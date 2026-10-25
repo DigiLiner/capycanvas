@@ -60,6 +60,19 @@ artifacts/render-owner-queue
 The Linux fixture substitutes only the unavailable Objective-C autorelease pool;
 it verifies queue mechanics, not Metal, SwiftUI or native Apple integration.
 
+The C bridge uses typed generation handles for sessions, jobs and output buffers.
+Sessions belong to their creating render thread; worker jobs retain owned state.
+Invalid, expired, wrong-kind and busy handles fail without dereferencing host
+addresses. A job already using a handle retains its state through concurrent
+retirement. The caller still supplies valid, exclusive C input and output pointers
+and keeps native descriptors and Metal objects alive for their documented calls.
+
+Every `CapyText` result is owned. `NativeBuffers.swift` copies text and pixel
+ranges of at most 8 MiB and releases the corresponding token. Metadata reads
+initialize outputs on failure and return separately owned text handles. Image
+copies run on workers; scope delivery preserves delta order and checks the
+drawing identity before publishing to the UI.
+
 The scripts default to `/Applications/Xcode.app/Contents/Developer`; set
 `DEVELOPER_DIR` if Xcode is elsewhere. A physical iPad also needs Developer Mode,
 pairing, a development certificate and a profile covering the device. A first

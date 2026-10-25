@@ -8,7 +8,7 @@ fn new_drawing(app: &App, depth: SampleDepth) {
         unsafe { capy_apple_project_adopt(app.0, job.0, c"Untitled".as_ptr(), c"".as_ptr()) },
         0,
         "{:?}",
-        unsafe { &*app.0 }.error
+        app.borrow().error
     );
     app.draw_until_idle();
 }
@@ -26,7 +26,7 @@ pub(super) fn switch(app: &App, id: u64, closing: bool) {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     let task = unsafe { capy_apple_document_switch(app.0, id, closing) };
-    assert!(!task.is_null(), "{:?}", unsafe { &*app.0 }.error);
+    assert!(!(task==0), "{:?}", app.borrow().error);
     if closing { assert_eq!(unsafe { capy_apple_document_close_commit(app.0, task, true) }, 0); }
     assert_eq!(
         unsafe { capy_document_prepare(task) },
@@ -36,7 +36,7 @@ pub(super) fn switch(app: &App, id: u64, closing: bool) {
         unsafe { capy_apple_document_resume(app.0, task) },
         0,
         "{:?}",
-        unsafe { &*app.0 }.error
+        app.borrow().error
     );
     unsafe { capy_document_free(task) };
     app.draw_until_idle();
@@ -45,31 +45,31 @@ pub(super) fn switch(app: &App, id: u64, closing: bool) {
 fn apple_tab_close_preparation_can_cancel_without_retiring_source() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         new_drawing(&app, SampleDepth::U8);
-        let source = unsafe { &*app.0 }.host.session.engine().document().clone();
+        let source = app.document().clone();
         assert_eq!(unsafe { capy_apple_document_close(app.0, 0, 0) }, 0);
         super::fixtures::until(&app, "Close preparation", || unsafe { capy_apple_document_prepare_switch(app.0, 2_000_000_000) } == 0);
         let task = unsafe { capy_apple_document_switch(app.0, 0, true) };
-        assert!(!task.is_null(), "{:?}", unsafe { &*app.0 }.error);
-        assert_eq!(unsafe { &*app.0 }.window.documents.selected(), 2);
-        assert_eq!(unsafe { &*app.0 }.window.documents.order().len(), 2);
-        assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &source);
+        assert!(!(task==0), "{:?}", app.borrow().error);
+        assert_eq!(app.borrow().window.documents.selected(), 2);
+        assert_eq!(app.borrow().window.documents.order().len(), 2);
+        assert_project_document(&app.document(), &source);
         assert_eq!(unsafe { capy_apple_document_close_commit(app.0, task, false) }, 0);
         unsafe { capy_document_free(task) };
         app.draw_until_idle();
         assert_eq!(tabs(&app)["selected"], 2);
         assert_eq!(tabs(&app)["tabs"].as_array().unwrap().len(), 2);
         assert!(!app.state()["document_file"]["close_ready"].as_bool().unwrap());
-        assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &source);
+        assert_project_document(&app.document(), &source);
     }
 }
 #[test]
 fn apple_new_drawing_takes_the_upcoming_untitled_name_or_the_name_it_was_given() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         let title = |view: &Value| view["tabs"].as_array().unwrap().iter().find(|tab| tab["id"] == view["selected"]).unwrap()["title"].clone();
         let upcoming = tabs(&app)["upcoming_untitled"].clone();
@@ -78,7 +78,7 @@ fn apple_new_drawing_takes_the_upcoming_untitled_name_or_the_name_it_was_given()
         assert_eq!(title(&tabs(&app)), upcoming);
         assert_ne!(tabs(&app)["upcoming_untitled"], upcoming);
         let job = ProjectJob::create_with(&app, [96, 64], &[json!({"op": "name", "text": "  Harbor study "})]);
-        assert_eq!(unsafe { capy_apple_project_adopt(app.0, job.0, c"Untitled".as_ptr(), c"".as_ptr()) }, 0, "{:?}", unsafe { &*app.0 }.error);
+        assert_eq!(unsafe { capy_apple_project_adopt(app.0, job.0, c"Untitled".as_ptr(), c"".as_ptr()) }, 0, "{:?}", app.borrow().error);
         app.draw_until_idle();
         assert_eq!(title(&tabs(&app)), "Harbor study");
         assert_eq!(app.state()["document_file"]["unsaved_name"], "Harbor study");
@@ -89,11 +89,11 @@ fn apple_new_drawing_takes_the_upcoming_untitled_name_or_the_name_it_was_given()
 fn apple_tabs_preserve_history_pixels_and_disk_parking() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         app.stroke();
         app.draw_until_idle();
-        let first = unsafe { &*app.0 }.host.session.engine().document().clone();
+        let first = app.document().clone();
         new_drawing(&app, SampleDepth::F32);
         assert_eq!(tabs(&app)["tabs"].as_array().unwrap().len(), 2);
         assert_eq!(tabs(&app)["selected"], 2);
@@ -103,26 +103,26 @@ fn apple_tabs_preserve_history_pixels_and_disk_parking() {
         app.layer_action(json!({"op":"fill_selection"}));
         app.invoke("deselect");
         app.draw_until_idle();
-        let second = unsafe { &*app.0 }.host.session.engine().document().clone();
-        unsafe { &mut *app.0 }.window.documents.budget.inactive_ram = 0;
+        let second = app.document().clone();
+        app.borrow().window.documents.budget.inactive_ram = 0;
         switch(&app, 1, false);
         assert_eq!(tabs(&app)["resident_bytes"], 0);
-        assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &first);
-        assert_eq!(unsafe { &*app.0 }.host.session.engine().document().working, first.working);
+        assert_project_document(&app.document(), &first);
+        assert_eq!(app.document().working, first.working);
         app.invoke("undo");
         app.draw_until_idle();
         assert_ne!(
             raster_samples(
-                unsafe { &*app.0 }.host.session.engine().document().target_raster(first.working.target.unwrap()).unwrap()
+                app.document().target_raster(first.working.target.unwrap()).unwrap()
             ),
             raster_samples(active_raster(&first))
         );
         app.invoke("redo");
         app.draw_until_idle();
-        assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &first);
-        assert_eq!(unsafe { &*app.0 }.host.session.engine().document().working, first.working);
+        assert_project_document(&app.document(), &first);
+        assert_eq!(app.document().working, first.working);
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        let capture = unsafe { &*app.0 }.window.session(&unsafe { &*app.0 }.host, 2).unwrap().capture_session().unwrap();
+        let capture = app.with(|native|native.window.session(&native.host, 2).unwrap().capture_session().unwrap());
         let prepared = capture.prepare(&cancel).unwrap();
         let mut file = tempfile();
         prepared.write(&mut file, &cancel).unwrap();
@@ -148,7 +148,7 @@ fn apple_tabs_preserve_history_pixels_and_disk_parking() {
             json!({"type":"document_tabs","op":"history","redo":true}),
         );
         assert_eq!(tabs(&app)["tabs"][0]["id"], 2);
-        assert!(unsafe { capy_apple_document_switch(app.0, 99, false) }.is_null());
+        assert!((unsafe { capy_apple_document_switch(app.0, 99, false) }==0));
         assert_eq!(tabs(&app)["selected"], 1);
         assert_eq!(unsafe { capy_apple_document_close(app.0, 0, 0) }, 0);
         let request = app.state()["requests"]
@@ -180,8 +180,8 @@ fn apple_tabs_preserve_history_pixels_and_disk_parking() {
         assert_eq!(tabs(&app)["selected"], 2);
         assert_eq!(tabs(&app)["tabs"].as_array().unwrap().len(), 1);
         assert_eq!(tabs(&app)["can_undo"], false);
-        assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &second);
-        assert_eq!(unsafe { &*app.0 }.host.session.engine().document().working, second.working);
+        assert_project_document(&app.document(), &second);
+        assert_eq!(app.document().working, second.working);
     }
 }
 

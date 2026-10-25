@@ -39,10 +39,10 @@ fn resolve(request: &Value) -> Result<Value, String> {
 /// # Safety
 /// Request is NUL-terminated UTF-8 JSON. Free the result with capy_apple_string_free.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_storage(request: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_storage(request: *const c_char) -> u64 {
     let result = unsafe { project::read_title(request) }
-        .and_then(|request| serde_json::from_str(request).map_err(|e| e.to_string()))
+        .and_then(|request| serde_json::from_str(&request).map_err(|e| e.to_string()))
         .and_then(|request| resolve(&request))
         .unwrap_or_else(|error| json!({ "error": error }));
-    CString::new(result.to_string()).map_or(std::ptr::null_mut(), CString::into_raw)
+    CString::new(result.to_string()).map_or(0, handles::text)
 }

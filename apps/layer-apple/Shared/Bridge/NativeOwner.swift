@@ -10,51 +10,51 @@ private final class MetalLayerLease: @unchecked Sendable {
 }
 
 private final class LanguageJob: @unchecked Sendable {
-    let handle: OpaquePointer
-    init(_ handle: OpaquePointer) { self.handle = handle }
-    deinit { capy_language_free(handle) }
+    let handle: UInt64
+    init(_ handle: UInt64) { self.handle = handle }
+    deinit { capy_language_free(nativeValue(handle)) }
 }
 
 private final class SessionJob: @unchecked Sendable {
-    let handle: OpaquePointer
+    let handle: UInt64
     private let failure: String
-    init(_ handle: OpaquePointer, failure: String) { self.handle = handle; self.failure = failure }
-    deinit { let handle = handle; NativeProjectTask.io.async { capy_session_free(handle) } }
+    init(_ handle: UInt64, failure: String) { self.handle = handle; self.failure = failure }
+    deinit { let handle = handle; NativeProjectTask.io.async { capy_session_free(nativeValue(handle)) } }
     func work() -> String? {
-        let result = capy_session_work(handle, { uri in
-            guard let uri, let url = URL(string: String(cString: uri)), url.isFileURL else { return nil }
-            var observed: OpaquePointer?
+        let result = capy_session_work(nativeValue(handle), { uri in
+            guard let uri, let url = URL(string: String(cString: uri)), url.isFileURL else { return 0 }
+            var observed: UInt64?
             do {
                 try ProjectFileIO.coordinate(url, writing: false) { source in
                     let file = try FileHandle(forReadingFrom: source)
                     defer { try? file.close() }
-                    observed = capy_session_destination_read(file.fileDescriptor)
+                    observed = nativeHandle(capy_session_destination_read(file.fileDescriptor))
                 }
-                return observed
+                return nativeValue(observed)
             } catch {
-                capy_session_destination_free(observed)
-                return nil
+                capy_session_destination_free(nativeValue(observed))
+                return 0
             }
         })
         return result < 0 ? diagnostic ?? failure : nil
     }
     var diagnostic: String? {
-        guard let text = capy_session_error(handle) else { return nil }
-        defer { capy_apple_string_free(text) }
-        return String(cString: text)
+        guard let text = takeNativeText(capy_session_error(nativeValue(handle))) else { return nil }
+
+        return text
     }
 }
 
 private final class NativeLaunch: @unchecked Sendable {
-    let handle: OpaquePointer?
+    let handle: UInt64?
     let failure: String?
     init(configuration: String) {
-        var error: UnsafeMutablePointer<CChar>?
-        handle = configuration.withCString { capy_apple_prepare_launch($0, &error) }
-        failure = error.map { String(cString:$0) }
-        if let error { capy_apple_string_free(error) }
+        var error: UInt64 = 0
+        handle = configuration.withCString { nativeHandle(capy_apple_prepare_launch($0, &error)) }
+        failure = takeNativeText(error)
+
     }
-    deinit { let handle = handle; NativeProjectTask.io.async { if let handle { capy_apple_launch_free(handle) } } }
+    deinit { let handle = handle; NativeProjectTask.io.async { if let handle { capy_apple_launch_free(nativeValue(handle)) } } }
 }
 private final class PersistenceLoad: @unchecked Sendable {
     struct Value: Sendable {
@@ -81,8 +81,9 @@ final class NativeOwner: @unchecked Sendable {
     private var requestedLanguagePreference: String?
     private var currentLanguagePreference = ""
     var languageInputBusy: (@MainActor @Sendable () -> Bool)?
-    var scopesReceived: (@Sendable (ScopeUpdate) -> Void)?
-    private var handle: OpaquePointer?
+    private var scopesReceived: (@Sendable (ScopeUpdate) -> Void)?
+    private var scopesBusy = false
+    private var handle: UInt64?
     private let platform: UInt32
     private var launchConfiguration: NativeLaunch?
     private var launchFailure: String?
@@ -113,7 +114,7 @@ final class NativeOwner: @unchecked Sendable {
         }
     }
     func redraw() {
-        perform { [self] in try check(capy_apple_redraw(handle)) }
+        perform { [self] in try check(capy_apple_redraw(nativeValue(handle))) }
     }
     private var lastSnapshotTime: UInt64 = 0
     private var canvasReady = false
@@ -202,22 +203,22 @@ final class NativeOwner: @unchecked Sendable {
         }
     }
     private func launch() throws {
-        var bootstrap: UnsafeMutablePointer<CChar>?
-        var error: UnsafeMutablePointer<CChar>?
+        var bootstrap: UInt64 = 0
+        var error: UInt64 = 0
         guard let prepared = launchConfiguration?.handle else {
             throw HostFailure(message:launchConfiguration?.failure ?? "Native session initialization failed")
         }
-        handle = capy_apple_launch(platform, prepared, &bootstrap, &error)
-        defer { if let error { capy_apple_string_free(error) } }
-        if let bootstrap {
-            defer { capy_apple_string_free(bootstrap) }
-            let view = try JSON.decode(String(cString: bootstrap))
+        handle = nativeHandle(capy_apple_launch(platform,nativeValue(prepared), &bootstrap, &error))
+
+        let launchError = takeNativeText(error)
+        if let bootstrap = takeNativeText(bootstrap) {
+            let view = try JSON.decode(bootstrap)
             let catalog = handle == nil ? nil : try request(2, JSON(["type": "catalog"]))
             catalogLoaded = catalog?.isNull == false
             receive(JSON(["bootstrap": view.raw, "catalog": catalog?.raw ?? NSNull()]), nil)
         }
         guard handle != nil else {
-            launchFailure = error.map { String(cString: $0) } ?? "Native session initialization failed"
+            launchFailure = launchError ?? "Native session initialization failed"
             throw HostFailure(message: launchFailure!)
         }
         launchFailure = nil
@@ -230,13 +231,13 @@ final class NativeOwner: @unchecked Sendable {
         trace?.finish()
         let handle = handle, retainedLayer = layer
         queue.finish {
-            capy_apple_detach(handle)
-            capy_apple_destroy(handle)
+            capy_apple_detach(nativeValue(handle))
+            capy_apple_destroy(nativeValue(handle))
             withExtendedLifetime(retainedLayer) {}
         }
     }
     private func check(_ result: Int32) throws {
-        if result < 0 { throw HostFailure(message: launchFailure ?? capy_apple_error(handle).map(String.init(cString:)) ?? "Native operation failed") }
+        if result < 0 { throw HostFailure(message: launchFailure ?? takeNativeText(capy_apple_error(nativeValue(handle))) ?? "Native operation failed") }
     }
     private func request(_ kind: UInt32, _ value: JSON = JSON()) throws -> JSON? {
         guard let handle else { throw HostFailure(message: launchFailure ?? "Native session is unavailable") }
@@ -244,13 +245,13 @@ final class NativeOwner: @unchecked Sendable {
             requestedLanguagePreference = nil
         }
         let source = try value.encoded()
-        let result = source.withCString { capy_apple_request(handle, kind, $0) }
+        let result = source.withCString { takeNativeText(capy_apple_request(nativeValue(handle), kind, $0)) }
         guard let result else {
-            if let error = capy_apple_error(handle) { throw HostFailure(message: String(cString: error)) }
+            if let error = takeNativeText(capy_apple_error(nativeValue(handle))) { throw HostFailure(message: error) }
             return nil
         }
-        defer { capy_apple_string_free(result) }
-        return try JSON.decode(String(cString: result))
+
+        return try JSON.decode(result)
     }
     private func publish() throws {
         if let snapshot = try request(7) {
@@ -275,24 +276,40 @@ final class NativeOwner: @unchecked Sendable {
         try prepareLanguage()
     }
     private func takeScopes() {
-        guard let scopes = capy_apple_take_scopes(handle) else { return }
-        defer { capy_scopes_free(scopes) }
-        var info = CapyScopeInfo()
-        capy_scopes_read(scopes, &info)
-        guard let plots = info.plots, let header = try? JSON.decode(String(cString: plots)) else { return }
-        scopesReceived?(ScopeUpdate(header: header, pixels: info.pixels.map { Data(bytes: $0, count: info.count) } ?? Data()))
+        guard !scopesBusy, scopesReceived != nil,
+            let scopes = nativeHandle(capy_apple_take_scopes(nativeValue(handle))) else { return }
+        scopesBusy = true
+        DispatchQueue.global(qos: .utility).async { [self] in
+            var info = CapyScopeInfo()
+            var update: ScopeUpdate?
+            if capy_scopes_read(scopes, &info), let plots = takeNativeText(info.plots),
+                let header = try? JSON.decode(plots),
+                let pixels = copyNativeData(info.count, copy: { capy_scopes_copy(scopes, $0, $1, $2) }) {
+                update = ScopeUpdate(header: header, pixels: pixels)
+            }
+            capy_scopes_free(scopes)
+            let result = update
+            queue.async { [self] in
+                scopesBusy = false
+                if let result { scopesReceived?(result) }
+                takeScopes()
+            }
+        }
+    }
+    func setScopesReceiver(_ receive: @escaping @Sendable (ScopeUpdate) -> Void) {
+        queue.async { [self] in scopesReceived = receive; takeScopes() }
     }
     private func prepareLanguage() throws {
         let preference = currentLanguagePreference
         guard preference != requestedLanguagePreference else { return }
         requestedLanguagePreference = preference
         let tags = try JSON(Locale.preferredLanguages).encoded()
-        guard let pointer = tags.withCString({ capy_apple_language_request(handle, $0) }) else { return }
+        guard let pointer = tags.withCString({ nativeHandle(capy_apple_language_request(nativeValue(handle), $0)) }) else { return }
         let job = LanguageJob(pointer)
         languageWorker.async { [self, job] in
-            capy_language_prepare(job.handle)
+            capy_language_prepare(nativeValue(job.handle))
             queue.async { [self, job] in
-                if capy_apple_language_prepared(handle, job.handle) {
+                if capy_apple_language_prepared(nativeValue(handle),nativeValue(job.handle)) {
                     languageReady = true
                     publishLanguageWhenIdle()
                 }
@@ -306,7 +323,7 @@ final class NativeOwner: @unchecked Sendable {
             let busy = NativeTextContext.inputBusy || languageInputBusy?() == true
             queue.async { [self] in
                 languagePollScheduled = false
-                let result = capy_apple_language_publish(handle, busy)
+                let result = capy_apple_language_publish(nativeValue(handle), busy)
                 if result != 0 { languageReady = false }
                 if result == 1 {
                     do { try publish() } catch { receive(nil, error.localizedDescription) }
@@ -320,8 +337,8 @@ final class NativeOwner: @unchecked Sendable {
         queue.async { [self] in
             do {
                 let status = try request(2, query) ?? JSON()
-                let pointer = capy_apple_take_filter_previews(handle)
-                if let error = capy_apple_error(handle) { throw HostFailure(message: String(cString: error)) }
+                let pointer = nativeHandle(capy_apple_take_filter_previews(nativeValue(handle)))
+                if let error = takeNativeText(capy_apple_error(nativeValue(handle))) { throw HostFailure(message: error) }
                 completion(FilterPreviewReply(status: status, atlas: pointer.map(NativeFilterPreviews.init), error: nil))
             } catch { completion(FilterPreviewReply(status: JSON(), atlas: nil, error: error.localizedDescription)) }
         }
@@ -329,14 +346,14 @@ final class NativeOwner: @unchecked Sendable {
     func glassRegions(_ value: JSON) {
         perform { [self] in
             let source = try value.encoded()
-            try check(source.withCString { capy_apple_glass_regions(handle, $0) })
+            try check(source.withCString { capy_apple_glass_regions(nativeValue(handle), $0) })
             receive(nil, nil)
         }
     }
     func navigatorPlacements(_ value: JSON) {
         perform { [self] in
             let source = try value.encoded()
-            try check(source.withCString { capy_apple_navigator_placements(handle, $0) })
+            try check(source.withCString { capy_apple_navigator_placements(nativeValue(handle), $0) })
             // Layout can settle after the canvas driver has gone idle.
             receive(nil, nil)
         }
@@ -390,24 +407,24 @@ final class NativeOwner: @unchecked Sendable {
         completion: @escaping @Sendable (String?) -> Void) {
         queue.async { [self] in
             do {
-                if let decision = closeDecision { try check(capy_apple_document_close(handle, UInt32(id), decision)) }
-                else { try check(capy_apple_document_complete(handle, UInt32(id), succeeded == true ? 1 : 0)) }
+                if let decision = closeDecision { try check(capy_apple_document_close(nativeValue(handle), UInt32(id), decision)) }
+                else { try check(capy_apple_document_complete(nativeValue(handle), UInt32(id), succeeded == true ? 1 : 0)) }
                 try publish(); completion(nil)
             } catch { completion(error.localizedDescription) }
         }
     }
     func hasClip(nonce: String, completion: @escaping @Sendable (Bool) -> Void) {
         queue.async { [self] in
-            let current = capy_apple_clip_nonce(handle)
-            defer { if let current { capy_apple_string_free(current) } }
-            completion(current.map { String(cString: $0) == nonce } ?? false)
+            let current = takeNativeText(capy_apple_clip_nonce(nativeValue(handle)))
+
+            completion(current.map { $0 == nonce } ?? false)
         }
     }
     func paperTask(id: UInt32, epoch: UInt64, directory: URL,
         completion: @escaping @Sendable (NativePaperTask?, String?) -> Void) {
         queue.async { [self] in
-            guard let pointer = directory.path.withCString({ capy_apple_paper_task(handle,id,epoch,$0) }) else {
-                let error = capy_apple_error(handle).map(String.init(cString:)) ?? documentDeliveryCopy["change_in_progress"].string
+            guard let pointer = directory.path.withCString({ nativeHandle(capy_apple_paper_task(nativeValue(handle),id,epoch,$0)) }) else {
+                let error = takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["change_in_progress"].string
                 if id != 0 { _ = try? request(0,JSON(["type":"complete_request","id":id,"error":error])) }
                 try? publish(); completion(nil,error); return
             }
@@ -416,8 +433,8 @@ final class NativeOwner: @unchecked Sendable {
     }
     func paperImport(directory: URL, completion: @escaping @Sendable (NativePaperTask?, String?) -> Void) {
         queue.async { [self] in
-            guard let pointer = directory.path.withCString({ capy_apple_paper_import(handle, $0) }) else {
-                completion(nil, capy_apple_error(handle).map(String.init(cString:)) ?? documentDeliveryCopy["change_in_progress"].string); return
+            guard let pointer = directory.path.withCString({ nativeHandle(capy_apple_paper_import(nativeValue(handle), $0)) }) else {
+                completion(nil, takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["change_in_progress"].string); return
             }
             completion(NativePaperTask(pointer), nil)
         }
@@ -426,11 +443,11 @@ final class NativeOwner: @unchecked Sendable {
         NativeProjectTask.io.async { [self] in
             job.work(url)
             queue.async { [self] in
-                let error = capy_paper_error(job.handle)
-                defer { if let error { capy_apple_string_free(error) } }
+                let error = takeNativeText(capy_paper_error(nativeValue(job.handle)))
+
                 do {
-                    try check(capy_apple_paper_apply(handle,job.handle)); try publish()
-                    completion(error.map { String(cString: $0) })
+                    try check(capy_apple_paper_apply(nativeValue(handle),nativeValue(job.handle))); try publish()
+                    completion(error)
                 } catch { completion(error.localizedDescription) }
             }
         }
@@ -438,7 +455,7 @@ final class NativeOwner: @unchecked Sendable {
     func paperPreviews(ids: [String], completion: @escaping @Sendable (NativePaperPreviews?) -> Void) {
         guard let text = try? JSON(ids).encoded() else { completion(nil); return }
         queue.async { [self] in
-            completion(text.withCString { capy_apple_paper_previews(handle,$0) }.map { NativePaperPreviews($0,ids:ids) })
+            completion(text.withCString { nativeHandle(capy_apple_paper_previews(nativeValue(handle),$0)) }.map { NativePaperPreviews($0,ids:ids) })
         }
     }
     func projectTask(kind: NativeProjectTask.Kind, expected: (UInt64, UInt64)? = nil,
@@ -451,22 +468,22 @@ final class NativeOwner: @unchecked Sendable {
         @Sendable func poll() {
             // Inspection validates a committed snapshot in Rust; it does not
             // wait for unrelated filter-library compilation or block drawing.
-            let ready = kind == .lookup || kind == .clip ? 0 : kind == .save ? capy_apple_prepare_recovery(handle, FrameTrace.now()) : capy_apple_project_ready(handle)
+            let ready = kind == .lookup || kind == .clip ? 0 : kind == .save ? capy_apple_prepare_recovery(nativeValue(handle), FrameTrace.now()) : capy_apple_project_ready(nativeValue(handle))
             if ready == 1 {
                 if DispatchTime.now() < deadline { queue.asyncAfter(deadline: .now() + .milliseconds(16), execute: poll) }
                 else { completion(nil, "Document preparation timed out") }
                 return
             }
-            if ready < 0 { completion(nil, capy_apple_error(handle).map(String.init(cString:)) ?? "Document is unavailable"); return }
-            let pointer: OpaquePointer?
-            if let placementText { pointer = placementText.withCString { capy_apple_project_task(handle, kind.rawValue, $0) } }
-            else { pointer = capy_apple_project_task(handle, kind.rawValue, nil) }
+            if ready < 0 { completion(nil, takeNativeText(capy_apple_error(nativeValue(handle))) ?? "Document is unavailable"); return }
+            let pointer: UInt64?
+            if let placementText { pointer = placementText.withCString { nativeHandle(capy_apple_project_task(nativeValue(handle), kind.rawValue, $0)) } }
+            else { pointer = nativeHandle(capy_apple_project_task(nativeValue(handle), kind.rawValue, nil)) }
             guard let pointer else {
-                completion(nil, capy_apple_error(handle).map(String.init(cString:)) ?? "Document is unavailable")
+                completion(nil, takeNativeText(capy_apple_error(nativeValue(handle))) ?? "Document is unavailable")
                 return
             }
             let task = NativeProjectTask(pointer)
-            if let expected, capy_project_matches(task.handle, expected.0, expected.1) == 0 {
+            if let expected, capy_project_matches(nativeValue(task.handle), expected.0, expected.1) == 0 {
                 completion(nil, "The document changed; review those changes before opening another drawing")
             } else { completion(task, nil) }
         }
@@ -481,7 +498,7 @@ final class NativeOwner: @unchecked Sendable {
                 try task.prepareEdit(choice, copy: copy)
                 queue.async { [self] in
                     do {
-                        try check(capy_apple_project_candidate(handle, task.handle))
+                        try check(capy_apple_project_candidate(nativeValue(handle),nativeValue(task.handle)))
                         NativeProjectTask.io.async {
                             do { try task.compare(); completion(nil) }
                             catch { completion(error.localizedDescription) }
@@ -495,21 +512,21 @@ final class NativeOwner: @unchecked Sendable {
         completion: @escaping @Sendable (String?, Bool) -> Void) {
         queue.async { [self] in
             let opened = sessions.path.withCString { sessions in
-                scene.withCString { capy_apple_session_open(handle, sessions, $0, adopt, retry) }
+                scene.withCString { nativeHandle(capy_apple_session_open(nativeValue(handle), sessions, $0, adopt, retry)) }
             }
             guard let pointer = opened else {
                 launchSessionPending = false
-                completion(capy_apple_error(handle).map(String.init(cString:)) ?? documentDeliveryCopy["open_operation"].string, false); return
+                completion(takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["open_operation"].string, false); return
             }
             let task = SessionJob(pointer, failure: documentDeliveryCopy["change_in_progress"].string)
             NativeProjectTask.io.async { [self] in
                 if let failure = task.work() { queue.async { [self] in launchSessionPending = false; completion(failure, false) }; return }
                 queue.async { [self] in
-                    do { try check(capy_apple_session_adopt(handle, task.handle)) }
+                    do { try check(capy_apple_session_adopt(nativeValue(handle),nativeValue(task.handle))) }
                     catch { launchSessionPending = false; completion(error.localizedDescription, false); return }
                     do { try publish() } catch { receive(nil, error.localizedDescription) }
                     NativeProjectTask.io.async { [self] in
-                        _ = capy_session_restore_finished(task.handle)
+                        _ = capy_session_restore_finished(nativeValue(task.handle))
                         let failure = task.diagnostic
                         queue.async { [self] in
                             launchSessionPending = false
@@ -524,21 +541,21 @@ final class NativeOwner: @unchecked Sendable {
         completion: @escaping @Sendable (String?, Bool) -> Void) {
         let deadline = DispatchTime.now() + .seconds(30)
         @Sendable func poll() {
-            if let pendingClose, capy_apple_document_close_validate(handle, pendingClose.handle) < 0 {
-                completion(capy_apple_error(handle).map(String.init(cString:)) ?? documentDeliveryCopy["selected_changed"].string, false); return
+            if let pendingClose, capy_apple_document_close_validate(nativeValue(handle),nativeValue(pendingClose.handle)) < 0 {
+                completion(takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["selected_changed"].string, false); return
             }
-            let ready = capy_apple_prepare_recovery(handle, FrameTrace.now())
+            let ready = capy_apple_prepare_recovery(nativeValue(handle), FrameTrace.now())
             if ready == 1 {
                 if !waits { completion(nil, false) }
                 else if DispatchTime.now() < deadline { queue.asyncAfter(deadline: .now() + .milliseconds(16), execute: poll) }
                 else { completion(documentDeliveryCopy["change_in_progress"].string, false) }
                 return
             }
-            guard ready == 0, let pointer = capy_apple_session_capture(handle, exclusion, cleanExit) else {
-                completion(capy_apple_error(handle).map(String.init(cString:)) ?? documentDeliveryCopy["change_in_progress"].string, false); return
+            guard ready == 0, let pointer = nativeHandle(capy_apple_session_capture(nativeValue(handle), exclusion, cleanExit)) else {
+                completion(takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["change_in_progress"].string, false); return
             }
             let task = SessionJob(pointer, failure: documentDeliveryCopy["change_in_progress"].string)
-            NativeProjectTask.io.async { let failure = task.work(); completion(failure ?? task.diagnostic, capy_session_committed(task.handle)) }
+            NativeProjectTask.io.async { let failure = task.work(); completion(failure ?? task.diagnostic, capy_session_committed(nativeValue(task.handle))) }
         }
         queue.async(execute: poll)
     }
@@ -547,11 +564,11 @@ final class NativeOwner: @unchecked Sendable {
     func exportTask(id: UInt64, completion: @escaping @Sendable (NativeProjectTask?, String?) -> Void) {
         let deadline = DispatchTime.now() + .seconds(30)
         @Sendable func poll() {
-            var pointer: OpaquePointer?
-            let ready = capy_apple_project_ready(handle)
-            let result = ready == 1 ? 0 : capy_apple_export_task(handle, UInt32(id), FrameTrace.now(), &pointer)
-            if result < 0 { completion(nil, capy_apple_error(handle).map(String.init(cString:)) ?? "Export failed") }
-            else if let pointer { completion(NativeProjectTask(pointer), nil) }
+            var pointer: UInt64 = 0
+            let ready = capy_apple_project_ready(nativeValue(handle))
+            let result = ready == 1 ? 0 : capy_apple_export_task(nativeValue(handle), UInt32(id), FrameTrace.now(), &pointer)
+            if result < 0 { completion(nil, takeNativeText(capy_apple_error(nativeValue(handle))) ?? "Export failed") }
+            else if let pointer = nativeHandle(pointer) { completion(NativeProjectTask(pointer), nil) }
             else if DispatchTime.now() >= deadline { completion(nil, "The canvas is not ready to export") }
             else { queue.asyncAfter(deadline: .now() + .milliseconds(16), execute: poll) }
         }
@@ -562,7 +579,7 @@ final class NativeOwner: @unchecked Sendable {
         let deadline = DispatchTime.now() + .seconds(15)
         @Sendable func attempt() {
             do {
-                let ready = opening ? capy_apple_project_prepare_adopt(handle, task.handle, FrameTrace.now()) : 0
+                let ready = opening ? capy_apple_project_prepare_adopt(nativeValue(handle),nativeValue(task.handle), FrameTrace.now()) : 0
                 if ready == 1 {
                     guard DispatchTime.now() < deadline else { throw HostFailure(message: "Drawing capture did not finish") }
                     queue.asyncAfter(deadline: .now() + .milliseconds(16), execute: attempt); return
@@ -570,8 +587,8 @@ final class NativeOwner: @unchecked Sendable {
                 try check(ready)
                 try title.withCString { name in
                     try (url?.absoluteString ?? "").withCString { uri in
-                        try check(opening ? capy_apple_project_adopt(handle, task.handle, name, uri)
-                            : capy_apple_project_saved(handle, task.handle, name, uri))
+                        try check(opening ? capy_apple_project_adopt(nativeValue(handle),nativeValue(task.handle), name, uri)
+                            : capy_apple_project_saved(nativeValue(handle),nativeValue(task.handle), name, uri))
                     }
                 }
                 try publish(); completion(nil)
@@ -581,9 +598,9 @@ final class NativeOwner: @unchecked Sendable {
         queue.async(execute: attempt)
     }
     private final class DocumentJob: @unchecked Sendable {
-        let handle: OpaquePointer
-        init(_ handle: OpaquePointer) { self.handle = handle }
-        deinit { let pointer = handle; NativeProjectTask.io.async { capy_document_free(pointer) } }
+        let handle: UInt64
+        init(_ handle: UInt64) { self.handle = handle }
+        deinit { let pointer = handle; NativeProjectTask.io.async { capy_document_free(nativeValue(pointer)) } }
     }
     func switchDocument(_ id: UInt64, closing: Bool = false,
         removing: (@Sendable (@escaping @Sendable (Bool) -> Void) -> Void)? = nil,
@@ -591,24 +608,24 @@ final class NativeOwner: @unchecked Sendable {
         let deadline = DispatchTime.now() + .seconds(15)
         @Sendable func attempt() {
             do {
-                let ready = capy_apple_document_prepare_switch(handle, FrameTrace.now())
+                let ready = capy_apple_document_prepare_switch(nativeValue(handle), FrameTrace.now())
                 if ready == 1 {
                     guard DispatchTime.now() < deadline else { throw HostFailure(message: "Drawing capture did not finish") }
                     queue.asyncAfter(deadline: .now() + .milliseconds(16), execute: attempt); return
                 }
                 try check(ready)
-                guard let task = capy_apple_document_switch(handle, id, closing) else { try check(-1); return }
+                guard let task = nativeHandle(capy_apple_document_switch(nativeValue(handle), id, closing)) else { try check(-1); return }
                 let job = DocumentJob(task)
                 if closing {
                     guard let removing else {
-                        try check(capy_apple_document_close_commit(handle, task, false))
+                        try check(capy_apple_document_close_commit(nativeValue(handle),nativeValue(task), false))
                         completion(documentDeliveryCopy["close_operation"].string); return
                     }
                     pendingClose = job
                     removing { [self, job] accepted in queue.async { [self, job] in
                         do {
                             pendingClose = nil
-                            try check(capy_apple_document_close_commit(handle, job.handle, accepted))
+                            try check(capy_apple_document_close_commit(nativeValue(handle),nativeValue(job.handle), accepted))
                             try publish()
                             if accepted { runDocumentJob(job, completion: completion) }
                             else { completion(documentDeliveryCopy["close_operation"].string) }
@@ -620,14 +637,14 @@ final class NativeOwner: @unchecked Sendable {
         queue.async(execute: attempt)
     }
     private func documentStorage() {
-        guard let task = capy_apple_document_storage(handle) else { return }
+        guard let task = nativeHandle(capy_apple_document_storage(nativeValue(handle))) else { return }
         runDocumentJob(DocumentJob(task)) { [weak self] error in if let error { self?.receive(nil, error) } }
     }
     private func runDocumentJob(_ job: DocumentJob, completion: @escaping @Sendable (String?) -> Void) {
         NativeProjectTask.io.async { [self, job] in
-            _ = capy_document_prepare(job.handle)
+            _ = capy_document_prepare(nativeValue(job.handle))
             queue.async { [self, job] in
-                do { try check(capy_apple_document_resume(handle, job.handle)); try publish(); completion(nil) }
+                do { try check(capy_apple_document_resume(nativeValue(handle),nativeValue(job.handle))); try publish(); completion(nil) }
                 catch { try? publish(); completion(error.localizedDescription) }
             }
         }
@@ -637,26 +654,28 @@ final class NativeOwner: @unchecked Sendable {
         do { text = try (recipe ?? JSON()).encoded() }
         catch { completion(nil, error.localizedDescription); return }
         queue.async { [self] in
-            let pointer = text.withCString { capy_apple_proof_task(handle, UInt32(id), $0) }
+            let pointer = text.withCString { nativeHandle(capy_apple_proof_task(nativeValue(handle), UInt32(id), $0)) }
             completion(pointer.map(NativeProjectTask.init), pointer == nil
-                ? capy_apple_error(handle).map(String.init(cString:)) ?? "Proof is unavailable" : nil)
+                ? takeNativeText(capy_apple_error(nativeValue(handle))) ?? "Proof is unavailable" : nil)
         }
     }
     func strokeRecordingData(completion: @escaping @Sendable (Result<Data, Error>) -> Void) {
         queue.async { [self] in
-            var length = 0
-            guard let bytes = capy_apple_stroke_recording_data(handle, &length) else {
-                completion(.failure(HostFailure(message: capy_apple_error(handle).map(String.init(cString:)) ?? "The recording is unavailable")))
+            guard let bytes = nativeHandle(capy_apple_stroke_recording_data(nativeValue(handle))) else {
+                completion(.failure(HostFailure(message: takeNativeText(capy_apple_error(nativeValue(handle))) ?? "The recording is unavailable")))
                 return
             }
-            let data = Data(bytes: bytes, count: length)
-            capy_bytes_free(bytes, length)
-            completion(.success(data))
+            NativeProjectTask.io.async {
+                defer { capy_bytes_free(bytes) }
+                if let data = copyNativeData(capy_bytes_length(bytes), copy: { capy_bytes_copy(bytes, $0, $1, $2) }) {
+                    completion(.success(data))
+                } else { completion(.failure(HostFailure(message: "The recording is unavailable"))) }
+            }
         }
     }
     func checkProof(_ task: NativeProjectTask, completion: @escaping @Sendable (String?) -> Void) {
         queue.async { [self] in
-            do { try check(capy_apple_proof_check(handle, task.handle)); completion(nil) }
+            do { try check(capy_apple_proof_check(nativeValue(handle),nativeValue(task.handle))); completion(nil) }
             catch { completion(error.localizedDescription) }
         }
     }
@@ -664,8 +683,8 @@ final class NativeOwner: @unchecked Sendable {
         completion: @escaping @Sendable (String?) -> Void) {
         queue.async { [self] in
             do {
-                if let failure { try failure.withCString { try check(capy_apple_proof_failed(handle, task.handle, $0)) } }
-                else { try check(capy_apple_proof_apply(handle, task.handle, preserved)) }
+                if let failure { try failure.withCString { try check(capy_apple_proof_failed(nativeValue(handle),nativeValue(task.handle), $0)) } }
+                else { try check(capy_apple_proof_apply(nativeValue(handle),nativeValue(task.handle), preserved)) }
                 try publish(); completion(nil)
             } catch { completion(error.localizedDescription) }
         }
@@ -697,7 +716,7 @@ final class NativeOwner: @unchecked Sendable {
     func flushPersistence(_ completion: @escaping @Sendable (Bool) -> Void) {
         let deadline = DispatchTime.now() + .seconds(10)
         @Sendable func poll() {
-            let result = persistence.locations == nil ? 0 : capy_apple_prepare_recovery(handle, FrameTrace.now())
+            let result = persistence.locations == nil ? 0 : capy_apple_prepare_recovery(nativeValue(handle), FrameTrace.now())
             preparationError = nil
             if result < 0 {
                 do { try check(result) } catch { preparationError = error.localizedDescription }
@@ -772,7 +791,7 @@ final class NativeOwner: @unchecked Sendable {
         guard handle != nil else { throw HostFailure(message: launchFailure ?? "Native session is unavailable") }
         guard let layer, let size = surfaceSize else { throw HostFailure(message: "The canvas has no presentation surface") }
         let surface = Unmanaged.passUnretained(layer).toOpaque()
-        try check(capy_apple_attach(handle, surface, size.width, size.height, size.scale))
+        try check(capy_apple_attach(nativeValue(handle), surface, size.width, size.height, size.scale))
     }
     private func startGpuHealthChecks() {
         guard gpuHealth == nil else { return }
@@ -786,7 +805,7 @@ final class NativeOwner: @unchecked Sendable {
             if hdrDocument { receive(JSON(["display_poll": true]), nil) }
             // Failure callbacks can arrive after the display link goes idle.
             // Healthy checks do not publish UI state or submit canvas work.
-            let status = capy_apple_poll_renderer(handle)
+            let status = capy_apple_poll_renderer(nativeValue(handle))
             if status != 0 {
                 do { try check(status); try publish() }
                 catch { try? publish(); receive(nil, error.localizedDescription) }
@@ -798,14 +817,14 @@ final class NativeOwner: @unchecked Sendable {
     #if DEBUG
     func testGpuFault(validation: Bool) {
         guard ProcessInfo.processInfo.environment["CAPY_GPU_RECOVERY_TEST"] == "1" else { return }
-        perform { [self] in try check(capy_apple_test_gpu_fault(handle, validation ? 1 : 0)) }
+        perform { [self] in try check(capy_apple_test_gpu_fault(nativeValue(handle), validation ? 1 : 0)) }
     }
     #endif
     func restartCanvas(_ completion: @escaping @Sendable (String?) -> Void) {
         queue.async { [self] in
             do {
                 if handle == nil { try launch() }
-                try check(capy_apple_suspend_renderer(handle))
+                try check(capy_apple_suspend_renderer(nativeValue(handle)))
                 try publish()
                 try attachCurrentLayer()
                 startGpuHealthChecks()
@@ -820,12 +839,12 @@ final class NativeOwner: @unchecked Sendable {
         guard shaderInputPending.claim() else { return }
         queue.async { [self] in
             shaderInputPending.release()
-            capy_apple_shader_input(handle)
+            capy_apple_shader_input(nativeValue(handle))
         }
     }
     func resize(width: UInt32, height: UInt32, scale: Float) {
         perform { [self] in
-            try check(capy_apple_resize(handle, width, height, scale))
+            try check(capy_apple_resize(nativeValue(handle), width, height, scale))
             surfaceSize = (width, height, scale)
             #if DEBUG
             surfaceSized = true
@@ -858,7 +877,7 @@ final class NativeOwner: @unchecked Sendable {
     }
     func detach() {
         perform { [self] in
-            try check(capy_apple_detach(handle))
+            try check(capy_apple_detach(nativeValue(handle)))
             gpuHealth?.cancel(); gpuHealth = nil
             layer = nil; surfaceSize = nil
         }
@@ -883,11 +902,11 @@ final class NativeOwner: @unchecked Sendable {
             }
             try records.withUnsafeBufferPointer {
                 if updates.isEmpty {
-                    try check(capy_apple_pointer(handle, id, tool, button, $0.baseAddress, $0.count, predicted ? 1 : 0, revision))
+                    try check(capy_apple_pointer(nativeValue(handle), id, tool, button, $0.baseAddress, $0.count, predicted ? 1 : 0, revision))
                 } else {
                     let samples = $0
                     try updates.withUnsafeBufferPointer {
-                        try check(capy_apple_pointer_updates(handle, id, tool, button, samples.baseAddress, samples.count,
+                        try check(capy_apple_pointer_updates(nativeValue(handle), id, tool, button, samples.baseAddress, samples.count,
                             $0.baseAddress, correction ? 1 : 0, revision))
                     }
                 }
@@ -897,9 +916,12 @@ final class NativeOwner: @unchecked Sendable {
         }
     }
     private var canvasBarHold: UInt32 = 0
-    var canvasBarHoldChanged: (@Sendable (UInt32) -> Void)?
+    private var canvasBarHoldChanged: (@Sendable (UInt32) -> Void)?
+    func setCanvasBarHoldChanged(_ receive: @escaping @Sendable (UInt32) -> Void) {
+        perform { [self] in canvasBarHoldChanged = receive }
+    }
     private func syncCanvasBarHold() {
-        let hold = capy_apple_canvas_bar_hold(handle)
+        let hold = capy_apple_canvas_bar_hold(nativeValue(handle))
         guard hold != canvasBarHold else { return }
         canvasBarHold = hold
         canvasBarHoldChanged?(hold)
@@ -924,13 +946,13 @@ final class NativeOwner: @unchecked Sendable {
     }
     func scroll(x: Float, y: Float, dx: Float, dy: Float, scale: Float, zoom: Bool, horizontal: Bool) {
         perform { [self] in
-            try check(capy_apple_scroll(handle, x, y, dx, dy, scale, zoom ? 1 : 0, horizontal ? 1 : 0))
+            try check(capy_apple_scroll(nativeValue(handle), x, y, dx, dy, scale, zoom ? 1 : 0, horizontal ? 1 : 0))
             try publish()
         }
     }
     func gesture(x: Float, y: Float, scale: Float, rotation: Float, began: Bool) {
         perform { [self] in
-            try check(capy_apple_gesture(handle, x, y, scale, rotation, began ? 1 : 0))
+            try check(capy_apple_gesture(nativeValue(handle), x, y, scale, rotation, began ? 1 : 0))
             try publish()
         }
     }
@@ -941,7 +963,7 @@ final class NativeOwner: @unchecked Sendable {
         sampleGpuClock(observation)
         var status = CapyGpuFrameTimingStats()
         let capacity = gpuSamples.count
-        let count = capy_apple_take_gpu_timing(handle, &gpuSamples, capacity, &status)
+        let count = capy_apple_take_gpu_timing(nativeValue(handle), &gpuSamples, capacity, &status)
         if count >= 0 {
             for sample in gpuSamples.prefix(Int(count)) {
                 observation.record(FrameTraceEvent(kind: .gpu, a: sample.frame, b: sample.elapsed_ns, c: sample.status,
@@ -982,18 +1004,18 @@ final class NativeOwner: @unchecked Sendable {
                     e: costs[0], f: costs[1], g: costs[2], h: costs[3], i: costs[4], j: latestTracedInput))
                 if let observation {
                     observation.record(FrameTraceEvent(kind: .consumedPaint, a: now,
-                        b: capy_apple_consumed_paint_ns(handle), c: capy_apple_submitted_canvas_updates(handle)))
+                        b: capy_apple_consumed_paint_ns(nativeValue(handle)), c: capy_apple_submitted_canvas_updates(nativeValue(handle))))
                 }
                 if let trace { collectGpuTiming(trace) }
             }
             do {
                 let wantsGpuTiming = observation?.recordsGpuTiming == true
                 if gpuTimingEnabled != wantsGpuTiming {
-                    try check(capy_apple_gpu_timing(handle, wantsGpuTiming ? 1 : 0))
+                    try check(capy_apple_gpu_timing(nativeValue(handle), wantsGpuTiming ? 1 : 0))
                     gpuTimingEnabled = wantsGpuTiming
                 }
                 if wantsGpuTiming, let observation { sampleGpuClock(observation) }
-                let result = capy_apple_frame(handle, now, max(now, target), &costs)
+                let result = capy_apple_frame(nativeValue(handle), now, max(now, target), &costs)
                 try check(result)
                 syncCanvasBarHold()
                 // Always flush the final state before the display link sleeps.
@@ -1008,7 +1030,7 @@ final class NativeOwner: @unchecked Sendable {
                     if initialActions.isEmpty { try publish() }
                 }
                 #endif
-                if canvasReady && !shadersReady { try check(capy_apple_finish_startup_catalog(handle)) }
+                if canvasReady && !shadersReady { try check(capy_apple_finish_startup_catalog(nativeValue(handle))) }
                 if let observation {
                     let state: UInt64 = (canvasReady ? 1 : 0) | (catalogLoaded ? 2 : 0) | (result == 1 ? 4 : 0) | (shadersReady ? 8 : 0)
                     if state != lastTraceState {
@@ -1016,12 +1038,12 @@ final class NativeOwner: @unchecked Sendable {
                         lastTraceState = state
                     }
                 }
-                completion(result == 1, capy_apple_camera_revision(handle), costs)
+                completion(result == 1, capy_apple_camera_revision(nativeValue(handle)), costs)
             } catch {
                 observation?.record(FrameTraceEvent(kind: .state, a: FrameTrace.now(), b: now, d: 1))
                 try? publish()
                 receive(nil, error.localizedDescription)
-                completion(false, capy_apple_camera_revision(handle), costs)
+                completion(false, capy_apple_camera_revision(nativeValue(handle)), costs)
             }
         }
     }

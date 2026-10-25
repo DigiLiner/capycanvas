@@ -38,17 +38,17 @@ private enum Checks {
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             DispatchQueue(label: "art.capycanvas.tests.layer-owner").async {
                 do {
-                    var bootstrap: UnsafeMutablePointer<CChar>?
-                    var error: UnsafeMutablePointer<CChar>?
-                    let app = capy_apple_launch(platform, "{\"saved\":\"\",\"preferred_languages\":[\"en\"]}", &bootstrap, &error)
-                    defer {
-                        if let bootstrap { capy_apple_string_free(bootstrap) }
-                        if let error { capy_apple_string_free(error) }
-                    }
-                    guard let app else { throw Failure(message: error.map { String(cString: $0) } ?? "Launch failed") }
+                    var bootstrap: UInt64 = 0
+                    var error: UInt64 = 0
+                    let prepared = #"{"saved":"","preferred_languages":["en"]}"#.withCString { capy_apple_prepare_launch($0, &error) }
+                    defer { capy_apple_launch_free(prepared) }
+                    let app = capy_apple_launch(platform, prepared, &bootstrap, &error)
+                    _ = takeNativeText(bootstrap)
+                    let launchError = takeNativeText(error)
+                    guard app != 0 else { throw Failure(message: launchError ?? "Launch failed") }
                     defer { capy_apple_detach(app); capy_apple_destroy(app) }
                     func check(_ result: Int32) throws {
-                        if result < 0 { throw Failure(message: capy_apple_error(app).map(String.init(cString:)) ?? "Metal operation failed") }
+                        if result < 0 { throw Failure(message: takeNativeText(capy_apple_error(app)) ?? "Metal operation failed") }
                     }
                     let pointer = Unmanaged.passUnretained(layer).toOpaque()
                     try check(capy_apple_attach(app, pointer, 256, 256, 1))

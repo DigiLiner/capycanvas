@@ -8,7 +8,7 @@ fn normalize_session_identity(app: &App, snapshot: &mut Value) {
     let encoded = serde_json::to_vec(&app.state()).unwrap();
     let live: Value = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(snapshot["state"], live);
-    let session = &unsafe { &*app.0 }.host.session;
+    let session = &app.borrow().host.session;
     for (key, context) in [
         ("color_edit_context", session.color_edit_context()),
         ("color_wheel_context", session.color_wheel_context()),
@@ -37,7 +37,7 @@ fn apple_request_seven_extends_the_shared_layout_update() {
     for platform in [0, 1] {
         let shared = App::new(platform);
         let app = App::new(platform);
-        let bytes = unsafe { &mut *shared.0 }.host.take_layout_update_bytes().unwrap().unwrap();
+        let bytes = shared.borrow().host.take_layout_update_bytes().unwrap().unwrap();
         let mut expected: Value = serde_json::from_slice(&bytes).unwrap();
         let mut published = app.request(7, Value::Null).unwrap();
         let extension = published.as_object_mut().unwrap();

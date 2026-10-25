@@ -140,12 +140,15 @@ import Darwin
                 DispatchQueue.main.async { self?.receive(snapshot, failure) }
             }
             native?.languageInputBusy = { [weak self] in self?.workspace.languageInputBusy == true }
-            native?.scopesReceived = { [weak self] update in DispatchQueue.main.async { self?.scopes.receive(update) } }
+            native?.setScopesReceiver { [weak self] update in DispatchQueue.main.async {
+                guard let self, self.drawingIdentity == update.identity else { return }
+                self.scopes.receive(update)
+            } }
             if usesWorkspaceLibrary, let locations = storage.locations {
                 workspaces = WorkspaceController(store: self, directory: locations.workspaces, scene: scene)
             }
             notice.answer = { [weak self] id, accept, action in self?.dispatch(["type": "notice", "id": id, "accept": accept, "action": action ?? NSNull()]) }
-            native?.canvasBarHoldChanged = { [weak self] hold in
+            native?.setCanvasBarHoldChanged { [weak self] hold in
                 DispatchQueue.main.async { self?.canvasBar.hold(hold) }
             }
             if let workload { drawingWorkload = DrawingWorkload(store: self, plan: workload) }
@@ -388,9 +391,9 @@ import Darwin
     }
     func resolveNumber(_ control: JSON, value: Double, operation: [String: Any]) throws -> JSON {
         let request = try JSON(["language": interfaceLanguage, "request": ["control": control.raw, "value": value, "operation": operation]]).encoded()
-        guard let response = request.withCString({ capy_apple_numeric($0) }) else { throw HostFailure(message: "Numeric input failed") }
-        defer { capy_apple_string_free(response) }
-        let value = try JSON.decode(String(cString: response))
+        guard let response = request.withCString({ takeNativeText(capy_apple_numeric($0)) }) else { throw HostFailure(message: "Numeric input failed") }
+
+        let value = try JSON.decode(response)
         if !value["error"].isNull { throw HostFailure(message: value["error"].string) }
         return value
     }

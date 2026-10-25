@@ -3,7 +3,7 @@ use super::fixtures::until;
 
 fn picker_app(platform: u32) -> App {
     let app = App::new(platform);
-    unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+    app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
     app.draw_until_idle();
     app
 }
@@ -28,7 +28,7 @@ fn apple_picker_previews_on_hover_and_contact_and_accepts_by_device() {
         assert!(picking(&app));
         pointer(&app, 0, 1, 0., center, 3_000_000_000.);
         until(&app, "mouse hover previews", || !app.state()["color_picker"]["preview"].is_null());
-        assert!(unsafe { &*app.0 }.host.session.color_picker_overlay().is_some());
+        assert!(app.borrow().host.session.color_picker_overlay().is_some());
         assert_eq!(app.state()["colors"], colors, "Hover never commits");
         app.request(1, json!({"type":"cursor_leave"}));
         assert!(app.state()["color_picker"]["preview"].is_null());

@@ -5,9 +5,9 @@ use super::*;
 /// Worker only. Borrows NUL-terminated action JSON and count readable bytes.
 /// Returns owned shared profile-library result/error JSON; storage stays native.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_profile_library(request: *const c_char, bytes: *const u8, count: usize) -> *mut c_char {
+pub unsafe extern "C" fn capy_profile_library(request: *const c_char, bytes: *const u8, count: usize) -> u64 {
     let result = (|| -> Result<serde_json::Value, String> {
-        let (localization, action) = control_request::<layer_ui::profile_library::ProfileLibraryAction>(unsafe { read_title(request) }?)?;
+        let (localization, action) = control_request::<layer_ui::profile_library::ProfileLibraryAction>(&unsafe { read_title(request) }?)?;
         // The storage adapter reads one extra byte to detect an oversized file.
         // Inspect turns that shared validation failure into an unavailable row.
         if count > layer_ui::profile_library::PROFILE_READ_LIMIT + 1 { return Err(layer_ui::ColorFeatureError::ProfileReadLimit.profile_message(&localization)); }
@@ -17,7 +17,7 @@ pub unsafe extern "C" fn capy_profile_library(request: *const c_char, bytes: *co
         };
         action.execute_localized(bytes, &localization).map_err(|reason| reason.profile_message(&localization))
     })();
-    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).unwrap().into_raw()
+    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).map_or(0,handles::text)
 }
 
 /// # Safety
@@ -25,14 +25,14 @@ pub unsafe extern "C" fn capy_profile_library(request: *const c_char, bytes: *co
 /// Encoded export bytes are written to output at its current offset when it is
 /// not -1. Returns owned metadata/error JSON; the host publishes files atomically.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_palette_file(request: *const c_char, bytes: *const u8, count: usize, output: i32) -> *mut c_char {
+pub unsafe extern "C" fn capy_palette_file(request: *const c_char, bytes: *const u8, count: usize, output: i32) -> u64 {
     let result = (|| -> Result<serde_json::Value, String> {
         if count > layer_ui::ColorLibrary::MAX_IMPORT_BYTES + 1 { return Err("Palette files must be at most 1 MB".into()); }
         let bytes = if count == 0 { &[][..] } else {
             if bytes.is_null() { return Err("Palette bytes are unavailable".into()); }
             unsafe { std::slice::from_raw_parts(bytes, count) }
         };
-        let request = serde_json::from_str(unsafe { read_title(request) }?).map_err(|e| e.to_string())?;
+        let request = serde_json::from_str(&unsafe { read_title(request) }?).map_err(|e| e.to_string())?;
         let (metadata, encoded) = layer_ui::palette_file(request, bytes)?;
         if output >= 0 && !encoded.is_empty() {
             let mut file = ManuallyDrop::new(unsafe { File::from_raw_fd(output) });
@@ -40,20 +40,20 @@ pub unsafe extern "C" fn capy_palette_file(request: *const c_char, bytes: *const
         }
         Ok(metadata)
     })();
-    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).unwrap().into_raw()
+    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).map_or(0,handles::text)
 }
 
 /// # Safety
 /// Worker only. Borrows NUL-terminated recipe/action JSON; returns owned draft/error JSON.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_export_draft(recipe: *const c_char, action: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_export_draft(recipe: *const c_char, action: *const c_char) -> u64 {
     let result = (|| -> Result<serde_json::Value, String> {
-        let (localization, action) = control_request(unsafe { read_title(action) }?)?;
-        let recipe: layer_ui::ExportRecipe = serde_json::from_str(unsafe { read_title(recipe) }?).map_err(|e| e.to_string())?;
+        let (localization, action) = control_request(&unsafe { read_title(action) }?)?;
+        let recipe: layer_ui::ExportRecipe = serde_json::from_str(&unsafe { read_title(recipe) }?).map_err(|e| e.to_string())?;
         let draft=recipe.draft_localized(action, &localization);
         serde_json::to_value(draft).map_err(|e| e.to_string())
     })();
-    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).unwrap().into_raw()
+    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).map_or(0,handles::text)
 }
 
 /// # Safety
@@ -61,9 +61,9 @@ pub unsafe extern "C" fn capy_export_draft(recipe: *const c_char, action: *const
 /// input may be -1 for defaults; changed preferences require a temporary output.
 /// Returns owned view/error JSON. The host publishes output only after success.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_export_presets(input: i32, output: i32, request: *const c_char, color: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_export_presets(input: i32, output: i32, request: *const c_char, color: *const c_char) -> u64 {
     let result = (|| -> Result<serde_json::Value, String> {
-        let (localization, request) = control_request(unsafe { read_title(request) }?)?;
+        let (localization, request) = control_request(&unsafe { read_title(request) }?)?;
         let mut library = if input < 0 { layer_ui::ExportPresets::default() } else {
             let file = ManuallyDrop::new(unsafe { File::from_raw_fd(input) });
             let mut bytes = Vec::new();
@@ -71,7 +71,7 @@ pub unsafe extern "C" fn capy_export_presets(input: i32, output: i32, request: *
                 .read_to_end(&mut bytes).map_err(|e| e.to_string())?;
             layer_ui::ExportPresets::restore(&bytes)
         };
-        let color = serde_json::from_str(unsafe { read_title(color) }?).map_err(|e| e.to_string())?;
+        let color = serde_json::from_str(&unsafe { read_title(color) }?).map_err(|e| e.to_string())?;
         let mut view = library.operate(request, color).map_err(|reason| reason.preset_message(&localization))?;
         view.localize_names(color, &localization);
         if view.changed {
@@ -81,5 +81,5 @@ pub unsafe extern "C" fn capy_export_presets(input: i32, output: i32, request: *
         }
         serde_json::to_value(view).map_err(|e| e.to_string())
     })();
-    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).unwrap().into_raw()
+    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).map_or(0,handles::text)
 }

@@ -4,9 +4,10 @@ use super::*;
 /// # Safety
 /// File worker only. Choice is optional DocumentColorChange/ColorProfile JSON.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_edit_work(task: *const CapyProjectTask, choice: *const c_char, copy: bool) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
-    let choice = unsafe { read_title(choice) }.map(str::to_owned);
+pub unsafe extern "C" fn capy_project_edit_work(task: u64, choice: *const c_char, copy: bool) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
+    let choice = unsafe { read_title(choice) };
     task.perform(|payload| {
         let choice = choice?;
         match payload {
@@ -25,8 +26,9 @@ pub unsafe extern "C" fn capy_project_edit_work(task: *const CapyProjectTask, ch
 /// # Safety
 /// Owner only, after edit_work. Shared validation constructs the source candidate.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_project_candidate(app: *mut CapyApple, task: *const CapyProjectTask) -> i32 {
-    let (Some(app), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_project_candidate(app: u64, task: u64) -> i32 {
+    let (Some(mut lease_app),Some(lease_task))=(handles::app(app),handles::shared::<CapyProjectTask>(task)) else { return -1; };
+    let (app,task)=(&mut *lease_app,&*lease_task);
     app.perform(|app| {
         task.check_cancelled()?;
         let mut state = task.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -41,8 +43,9 @@ pub unsafe extern "C" fn capy_apple_project_candidate(app: *mut CapyApple, task:
 /// # Safety
 /// Worker only, after project_candidate; renders complete source comparisons.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_compare(task: *const CapyProjectTask) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_project_compare(task: u64) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
     task.perform(|payload| {
         let localization = &task.localization;
         match payload {
@@ -56,9 +59,10 @@ pub unsafe extern "C" fn capy_project_compare(task: *const CapyProjectTask) -> i
 /// # Safety
 /// Worker only, before comparison or writing. The output recipe never edits the master.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_export_options(task: *const CapyProjectTask, recipe: *const c_char) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
-    let recipe = unsafe { read_title(recipe) }.map(str::to_owned);
+pub unsafe extern "C" fn capy_project_export_options(task: u64, recipe: *const c_char) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
+    let recipe = unsafe { read_title(recipe) };
     task.perform(|payload| {
         let localization = &task.localization;
         match payload {
@@ -70,8 +74,9 @@ pub unsafe extern "C" fn capy_project_export_options(task: *const CapyProjectTas
 /// # Safety
 /// File worker only. Returns owned metadata JSON. Parsing profiles stays off owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_details(task: *const CapyProjectTask) -> *mut c_char {
-    let Some(task) = (unsafe { task.as_ref() }) else { return std::ptr::null_mut(); };
+pub unsafe extern "C" fn capy_project_details(task: u64) -> u64 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return 0; };
+    let task=&*lease_task;
     let mut json = String::new();
     let result = task.perform(|payload| {
         json = match payload {
@@ -83,24 +88,38 @@ pub unsafe extern "C" fn capy_project_details(task: *const CapyProjectTask) -> *
         }.map_err(|e| e.to_string())?;
         Ok(())
     });
-    if result < 0 { std::ptr::null_mut() } else { CString::new(json).unwrap().into_raw() }
+    if result < 0 { 0 } else { CString::new(json).map_or(0,handles::text) }
 }
+#[derive(Default)]
 #[repr(C)]
 pub struct CapyProjectPreview {
-    pub width: u32, pub height: u32, pub pixels: *const u8, pub count: usize,
+    pub width: u32, pub height: u32, pub count: usize,
+}
+fn preview(payload:&Payload,index:usize)->Option<([u32;2],&[u8])> {
+    let previews=match payload {Payload::Color {task:c,..}=>c.previews(),Payload::Source(s)=>s.previews(),Payload::Export(e)=>e.previews(),_=>return None};
+    previews.get(index).map(|preview|(preview.extent,preview.pixels.as_slice()))
 }
 /// # Safety
-/// Worker only, after successful preparation. Borrowed pixels remain readable
-/// until the next mutating job call/free; copy them before returning to the UI.
+/// Worker only, after successful preparation. Output contains metadata.
 /// Index 0 is before, 1 after and 2 the encoded SDR base.
 /// Output must be aligned and exclusively writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_preview_at(task: *const CapyProjectTask, index: u32, output: *mut CapyProjectPreview) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_project_preview_at(task: u64, index: u32, output: *mut CapyProjectPreview) -> i32 {
     if output.is_null() { return -1; }
+    unsafe {output.write(CapyProjectPreview::default());}
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
     let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
-    let previews = match &state.payload { Payload::Color { task: c, .. } => c.previews(), Payload::Source(s) => s.previews(), Payload::Export(e) => e.previews(), _ => return -1 };
-    let Some(preview) = previews.get(index as usize) else { return -1; };
-    unsafe { output.write(CapyProjectPreview { width: preview.extent[0], height: preview.extent[1], pixels: preview.pixels.as_ptr(), count: preview.pixels.len() }); }
+    let Some(([width,height],bytes))=preview(&state.payload,index as usize) else {return -1;};
+    unsafe { output.write(CapyProjectPreview {width,height,count:bytes.len()}); }
     0
+}
+
+/// # Safety
+/// Nonempty output is writable and exclusive for length bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_project_preview_copy(task:u64,index:u32,offset:usize,output:*mut u8,length:usize)->bool {
+    let Some(task)=handles::shared::<CapyProjectTask>(task) else {return false;};
+    let state=task.state.lock().unwrap_or_else(|e|e.into_inner());
+    preview(&state.payload,index as usize).is_some_and(|(_,bytes)|unsafe {layer_host::ffi::copy_bytes(bytes,offset,output,length)})
 }

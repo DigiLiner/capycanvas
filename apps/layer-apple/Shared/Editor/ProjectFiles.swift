@@ -184,7 +184,7 @@ import UIKit
                     case .success(let png):
                         do { try PhotoClipboard.write(png: png, nonce: nonce, failure: store?.catalog["document_delivery_copy"]["clipboard_unavailable"].string ?? "") }
                         catch { fail(error.localizedDescription); return }
-                        capy_project_clip_published(task.handle)
+                        capy_project_clip_published(nativeValue(task.handle))
                         native.finishProject(task, opening: true, title: "", url: nil) { [weak self] error in
                             DispatchQueue.main.async { [weak self] in
                                 guard let self else { return }
@@ -577,9 +577,9 @@ import UIKit
     private func fileDrop(_ drawings: [Bool], layer: Bool) -> JSON {
         do {
             let text = try JSON(["language": store?.interfaceLanguage ?? "en", "request": ["drawings": drawings, "layer": layer]]).encoded()
-            guard let response = text.withCString({ capy_apple_file_drop($0) }) else { return JSON() }
-            defer { capy_apple_string_free(response) }
-            return try JSON.decode(String(cString: response))
+            guard let response = text.withCString({ takeNativeText(capy_apple_file_drop($0)) }) else { return JSON() }
+
+            return try JSON.decode(response)
         } catch { return JSON(["error": error.localizedDescription]) }
     }
     private func place(_ task: NativeProjectTask, inputs: [PhotoItem], index: Int = 0, representation: Int = 0) {

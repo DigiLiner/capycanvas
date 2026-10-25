@@ -4,9 +4,9 @@ import QuartzCore
 enum BubbleUI {
     static func resolve(_ request: [String: Any]) -> JSON {
         guard let text = try? JSON(request).encoded(),
-            let result = text.withCString({ capy_apple_bubble_ui($0) }) else { return JSON() }
-        defer { capy_apple_string_free(result) }
-        return (try? JSON.decode(String(cString: result))) ?? JSON()
+            let result = text.withCString({ takeNativeText(capy_apple_bubble_ui($0)) }) else { return JSON() }
+
+        return (try? JSON.decode(result)) ?? JSON()
     }
 }
 

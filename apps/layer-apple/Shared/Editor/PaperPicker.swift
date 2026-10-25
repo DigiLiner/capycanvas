@@ -2,37 +2,37 @@ import SwiftUI
 import CoreGraphics
 
 final class NativePaperTask: @unchecked Sendable {
-    let handle: OpaquePointer
-    init(_ handle: OpaquePointer) { self.handle = handle }
-    deinit { let handle = handle; NativeProjectTask.io.async { capy_paper_free(handle) } }
-    func cancel() { capy_paper_cancel(handle) }
+    let handle: UInt64
+    init(_ handle: UInt64) { self.handle = handle }
+    deinit { let handle = handle; NativeProjectTask.io.async { capy_paper_free(nativeValue(handle)) } }
+    func cancel() { capy_paper_cancel(nativeValue(handle)) }
     func work(_ url: URL?) {
         do {
             if let url {
                 try ProjectFileIO.coordinate(url, writing: false) { source in
                     let file = try FileHandle(forReadingFrom: source)
                     defer { try? file.close() }
-                    source.deletingPathExtension().lastPathComponent.withCString { capy_paper_work(self.handle, file.fileDescriptor, $0) }
+                    source.deletingPathExtension().lastPathComponent.withCString { capy_paper_work(nativeValue(self.handle), file.fileDescriptor, $0) }
                 }
-            } else { "".withCString { capy_paper_work(handle, -1, $0) } }
-        } catch { error.localizedDescription.withCString { capy_paper_failed(handle, $0) } }
+            } else { "".withCString { capy_paper_work(nativeValue(handle), -1, $0) } }
+        } catch { error.localizedDescription.withCString { capy_paper_failed(nativeValue(handle), $0) } }
     }
 }
 
 final class NativePaperPreviews: @unchecked Sendable {
-    private let handle: OpaquePointer
+    private let handle: UInt64
     private let ids: [String]
-    init(_ handle: OpaquePointer, ids: [String]) { self.handle = handle; self.ids = ids }
-    deinit { let handle = handle; NativeProjectTask.io.async { capy_paper_previews_free(handle) } }
+    init(_ handle: UInt64, ids: [String]) { self.handle = handle; self.ids = ids }
+    deinit { let handle = handle; NativeProjectTask.io.async { capy_paper_previews_free(nativeValue(handle)) } }
     struct Decoded: @unchecked Sendable { let images: [String: CGImage] }
     func decode() -> Decoded {
         var images: [String:CGImage] = [:]
-        for index in 0..<min(ids.count,capy_paper_previews_count(handle)) {
-            var bytes: UnsafePointer<UInt8>?, count = 0
-            let side = Int(capy_paper_previews_read(handle,index,&bytes,&count))
-            guard let bytes, side > 0, count == side * side else { continue }
-            let data = Data(bytes:bytes,count:count)
-            guard let provider = CGDataProvider(data:data as CFData),
+        for index in 0..<min(ids.count,capy_paper_previews_count(nativeValue(handle))) {
+            var count = 0
+            let side = Int(capy_paper_previews_read(nativeValue(handle),index,&count))
+            guard side > 0, count == side * side,
+                let data = copyNativeData(count, copy: { capy_paper_previews_copy(handle, index, $0, $1, $2) }),
+                let provider = CGDataProvider(data:data as CFData),
                 let image = CGImage(width:side,height:side,bitsPerComponent:8,bitsPerPixel:8,bytesPerRow:side,
                     space:CGColorSpaceCreateDeviceGray(),bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.none.rawValue),
                     provider:provider,decode:nil,shouldInterpolate:true,intent:.relativeColorimetric) else { continue }

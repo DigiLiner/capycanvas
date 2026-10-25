@@ -4,13 +4,13 @@ use std::os::fd::AsRawFd;
 
 fn install(app: &App) {
     let gpu = native_renderer();
-    let app = unsafe { &mut *app.0 };
+    let mut lease_app=app.borrow();let app=&mut *lease_app;
     app.metal.install_renderer(&mut app.host, gpu).unwrap();
 }
 
 #[test]
 fn canvas_update_counter_observes_paint_without_advancing_it() {
-    assert_eq!(unsafe { capy_apple_submitted_canvas_updates(std::ptr::null()) }, 0);
+    assert_eq!(unsafe { capy_apple_submitted_canvas_updates(0) }, 0);
     for platform in [0, 1] {
         let app = App::new(platform);
         assert_eq!(unsafe { capy_apple_submitted_canvas_updates(app.0) }, 0);
@@ -46,7 +46,7 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
             app.draw_until_idle();
             let painted = app.pixels();
             assert_ne!(painted, imported);
-            for (_, _, source) in unsafe { &*app.0 }.host.session.engine().document().artwork.paint.iter() {
+            for (_, _, source) in app.document().artwork.paint.iter() {
                 raster_samples(&source.raster);
             }
             app.invoke("undo");
@@ -54,16 +54,16 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
             assert_eq!(app.pixels(), imported);
             app.action(json!({"type":"set_brush_size","value":47}));
             let state = app.state();
-            let session = &unsafe { &*app.0 }.host.session;
-            let committed = session.engine().document().clone();
-            let checkpoint = session.engine().checkpoint();
-            let device = session.engine().backend().0.as_ref().unwrap().device().clone();
+            let (committed,checkpoint,device)=app.with(|native| {
+                let session=&native.host.session;
+                (session.engine().document().clone(),session.engine().checkpoint(),session.engine().backend().0.as_ref().unwrap().device().clone())
+            });
             let revision = unsafe { capy_apple_camera_revision(app.0) };
             let down = [450.,350.,1.,0.,0.,0.,0.,3_000_000_000.,1.];
             assert_eq!(unsafe { capy_apple_pointer(app.0, 9, 0, 0, down.as_ptr(), down.len(), 0, revision) }, 0);
             app.draw_frame();
-            assert!(unsafe { &*app.0 }.host.session.engine().has_active_stroke());
-            let document = unsafe { &*app.0 }.host.session.engine().document().clone();
+            assert!(app.borrow().host.session.engine().has_active_stroke());
+            let document = app.document().clone();
             assert_project_document(&document, &committed);
             assert_eq!(document.revision, committed.revision);
             // Starting a contact reserves its unique ID even if later canceled.
@@ -76,7 +76,7 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
             // wgpu reports destruction after the old queue finishes. Observe
             // that real callback through the owner; do not assume it is inline.
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while !unsafe { &*app.0 }.host.session.rendering_suspended() {
+            while !app.borrow().host.session.rendering_suspended() {
                 assert_eq!(unsafe { capy_apple_frame(app.0, 3_010_000_000, 3_010_000_000, std::ptr::null_mut()) }, 0);
                 assert!(std::time::Instant::now() < deadline, "{platform} {fault}: loss callback did not arrive");
                 std::thread::sleep(std::time::Duration::from_millis(2));
@@ -84,7 +84,8 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
             let stopped = app.full_snapshot();
             assert_eq!(stopped["gpu_ready"], false, "{platform} {fault}");
             assert!(!stopped["error"].is_null());
-            let session = &unsafe { &*app.0 }.host.session;
+            app.with(|native| {
+            let session = &native.host.session;
             assert!(session.rendering_suspended());
             assert!(!session.engine().has_active_stroke());
             assert_eq!(session.engine().document(), &document);
@@ -92,12 +93,13 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
             assert!(!session.command(layer_ui::CommandId::Redo).enabled);
             assert!(session.command(layer_ui::CommandId::SaveDocumentAs).enabled);
 
+            });
             let task = ProjectJob::new(&app, false);
             let request = app.state()["requests"][0]["id"].clone();
             let mut file = fixtures::tempfile();
             let fd = file.as_raw_fd();
-            let pointer = task.0 as usize;
-            assert_eq!(std::thread::spawn(move || unsafe { capy_project_write(pointer as *const CapyProjectTask, fd) }).join().unwrap(), 0, "{:?}", task.error());
+            let pointer = task.0;
+            assert_eq!(std::thread::spawn(move || unsafe { capy_project_write(pointer, fd) }).join().unwrap(), 0, "{:?}", task.error());
             file.sync_all().unwrap();
             file.rewind().unwrap();
             let saved = read_document(&mut file);
@@ -106,7 +108,7 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
 
             install(&app);
             app.draw_until_idle();
-            assert!(!unsafe { &*app.0 }.host.session.rendering_suspended());
+            assert!(!app.borrow().host.session.rendering_suspended());
             assert_eq!(app.pixels(), imported, "{platform} {fault}: restored raster/source pixels");
             assert_eq!(app.state()["workspace"], state["workspace"]);
             assert_eq!(app.state()["brush"], state["brush"]);
@@ -117,7 +119,7 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
             device.destroy();
             let _ = device.poll(wgpu::PollType::Poll);
             app.full_snapshot();
-            assert!(!unsafe { &*app.0 }.host.session.rendering_suspended());
+            assert!(!app.borrow().host.session.rendering_suspended());
             let up = [480.,370.,1.,0.,0.,0.,0.,3_010_000_000.,3.];
             assert_eq!(unsafe { capy_apple_pointer(app.0, 9, 0, 0, up.as_ptr(), up.len(), 0, revision) }, 0);
             app.draw_until_idle();
@@ -146,12 +148,13 @@ fn unsupported_metal_adapter_keeps_localized_explanation_and_native_cause_on_bot
         for language in [layer_ui::UiLanguage::English, layer_ui::UiLanguage::Japanese] {
             let localization = layer_ui::Localizer::shared(language);
             let app = App(apple_launch_localized(platform, "", localization.clone()).unwrap());
-            let native = unsafe { &mut *app.0 };
+            let mut lease_native=app.borrow();let native=&mut *lease_native;
             assert!(metal::check_adapter(&native.host, adapter, &limits).is_ok());
             let expected = layer_ui::gpu_unsupported(&localization, &format!("Metal adapter requirements: {cause}"));
             assert!(native.perform(|a| a.gpu_operation(|a| metal::check_adapter(&a.host, adapter, &beyond))).is_none());
-            let error = unsafe { CStr::from_ptr(capy_apple_error(app.0)) }.to_str().unwrap();
-            assert_eq!(error, expected);
+            drop(lease_native);
+            let error = handles::take_text(unsafe {capy_apple_error(app.0)});
+            assert_eq!(error.to_str().unwrap(), expected);
             let snapshot = app.full_snapshot();
             assert_eq!(snapshot["gpu_ready"], false);
             assert_eq!(snapshot["error"], expected);

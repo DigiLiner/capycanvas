@@ -6,7 +6,7 @@ fn customize(app: &App, action: Value) {
 
 // Drawer workflows opt into drawers; ordinary collapsed columns open whole members.
 fn enable_column_drawers(app: &App, panel: layer_ui::Panel) {
-    let layout = &unsafe { &*app.0 }.host.session.state().workspace.layout;
+    let layout = app.with(|native|native.host.session.state().workspace.layout.clone());
     let group = layout.panel_group(panel).unwrap();
     let column = layout.column_for_group(group).unwrap();
     customize(app, json!({"type":"set_column_drawers","column":column,"drawers":true}));
@@ -16,12 +16,12 @@ fn enable_column_drawers(app: &App, panel: layer_ui::Panel) {
 fn apple_stack_auto_hide_consumes_native_contact_before_the_next_contact_paints() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
-        let group = unsafe { &*app.0 }.host.session.state().workspace.layout
+        let group = app.borrow().host.session.state().workspace.layout
             .panel_group(layer_ui::Panel::Brushes).unwrap();
         customize(&app, json!({"type":"set_column_collapsed","group":group,"collapsed":true}));
-        let column = unsafe { &*app.0 }.host.session.state().workspace.layout.collapsed_column_for_group(group).unwrap();
+        let column = app.borrow().host.session.state().workspace.layout.collapsed_column_for_group(group).unwrap();
         customize(&app, json!({"type":"set_column_drawers","column":column,"drawers":false}));
         customize(&app, json!({"type":"set_column_auto_hide","column":column,"auto_hide":true}));
         customize(&app, json!({"type":"toggle_column_drawer","group":group,"panel":"brushes"}));
@@ -34,7 +34,7 @@ fn apple_stack_auto_hide_consumes_native_contact_before_the_next_contact_paints(
             app.request(1, json!(layer_ui::UiInput::Chrome {
                 event: layer_ui::ChromeEvent::Contact { position:[900.,700.], canvas:true }, facts, viewport:[1200.,900.],
             }));
-            assert!(unsafe { &*app.0 }.host.session.state().workspace.layout.column_stack(column).open_column.is_some());
+            assert!(app.borrow().host.session.state().workspace.layout.column_stack(column).open_column.is_some());
         }
         app.request(1, json!(layer_ui::UiInput::Chrome {
             event: layer_ui::ChromeEvent::Refresh, facts:Default::default(), viewport:[1200.,900.],
@@ -42,11 +42,14 @@ fn apple_stack_auto_hide_consumes_native_contact_before_the_next_contact_paints(
         // The gesture starts on the canvas outside the expanded member. Its
         // complete native down/move/up sequence belongs to auto-hide dismissal.
         let stroke = || {
-            let session = &unsafe { &*app.0 }.host.session;
+            let (x,y)=app.with(|native| {
+            let session=&native.host.session;
             let [a,b,c,d,tx,ty] = session.state().camera.document_to_surface();
             let doc = session.engine().document();
             let x = f64::from(tx + (a * doc.composition().size[0] as f32 + c * doc.composition().size[1] as f32) * 0.5);
             let y = f64::from(ty + (b * doc.composition().size[0] as f32 + d * doc.composition().size[1] as f32) * 0.5);
+            (x,y)
+            });
             let records = [x,y,1.,0.,0.,0.,0.,1_000_000_000.,1.,
                 x+10.,y+10.,1.,0.,0.,0.,0.,1_010_000_000.,2.,
                 x+20.,y+20.,1.,0.,0.,0.,0.,1_020_000_000.,3.];
@@ -54,7 +57,7 @@ fn apple_stack_auto_hide_consumes_native_contact_before_the_next_contact_paints(
             app.draw_until_idle();
         };
         stroke();
-        assert!(unsafe { &*app.0 }.host.session.state().workspace.layout.column_stack(column).open_column.is_none());
+        assert!(app.borrow().host.session.state().workspace.layout.column_stack(column).open_column.is_none());
         assert_eq!(app.pixels(), initial, "Auto-hide must consume the entire native contact without ink");
         // Positive control: dismissal must release input for the next stroke.
         stroke();
@@ -78,7 +81,7 @@ fn config(app: &App, id: &str) -> Value {
 fn apple_tab_preview_request_and_release_commit_the_same_slot() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        let group = unsafe { &*app.0 }.host.session.state().workspace.layout.panel_group(layer_ui::Panel::Brushes).unwrap();
+        let group = app.borrow().host.session.state().workspace.layout.panel_group(layer_ui::Panel::Brushes).unwrap();
         for panel in ["toolbar", "navigator"] {
             app.action(json!({"type":"move_panel","panel":panel,"target":{"kind":"tab","group":group},"viewport":[1200,900]}));
         }
@@ -97,11 +100,10 @@ fn apple_tab_preview_request_and_release_commit_the_same_slot() {
         let preview = app.request(2, json!({"type":"workspace_drag_preview","item":{"kind":"panel","panel":"toolbar"},"position":[x+71.,y+18.],"tabs":tabs})).unwrap();
         assert_eq!(preview["drop"]["target"]["index"], 3);
         drag("up", 30.);
-        let layout = &unsafe { &*app.0 }.host.session.state().workspace.layout;
+        let layout = app.with(|native|native.host.session.state().workspace.layout.clone());
         assert_eq!(layout.group_panels(group).unwrap(), &[layer_ui::Panel::Brushes, layer_ui::Panel::Navigator, layer_ui::Panel::Toolbar]);
     }
 }
-
 
 #[test]
 fn apple_toolbar_styles_reach_ribbons_and_drawers_with_shared_metrics() {
@@ -260,7 +262,6 @@ fn apple_default_workspace_reaches_every_grouped_brush_without_changing_artwork(
     }
 }
 
-
 #[test]
 fn expanded_toolbar_geometry_and_final_drop_action_match_the_shared_preview() {
     for platform in [0, 1] {
@@ -274,21 +275,21 @@ fn expanded_toolbar_geometry_and_final_drop_action_match_the_shared_preview() {
             )
             .unwrap();
         assert_eq!(app.state()["workspace"], baseline);
-        let layout = unsafe { &*app.0 }.host.session.layout([1200., 900.]);
+        let layout = app.borrow().host.session.layout([1200., 900.]);
         let group = layout
             .groups
             .iter()
             .find(|g| g.active == layer_ui::Panel::Toolbar)
             .unwrap();
         let p = expansion["preview"].clone();
-        let config = unsafe { &*app.0 }
+        let config = app.with(|native|native
             .host
             .session
             .state()
             .workspace
             .layout
             .panel(layer_ui::Panel::Toolbar)
-            .unwrap();
+            .unwrap().clone());
         let expected = layer_ui::toolbar_tile_layout(
             p["width"].as_f64().unwrap() as f32,
             (p["height"].as_f64().unwrap() - expansion["configuration"]["y"].as_f64().unwrap())
@@ -335,7 +336,7 @@ fn apple_drawer_dismissal_consumes_the_entire_canvas_contact_then_allows_paintin
             },
             0
         );
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_frame();
         let paper = app.pixels();
@@ -390,7 +391,7 @@ fn apple_drawer_dismissal_consumes_the_entire_canvas_contact_then_allows_paintin
         assert!(app.state()["customization"]["drawer"].is_null());
         app.draw_frame();
         assert_eq!(app.pixels(), paper);
-        assert!(unsafe { &*app.0 }.dismissed_contacts.is_empty());
+        assert!(app.borrow().dismissed_contacts.is_empty());
         assert_eq!(unsafe { capy_apple_resize(app.0, 1200, 900, 1.) }, 0);
         app.stroke();
         app.draw_frame();
@@ -406,7 +407,7 @@ fn apple_collapsed_toolbar_drawer_publishes_its_column_and_geometry() {
     for platform in [0, 1] {
         let app = App::new(platform);
         enable_column_drawers(&app, layer_ui::Panel::Brushes);
-        let group = unsafe { &*app.0 }
+        let group = app.borrow()
             .host
             .session
             .state()
@@ -423,7 +424,7 @@ fn apple_collapsed_toolbar_drawer_publishes_its_column_and_geometry() {
             &app,
             json!({"type":"toggle_column_drawer","group":group,"panel":"toolbar"}),
         );
-        let column = unsafe { &*app.0 }
+        let column = app.borrow()
             .host
             .session
             .state()
@@ -459,11 +460,11 @@ fn apple_collapsed_toolbar_drawer_publishes_its_column_and_geometry() {
 fn apple_current_main_drawers_paper_and_zen_use_shared_actions() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        let policy = unsafe { &*app.0 }.host.session.state().platform;
+        let policy = app.borrow().host.session.state().platform;
         app.action(json!({"type":"restore_workspace","workspace":layer_ui::WorkspaceState {
             layout: layer_ui::WorkspacePreset::Painter.layout(policy), ..Default::default()
         }}));
-        let header = unsafe { &*app.0 }.host.session.state().workspace.layout.header.clone();
+        let header = app.borrow().host.session.state().workspace.layout.header.clone();
         let opener = |control| header.entries().find(|entry|
             entry.item == layer_ui::HeaderItem::Tool { control }).unwrap().id;
         let brush = opener(layer_ui::ToolbarControl::Command { command: layer_ui::CommandId::DrawingBrush });

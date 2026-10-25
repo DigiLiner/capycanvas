@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn consumed_paint_timestamp_advances_only_after_real_input_reaches_the_engine() {
-    assert_eq!(unsafe { capy_apple_consumed_paint_ns(std::ptr::null()) }, 0);
+    assert_eq!(unsafe { capy_apple_consumed_paint_ns(0) }, 0);
     for platform in [0, 1] {
         let app = fixtures::selection_app(platform);
         app.action(json!({"type":"select_brush","id":layer_core::DefaultBrushPreset::GPen as u32}));
@@ -23,14 +23,14 @@ fn consumed_paint_timestamp_advances_only_after_real_input_reaches_the_engine() 
                 capy_apple_pointer(app.0, 1, 0, 0, record.as_ptr(), record.len(), predicted,
                     capy_apple_camera_revision(app.0))
             }, 0);
-            assert!(unsafe { &*app.0 }.host.session.engine().has_pending_input());
+            assert!(app.borrow().host.session.engine().has_pending_input());
             assert_eq!(unsafe { capy_apple_consumed_paint_ns(app.0) }, previous,
                 "Receipt and enqueueing do not acknowledge engine consumption");
-            let events = unsafe { &*app.0 }.host.session.engine().metrics().input_events;
+            let events = app.borrow().host.session.engine().metrics().input_events;
             fixtures::until(&app, "Pointer input did not reach the engine", || {
-                !unsafe { &*app.0 }.host.session.engine().has_pending_input()
+                !app.borrow().host.session.engine().has_pending_input()
             });
-            assert!(unsafe { &*app.0 }.host.session.engine().metrics().input_events > events);
+            assert!(app.borrow().host.session.engine().metrics().input_events > events);
             assert_eq!(unsafe { capy_apple_consumed_paint_ns(app.0) }, consumed,
                 "Only consumed real Down/Move samples advance the timestamp");
         }
@@ -42,7 +42,7 @@ fn mac_manual_prediction_adds_lead_only_for_the_pen() {
     for tool in [0, 1] {
         for milliseconds in [0, 64] {
             let app = App::new(1);
-            unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(
+            app.borrow().host.session.renderer_mut().0 = Some(
                 native_renderer(),
             );
             app.action(json!({"type":"select_brush","id":layer_core::DefaultBrushPreset::GPen as u32}));
@@ -55,16 +55,16 @@ fn mac_manual_prediction_adds_lead_only_for_the_pen() {
             app.action(json!({"type":"close_settings"}));
             app.draw_until_idle();
             let baseline = app.pixels();
-            let transform = unsafe { &*app.0 }.host.session.state().camera.input_transform();
+            let transform = app.borrow().host.session.state().camera.input_transform();
             let ahead = transform.map(layer_core::Point { x: 720., y: 450. });
-            let width = unsafe { &*app.0 }.host.session.engine().document().composition().size[0] as usize;
+            let width = app.document().composition().size[0] as usize;
             let offset = (ahead.y as usize * width + ahead.x as usize) * 4;
             let mut record = [500., 450., 0.8, 0., 0., 0., 0., 0., 1.];
             let handle = app.0;
             let send = move |record: &[f64]| {
                 assert_eq!(unsafe { capy_apple_pointer(handle, 1, tool, 0,
                     record.as_ptr(), record.len(), 0, capy_apple_camera_revision(handle)) }, 0);
-                unsafe { &mut *handle }.host.prepare_canvas_frame(
+                handles::app(handle).unwrap().host.prepare_canvas_frame(
                     record[7] as u64, record[7] as u64 + 8_000_000, true).unwrap();
             };
             for index in 0..101 {
@@ -73,7 +73,7 @@ fn mac_manual_prediction_adds_lead_only_for_the_pen() {
                 record[8] = if index == 0 { 1. } else { 2. };
                 send(&record);
             }
-            let cursor = unsafe { &mut *app.0 }.host.session.canvas_cursor().unwrap();
+            let cursor = app.borrow().host.session.canvas_cursor().unwrap();
             assert_eq!(cursor.center, [700., 450.]);
             let live = app.pixels();
             let pixel = &live[offset..offset + 4];
@@ -81,14 +81,14 @@ fn mac_manual_prediction_adds_lead_only_for_the_pen() {
             eprintln!("Mac tool={tool} prediction={milliseconds}ms: pixel 20px ahead of cursor={pixel:?}");
             let predicts = tool == 0 && milliseconds == 64;
             assert_eq!(blue, predicts, "Only pen input receives manual prediction lead");
-            assert_eq!(unsafe { &*app.0 }.host.session.engine().metrics().engine_prediction_frames > 0, predicts);
+            assert_eq!(app.borrow().host.session.engine().metrics().engine_prediction_frames > 0, predicts);
             record[7] += 1_000_000.;
             record[8] = 3.;
             send(&record);
             let committed = app.pixels();
             assert_eq!(&committed[offset..offset + 4], &baseline[offset..offset + 4],
                 "Pen-up must remove predicted ink beyond the real endpoint");
-            assert_eq!(unsafe { &*app.0 }.host.session.engine().metrics().committed_strokes, 1);
+            assert_eq!(app.borrow().host.session.engine().metrics().committed_strokes, 1);
             app.invoke("undo");
             app.draw_until_idle();
             assert_eq!(app.pixels(), baseline);
@@ -104,7 +104,7 @@ fn project_adoption_preserves_native_prediction_and_manual_lookahead() {
     for platform in [0, 1] {
         {
             let app = App::new(platform);
-            unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(
+            app.borrow().host.session.renderer_mut().0 = Some(
                 native_renderer(),
             );
             let mut settings = app.state()["settings"].clone();
@@ -124,14 +124,14 @@ fn project_adoption_preserves_native_prediction_and_manual_lookahead() {
             assert_eq!(app.state()["settings"], settings);
             app.draw_until_idle();
             let baseline = app.pixels();
-            let transform = unsafe { &*app.0 }
+            let transform = app.borrow()
                 .host
                 .session
                 .state()
                 .camera
                 .input_transform();
             let ahead = transform.map(layer_core::Point { x: 720., y: 450. });
-            let width = unsafe { &*app.0 }.host.session.engine().document().composition().size[0] as usize;
+            let width = app.document().composition().size[0] as usize;
             let offset = (ahead.y as usize * width + ahead.x as usize) * 4;
             let send = |record: &[f64], predicted| {
                 assert_eq!(
@@ -151,7 +151,7 @@ fn project_adoption_preserves_native_prediction_and_manual_lookahead() {
                 );
             };
             let frame = |time: f64| {
-                unsafe { &mut *app.0 }
+                app.borrow()
                     .host
                     .prepare_canvas_frame(time as u64, time as u64 + 8_000_000, true)
                     .unwrap()
@@ -170,7 +170,7 @@ fn project_adoption_preserves_native_prediction_and_manual_lookahead() {
                 send(&predicted, 1);
                 frame(record[7]);
             }
-            let metrics = unsafe { &*app.0 }.host.session.engine().metrics();
+            let metrics = app.borrow().host.session.engine().metrics();
             assert_eq!(metrics.platform_prediction_frames > 0, platform == 0);
             assert_eq!(metrics.engine_prediction_frames > 0, platform == 1);
             let live = app.pixels();
@@ -207,7 +207,7 @@ fn lasso_pointer_contacts_preserve_history_and_paint_enclosed_pixels_on_both_pla
     for platform in [0, 1] {
         for tool in ["select", "lasso_fill"] {
             let app = App::new(platform);
-            unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(
+            app.borrow().host.session.renderer_mut().0 = Some(
                 native_renderer(),
             );
             app.action(json!({"type":"set_color","rgba":[0.2,0.45,0.8,1]}));
@@ -216,10 +216,10 @@ fn lasso_pointer_contacts_preserve_history_and_paint_enclosed_pixels_on_both_pla
             app.layer_action(json!({"op":"tool","tool":tool}));
             app.draw_until_idle();
             let baseline = app.pixels();
-            let session = &unsafe { &*app.0 }.host.session;
-            let selection = session.engine().document().working.selection.clone();
-            let width = session.engine().document().composition().size[0] as usize;
-            let transform = session.state().camera.input_transform();
+            let (selection,width,transform)=app.with(|native| {
+                let session=&native.host.session;
+                (session.engine().document().working.selection.clone(),session.engine().document().composition().size[0] as usize,session.state().camera.input_transform())
+            });
             let a = transform.map(layer_core::Point { x: 500., y: 400. });
             let b = transform.map(layer_core::Point { x: 650., y: 550. });
             let send = |id: u64, points: &[[f64; 3]]| {
@@ -258,7 +258,7 @@ fn lasso_pointer_contacts_preserve_history_and_paint_enclosed_pixels_on_both_pla
                 app.draw_until_idle();
                 assert!(app.state()["host_error"].is_null());
             };
-            assert!(unsafe { &*app.0 }.host.session.engine().can_redo());
+            assert!(app.borrow().host.session.engine().can_redo());
             for (id, points) in [
                 (1, vec![[540., 440., 1.], [540., 440., 3.]]),
                 (
@@ -281,13 +281,15 @@ fn lasso_pointer_contacts_preserve_history_and_paint_enclosed_pixels_on_both_pla
                 ),
             ] {
                 send(id, &points);
-                let session = &unsafe { &*app.0 }.host.session;
+                app.with(|native| {
+                let session = &native.host.session;
                 assert_eq!(session.engine().document().working.selection, selection);
                 assert!(
                     session.engine().can_redo(),
                     "Empty/cancelled contacts preserve Redo"
                 );
                 session.require_document_snapshot_idle().unwrap();
+                });
                 assert_eq!(app.pixels(), baseline);
             }
             send(
@@ -302,11 +304,7 @@ fn lasso_pointer_contacts_preserve_history_and_paint_enclosed_pixels_on_both_pla
             );
             let before_fill = if tool == "select" {
                 assert_ne!(
-                    unsafe { &*app.0 }
-                        .host
-                        .session
-                        .engine()
-                        .document()
+                    app.document()
                         .working.selection,
                     selection
                 );
@@ -328,8 +326,8 @@ fn lasso_pointer_contacts_preserve_history_and_paint_enclosed_pixels_on_both_pla
             let ys = a.y.min(b.y) - 2. ..=a.y.max(b.y) + 2.;
             assert!(
                 painted
-                    .chunks_exact(4)
-                    .zip(before_fill.chunks_exact(4))
+                    .as_chunks::<4>().0.iter()
+                    .zip(before_fill.as_chunks::<4>().0.iter())
                     .enumerate()
                     .all(|(i, (a, b))| {
                         let (x, y) = ((i % width) as f32, (i / width) as f32);
@@ -371,7 +369,7 @@ fn estimated_input_abi_matches_final_sensor_oracle_pixels_and_history_on_both_pl
             let apps = [App::new(platform), App::new(platform)];
             let mut results = Vec::new();
             for (estimated, app) in apps.iter().enumerate() {
-                unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(
+                app.borrow().host.session.renderer_mut().0 = Some(
                     native_renderer(),
                 );
                 app.action(json!({"type":"set_tool_setting","id":"smoothing_strength","value":0}));
@@ -443,12 +441,11 @@ fn estimated_input_abi_matches_final_sensor_oracle_pixels_and_history_on_both_pl
                     ink, baseline,
                     "fixture must change artwork: {platform}/{brush:?}"
                 );
-                let engine = unsafe { &*app.0 }.host.session.engine();
-                assert_eq!(engine.metrics().committed_strokes, 2);
+                assert_eq!(app.borrow().host.session.engine().metrics().committed_strokes,2);
                 // Completed contacts are stored as immutable raster revisions.
                 // Compare backing as well as composited pixels against
                 // the contact delivered with final pressure, tilt and twist.
-                let document = engine.document();
+                let document = app.document();
                 let samples =
                     raster_samples(document.target_raster(document.active_target().unwrap()).unwrap());
                 app.invoke("undo");
@@ -487,7 +484,7 @@ fn apple_stroke_recordings_capture_hover_and_contacts_and_export_compressed() {
     use std::os::fd::AsRawFd;
     for (platform, name) in [(0, "ios"), (1, "mac")] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         let status = |action: Value| app.request(2, json!({"type":"stroke_recording","action":action})).unwrap();
         assert_eq!(status(Value::Null)["label"], "Start stroke recording");
@@ -505,14 +502,15 @@ fn apple_stroke_recordings_capture_hover_and_contacts_and_export_compressed() {
         let stopped = status(json!("stop"));
         assert_eq!((stopped["recording"].as_bool(), stopped["ready"].as_bool()), (Some(false), Some(true)));
         assert!(stopped["raw_events"].as_u64().unwrap() >= 4);
-        let mut length = 0usize;
-        let bytes = unsafe { capy_apple_stroke_recording_data(handle, &mut length) };
-        assert!(!bytes.is_null() && length > 0);
+        let bytes=capy_apple_stroke_recording_data(handle);
+        let length=capy_bytes_length(bytes);
+        let raw=copied_bytes(length,|offset,output,count|unsafe {capy_bytes_copy(bytes,offset,output,count)});
+        assert!(!(bytes==0) && length > 0);
         let path = std::env::temp_dir().join(format!("capy-recording-{}-{name}", std::process::id()));
         let mut file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
         std::fs::remove_file(&path).unwrap();
-        assert!(unsafe { capy_stroke_recording_write(bytes, length, file.as_raw_fd()) }.is_null());
-        unsafe { capy_bytes_free(bytes, length) };
+        assert!((unsafe { capy_stroke_recording_write(raw.as_ptr(), raw.len(), file.as_raw_fd()) }==0));
+        capy_bytes_free(bytes);
         file.rewind().unwrap();
         let mut compressed = Vec::new();
         file.read_to_end(&mut compressed).unwrap();
@@ -534,5 +532,5 @@ fn ipad_touch_timing_and_pencil_actions_reach_the_session() {
     assert!(app.try_request(2, &json!({"type":"touch_policy","tap_ms":0,"slop":20.})).is_err());
     let reply = app.request(1, json!({"type":"stylus_action","action":"switch_eraser"})).unwrap();
     assert_eq!(reply["handled"], true);
-    assert!(unsafe { &*app.0 }.host.session.command(layer_ui::CommandId::Eraser).selected);
+    assert!(app.borrow().host.session.command(layer_ui::CommandId::Eraser).selected);
 }

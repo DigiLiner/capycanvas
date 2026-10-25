@@ -18,10 +18,10 @@ const CORRECTIONS: [(&str, &str, f64, Option<&str>); 6] = [
     ("color_balance", "midtones_red", 12., Some("midtones")),
 ];
 fn document(app: &App) -> Document {
-    unsafe { &*app.0 }.host.session.engine().document().clone()
+    app.document().clone()
 }
 fn samples(app: &App) -> Vec<[f32; 4]> {
-    let s = &unsafe { &*app.0 }.host.session;
+    let s = &app.borrow().host.session;
     let project = s.capture_artwork().unwrap();
     let mut snapshot = s
         .engine()
@@ -74,7 +74,7 @@ fn value(index: usize, alternate: bool) -> Value {
 fn select_region(app: &App) {
     app.invoke("lasso");
     app.draw_until_idle();
-    let [a, b, c, d, e, f] = unsafe { &*app.0 }
+    let [a, b, c, d, e, f] = app.borrow()
         .host
         .session
         .state()
@@ -133,7 +133,7 @@ fn apple_photo_corrections_masks_and_original_samples_remain_revisable_after_wor
             (RgbSpace::ProPhoto, SampleDepth::U16),
         ] {
             let app = App::new(platform);
-            unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+            app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
             app.draw_until_idle();
             let new = ProjectJob::create_with(&app, [128, 96], &[json!({"op": "space", "space": space}), json!({"op": "depth", "depth": depth}),
                 json!({"op": "paper_color"}), json!({"op": "transparent", "transparent": true}), json!({"op": "use_paper_color"})]);
@@ -169,7 +169,7 @@ fn apple_photo_corrections_masks_and_original_samples_remain_revisable_after_wor
                     .collect();
                 builder.push_row(&row).unwrap();
             }
-            unsafe { &mut *app.0 }
+            app.borrow()
                 .host
                 .session
                 .import_layer_source("Original 16-bit photograph", builder.finish().unwrap())
@@ -262,7 +262,7 @@ fn apple_photo_corrections_masks_and_original_samples_remain_revisable_after_wor
                 save.error()
             );
             let fresh = App::new(platform);
-            unsafe { &mut *fresh.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+            fresh.borrow().host.session.renderer_mut().0 = Some(native_renderer());
             fresh.draw_until_idle();
             let open = ProjectJob::new(&fresh, true);
             file.rewind().unwrap();

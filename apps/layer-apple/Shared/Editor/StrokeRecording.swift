@@ -62,12 +62,12 @@ import UniformTypeIdentifiers
         defer { try? FileManager.default.removeItem(at: url) }
         let file = try FileHandle(forWritingTo: url)
         let failure = raw.withUnsafeBytes { buffer in
-            capy_stroke_recording_write(buffer.bindMemory(to: UInt8.self).baseAddress, raw.count, file.fileDescriptor)
+            takeNativeText(capy_stroke_recording_write(buffer.bindMemory(to: UInt8.self).baseAddress, raw.count, file.fileDescriptor))
         }
         try file.close()
         if let failure {
-            defer { capy_apple_string_free(failure) }
-            throw HostFailure(message: (try? JSON.decode(String(cString: failure)))?["error"].string ?? message)
+
+            throw HostFailure(message: (try? JSON.decode(failure))?["error"].string ?? message)
         }
         return try Data(contentsOf: url)
     }

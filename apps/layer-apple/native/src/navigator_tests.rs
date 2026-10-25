@@ -2,7 +2,7 @@ use super::*;
 
 fn show_stats(app: &App) {
     app.action(json!({"type":"customize","action":{"type":"set_panel_visible","panel":"stats","visible":true}}));
-    let group = unsafe { &*app.0 }
+    let group = app.borrow()
         .host
         .session
         .state()
@@ -26,10 +26,11 @@ fn diagnostics_restored_before_gpu_attachment_collects_actual_drawing_samples() 
     for platform in [0, 1] {
         let app = App::new(platform);
         show_stats(&app);
-        let host = unsafe { &mut *app.0 };
+        app.with(|host| {
         host.host.session.renderer_mut().0 =
             Some(native_renderer());
         host.host.session.sync_renderer_telemetry();
+        });
         app.draw_frame();
         app.stroke();
         app.draw_frame();
@@ -37,7 +38,7 @@ fn diagnostics_restored_before_gpu_attachment_collects_actual_drawing_samples() 
         // including the final stroke after drawing has gone idle.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let stats = loop {
-            unsafe { &*app.0 }.host.session.engine().backend().0.as_ref().unwrap()
+            app.borrow().host.session.engine().backend().0.as_ref().unwrap()
                 .device().poll(wgpu::PollType::Poll).unwrap();
             let stats = app.request(2, json!({"type":"renderer_stats"})).unwrap();
             if metric(&stats, "GPU · ms")["value"].as_str().unwrap().split(" / ")
@@ -99,7 +100,7 @@ fn slot() -> Value {
     json!({"bounds":[10,20,264,200],"clip":[12,30,200,170],"order":3})
 }
 fn overview(app: &App) -> Vec<layer_render_wgpu::OverviewPlacement> {
-    let app = unsafe { &*app.0 };
+    let mut lease_app=app.borrow();let app=&mut *lease_app;
     let scale = app.host.session.state().camera.viewport[0] as f32 / app.host.logical[0];
     app.metal.navigators.placements(&app.host, scale)
 }
@@ -116,7 +117,7 @@ fn live_navigator_uses_current_document_camera_and_display_scale_without_bitmaps
         assert_eq!(initial.bounds, [28., 48., 512., 384.]);
         assert_eq!(initial.clip, Some([24., 60., 400., 340.]));
         assert_eq!(initial.scale, 2.);
-        let document_revision = unsafe { &*app.0 }.host.session.engine().document().revision;
+        let document_revision = app.document().revision;
         for command in ["zoom_in", "rotate_right", "flip_horizontal"] {
             app.invoke(command);
         }
@@ -124,7 +125,7 @@ fn live_navigator_uses_current_document_camera_and_display_scale_without_bitmaps
         assert_eq!(moved.bounds, initial.bounds);
         assert_ne!(moved.work_area, initial.work_area);
         assert_eq!(
-            unsafe { &*app.0 }.host.session.engine().document().revision,
+            app.document().revision,
             document_revision
         );
         app.stroke();
@@ -158,8 +159,8 @@ fn live_navigator_uses_current_document_camera_and_display_scale_without_bitmaps
 fn native_rotation_snapping_menu_and_gestures_follow_both_platform_policies() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        let camera = || unsafe { &*app.0 }.host.session.state().camera.clone();
-        let checkpoint = unsafe { &*app.0 }.host.session.engine().checkpoint();
+        let camera = || app.borrow().host.session.state().camera.clone();
+        let checkpoint = app.borrow().host.session.engine().checkpoint();
         for enabled in [true, false] {
             let menu = app.request(2, json!({"type":"zoom_menu"})).unwrap();
             let snap = &menu["sections"][3][1];
@@ -183,7 +184,7 @@ fn native_rotation_snapping_menu_and_gestures_follow_both_platform_policies() {
         let [x, y] = before.work_area_center();
         assert_eq!(unsafe { capy_apple_gesture(app.0, x, y, 1.1, 0., 1) }, 0);
         assert_eq!(camera().rotation, before.rotation);
-        assert_eq!(unsafe { &*app.0 }.host.session.engine().checkpoint(), checkpoint);
+        assert_eq!(app.borrow().host.session.engine().checkpoint(), checkpoint);
     }
 }
 
@@ -202,8 +203,8 @@ fn native_gesture_recalls_one_beginning_and_invalid_beginnings_preserve_it() {
         app.invoke("zoom_in");
         app.invoke("rotate_right");
         app.invoke("flip_horizontal");
-        let camera = || unsafe { &*app.0 }.host.session.state().camera.clone();
-        let checkpoint = unsafe { &*app.0 }.host.session.engine().checkpoint();
+        let camera = || app.borrow().host.session.state().camera.clone();
+        let checkpoint = app.borrow().host.session.engine().checkpoint();
         let before = camera();
         let [x, y] = before.work_area_center();
         for (began, scale, rotation) in [(1, 1.1, 0.07), (0, 1.2, 0.10), (0, 0.8, -0.05)] {
@@ -215,16 +216,16 @@ fn native_gesture_recalls_one_beginning_and_invalid_beginnings_preserve_it() {
         for (x, scale, rotation) in [(f32::NAN, 1., 0.), (x, 0., 0.), (x, 1., f32::INFINITY)] {
             assert_eq!(unsafe { capy_apple_gesture(app.0, x, y, scale, rotation, 1) }, -1);
             let error = unsafe { capy_apple_error(app.0) };
-            assert!(!error.is_null());
-            assert_eq!(unsafe { CStr::from_ptr(error) }.to_str().unwrap(), "Invalid native gesture");
+            assert!(!(error==0));
+            assert_eq!(handles::take_text(error).to_str().unwrap(), "Invalid native gesture");
             assert_eq!(camera(), completed);
         }
         app.invoke("previous_view");
         same_view(&camera(), &before);
         app.invoke("previous_view");
         same_view(&camera(), &completed);
-        assert_eq!(unsafe { &*app.0 }.host.session.engine().checkpoint(), checkpoint);
-        assert!(unsafe { &*app.0 }.host.session.engine().backend().0.is_none());
+        assert_eq!(app.borrow().host.session.engine().checkpoint(), checkpoint);
+        assert!(app.borrow().host.session.engine().backend().0.is_none());
     }
 }
 
@@ -235,7 +236,7 @@ fn navigator_geometry_and_gestures_preserve_document_pixels_and_history() {
         app.stroke();
         app.draw_until_idle();
         let pixels = app.pixels();
-        let revision = unsafe { &*app.0 }.host.session.engine().document().revision;
+        let revision = app.document().revision;
         for _ in 0..6 {
             app.invoke("zoom_in");
         }
@@ -254,7 +255,7 @@ fn navigator_geometry_and_gestures_preserve_document_pixels_and_history() {
             geometry["image"],
             json!({"x":4.0,"y":4.0,"width":256.0,"height":192.0})
         );
-        let camera = || unsafe { &*app.0 }.host.session.state().camera.clone();
+        let camera = || app.borrow().host.session.state().camera.clone();
         let send = |phase, position| {
             app.action(
                 json!({"type":"navigator","phase":phase,"position":position,"viewport":viewport}),
@@ -306,7 +307,7 @@ fn navigator_geometry_and_gestures_preserve_document_pixels_and_history() {
         }
         app.draw_until_idle();
         assert_eq!(
-            unsafe { &*app.0 }.host.session.engine().document().revision,
+            app.document().revision,
             revision
         );
         assert_eq!(app.pixels(), pixels);

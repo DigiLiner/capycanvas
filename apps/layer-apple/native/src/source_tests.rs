@@ -7,9 +7,9 @@ fn shared_icc_library_bridge_keeps_bytes_summaries_and_invalid_entry_errors() {
         fixture_localization();
         let action = CString::new(json!({"language":"en","request":action}).to_string()).unwrap();
         let text = unsafe { capy_profile_library(action.as_ptr(), bytes.as_ptr(), bytes.len()) };
-        assert!(!text.is_null());
-        let value: Value = serde_json::from_slice(unsafe { CStr::from_ptr(text) }.to_bytes()).unwrap();
-        unsafe { capy_apple_string_free(text) };
+        assert!(!(text==0));
+        let value: Value = serde_json::from_slice(handles::take_text(text).to_bytes()).unwrap();
+
         value
     };
     let bytes = layer_color::profile_bytes(&ColorProfile::Builtin(RgbSpace::DisplayP3)).unwrap();

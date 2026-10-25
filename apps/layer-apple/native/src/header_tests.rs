@@ -99,13 +99,13 @@ fn apple_header_capture_cancels_on_resize_blur_and_source_replacement() {
 fn apple_header_keeps_capy_separate_from_adjacent_icon_bars() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        let policy = unsafe { &*app.0 }.host.session.state().platform;
+        let policy = app.borrow().host.session.state().platform;
         app.action(json!({"type":"restore_workspace","workspace":layer_ui::WorkspaceState {
             layout: layer_ui::WorkspacePreset::Painter.layout(policy), ..Default::default()
         }}));
         let view = geometry(&app, platform);
         let kinds = |bar: &Value| -> Vec<String> {
-            let header = &unsafe { &*app.0 }.host.session.state().workspace.layout.header;
+            let header = app.with(|native|native.host.session.state().workspace.layout.header.clone());
             bar["items"].as_array().unwrap().iter().map(|id| {
                 let entry = header.entry(id.as_u64().unwrap() as u32).unwrap();
                 serde_json::to_value(entry.item).unwrap()["kind"].as_str().unwrap().to_owned()

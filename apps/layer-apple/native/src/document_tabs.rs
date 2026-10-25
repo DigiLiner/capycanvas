@@ -72,14 +72,15 @@ impl CapyApple {
 /// Serial owner. Flush native input and wait for every retained undo raster,
 /// not just the current recovery snapshot, before retiring the GPU.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_document_prepare_switch(app: *mut CapyApple, now: u64) -> i32 {
+pub unsafe extern "C" fn capy_apple_document_prepare_switch(app: u64, now: u64) -> i32 {
     let ready = unsafe { capy_apple_prepare_recovery(app, now) };
     if ready != 0 {
         return ready;
     }
-    let Some(a) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_a)=handles::app(app) else {
         return -1;
     };
+    let a=&mut *lease_a;
     a.perform(|a| Ok(i32::from(!a.window.park_ready(&a.host)?)))
         .unwrap_or(-1)
 }
@@ -87,35 +88,37 @@ pub unsafe extern "C" fn capy_apple_document_prepare_switch(app: *mut CapyApple,
 /// Serial owner only. The returned job must be prepared on a worker and freed once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_document_switch(
-    app: *mut CapyApple,
+    app: u64,
     id: u64,
     closing: bool,
-) -> *mut CapyDocumentTask {
-    let Some(a) = (unsafe { app.as_mut() }) else {
-        return std::ptr::null_mut();
+) -> u64 {
+    let Some(mut lease_a)=handles::app(app) else {
+        return 0;
     };
+    let a=&mut *lease_a;
     a.perform(|a| {
         let options = a.host.renderer_options();
         if closing {
             let close = a.window.prepare_close(&mut a.host, options)?;
             let task = a.document_job(None);
             task.0.lock().unwrap_or_else(|e| e.into_inner()).close = Some(close);
-            return Ok(Box::into_raw(task));
+            return Ok(handles::store(*task));
         }
         let Some((activation, _)) = a.window.switch(&mut a.host, id, closing, options, |_| {})?
         else {
-            return Ok(Box::into_raw(a.document_job(None)));
+            return Ok(handles::store(*a.document_job(None)));
         };
         a.document_retired();
-        Ok(Box::into_raw(a.document_job(Some(activation))))
+        Ok(handles::store(*a.document_job(Some(activation))))
     })
-    .unwrap_or(std::ptr::null_mut())
+    .unwrap_or(0)
 }
 /// # Safety
 /// Serial owner; every prepared close must be committed or cancelled before free.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_document_close_commit(app: *mut CapyApple, task: *mut CapyDocumentTask, accept: bool) -> i32 {
-    let (Some(a), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_document_close_commit(app: u64, task: u64, accept: bool) -> i32 {
+    let (Some(mut lease_a),Some(lease_task))=(handles::app(app),handles::shared::<CapyDocumentTask>(task)) else { return -1; };
+    let (a,task)=(&mut *lease_a,&*lease_task);
     a.perform(|a| {
         let mut job = task.0.lock().unwrap_or_else(|e| e.into_inner());
         let close = job.close.take().ok_or("The drawing close is unavailable")?;
@@ -131,8 +134,9 @@ pub unsafe extern "C" fn capy_apple_document_close_commit(app: *mut CapyApple, t
 /// # Safety
 /// Serial owner before publishing the session membership removal.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_document_close_validate(app: *mut CapyApple, task: *const CapyDocumentTask) -> i32 {
-    let (Some(a), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_document_close_validate(app: u64, task: u64) -> i32 {
+    let (Some(mut lease_a),Some(lease_task))=(handles::app(app),handles::shared::<CapyDocumentTask>(task)) else { return -1; };
+    let (a,task)=(&mut *lease_a,&*lease_task);
     a.perform(|a| {
         let job = task.0.lock().unwrap_or_else(|e| e.into_inner());
         a.window.validate_close(&a.host, job.close.as_ref().ok_or("The drawing close is unavailable")?)
@@ -141,16 +145,17 @@ pub unsafe extern "C" fn capy_apple_document_close_validate(app: *mut CapyApple,
 /// # Safety
 /// Serial owner only; schedules inactive backing I/O without changing selection.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_document_storage(app: *mut CapyApple) -> *mut CapyDocumentTask {
-    unsafe { app.as_ref() }.map_or(std::ptr::null_mut(), |a| Box::into_raw(a.document_job(None)))
+pub unsafe extern "C" fn capy_apple_document_storage(app: u64) -> u64 {
+    handles::app(app).map_or(0, |a| handles::store(*a.document_job(None)))
 }
 /// # Safety
 /// Worker only; job stays alive and has no concurrent caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_document_prepare(task: *mut CapyDocumentTask) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else {
+pub unsafe extern "C" fn capy_document_prepare(task: u64) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyDocumentTask>(task) else {
         return -1;
     };
+    let task=&*lease_task;
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("capy-drawing".into())
@@ -191,12 +196,13 @@ fn prepare_document(task: &CapyDocumentTask) -> i32 {
 /// Serial owner after worker completion; preserves the selected document on failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_document_resume(
-    app: *mut CapyApple,
-    task: *mut CapyDocumentTask,
+    app: u64,
+    task: u64,
 ) -> i32 {
-    let (Some(a), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else {
+    let (Some(mut lease_a),Some(lease_task))=(handles::app(app),handles::shared::<CapyDocumentTask>(task)) else {
         return -1;
     };
+    let (a,task)=(&mut *lease_a,&*lease_task);
     a.perform(|a| {
         let mut job = task.0.lock().unwrap_or_else(|e| e.into_inner());
         let job = &mut *job;
@@ -226,8 +232,6 @@ pub unsafe extern "C" fn capy_apple_document_resume(
 /// # Safety
 /// No outstanding job calls. Resource destruction belongs on the file worker.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_document_free(task: *mut CapyDocumentTask) {
-    if !task.is_null() {
-        drop(unsafe { Box::from_raw(task) });
-    }
+pub unsafe extern "C" fn capy_document_free(task: u64) {
+    handles::free::<CapyDocumentTask>(task);
 }

@@ -7,12 +7,13 @@ use layer_render::FilterPreviewImage;
 /// The layout is immutable until the next call. No preview pixels cross the ABI.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_navigator_placements(
-    app: *mut CapyApple,
+    app: u64,
     json: *const c_char,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         if json.is_null() {
             return Err("Missing Navigator geometry".into());
@@ -37,10 +38,11 @@ pub unsafe extern "C" fn capy_apple_navigator_placements(
 /// arcs [cx,cy,radius,band,start_degrees,sweep_degrees,strength], color_bubbles
 /// [cx,cy,wheel_radius,arc_radius,cap,end_angle_radians,strength] and DrawerConnection records.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_glass_regions(app: *mut CapyApple, json: *const c_char) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+pub unsafe extern "C" fn capy_apple_glass_regions(app: u64, json: *const c_char) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         if json.is_null() {
             return Err("Missing glass geometry".into());
@@ -62,7 +64,7 @@ pub unsafe extern "C" fn capy_apple_glass_regions(app: *mut CapyApple, json: *co
 /// Stateless geometry on any thread. JSON is [Camera, documentExtent, viewport].
 /// The returned JSON is owned and uses the ordinary string-free function.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_navigator_geometry(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_navigator_geometry(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing Navigator geometry", |source| {
         let (camera, document, viewport): (layer_ui::Camera, [u32; 2], [f32; 2]) =
             serde_json::from_str(source).map_err(|e| e.to_string())?;
@@ -76,15 +78,15 @@ pub struct CapyFilterPreviews {
     filters: CString,
 }
 
+#[derive(Default)]
 #[repr(C)]
 pub struct CapyFilterPreviewInfo {
     pub request: u64,
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub pixels: *const u8,
     pub count: usize,
-    pub filters: *const c_char,
+    pub filters: u64,
 }
 
 /// # Safety
@@ -93,55 +95,64 @@ pub struct CapyFilterPreviewInfo {
 /// The shared query already retires stale requests without an editor error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_take_filter_previews(
-    app: *mut CapyApple,
-) -> *mut CapyFilterPreviews {
-    let Some(app) = (unsafe { app.as_mut() }) else {
-        return std::ptr::null_mut();
+    app: u64,
+) -> u64 {
+    let Some(mut lease_app)=handles::app(app) else {
+        return 0;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         let Some(atlas) = app.host.take_filter_preview_image() else {
-            return Ok(std::ptr::null_mut());
+            return Ok(0);
         };
         let filters =
             CString::new(serde_json::to_string(&atlas.filters).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
-        Ok(Box::into_raw(Box::new(CapyFilterPreviews {
+        Ok(handles::store(CapyFilterPreviews {
             atlas,
             filters,
-        })))
+        }))
     })
-    .unwrap_or(std::ptr::null_mut())
+    .unwrap_or(0)
 }
 
 /// # Safety
 /// Previews must be live; output must be aligned and exclusively writable.
-/// Output views are borrowed until previews_free.
+/// Metadata text is owned; pixel copies retain the source for each call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_filter_previews_read(
-    previews: *const CapyFilterPreviews,
+    previews: u64,
     output: *mut CapyFilterPreviewInfo,
-) {
-    let Some(previews) = (unsafe { previews.as_ref() }) else {
-        return;
+) -> bool {
+    if output.is_null() { return false; }
+    unsafe {output.write(CapyFilterPreviewInfo::default());}
+    let Some(lease_previews)=handles::shared::<CapyFilterPreviews>(previews) else {
+        return false;
     };
-    if output.is_null() { return; }
+    let previews=&*lease_previews;
     let image = &previews.atlas.image;
     unsafe { output.write(CapyFilterPreviewInfo {
         request: image.request_id,
         width: image.width,
         height: image.height,
         stride: image.stride,
-        pixels: image.bytes.as_ptr(),
         count: image.bytes.len(),
-        filters: previews.filters.as_ptr(),
+        filters: handles::text(previews.filters.clone()),
     }); }
+    true
 }
 
 /// # Safety
-/// Free exactly once, after all borrowed views have finished reading.
+/// Nonempty output is writable and exclusive for length bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_filter_previews_free(previews: *mut CapyFilterPreviews) {
-    if !previews.is_null() {
-        unsafe { drop(Box::from_raw(previews)) };
-    }
+pub unsafe extern "C" fn capy_filter_previews_copy(previews:u64,offset:usize,output:*mut u8,length:usize)->bool {
+    handles::shared::<CapyFilterPreviews>(previews).is_some_and(|previews|
+        unsafe {layer_host::ffi::copy_bytes(&previews.atlas.image.bytes,offset,output,length)})
+}
+
+/// # Safety
+/// Retire the handle after its worker calls finish.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_filter_previews_free(previews: u64) {
+    handles::free::<CapyFilterPreviews>(previews);
 }

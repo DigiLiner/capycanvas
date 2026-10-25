@@ -40,6 +40,7 @@ fn error(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+#[cfg(any(target_vendor="apple",test))]
 pub(super) fn check_adapter(host: &NativeHost, adapter: &wgpu::Adapter, limits: &wgpu::Limits) -> Result<(), String> {
     match layer_host::unsupported_adapter(adapter, limits) {
         Some(cause) => Err(layer_ui::gpu_unsupported(host.session.localization(), &format!("Metal adapter requirements: {cause}"))),
@@ -295,13 +296,12 @@ impl MetalHost {
         // Own the timer locally so a panic cannot strand an active query in the
         // host. Normal errors/early returns still close their GPU span.
         let mut timing = self.timing.take();
-        if self.timing_enabled {
-            if let Some(gpu) = &host.session.renderer_mut().0 {
+        if self.timing_enabled
+            && let Some(gpu) = &host.session.renderer_mut().0 {
                 timing
                     .get_or_insert_with(|| GpuFrameTimer::new(gpu.device(), gpu.queue()))
                     .begin(gpu.device(), gpu.queue(), now);
             }
-        }
         let result = self.frame_inner(host, now, presentation);
         if let (Some(timing), Some(gpu)) = (&mut timing, &host.session.renderer_mut().0) {
             timing.end(gpu.device(), gpu.queue());

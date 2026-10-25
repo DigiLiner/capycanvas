@@ -37,7 +37,7 @@ impl WindowDisk {
 }
 pub struct CapySessionTask(Mutex<SessionJob>);
 pub struct CapySessionDestination(layer_ui::DestinationFingerprint);
-pub type SessionDestinationObserver = unsafe extern "C" fn(*const c_char) -> *mut CapySessionDestination;
+pub type SessionDestinationObserver = unsafe extern "C" fn(*const c_char) -> u64;
 struct SessionOpen {
     sessions: PathBuf,
     scene: String,
@@ -183,7 +183,7 @@ impl SessionJob {
                 let observed = restore.state.location.as_ref().and_then(|location| {
                     let uri = CString::new(location.uri.as_str()).ok()?;
                     let fingerprint = unsafe { observe?(uri.as_ptr()) };
-                    if fingerprint.is_null() { None } else { Some(unsafe { Box::from_raw(fingerprint) }.0) }
+                    handles::take::<CapySessionDestination>(fingerprint).map(|fingerprint|fingerprint.0)
                 });
                 let mut candidate = environment.prepare(restore.document().clone(), || false)?;
                 candidate.restore_session(restore, recovered, observed)?;
@@ -212,11 +212,10 @@ impl SessionJob {
             }
         }
         self.restored = !self.candidates.is_empty();
-        if !self.append {
-            if !self.candidates.iter().any(|(id, _)| *id == self.active) {
+        if !self.append
+            && !self.candidates.iter().any(|(id, _)| *id == self.active) {
                 self.active = self.candidates.first().map_or(0, |(id, _)| *id);
             }
-        }
         let warnings: Vec<_> = failures.into_iter().map(|(key, error)| format!("Drawing {key}: {error}")).collect();
         self.warning = if warnings.is_empty() { None } else { CString::new(warnings.join("\n\n").replace('\0', " ")).ok() };
         manifest = manifest.reconcile(manifest.drawings.clone(), manifest.active, false)?;
@@ -311,46 +310,49 @@ impl SessionJob {
 /// the file worker. `adopt` lets a scene without drawings take over another
 /// unlocked session that has some.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_session_open(app: *mut CapyApple, sessions: *const c_char, scene: *const c_char,
-    adopt: bool, retry: bool) -> *mut CapySessionTask {
-    let Some(a) = (unsafe { app.as_mut() }) else { return std::ptr::null_mut(); };
+pub unsafe extern "C" fn capy_apple_session_open(app: u64, sessions: *const c_char, scene: *const c_char,
+    adopt: bool, retry: bool) -> u64 {
+    let Some(mut lease_a)=handles::app(app) else { return 0; };
+    let a=&mut *lease_a;
     a.perform(|a| {
         let open = SessionOpen { sessions: PathBuf::from(unsafe { project::read_title(sessions) }?),
             scene: unsafe { project::read_title(scene) }?.to_owned(), adopt };
         let environment = OpenEnvironment::capture(&a.host.session,
             a.window.documents.admission(&a.host.session.retained_document_tiles()), a.host.renderer_options())?;
-        Ok(Box::into_raw(Box::new(CapySessionTask(Mutex::new(SessionJob {
+        Ok(handles::store(CapySessionTask(Mutex::new(SessionJob {
             open: Some(open), disk: if retry { a.session_disk.clone() } else { None }, environment: Some(environment), captures: None,
             candidates: Vec::new(), active: 0, clean_exit: false, retry, stamp: a.host.session.session_stamp(), retired: Vec::new(), error: None, restored: false, adopted: false, sequence: 0, exclusion: 0, committed: false,
             warning: None, append: retry && a.session_disk.is_some(),
-        })))))
-    }).unwrap_or(std::ptr::null_mut())
+        }))))
+    }).unwrap_or(0)
 }
 /// # Safety
 /// Serial owner after recovery preparation; exclusion 0 retains all drawings,
 /// u64::MAX removes the window, otherwise it removes one explicitly closed tab.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_session_capture(app: *mut CapyApple, exclusion: u64, clean_exit: bool) -> *mut CapySessionTask {
-    let Some(a) = (unsafe { app.as_mut() }) else { return std::ptr::null_mut(); };
+pub unsafe extern "C" fn capy_apple_session_capture(app: u64, exclusion: u64, clean_exit: bool) -> u64 {
+    let Some(mut lease_a)=handles::app(app) else { return 0; };
+    let a=&mut *lease_a;
     a.perform(|a| {
         let disk = a.session_disk.clone().ok_or("The editing session has not finished restoring")?;
         a.session_capture_sequence = a.session_capture_sequence.checked_add(1).ok_or("Editing session capture sequence exhausted")?;
         let order: Vec<_> = a.window.documents.order().iter().copied().filter(|id| exclusion != u64::MAX && *id != exclusion).collect();
         let active = if order.contains(&a.window.documents.selected()) { a.window.documents.selected() } else { order.first().copied().unwrap_or(0) };
         let captures = order.into_iter().map(|id| Ok((id, a.window.session(&a.host, id)?.capture_session()?))).collect::<Result<Vec<_>,String>>()?;
-        Ok(Box::into_raw(Box::new(CapySessionTask(Mutex::new(SessionJob {
+        Ok(handles::store(CapySessionTask(Mutex::new(SessionJob {
             open: None, disk: Some(disk), environment: None, captures: Some(captures), candidates: Vec::new(), active, clean_exit, retry: false,
             stamp: a.host.session.session_stamp(), retired: Vec::new(), error: None, restored: false, adopted: false, sequence: a.session_capture_sequence, exclusion, committed: false,
             warning: None, append: false,
-        })))))
-    }).unwrap_or(std::ptr::null_mut())
+        }))))
+    }).unwrap_or(0)
 }
 /// # Safety
 /// File worker only; no concurrent calls use this task. The observer transfers
 /// a fingerprint allocation from capy_session_destination_read or returns null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_work(task: *mut CapySessionTask, observe: Option<SessionDestinationObserver>) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_session_work(task: u64, observe: Option<SessionDestinationObserver>) -> i32 {
+    let Some(lease_task)=handles::shared::<CapySessionTask>(task) else { return -1; };
+    let task=&*lease_task;
     on_large_stack("capy-session", || {
         let mut job = task.0.lock().unwrap_or_else(|e| e.into_inner());
         let result = catch_unwind(AssertUnwindSafe(|| if job.open.is_some() { job.load(observe) } else { job.write() }));
@@ -370,24 +372,25 @@ pub unsafe extern "C" fn capy_session_work(task: *mut CapySessionTask, observe: 
 /// File worker only. The borrowed descriptor is exclusively readable at offset
 /// zero for this call; the returned allocation transfers to the session observer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_destination_read(fd: i32) -> *mut CapySessionDestination {
+pub unsafe extern "C" fn capy_session_destination_read(fd: i32) -> u64 {
     use std::os::fd::BorrowedFd;
-    if fd < 0 { return std::ptr::null_mut(); }
+    if fd < 0 { return 0; }
     let result = unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned().ok()
         .and_then(|fd| layer_ui::DestinationFingerprint::read(std::fs::File::from(fd)).ok());
-    result.map_or(std::ptr::null_mut(), |fingerprint| Box::into_raw(Box::new(CapySessionDestination(fingerprint))))
+    result.map_or(0, |fingerprint| handles::mutable(CapySessionDestination(fingerprint)))
 }
 /// # Safety
 /// Releases an observation not transferred to capy_session_work.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_destination_free(fingerprint: *mut CapySessionDestination) {
-    if !fingerprint.is_null() { drop(unsafe { Box::from_raw(fingerprint) }); }
+pub unsafe extern "C" fn capy_session_destination_free(fingerprint: u64) {
+    handles::free::<CapySessionDestination>(fingerprint);
 }
 /// # Safety
 /// Serial owner after successful file work; no input may replace the launch drawing.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_session_adopt(app: *mut CapyApple, task: *mut CapySessionTask) -> i32 {
-    let (Some(a), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_session_adopt(app: u64, task: u64) -> i32 {
+    let (Some(mut lease_a),Some(lease_task))=(handles::app(app),handles::shared::<CapySessionTask>(task)) else { return -1; };
+    let (a,task)=(&mut *lease_a,&*lease_task);
     a.perform(|a| {
         let mut job = task.0.lock().unwrap_or_else(|e| e.into_inner());
         if job.adopted { return Ok(()); }
@@ -434,8 +437,9 @@ pub unsafe extern "C" fn capy_apple_session_adopt(app: *mut CapyApple, task: *mu
 /// # Safety
 /// File worker after successful adoption; leaves failed publication retryable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_restore_finished(task: *mut CapySessionTask) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_session_restore_finished(task: u64) -> i32 {
+    let Some(lease_task)=handles::shared::<CapySessionTask>(task) else { return -1; };
+    let task=&*lease_task;
     let mut job = task.0.lock().unwrap_or_else(|e| e.into_inner());
     let result = (|| -> Result<(),String> {
         if !job.adopted { return Err("The editing session was not adopted".into()); }
@@ -448,22 +452,22 @@ pub unsafe extern "C" fn capy_session_restore_finished(task: *mut CapySessionTas
 /// # Safety
 /// Task must remain alive for this call; release the result with capy_apple_string_free.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_error(task: *const CapySessionTask) -> *mut c_char {
-    unsafe { task.as_ref() }.and_then(|task| {
+pub unsafe extern "C" fn capy_session_error(task: u64) -> u64 {
+    handles::shared::<CapySessionTask>(task).and_then(|task| {
         let job = task.0.lock().unwrap_or_else(|e| e.into_inner());
         job.error.clone().or_else(|| job.warning.clone())
     })
-        .map_or(std::ptr::null_mut(), CString::into_raw)
+        .map_or(0, handles::text)
 }
 /// # Safety
 /// Worker completion must precede this read.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_committed(task: *const CapySessionTask) -> bool {
-    unsafe { task.as_ref() }.is_some_and(|task| task.0.lock().unwrap_or_else(|e| e.into_inner()).committed)
+pub unsafe extern "C" fn capy_session_committed(task: u64) -> bool {
+    handles::shared::<CapySessionTask>(task).is_some_and(|task| task.0.lock().unwrap_or_else(|e| e.into_inner()).committed)
 }
 /// # Safety
 /// No outstanding task calls. Free on the file worker.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_free(task: *mut CapySessionTask) {
-    if !task.is_null() { drop(unsafe { Box::from_raw(task) }); }
+pub unsafe extern "C" fn capy_session_free(task: u64) {
+    handles::free::<CapySessionTask>(task);
 }

@@ -97,9 +97,9 @@ import SwiftUI
     private static func frame(_ request: [String: Any]) -> JSON {
         do {
             let text = try JSON(request).encoded()
-            guard let response = text.withCString({ capy_apple_drawer_frame($0) }) else { return JSON() }
-            defer { capy_apple_string_free(response) }
-            return try JSON.decode(String(cString: response))
+            guard let response = text.withCString({ takeNativeText(capy_apple_drawer_frame($0)) }) else { return JSON() }
+
+            return try JSON.decode(response)
         } catch { return JSON(["error": error.localizedDescription]) }
     }
     func measure(_ height: CGFloat, column: Int) {

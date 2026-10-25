@@ -47,7 +47,7 @@ enum Payload {
         gpu: Option<layer_render_wgpu::snapshot::SnapshotGpu>,
     },
     Open {
-        environment: Option<OpenEnvironment>,
+        environment: Option<Box<OpenEnvironment>>,
         candidate: Option<Box<UiSession<Renderer>>>,
         source: layer_ui::ImportSource,
         imported: Option<layer_ui::ImportedDocument>,
@@ -59,7 +59,7 @@ enum Payload {
         context: layer_ui::ImagePlacementContext,
         request: u32,
         device: wgpu::Device,
-        environment: Option<OpenEnvironment>,
+        environment: Option<Box<OpenEnvironment>>,
         clip: Option<PixelClip>,
         color: layer_core::color::DocumentColor,
         mode: Option<layer_ui::PasteMode>,
@@ -152,13 +152,14 @@ impl CapyProjectTask {
 /// placement is optional JSON for kind 3: a surface point or a layer-row hit.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_project_task(
-    app: *mut CapyApple,
+    app: u64,
     opening: u32,
     placement: *const c_char,
-) -> *mut CapyProjectTask {
-    let Some(app) = (unsafe { app.as_mut() }) else {
-        return std::ptr::null_mut();
+) -> u64 {
+    let Some(mut lease_app)=handles::app(app) else {
+        return 0;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         if opening != 3 && !placement.is_null() { return Err("Only image placement accepts a drop target".into()); }
         let admission = app.window.documents.admission(&app.host.session.retained_document_tiles());
@@ -213,7 +214,7 @@ pub unsafe extern "C" fn capy_apple_project_task(
             #[derive(serde::Deserialize)]
             struct Row { target: u64, fraction: f32 }
             let placement: Placement = if placement.is_null() { Default::default() } else {
-                serde_json::from_str(unsafe { read_title(placement) }?).map_err(|e| e.to_string())?
+                serde_json::from_str(&unsafe { read_title(placement) }?).map_err(|e| e.to_string())?
             };
             if placement.screen.is_some() && placement.layer.is_some() { return Err("Choose one image drop target".into()); }
             let destination = placement.layer.map(|row| {
@@ -233,13 +234,13 @@ pub unsafe extern "C" fn capy_apple_project_task(
                 context, request, device,
                 color: session.engine().document().composition().color,
                 mode: match session.document_request(request)? { DocumentRequest::Paste { mode } => Some(*mode), _ => None },
-                environment: session.pasting_new_image().then(|| OpenEnvironment::capture(session, admission, options)).transpose()?,
+                environment: session.pasting_new_image().then(|| OpenEnvironment::capture(session, admission, options).map(Box::new)).transpose()?,
                 clip: placement.nonce.map(|nonce| app.window.documents.clip.capture(&nonce, session.localization())).transpose()?,
             }
         } else if opening == 1 {
             session.require_document_idle()?;
             Payload::Open {
-                environment: Some(OpenEnvironment::capture(session, admission, options)?),
+                environment: Some(Box::new(OpenEnvironment::capture(session, admission, options)?)),
                 candidate: None,
                 source: layer_ui::ImportSource::Master,
                 imported: None,
@@ -259,18 +260,19 @@ pub unsafe extern "C" fn capy_apple_project_task(
         if opening == 0 {
             task.state.lock().unwrap_or_else(|e| e.into_inner()).expectation = session.save_destination_expectation();
         }
-        Ok(Box::into_raw(task))
+        Ok(handles::store(*task))
     })
-    .unwrap_or(std::ptr::null_mut())
+    .unwrap_or(0)
 }
 
 /// # Safety
 /// Session owner only. Used as a barrier before a host decides whether to close.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_project_ready(app: *mut CapyApple) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+pub unsafe extern "C" fn capy_apple_project_ready(app: u64) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         if app.host.session.state().filter_load.pending {
             return Ok(1);
@@ -288,10 +290,11 @@ pub unsafe extern "C" fn capy_apple_project_ready(app: *mut CapyApple) -> i32 {
 /// file worker, and atomically publish recovery before acknowledging durability.
 /// Returns 1 while queued input or a non-capturable canvas operation remains.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_prepare_recovery(app: *mut CapyApple, now: u64) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+pub unsafe extern "C" fn capy_apple_prepare_recovery(app: u64, now: u64) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.prepare_recovery(now)
 }
 
@@ -321,11 +324,11 @@ impl CapyApple {
 /// actual owner capture so intervening edits cannot bypass an unsaved prompt.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_matches(
-    task: *const CapyProjectTask,
+    task: u64,
     epoch: u64,
     revision: u64,
 ) -> i32 {
-    unsafe { task.as_ref() }.map_or(0, |t| i32::from(t.epoch == epoch && t.revision == revision))
+    handles::shared::<CapyProjectTask>(task).map_or(0, |t| i32::from(t.epoch == epoch && t.revision == revision))
 }
 fn host_file(fd: i32) -> ManuallyDrop<File> {
     ManuallyDrop::new(unsafe { File::from_raw_fd(fd) })
@@ -335,10 +338,11 @@ fn host_file(fd: i32) -> ManuallyDrop<File> {
 /// Worker only. fd is an open, exclusively accessed descriptor at offset zero
 /// and stays host-owned. The host fsyncs and atomically replaces on success.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_write(task: *const CapyProjectTask, fd: i32) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else {
+pub unsafe extern "C" fn capy_project_write(task: u64, fd: i32) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else {
         return -1;
     };
+    let task=&*lease_task;
     let mut fingerprint = None;
     let result = task.perform(|payload| {
         if fd < 0 {
@@ -373,8 +377,9 @@ pub unsafe extern "C" fn capy_project_write(task: *const CapyProjectTask, fd: i3
 /// File worker immediately before atomic publication. The host retains a
 /// coordinated read descriptor for the current destination, or -1 if missing.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_destination_matches(task: *const CapyProjectTask, fd: i32, uri: *const c_char) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_project_destination_matches(task: u64, fd: i32, uri: *const c_char) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
     let expectation = task.state.lock().unwrap_or_else(|e| e.into_inner()).expectation.clone();
     let Some(expectation) = expectation else { return 0; };
     let result = (|| -> Result<(),String> {
@@ -392,8 +397,9 @@ pub unsafe extern "C" fn capy_project_destination_matches(task: *const CapyProje
 /// # Safety
 /// Worker only. The task and host-owned descriptor remain alive through writing.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_export_preview(task: *const CapyProjectTask, fd: i32) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_project_export_preview(task: u64, fd: i32) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
     task.perform(|payload| {
         if fd < 0 { return Err("Missing preview output".into()); }
         let file = host_file(fd);
@@ -412,8 +418,9 @@ enum Input<'a> {
 /// # Safety
 /// Worker only, after all clipboard images and profile choices have been read.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_finish_images(task: *const CapyProjectTask) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_project_finish_images(task: u64) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
     task.perform(|payload| {
         let Payload::Placed { images, environment, clip, color, mode, .. } = payload else { return Err("Not an image import".into()); };
         let Some(environment) = environment.take() else {
@@ -434,9 +441,9 @@ pub unsafe extern "C" fn capy_project_finish_images(task: *const CapyProjectTask
 }
 /// Shared decoder capabilities drive native picker and clipboard preferences.
 #[unsafe(no_mangle)]
-pub extern "C" fn capy_photo_formats() -> *mut c_char {
+pub extern "C" fn capy_photo_formats() -> u64 {
     CString::new(serde_json::to_string(&layer_color::photo::formats().collect::<Vec<_>>()).unwrap())
-        .unwrap().into_raw()
+        .map_or(0,handles::text)
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn capy_clipboard_image_bytes() -> usize {
@@ -452,7 +459,7 @@ pub unsafe extern "C" fn capy_drawing_path(path: *const c_char) -> bool {
 /// # Safety
 /// `json` is readable NUL-terminated UTF-8 for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_file_drop(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_file_drop(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing file drop", |source| {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -466,7 +473,7 @@ pub unsafe extern "C" fn capy_apple_file_drop(json: *const c_char) -> *mut c_cha
 /// Worker only. Read/validate/prepare before adoption. The fd remains
 /// caller-owned; name is NUL-terminated UTF-8.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_read(task: *const CapyProjectTask, fd: i32, name: *const c_char) -> i32 {
+pub unsafe extern "C" fn capy_project_read(task: u64, fd: i32, name: *const c_char) -> i32 {
     let fingerprint = if fd >= 0 {
         let file = host_file(fd);
         layer_ui::DestinationFingerprint::read(&*file).and_then(|fingerprint| {
@@ -476,7 +483,7 @@ pub unsafe extern "C" fn capy_project_read(task: *const CapyProjectTask, fd: i32
     } else { Err("Missing project input".into()) };
     let input = fingerprint.as_ref().map(|_| Input::File(fd)).map_err(Clone::clone);
     let result = unsafe { prepare_project(task, input, read_title(name)) };
-    if result == 0 && let Some(task) = (unsafe { task.as_ref() }) {
+    if result == 0 && let Some(task) = (handles::shared::<CapyProjectTask>(task)) {
         task.state.lock().unwrap_or_else(|e| e.into_inner()).fingerprint = fingerprint.ok();
     }
     result
@@ -484,7 +491,7 @@ pub unsafe extern "C" fn capy_project_read(task: *const CapyProjectTask, fd: i32
 /// # Safety
 /// Worker only; bytes and UTF-8 name remain readable until this call returns.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_read_bytes(task: *const CapyProjectTask, bytes: *const u8, count: usize, name: *const c_char) -> i32 {
+pub unsafe extern "C" fn capy_project_read_bytes(task: u64, bytes: *const u8, count: usize, name: *const c_char) -> i32 {
     let input = if bytes.is_null() || count == 0 || count > isize::MAX as usize {
         Err("The clipboard contains no image data".into())
     } else { Ok(Input::Bytes(unsafe { std::slice::from_raw_parts(bytes, count) })) };
@@ -493,40 +500,54 @@ pub unsafe extern "C" fn capy_project_read_bytes(task: *const CapyProjectTask, b
 /// # Safety
 /// Worker only; the task was captured after New drawing's Create.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_new(task: *const CapyProjectTask) -> i32 {
-    unsafe { prepare_project(task, Ok(Input::New), Ok("Untitled")) }
+pub unsafe extern "C" fn capy_project_new(task: u64) -> i32 {
+    unsafe { prepare_project(task, Ok(Input::New), Ok("Untitled".into())) }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_package_summary(task:*const CapyProjectTask)->*mut c_char {
-    let Some(task) = (unsafe {task.as_ref()}) else{return std::ptr::null_mut();};
+pub extern "C" fn capy_project_package_summary(task:u64)-> u64 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else {return 0;};
+    let task=&*lease_task;
     let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
     let summary = match &state.payload {
         Payload::Package(view) => serde_json::to_string(&view.summary(&task.localization)),
         _ => Ok("null".into()),
     };
-    summary.ok().and_then(|value| CString::new(value).ok()).map_or(std::ptr::null_mut(),CString::into_raw)
+    summary.ok().and_then(|value| CString::new(value).ok()).map_or(0,handles::text)
 }
 /// # Safety
 /// Task remains live; output is aligned and exclusively writable. Copy borrowed
 /// pixels before the next mutating task call or free.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_package_preview(task:*const CapyProjectTask,output:*mut CapyProjectPreview)->i32 {
-    let Some(task) = (unsafe {task.as_ref()}) else{return -1;};
+pub unsafe extern "C" fn capy_project_package_preview(task:u64,output:*mut CapyProjectPreview)->i32 {
     if output.is_null() { return -1; }
+    unsafe {output.write(CapyProjectPreview::default());}
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else {return -1;};
+    let task=&*lease_task;
     let state = task.state.lock().unwrap_or_else(|e|e.into_inner());
     let Payload::Package(view) = &state.payload else{return -1;};
     if let Some(preview) = view.preview() {
         let [width,height] = preview.size();
-        unsafe { output.write(CapyProjectPreview {width,height,pixels:preview.pixels().as_ptr(),count:preview.pixels().len()}); }
-    } else {unsafe { output.write(CapyProjectPreview {width:0,height:0,pixels:std::ptr::null(),count:0}); }}
+        unsafe { output.write(CapyProjectPreview {width,height,count:preview.pixels().len()}); }
+    }
     0
+}
+
+/// # Safety
+/// Nonempty output is writable and exclusive for length bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_project_package_preview_copy(task:u64,offset:usize,output:*mut u8,length:usize)->bool {
+    let Some(task)=handles::shared::<CapyProjectTask>(task) else {return false;};
+    let state=task.state.lock().unwrap_or_else(|e|e.into_inner());
+    let Payload::Package(view)=&state.payload else {return false;};
+    view.preview().is_some_and(|preview|unsafe {layer_host::ffi::copy_bytes(preview.pixels(),offset,output,length)})
 }
 
 /// # Safety
 /// Task remains alive; returns owned JSON interpretation, or JSON null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_profile(task: *const CapyProjectTask) -> *mut c_char {
-    let Some(task) = (unsafe { task.as_ref() }) else { return std::ptr::null_mut(); };
+pub unsafe extern "C" fn capy_project_profile(task: u64) -> u64 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return 0; };
+    let task=&*lease_task;
     let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
     let source = match &state.payload {
         Payload::Open { imported: Some(imported), environment: Some(environment), .. } =>
@@ -534,20 +555,21 @@ pub unsafe extern "C" fn capy_project_profile(task: *const CapyProjectTask) -> *
         Payload::Placed { images, .. } => images.pending_source().map(|s| &s.interpretation),
         _ => None,
     };
-    CString::new(serde_json::to_string(&source).unwrap()).unwrap().into_raw()
+    CString::new(serde_json::to_string(&source).unwrap()).map_or(0,handles::text)
 }
 /// # Safety
 /// Worker only; profile is NUL-terminated ColorProfile JSON. Invalid choices
 /// retain the pending source for retry without rereading or altering the file.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_assume_profile(task: *const CapyProjectTask, profile: *const c_char) -> i32 {
+pub unsafe extern "C" fn capy_project_assume_profile(task: u64, profile: *const c_char) -> i32 {
     let input = unsafe { read_title(profile) }.and_then(|text| {
-        serde_json::from_str(text).map(Input::Assume).map_err(|e| e.to_string())
+        serde_json::from_str(&text).map(Input::Assume).map_err(|e| e.to_string())
     });
-    unsafe { prepare_project(task, input, Ok("Photo")) }
+    unsafe { prepare_project(task, input, Ok("Photo".into())) }
 }
-unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>, String>, name: Result<&str, String>) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+unsafe fn prepare_project(task: u64, input: Result<Input<'_>, String>, name: Result<String, String>) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else { return -1; };
+    let task=&*lease_task;
     task.perform(|payload| {
         if let Payload::Lookup { resource, .. } = payload {
             let mut bytes = Vec::new();
@@ -557,14 +579,14 @@ unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>,
                 _ => return Err("Choose a color lookup table".into()),
             }
             task.check_cancelled()?;
-            *resource = Some(std::sync::Arc::new(layer_core::Lut3d::parse_cube_named(&bytes, name?)?));
+            *resource = Some(std::sync::Arc::new(layer_core::Lut3d::parse_cube_named(&bytes, &name?)?));
             return Ok(());
         }
         if let Payload::Placed { images, mode, .. } = payload {
             let interpreting = matches!(&input, Ok(Input::Assume(_)));
             let result = (|| {
                 let name = name?;
-                let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+                let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
                 match input? {
                     Input::File(fd) => {
                         let file = host_file(fd);
@@ -594,14 +616,14 @@ unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>,
             Input::File(fd) => {
                 let file = host_file(fd);
                 let outcome = context.read(layer_core::Cancellable { inner: &*file, cancelled: || task.check_cancelled().is_err() },
-                    layer_ui::ImportIntent::Open, name, task.control.cancellation_flag())?;
+                    layer_ui::ImportIntent::Open, &name, task.control.cancellation_flag())?;
                 match outcome {
                     layer_ui::ImportOutcome::Editable(value) => *imported = Some(value),
                     layer_ui::ImportOutcome::Package(value) => {*payload = Payload::Package(layer_ui::PackageView::new(value)?);return Ok(());}
                 }
             }
             Input::Bytes(bytes) => match context.read(Cursor::new(bytes),
-                layer_ui::ImportIntent::Open,name,task.control.cancellation_flag())? {
+                layer_ui::ImportIntent::Open,&name,task.control.cancellation_flag())? {
                 layer_ui::ImportOutcome::Editable(value) => *imported = Some(value),
                 layer_ui::ImportOutcome::Package(value) => {*payload = Payload::Package(layer_ui::PackageView::new(value)?);return Ok(());}
             },
@@ -630,8 +652,9 @@ unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>,
 /// original editor. Success retains the retired editor in the task for worker
 /// destruction, avoiding document/resource teardown on the drawing queue.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_project_prepare_adopt(app:*mut CapyApple,task:*const CapyProjectTask,now:u64)->i32 {
-    let (Some(a),Some(t))=(unsafe{app.as_mut()},unsafe{task.as_ref()}) else{return -1};
+pub unsafe extern "C" fn capy_apple_project_prepare_adopt(app:u64,task:u64,now:u64)->i32 {
+    let (Some(mut lease_a),Some(lease_t))=(handles::app(app),handles::shared::<CapyProjectTask>(task)) else {return -1};
+    let (a,t)=(&mut *lease_a,&*lease_t);
     let opening=matches!(t.state.lock().unwrap_or_else(|e|e.into_inner()).payload,Payload::Open{..} | Payload::Color { candidate: Some(_), .. });
     if !opening {return 0;}
     if a.host.session.state().document_file.epoch!=t.epoch || a.host.session.engine().document().revision!=t.revision {return 0;}
@@ -643,21 +666,22 @@ pub unsafe extern "C" fn capy_apple_project_prepare_adopt(app:*mut CapyApple,tas
 /// Serial owner, after worker preparation and outgoing backing completion.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_project_adopt(
-    app: *mut CapyApple,
-    task: *const CapyProjectTask,
+    app: u64,
+    task: u64,
     title: *const c_char,
     uri: *const c_char,
 ) -> i32 {
-    let (Some(app), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else {
+    let (Some(mut lease_app),Some(lease_task))=(handles::app(app),handles::shared::<CapyProjectTask>(task)) else {
         return -1;
     };
+    let (app,task)=(&mut *lease_app,&*lease_task);
     app.perform(|app| {
         task.check_cancelled()?;
         let title = unsafe { read_title(title) }?;
         let uri = unsafe { read_title(uri) }?;
-        let location = (!uri.is_empty()).then(|| DocumentLocation {
-            uri: uri.into(),
-            name: title.into(),
+        let location = (!uri.is_empty()).then_some(DocumentLocation {
+            uri,
+            name: title,
         });
         let mut state = task.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(error) = &state.error {
@@ -740,14 +764,15 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
 /// Session owner only, after the host has durably committed a successful save.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_project_saved(
-    app: *mut CapyApple,
-    task: *const CapyProjectTask,
+    app: u64,
+    task: u64,
     title: *const c_char,
     uri: *const c_char,
 ) -> i32 {
-    let (Some(app), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else {
+    let (Some(mut lease_app),Some(lease_task))=(handles::app(app),handles::shared::<CapyProjectTask>(task)) else {
         return -1;
     };
+    let (app,task)=(&mut *lease_app,&*lease_task);
     app.perform(|app| {
         task.check_cancelled()?;
         let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -769,8 +794,8 @@ pub unsafe extern "C" fn capy_apple_project_saved(
         }
         let id = task.save_request.ok_or("Not a save task")?;
         let location = DocumentLocation {
-                uri: unsafe { read_title(uri) }?.into(),
-                name: unsafe { read_title(title) }?.into(),
+                uri: unsafe { read_title(uri) }?,
+                name: unsafe { read_title(title) }?,
             };
         session.retarget_project_save(id, location.clone())?;
         session.complete_document_request(id, Ok(true))?;
@@ -779,19 +804,20 @@ pub unsafe extern "C" fn capy_apple_project_saved(
     })
     .map_or(-1, |_| 0)
 }
-pub(crate) unsafe fn read_title<'a>(title: *const c_char) -> Result<&'a str, String> {
+pub(crate) unsafe fn read_title(title: *const c_char) -> Result<String, String> {
     if title.is_null() {
         return Err("Missing document title".into());
     }
     unsafe { CStr::from_ptr(title) }
         .to_str()
+        .map(str::to_owned)
         .map_err(|_| "Invalid document title".into())
 }
 /// # Safety
 /// Task must stay alive for the call. Safe to cancel concurrently with a worker.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_cancel(task: *const CapyProjectTask) {
-    if let Some(task) = unsafe { task.as_ref() } {
+pub unsafe extern "C" fn capy_project_cancel(task: u64) {
+    if let Some(lease_task)=handles::shared::<CapyProjectTask>(task) {let task=&*lease_task;
         if task.phase.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire).is_ok() {
             task.control.cancel();
         }
@@ -801,46 +827,47 @@ pub unsafe extern "C" fn capy_project_cancel(task: *const CapyProjectTask) {
 /// Call just before atomic publication. Cancellation wins before this point;
 /// after it, publication finishes and cancellation cannot retract the save.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_begin_commit(task: *const CapyProjectTask) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else {
+pub unsafe extern "C" fn capy_project_begin_commit(task: u64) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else {
         return -1;
     };
+    let task=&*lease_task;
     task.begin_commit()
 }
 /// # Safety
 /// Call after the worker finishes. Returns an owned string, or NULL on success.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_error(task: *const CapyProjectTask) -> *mut c_char {
-    let Some(task) = (unsafe { task.as_ref() }) else {
-        return std::ptr::null_mut();
+pub unsafe extern "C" fn capy_project_error(task: u64) -> u64 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else {
+        return 0;
     };
+    let task=&*lease_task;
     let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
     state
         .error
         .as_ref()
         .and_then(|s| CString::new(s.replace('\0', " ")).ok())
-        .map_or(std::ptr::null_mut(), CString::into_raw)
+        .map_or(0, handles::text)
 }
 /// # Safety
 /// No outstanding calls. Free on a worker: retired documents can be large.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_free(task: *mut CapyProjectTask) {
-    if !task.is_null() {
-        drop(unsafe { Box::from_raw(task) });
-    }
+pub unsafe extern "C" fn capy_project_free(task: u64) {
+    handles::free::<CapyProjectTask>(task);
 }
 
 /// # Safety
 /// Session owner only. Complete a native picker/worker request after its effect.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_document_complete(
-    app: *mut CapyApple,
+    app: u64,
     id: u32,
     succeeded: u32,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         app.host
             .session
@@ -854,13 +881,14 @@ pub unsafe extern "C" fn capy_apple_document_complete(
 /// 4 clears a close authorization when an application termination is cancelled.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_document_close(
-    app: *mut CapyApple,
+    app: u64,
     id: u32,
     decision: u32,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         let session = &mut app.host.session;
         match decision {
@@ -891,16 +919,17 @@ pub unsafe extern "C" fn capy_apple_document_close(
 /// Output is aligned and exclusively writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_export_task(
-    app: *mut CapyApple,
+    app: u64,
     id: u32,
     now: u64,
-    output: *mut *mut CapyProjectTask,
+    output: *mut u64,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     if output.is_null() { return -1; }
-    unsafe { output.write(std::ptr::null_mut()); }
+    unsafe { output.write(0); }
     app.perform(|app| {
         app.host.session.require_document_idle()?;
         if !app.host.session.state().requests.iter().any(|r| {
@@ -939,7 +968,7 @@ pub unsafe extern "C" fn capy_apple_export_task(
             None,
             session.localization().clone(),
         );
-        unsafe { output.write(Box::into_raw(task)); }
+        unsafe { output.write(handles::store(*task)); }
         Ok(1)
     })
     .unwrap_or(-1)

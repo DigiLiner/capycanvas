@@ -6,7 +6,7 @@ fn import(app: &App, bytes: &[u8]) -> (ProjectJob, i32) {
     let view = app.state()["layer_properties"].clone();
     app.action(json!({"type":"effect","action":{"op":"import_lookup","layer":view["layer"],"epoch":view["epoch"]}}));
     let task = ProjectJob(unsafe { capy_apple_project_task(app.0, 7, std::ptr::null()) });
-    assert!(!task.0.is_null(), "{:?}", unsafe { CStr::from_ptr(capy_apple_error(app.0)) });
+    assert!(!(task.0==0), "{:?}", unsafe { handles::take_text(capy_apple_error(app.0)) });
     let read = unsafe { capy_project_read_bytes(task.0, bytes.as_ptr(), bytes.len(), c"Swap.cube".as_ptr()) };
     (task, read)
 }
@@ -15,7 +15,7 @@ fn import(app: &App, bytes: &[u8]) -> (ProjectJob, i32) {
 fn apple_lookup_import_parses_on_the_worker_and_applies_one_undo_step() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         app.action(json!({"type":"effect","action":{"op":"insert","effect":"color_lookup"}}));
         app.draw_until_idle();
@@ -31,7 +31,7 @@ fn apple_lookup_import_parses_on_the_worker_and_applies_one_undo_step() {
         let (task, read) = import(&app, SWAP);
         assert_eq!(read, 0, "{:?}", task.error());
         assert_eq!(unsafe { capy_apple_project_adopt(app.0, task.0, c"Swap.cube".as_ptr(), c"".as_ptr()) }, 0,
-            "{:?}", unsafe { CStr::from_ptr(capy_apple_error(app.0)) });
+            "{:?}", unsafe { handles::take_text(capy_apple_error(app.0)) });
         assert!(app.state()["requests"].as_array().unwrap().is_empty(), "Adoption completes the import request");
         assert_eq!(app.state()["layer_properties"]["resource_name"], "Swap.cube");
         app.invoke("undo");

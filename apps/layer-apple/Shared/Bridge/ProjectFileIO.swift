@@ -6,9 +6,9 @@ import UniformTypeIdentifiers
 extension UTType {
     static let capyProject = UTType(exportedAs: "art.capycanvas.project", conformingTo: .data)
     static let capyPhotoTypes: [UTType] = {
-        guard let text = capy_photo_formats() else { return [] }
-        defer { capy_apple_string_free(text) }
-        guard let formats = try? JSON.decode(String(cString: text)) else { return [] }
+        guard let text = takeNativeText(capy_photo_formats()) else { return [] }
+
+        guard let formats = try? JSON.decode(text) else { return [] }
         var types: [UTType] = []
         for format in formats.array {
             for ext in format["extensions"].array {
@@ -24,15 +24,15 @@ extension UTType {
 final class NativeProjectTask: @unchecked Sendable {
     enum Kind: UInt32 { case save = 0, open = 1, place = 3, color, properties, source, lookup, clip }
     static let io = DispatchQueue(label: "art.capycanvas.project-files", qos: .userInitiated)
-    let handle: OpaquePointer
-    init(_ handle: OpaquePointer) { self.handle = handle }
-    deinit { let handle = handle; Self.io.async { capy_project_free(handle) } }
-    func cancel() { capy_project_cancel(handle) }
+    let handle: UInt64
+    init(_ handle: UInt64) { self.handle = handle }
+    deinit { let handle = handle; Self.io.async { capy_project_free(nativeValue(handle)) } }
+    func cancel() { capy_project_cancel(nativeValue(handle)) }
     private func check(_ result: Int32) throws {
         guard result < 0 else { return }
-        let error = capy_project_error(handle)
-        defer { if let error { capy_apple_string_free(error) } }
-        throw HostFailure(message: error.map { String(cString: $0) } ?? "Document operation failed")
+        let error = takeNativeText(capy_project_error(nativeValue(handle)))
+
+        throw HostFailure(message: error ?? "Document operation failed")
     }
     func write(to url: URL, previewOnly: Bool = false, original: URL? = nil, destinationError: String = "") throws {
         try ProjectFileIO.coordinate(url, writing: true) { destination in
@@ -44,66 +44,73 @@ final class NativeProjectTask: @unchecked Sendable {
             try ProjectFileIO.atomicWrite(to: destination, beforeCommit: { [self] in
                 let existing = try? FileHandle(forReadingFrom: destination)
                 defer { try? existing?.close() }
-                try url.absoluteString.withCString { try self.check(capy_project_destination_matches(self.handle, existing?.fileDescriptor ?? -1, $0)) }
-                guard capy_project_begin_commit(self.handle) == 0 else { throw HostFailure(message: "Document operation cancelled") }
-            }) { [self] descriptor in try self.check(previewOnly ? capy_project_export_preview(self.handle, descriptor) : capy_project_write(self.handle, descriptor)) }
+                try url.absoluteString.withCString { try self.check(capy_project_destination_matches(nativeValue(self.handle), existing?.fileDescriptor ?? -1, $0)) }
+                guard capy_project_begin_commit(nativeValue(self.handle)) == 0 else { throw HostFailure(message: "Document operation cancelled") }
+            }) { [self] descriptor in try self.check(previewOnly ? capy_project_export_preview(nativeValue(self.handle), descriptor) : capy_project_write(nativeValue(self.handle), descriptor)) }
         }
     }
     func read(from url: URL?) throws {
-        guard let url else { try check(capy_project_new(handle)); return }
+        guard let url else { try check(capy_project_new(nativeValue(handle))); return }
         try ProjectFileIO.coordinate(url, writing: false) { source in
             let file = try FileHandle(forReadingFrom: source)
             defer { try? file.close() }
-            try url.lastPathComponent.withCString { try self.check(capy_project_read(self.handle, file.fileDescriptor, $0)) }
+            try url.lastPathComponent.withCString { try self.check(capy_project_read(nativeValue(self.handle), file.fileDescriptor, $0)) }
         }
     }
     func read(image: Data, name: String = "Pasted image") throws {
         try name.withCString { title in
-            try image.withUnsafeBytes { try check(capy_project_read_bytes(handle,
+            try image.withUnsafeBytes { try check(capy_project_read_bytes(nativeValue(handle),
                 $0.bindMemory(to: UInt8.self).baseAddress, $0.count, title)) }
         }
     }
     func prepareEdit(_ choice: JSON?, copy: Bool) throws {
-        try check(try (choice ?? JSON()).encoded().withCString { capy_project_edit_work(handle, $0, copy) })
+        try check(try (choice ?? JSON()).encoded().withCString { capy_project_edit_work(nativeValue(handle), $0, copy) })
     }
-    func finishImages() throws { try check(capy_project_finish_images(handle)) }
-    func compare() throws { try check(capy_project_compare(handle)) }
+    func finishImages() throws { try check(capy_project_finish_images(nativeValue(handle))) }
+    func compare() throws { try check(capy_project_compare(nativeValue(handle))) }
     var clipProgress: String? {
-        guard let text = capy_project_clip_progress(handle) else { return nil }
-        defer { capy_apple_string_free(text) }
-        return String(cString: text)
+        guard let text = takeNativeText(capy_project_clip_progress(nativeValue(handle))) else { return nil }
+
+        return text
     }
     func copyPixels(nonce: String) throws -> Data {
-        try nonce.withCString { try check(capy_project_clip_run(handle, $0)) }
-        var bytes: UnsafePointer<UInt8>?, count = 0
-        try check(capy_project_clip_png(handle, &bytes, &count))
-        guard let bytes else { throw HostFailure(message: "The copy has no pixels") }
-        return Data(bytes: bytes, count: count)
+        try nonce.withCString { try check(capy_project_clip_run(nativeValue(handle), $0)) }
+        var count = 0
+        try check(capy_project_clip_png(nativeValue(handle), &count))
+        guard let data = copyNativeData(count, copy: { capy_project_clip_png_copy(handle, $0, $1, $2) }) else {
+            throw HostFailure(message: "The copy has no pixels")
+        }
+        return data
     }
     func configureExport(_ recipe: JSON) throws {
-        try check(try recipe.encoded().withCString { capy_project_export_options(handle, $0) })
+        try check(try recipe.encoded().withCString { capy_project_export_options(nativeValue(handle), $0) })
     }
-    func buildProof() throws { try check(capy_project_proof_build(handle)) }
+    func buildProof() throws { try check(capy_project_proof_build(nativeValue(handle))) }
     func proofPreservation() throws -> Data? {
-        var bytes: UnsafePointer<UInt8>?, count = 0
-        try check(capy_project_proof_preservation(handle, &bytes, &count))
-        return bytes.map { Data(bytes: $0, count: count) }
+        var count = 0
+        try check(capy_project_proof_preservation(nativeValue(handle), &count))
+        guard count > 0 else { return nil }
+        guard let data = copyNativeData(count, copy: { capy_project_proof_preservation_copy(handle, $0, $1, $2) }) else {
+            throw HostFailure(message: "Proof is unavailable")
+        }
+        return data
     }
     func details() throws -> JSON {
-        guard let text = capy_project_details(handle) else { try check(-1); return JSON() }
-        defer { capy_apple_string_free(text) }
-        return try JSON.decode(String(cString: text))
+        guard let text = takeNativeText(capy_project_details(nativeValue(handle))) else { try check(-1); return JSON() }
+
+        return try JSON.decode(text)
     }
     func comparison(after: Bool) throws -> CGImage {
         try comparison(index: after ? 1 : 0)
     }
     func comparison(index: UInt32) throws -> CGImage {
         var preview = CapyProjectPreview()
-        guard capy_project_preview_at(handle, index, &preview) == 0, let pixels = preview.pixels,
+        guard capy_project_preview_at(nativeValue(handle), index, &preview) == 0,
             preview.width > 0, preview.height > 0, preview.width <= 512, preview.height <= 384,
             preview.count == Int(preview.width * preview.height * 4),
             let space = CGColorSpace(name: CGColorSpace.displayP3),
-            let provider = CGDataProvider(data: Data(bytes: pixels, count: preview.count) as CFData),
+            let data = copyNativeData(preview.count, copy: { capy_project_preview_copy(handle, index, $0, $1, $2) }),
+            let provider = CGDataProvider(data: data as CFData),
             let image = CGImage(width: Int(preview.width), height: Int(preview.height), bitsPerComponent: 8, bitsPerPixel: 32,
                 bytesPerRow: Int(preview.width) * 4, space: space,
                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
@@ -114,18 +121,19 @@ final class NativeProjectTask: @unchecked Sendable {
     }
 
     func packageSummary() throws -> JSON {
-        guard let text = capy_project_package_summary(handle) else { throw HostFailure(message: "Document operation is unavailable") }
-        defer { capy_apple_string_free(text) }
-        return try JSON.decode(String(cString: text))
+        guard let text = takeNativeText(capy_project_package_summary(nativeValue(handle))) else { throw HostFailure(message: "Document operation is unavailable") }
+
+        return try JSON.decode(text)
     }
     func packagePreview() throws -> CGImage? {
         var preview = CapyProjectPreview()
-        try check(capy_project_package_preview(handle, &preview))
-        guard let pixels = preview.pixels else { return nil }
+        try check(capy_project_package_preview(nativeValue(handle), &preview))
+        guard preview.count > 0 else { return nil }
         guard preview.width > 0, preview.height > 0, preview.width <= 1024, preview.height <= 1024,
             preview.count == Int(preview.width * preview.height * 4),
             let space = CGColorSpace(name: CGColorSpace.sRGB),
-            let provider = CGDataProvider(data: Data(bytes: pixels, count: preview.count) as CFData),
+            let data = copyNativeData(preview.count, copy: { capy_project_package_preview_copy(handle, $0, $1, $2) }),
+            let provider = CGDataProvider(data: data as CFData),
             let image = CGImage(width: Int(preview.width), height: Int(preview.height), bitsPerComponent: 8, bitsPerPixel: 32,
                 bytesPerRow: Int(preview.width) * 4, space: space,
                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
@@ -136,12 +144,12 @@ final class NativeProjectTask: @unchecked Sendable {
     }
 
     func pendingProfile() throws -> JSON {
-        guard let value = capy_project_profile(handle) else { throw HostFailure(message: "Document operation is unavailable") }
-        defer { capy_apple_string_free(value) }
-        return try JSON.decode(String(cString: value))
+        guard let value = takeNativeText(capy_project_profile(nativeValue(handle))) else { throw HostFailure(message: "Document operation is unavailable") }
+
+        return try JSON.decode(value)
     }
     func assumeProfile(_ profile: JSON) throws {
-        try check(try profile.encoded().withCString { capy_project_assume_profile(handle, $0) })
+        try check(try profile.encoded().withCString { capy_project_assume_profile(nativeValue(handle), $0) })
     }
 }
 

@@ -3,7 +3,7 @@ use super::*;
 
 fn region_app(platform: u32, gap: bool) -> App {
     let app = App::new(platform);
-    unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+    app.borrow().host.session.renderer_mut().0 =
         Some(native_renderer());
     app.draw_until_idle();
     let project = ProjectJob::create(&app, [64, 64]);
@@ -33,7 +33,7 @@ fn region_app(platform: u32, gap: bool) -> App {
 }
 
 fn contact(app: &App, id: u64, device: u32, phases: &[f64]) {
-    let m = unsafe { &*app.0 }
+    let m = app.borrow()
         .host
         .session
         .state()
@@ -97,11 +97,7 @@ fn apple_region_refinement_changes_coverage_and_restores_exact_history() {
                     id += 1;
                     contact(&app, id, device, &[1., 3.]);
                     app.draw_until_idle();
-                    let selection = unsafe { &*app.0 }
-                        .host
-                        .session
-                        .engine()
-                        .document()
+                    let selection = app.document()
                         .working.selection
                         .clone();
                     if tool == "auto_select" {
@@ -128,8 +124,8 @@ fn apple_region_refinement_changes_coverage_and_restores_exact_history() {
                     let painted = app.pixels();
                     let mut softened = 0;
                     for (i, (actual, before)) in painted
-                        .chunks_exact(4)
-                        .zip(baseline.chunks_exact(4))
+                        .as_chunks::<4>().0.iter()
+                        .zip(baseline.as_chunks::<4>().0.iter())
                         .enumerate()
                     {
                         let (x, y) = ((i % 64) as i32, (i / 64) as i32);
@@ -138,7 +134,7 @@ fn apple_region_refinement_changes_coverage_and_restores_exact_history() {
                         if !inside {
                             assert_eq!(actual, before, "Outside region at {x},{y}");
                         } else if smoothing == 0. {
-                            assert_eq!(actual, [0, 0, 255, 255], "Inside region at {x},{y}");
+                            assert_eq!(*actual, [0, 0, 255, 255], "Inside region at {x},{y}");
                         } else {
                             assert_eq!(&actual[2..], &[255, 255]);
                             softened += usize::from(actual[0] > 0 && actual[0] < 255);
@@ -161,22 +157,14 @@ fn apple_region_refinement_changes_coverage_and_restores_exact_history() {
                         app.invoke("undo");
                         app.draw_until_idle();
                         assert!(
-                            unsafe { &*app.0 }
-                                .host
-                                .session
-                                .engine()
-                                .document()
+                            app.document()
                                 .working.selection
                                 .is_none()
                         );
                         app.invoke("redo");
                         app.draw_until_idle();
                         assert_eq!(
-                            unsafe { &*app.0 }
-                                .host
-                                .session
-                                .engine()
-                                .document()
+                            app.document()
                                 .working.selection,
                             selection
                         );
@@ -219,7 +207,7 @@ fn apple_region_gap_closing_and_cancelled_requests_preserve_artwork() {
         for tool in ["auto_select", "fill"] {
             for cancel in ["contact", "escape", "blur", "tool"] {
                 app.invoke(tool);
-                assert!(unsafe { &*app.0 }.host.session.engine().can_redo());
+                assert!(app.borrow().host.session.engine().can_redo());
                 id += 1;
                 contact(&app, id, 0, &[1.]);
                 match cancel {
@@ -238,7 +226,7 @@ fn apple_region_gap_closing_and_cancelled_requests_preserve_artwork() {
                 contact(&app, id, 0, &[3.]);
                 app.draw_until_idle();
                 assert_eq!(app.pixels(), baseline, "{tool}/{cancel} must not paint");
-                let session = &unsafe { &*app.0 }.host.session;
+                let session = &app.borrow().host.session;
                 assert!(session.engine().document().working.selection.is_none());
                 assert!(
                     session.engine().can_redo(),
@@ -253,12 +241,14 @@ fn apple_region_gap_closing_and_cancelled_requests_preserve_artwork() {
                 id += 1;
                 contact(&app, id, 0, &[1., 3.]);
                 app.draw_frame();
-                let session = &unsafe { &*app.0 }.host.session;
+                app.with(|native| {
+                let session = &native.host.session;
                 assert!(
                     session.require_document_snapshot_idle().is_err(),
                     "Region processing must still block a document snapshot"
                 );
                 assert!(session.engine().document().working.selection.is_none());
+                });
                 match cancel {
                     "escape" => {
                         for pressed in [true, false] {
@@ -278,7 +268,7 @@ fn apple_region_gap_closing_and_cancelled_requests_preserve_artwork() {
                     baseline,
                     "The stale {tool}/{cancel} result must not paint"
                 );
-                let session = &unsafe { &*app.0 }.host.session;
+                let session = &app.borrow().host.session;
                 assert!(session.engine().document().working.selection.is_none());
                 assert!(session.engine().can_redo());
                 session.require_document_snapshot_idle().unwrap();

@@ -2,41 +2,42 @@ use super::*;
 use std::io::{Seek as _, Write as _};
 use std::os::fd::AsRawFd;
 
-struct PaperJob(*mut CapyPaperTask);
+struct PaperJob(u64);
 impl PaperJob {
     fn new(app: &App, request: u32, directory: &std::path::Path) -> Self {
         let directory = CString::new(directory.to_str().unwrap()).unwrap();
-        let job = Self(unsafe { capy_apple_paper_task(app.0,request,(&*app.0).host.session.state().document_file.epoch,directory.as_ptr()) });
-        assert!(!job.0.is_null()); job
+        let epoch=app.borrow().host.session.state().document_file.epoch;
+        let job = Self(unsafe { capy_apple_paper_task(app.0,request,epoch,directory.as_ptr()) });
+        assert!(!(job.0==0)); job
     }
     fn import(app: &App, directory: &std::path::Path) -> Self {
         let directory = CString::new(directory.to_str().unwrap()).unwrap();
         let job = Self(unsafe { capy_apple_paper_import(app.0,directory.as_ptr()) });
-        assert!(!job.0.is_null()); job
+        assert!(!(job.0==0)); job
     }
     fn work(&self, file: Option<&std::fs::File>) {
-        let pointer = self.0 as usize;
+        let pointer = self.0;
         let fd = file.map_or(-1, |file| file.as_raw_fd());
-        std::thread::spawn(move || unsafe { capy_paper_work(pointer as *const CapyPaperTask,fd,c"Scan".as_ptr()) }).join().unwrap();
+        std::thread::spawn(move || unsafe { capy_paper_work(pointer,fd,c"Scan".as_ptr()) }).join().unwrap();
         let error = unsafe { capy_paper_error(self.0) };
-        assert!(error.is_null(), "{}", unsafe { CStr::from_ptr(error) }.to_string_lossy());
+        assert!((error==0), "{}", handles::take_text(error).to_string_lossy());
     }
     fn apply(&self, app: &App) { assert_eq!(unsafe { capy_apple_paper_apply(app.0,self.0) },0); }
 }
 impl Drop for PaperJob { fn drop(&mut self) { unsafe { capy_paper_free(self.0) }; } }
 fn layer(app: &App) -> u64 {
-    layer_ui::occurrence_token(layer_core::paper::paper_occurrence(unsafe { &*app.0 }.host.session.engine().document().scene(),None).unwrap())
+    layer_ui::occurrence_token(layer_core::paper::paper_occurrence(app.document().scene(),None).unwrap())
 }
 fn paper_request(app: &App) -> u32 {
-    unsafe { &*app.0 }.host.session.state().requests.iter().find_map(|item|
+    app.borrow().host.session.state().requests.iter().find_map(|item|
         matches!(item.kind,layer_ui::HostRequestKind::Paper { .. }).then_some(item.id)).unwrap()
 }
 fn checkpoint(app: &App) -> u64 {
-    unsafe { &*app.0 }.host.session.engine().checkpoint()
+    app.borrow().host.session.engine().checkpoint()
 }
-fn document(app: &App) -> layer_core::Document { unsafe { &*app.0 }.host.session.engine().document().clone() }
+fn document(app: &App) -> layer_core::Document { app.document().clone() }
 fn choice(app: &App) -> u32 {
-    let state = unsafe { &*app.0 }.host.session.state();
+    let native=app.borrow();let state=native.host.session.state();
     let control = state.layer_properties.controls.iter().find(|control|control.key=="texture").unwrap();
     let layer_core::EffectValue::Choice(value) = &control.value else { panic!("paper choice") }; *value
 }
@@ -66,13 +67,14 @@ fn apple_paper_library_import_reload_rename_delete_and_add_preserve_authored_his
         let id = paper_request(&app); let job = PaperJob::new(&app,id,&directory); let input = gray_png();
         job.work(Some(&input));
         assert_project_document(&document(&app),&initial); assert_eq!(checkpoint(&app),initial_checkpoint);
-        assert!(unsafe { &*app.0 }.host.session.state().requests.iter().any(|item|item.id==id));
+        assert!(app.borrow().host.session.state().requests.iter().any(|item|item.id==id));
         job.apply(&app);
-        assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|item|item.id==id));
+        assert!(!app.borrow().host.session.state().requests.iter().any(|item|item.id==id));
         let imported = document(&app); let imported_checkpoint = checkpoint(&app); assert_ne!(imported_checkpoint,initial_checkpoint);
         assert!(app.state()["document_file"]["modified"].as_bool().unwrap());
         let entries = layer_host::papers::list(&directory).unwrap(); assert_eq!(entries.len(),1); let paper_id = entries[0].id.clone();
-        let original = unsafe { &*app.0 }.host.session.paper_image(layer(&app)).unwrap();
+        let paper_layer=layer(&app);
+        let original = app.borrow().host.session.paper_image(paper_layer).unwrap();
         assert_source_samples(&original,&layer_host::papers::load(&directory,&paper_id).unwrap());
         app.invoke("undo"); assert_eq!(checkpoint(&app),initial_checkpoint); assert_project_document(&document(&app),&initial);
         app.invoke("redo"); assert_eq!(checkpoint(&app),imported_checkpoint); assert_project_document(&document(&app),&imported);
@@ -81,7 +83,7 @@ fn apple_paper_library_import_reload_rename_delete_and_add_preserve_authored_his
             effect(&app,action); let id = paper_request(&app); let job = PaperJob::new(&app,id,&directory);job.work(None);job.apply(&app);
             assert_eq!(checkpoint(&app),imported_checkpoint); assert_project_document(&document(&app),&imported);
             assert!(app.state()["document_file"]["modified"].as_bool().unwrap());
-            assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|item|item.id==id));
+            assert!(!app.borrow().host.session.state().requests.iter().any(|item|item.id==id));
             let entries=layer_host::papers::list(&directory).unwrap();
             match operation {
                 0 => { assert_eq!(entries.len(),1);assert_eq!(entries[0].id,paper_id);assert_eq!(entries[0].name,"Cotton rag"); }
@@ -91,18 +93,18 @@ fn apple_paper_library_import_reload_rename_delete_and_add_preserve_authored_his
             }
         }
         for _ in 0..2 {
-            let pending=unsafe { &*app.0 }.host.session.state().requests.iter().find_map(|item|
+            let pending=app.borrow().host.session.state().requests.iter().find_map(|item|
                 matches!(item.kind,layer_ui::HostRequestKind::Paper { .. }).then_some(item.id));
             let Some(id)=pending else { break };
             let job=PaperJob::new(&app,id,&directory);job.work(None);job.apply(&app);
         }
-        assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|item|matches!(item.kind,layer_ui::HostRequestKind::Paper { .. })));
+        assert!(!app.borrow().host.session.state().requests.iter().any(|item|matches!(item.kind,layer_ui::HostRequestKind::Paper { .. })));
         assert_eq!(checkpoint(&app),imported_checkpoint);assert_project_document(&document(&app),&imported);
         assert_eq!(layer_host::papers::list(&directory).unwrap().len(),1);
         effect(&app,json!({"op":"reset","layer":layer(&app),"key":"texture"}));
         let reset=checkpoint(&app);
         effect(&app,json!({"op":"set","layer":layer(&app),"key":"texture","value":{"kind":"choice","value":layer_core::paper::built_in_papers().len()}}));
-        let pending=unsafe { &*app.0 }.host.session.state().requests.iter().find_map(|item|
+        let pending=app.borrow().host.session.state().requests.iter().find_map(|item|
             matches!(item.kind,layer_ui::HostRequestKind::Paper { .. }).then_some(item.id));
         if let Some(id)=pending {let job=PaperJob::new(&app,id,&directory);job.work(None);job.apply(&app);}
         assert_project_document(&document(&app),&imported);
@@ -111,14 +113,15 @@ fn apple_paper_library_import_reload_rename_delete_and_add_preserve_authored_his
         let reopened = App::new(platform); reopened.action(json!({"type":"select_layer","id":layer(&reopened)}));
         let load = PaperJob::new(&reopened,0,&directory);load.work(None);load.apply(&reopened);
         let before = checkpoint(&reopened);
-        let index = unsafe { &*reopened.0 }.host.session.state().layer_properties.controls.iter()
+        let index = reopened.borrow().host.session.state().layer_properties.controls.iter()
             .find(|control|control.key=="texture").unwrap().paper.as_ref().unwrap().tiles.len()-1;
         effect(&reopened,json!({"op":"set","layer":layer(&reopened),"key":"texture","value":{"kind":"choice","value":index}}));
         assert_eq!(checkpoint(&reopened),before);
         let job = PaperJob::new(&reopened,paper_request(&reopened),&directory);job.work(None);job.apply(&reopened);
         assert_eq!(choice(&reopened),index as u32);
-        assert_source_samples(&unsafe { &*reopened.0 }.host.session.paper_image(layer(&reopened)).unwrap(),&original);
-        assert!(matches!(unsafe { &*reopened.0 }.host.session.new_drawing_paper(),layer_core::TextureSource::Image(_)));
+        let paper_layer=layer(&reopened);
+        assert_source_samples(&reopened.borrow().host.session.paper_image(paper_layer).unwrap(),&original);
+        assert!(matches!(reopened.borrow().host.session.new_drawing_paper(),layer_core::TextureSource::Image(_)));
         reopened.invoke("undo");assert_eq!(checkpoint(&reopened),before);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -137,47 +140,46 @@ fn apple_paper_retired_cancelled_and_replaced_requests_do_not_edit_the_current_d
         else { app.action(json!({"type":"complete_request","id":id,"error":null})); }
         job.apply(&app);assert_project_document(&document(&app),&before);assert_eq!(checkpoint(&app),mark);
         assert_eq!(app.state()["document_file"]["modified"],dirty);
-        assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|item|item.id==id));
+        assert!(!app.borrow().host.session.state().requests.iter().any(|item|item.id==id));
     }
     effect(&app,json!({"op":"import_paper","layer":layer(&app)}));
     let id=paper_request(&app);let job=PaperJob::new(&app,id,&directory);let input=gray_png();job.work(Some(&input));
     app.action(json!({"type":"complete_request","id":id,"error":null}));
-    unsafe { &mut *app.0 }.host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
+    app.borrow().host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
     let old=document(&app).artwork.id;
     let replacement = ProjectJob::create(&app, [64,64]);
-    assert_eq!(unsafe { capy_apple_project_adopt(app.0,replacement.0,c"Replacement".as_ptr(),c"".as_ptr()) },0,"{:?}",unsafe { &*app.0 }.error);
+    assert_eq!(unsafe { capy_apple_project_adopt(app.0,replacement.0,c"Replacement".as_ptr(),c"".as_ptr()) },0,"{:?}",app.borrow().error);
     app.action(json!({"type":"select_layer","id":layer(&app)}));
     effect(&app,json!({"op":"import_paper","layer":layer(&app)}));
     let current=paper_request(&app);assert!(current>id);
     let before=document(&app);let mark=checkpoint(&app);assert_ne!(before.artwork.id,old);
     let state=app.state();let requests=state["requests"].clone();let file=state["document_file"].clone();
-    let history={let engine=unsafe { &*app.0 }.host.session.engine();(engine.can_undo(),engine.can_redo())};
+    let history=app.with(|native| {let engine=native.host.session.engine();(engine.can_undo(),engine.can_redo())});
     job.apply(&app);
     assert_project_document(&document(&app),&before);assert_eq!(checkpoint(&app),mark);
     assert_eq!(document(&app).artwork.id,before.artwork.id);
     assert_eq!(app.state()["requests"],requests);assert_eq!(paper_request(&app),current);
     assert_eq!(app.state()["document_file"],file);
-    let engine=unsafe { &*app.0 }.host.session.engine();assert_eq!((engine.can_undo(),engine.can_redo()),history);
+    assert_eq!(app.with(|native| {let engine=native.host.session.engine();(engine.can_undo(),engine.can_redo())}),history);
     std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
 fn apple_paper_preview_leases_outlive_the_editor_and_match_shared_pixels() {
     let app=App::new(1);app.action(json!({"type":"select_layer","id":layer(&app)}));
-    let state=unsafe { &*app.0 }.host.session.state();
-    let mut ids:Vec<String>=state.layer_properties.controls.iter().find_map(|control|control.paper.as_ref()).unwrap()
-        .tiles.iter().filter_map(|tile|tile.id.as_deref().map(str::to_string)).collect();
+    let mut ids:Vec<String>=app.with(|native|native.host.session.state().layer_properties.controls.iter().find_map(|control|control.paper.as_ref()).unwrap()
+        .tiles.iter().filter_map(|tile|tile.id.as_deref().map(str::to_string)).collect());
     ids.push("missing".into());
-    let expected:Vec<_>=ids.iter().map(|id|unsafe { &*app.0 }.host.session.paper_preview(id)).collect();
+    let expected:Vec<_>=ids.iter().map(|id|app.borrow().host.session.paper_preview(id)).collect();
     assert_eq!(expected.iter().filter(|image|image.is_some()).count(),layer_core::paper::built_in_papers().len());
     let json=std::ffi::CString::new(serde_json::to_string(&ids).unwrap()).unwrap();
-    assert!(unsafe { capy_apple_paper_previews(app.0,std::ptr::null()) }.is_null());
-    let previews=unsafe { capy_apple_paper_previews(app.0,json.as_ptr()) };assert!(!previews.is_null());drop(app);
+    assert!((unsafe { capy_apple_paper_previews(app.0,std::ptr::null()) }==0));
+    let previews=unsafe { capy_apple_paper_previews(app.0,json.as_ptr()) };assert!(!(previews==0));drop(app);
     assert_eq!(unsafe { capy_paper_previews_count(previews) },expected.len());
     for (index,image) in expected.iter().enumerate() {
-        let mut bytes=std::ptr::null();let mut count=0;
-        let side=unsafe { capy_paper_previews_read(previews,index,&mut bytes,&mut count) };
-        if let Some(image)=image { assert_eq!(count,(side * side) as usize);assert_eq!(unsafe { std::slice::from_raw_parts(bytes,count) },image.as_ref()); }
+        let mut count=0;
+        let side=unsafe { capy_paper_previews_read(previews,index,&mut count) };
+        if let Some(image)=image { assert_eq!(count,(side * side) as usize);assert_eq!(copied_bytes(count,|offset,output,length|unsafe {capy_paper_previews_copy(previews,index,offset,output,length)}),image.as_ref()); }
         else { assert_eq!(side,0); }
     }
     unsafe { capy_paper_previews_free(previews) };
@@ -191,10 +193,10 @@ fn apple_paper_worker_failure_retires_its_request_without_authored_changes() {
     let id=paper_request(&app);let job=PaperJob::new(&app,id,&directory);
     let before=document(&app);let mark=checkpoint(&app);let dirty=app.state()["document_file"]["modified"].clone();
     unsafe { capy_paper_work(job.0,-1,c"Invalid input".as_ptr()) };
-    let error=unsafe { capy_paper_error(job.0) };assert!(!error.is_null());unsafe { capy_apple_string_free(error) };
+    let error=unsafe { capy_paper_error(job.0) };assert!(!(error==0));
     job.apply(&app);assert_project_document(&document(&app),&before);assert_eq!(checkpoint(&app),mark);
     assert_eq!(app.state()["document_file"]["modified"],dirty);
-    assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|item|item.id==id));
+    assert!(!app.borrow().host.session.state().requests.iter().any(|item|item.id==id));
     assert!(app.state()["host_error"].is_string());
 }
 
@@ -211,16 +213,16 @@ fn apple_initial_paper_is_prepared_before_publication_and_later_library_reload_d
     let (id,paper,entries)=layer_host::papers::import(&directory,&image,"Cotton",&||false).unwrap();
     for platform in [0,1] {
         let configuration=CString::new(remembered_launch(&directory,&id)).unwrap();
-        let app=App(unsafe {launch_json(platform,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!app.0.is_null());
+        let app=App(unsafe {launch_json(platform,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!(app.0==0));
         let document=document(&app);
         assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
-        let layer_core::TextureSource::Image(actual)=unsafe { &*app.0 }.host.session.new_drawing_paper() else {panic!("initial remembered image must exist before publication")};
+        let layer_core::TextureSource::Image(actual)=app.borrow().host.session.new_drawing_paper() else {panic!("initial remembered image must exist before publication")};
         assert_source_samples(actual.storage(),&paper);
         assert_eq!(document.composition().size,[1440,1080]);assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(144)));
         assert!(!app.state()["document_file"]["modified"].as_bool().unwrap());
-        assert!(!unsafe { &*app.0 }.host.session.engine().can_undo());assert!(!unsafe { &*app.0 }.host.session.engine().can_redo());
+        assert!(!app.borrow().host.session.engine().can_undo());assert!(!app.borrow().host.session.engine().can_redo());
         let job=PaperJob::new(&app,0,&directory);job.work(None);job.apply(&app);
-        assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|request|matches!(request.kind,
+        assert!(!app.borrow().host.session.state().requests.iter().any(|request|matches!(request.kind,
             layer_ui::HostRequestKind::Paper {..}|layer_ui::HostRequestKind::SaveSettings {..})));
         assert_eq!(layer_host::papers::list(&directory).unwrap(),entries);
     }
@@ -236,15 +238,15 @@ fn apple_new_drawing_resolves_its_uncached_library_paper_on_the_project_worker()
     for missing in [false,true] {
         if missing { std::fs::write(directory.join(format!("{id}.png")),b"invalid PNG").unwrap(); }
         let configuration=CString::new(json!({"saved":"","preferred_languages":["en"],"paper_directory":directory}).to_string()).unwrap();
-        let app=App(unsafe {launch_json(1,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!app.0.is_null());
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0=Some(native_renderer());
+        let app=App(unsafe {launch_json(1,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!(app.0==0));
+        app.borrow().host.session.renderer_mut().0=Some(native_renderer());
         assert_eq!(unsafe {capy_apple_resize(app.0,1200,900,1.)},0);app.draw_frame();
         let list=PaperJob::new(&app,0,&directory);list.work(None);list.apply(&app);
-        assert!(matches!(unsafe { &*app.0 }.host.session.paper_material(&id),layer_ui::paper_library::PaperMaterial::Stored {..}),"the order begins uncached");
+        assert!(matches!(app.borrow().host.session.paper_material(&id),layer_ui::paper_library::PaperMaterial::Stored {..}),"the order begins uncached");
         let before=document(&app);let mark=checkpoint(&app);
         app.order_new_drawing([96,64],&[json!({"op":"paper"}),json!({"op":"pick_paper","id":id}),json!({"op":"use_paper"})]);
-        let job=ProjectJob::new(&app,true);let pointer=job.0 as usize;
-        assert_eq!(std::thread::spawn(move ||unsafe {capy_project_new(pointer as *const CapyProjectTask)}).join().unwrap(),0);
+        let job=ProjectJob::new(&app,true);let pointer=job.0;
+        assert_eq!(std::thread::spawn(move ||unsafe {capy_project_new(pointer)}).join().unwrap(),0);
         assert_project_document(&document(&app),&before);assert_eq!(checkpoint(&app),mark);
         assert_eq!(unsafe {capy_apple_project_adopt(app.0,job.0,c"Untitled".as_ptr(),c"".as_ptr())},0);
         let texture=document(&app).paper(None).texture;
@@ -258,8 +260,8 @@ fn apple_new_drawing_resolves_its_uncached_library_paper_on_the_project_worker()
         }
         assert_eq!(document(&app).composition().size,[96,64]);
         assert!(!app.state()["document_file"]["modified"].as_bool().unwrap());
-        assert!(!unsafe { &*app.0 }.host.session.engine().can_undo());assert!(!unsafe { &*app.0 }.host.session.engine().can_redo());
-        assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|request|matches!(request.kind,layer_ui::HostRequestKind::SaveSettings {..})));
+        assert!(!app.borrow().host.session.engine().can_undo());assert!(!app.borrow().host.session.engine().can_redo());
+        assert!(!app.borrow().host.session.state().requests.iter().any(|request|matches!(request.kind,layer_ui::HostRequestKind::SaveSettings {..})));
     }
     std::fs::remove_dir_all(directory).unwrap();
 }
@@ -269,7 +271,7 @@ fn apple_new_drawing_imports_paper_into_the_library_without_changing_the_drawing
     let directory=std::env::temp_dir().join(format!("capy-apple-paper-library-import-{}",layer_workspace::new_id()));
     for platform in [0,1] {
         let app=App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
+        app.borrow().host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
         let list=PaperJob::new(&app,0,&directory);list.work(None);list.apply(&app);
         app.invoke("new_document");
         app.new_drawing(json!({"op":"open","screen":null,"untitled":2}));
@@ -287,12 +289,12 @@ fn apple_new_drawing_imports_paper_into_the_library_without_changing_the_drawing
         assert!(layer_host::papers::list(&directory).unwrap().iter().any(|entry|entry.id==id));
         let tiles=app.state()["new_drawing"]["drawer"]["tiles"].as_array().unwrap().clone();
         assert!(tiles.iter().any(|tile|tile["id"]==id.as_str()),"{tiles:?}");
-        assert!(matches!(unsafe { &*app.0 }.host.session.paper_material(&id),layer_ui::paper_library::PaperMaterial::Ready(_)));
+        assert!(matches!(app.borrow().host.session.paper_material(&id),layer_ui::paper_library::PaperMaterial::Ready(_)));
         app.new_drawing(json!({"op":"use_paper"}));
         assert_eq!(app.state()["new_drawing"]["setup"]["paper"]["texture"],id.as_str());
-        let failed=PaperJob::import(&app,&directory);let pointer=failed.0 as usize;
-        std::thread::spawn(move ||unsafe { capy_paper_work(pointer as *const CapyPaperTask,-1,c"Missing".as_ptr()) }).join().unwrap();
-        let error=unsafe { capy_paper_error(failed.0) };assert!(!error.is_null());unsafe { capy_apple_string_free(error) };
+        let failed=PaperJob::import(&app,&directory);let pointer=failed.0;
+        std::thread::spawn(move ||unsafe { capy_paper_work(pointer,-1,c"Missing".as_ptr()) }).join().unwrap();
+        let error=unsafe { capy_paper_error(failed.0) };assert!(!(error==0));
         assert_eq!(unsafe { capy_apple_paper_apply(app.0,failed.0) },-1);
         assert_project_document(&document(&app),&before);
     }
@@ -303,7 +305,7 @@ fn apple_new_drawing_imports_paper_into_the_library_without_changing_the_drawing
 fn apple_new_drawing_texture_visibility_reaches_the_drawing_built_on_the_project_worker() {
     for platform in [0,1] {
         let app=App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
+        app.borrow().host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
         let dialog=|app:&App| app.state()["new_drawing"].clone();
         app.invoke("new_document");
         app.new_drawing(json!({"op":"open","screen":null,"untitled":2}));
@@ -333,7 +335,7 @@ fn apple_new_drawing_texture_visibility_reaches_the_drawing_built_on_the_project
         app.save_settings();
         let job=ProjectJob::new(&app,true);
         assert_eq!(unsafe {capy_project_new(job.0)},0,"{:?}",job.error());
-        assert_eq!(unsafe {capy_apple_project_adopt(app.0,job.0,c"Untitled".as_ptr(),c"".as_ptr())},0,"{:?} / {:?}",job.error(),unsafe { &*app.0 }.error);
+        assert_eq!(unsafe {capy_apple_project_adopt(app.0,job.0,c"Untitled".as_ptr(),c"".as_ptr())},0,"{:?} / {:?}",job.error(),app.borrow().error);
         let created=document(&app);
         let paper=created.bottom_paper().unwrap();
         assert_eq!(created.composition().size,[64,48]);
@@ -349,23 +351,23 @@ fn apple_failed_initial_material_notifies_once_and_reload_does_not_repeat_the_fa
     let (id,_,_)=layer_host::papers::import(&directory,&image,"Cotton",&||false).unwrap();
     std::fs::write(directory.join(format!("{id}.png")),b"invalid PNG").unwrap();
     let configuration=CString::new(remembered_launch(&directory,&id)).unwrap();
-    let app=App(unsafe {launch_json(1,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!app.0.is_null());
+    let app=App(unsafe {launch_json(1,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!(app.0==0));
     let before=document(&app);let mark=checkpoint(&app);let notice=app.state()["notice"]["id"].clone();assert!(!notice.is_null());
     assert_eq!(before.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
     for _ in 0..2 {let job=PaperJob::new(&app,0,&directory);job.work(None);job.apply(&app);}
     assert_project_document(&document(&app),&before);assert_eq!(checkpoint(&app),mark);
     assert_eq!(app.state()["notice"]["id"],notice);
-    assert_eq!(unsafe { &*app.0 }.host.session.state().settings.new_document.paper.as_deref(),Some(id.as_str()));
-    assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|request|matches!(request.kind,
+    assert_eq!(app.borrow().host.session.state().settings.new_document.paper.as_deref(),Some(id.as_str()));
+    assert!(!app.borrow().host.session.state().requests.iter().any(|request|matches!(request.kind,
         layer_ui::HostRequestKind::Paper {..}|layer_ui::HostRequestKind::SaveSettings {..})));
     app.action(json!({"type":"select_layer","id":layer(&app)}));
     effect(&app,json!({"op":"set","layer":layer(&app),"key":"texture","value":{"kind":"choice","value":layer_core::paper::built_in_papers().len()}}));
     let request=paper_request(&app);let job=PaperJob::new(&app,request,&directory);
     unsafe {capy_paper_work(job.0,-1,c"Cotton".as_ptr())};
-    let error=unsafe {capy_paper_error(job.0)};assert!(!error.is_null());unsafe {capy_apple_string_free(error)};job.apply(&app);
-    assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|item|item.id==request));
+    let error=unsafe {capy_paper_error(job.0)};assert!(!(error==0));job.apply(&app);
+    assert!(!app.borrow().host.session.state().requests.iter().any(|item|item.id==request));
     assert!(app.state()["host_error"].is_string());assert_project_document(&document(&app),&before);
     let job=PaperJob::new(&app,0,&directory);job.work(None);job.apply(&app);
-    assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|request|matches!(request.kind,layer_ui::HostRequestKind::Paper {..})));
+    assert!(!app.borrow().host.session.state().requests.iter().any(|request|matches!(request.kind,layer_ui::HostRequestKind::Paper {..})));
     std::fs::remove_dir_all(directory).unwrap();
 }

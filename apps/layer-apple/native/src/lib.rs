@@ -1,5 +1,7 @@
 //! Apple host ABI. The same library serves UIKit and AppKit. Rust owns the
 //! shared session; Swift owns UI and serial execution. No callbacks into Swift.
+mod handles;
+pub use handles::{capy_apple_string_copy,capy_apple_string_free,capy_apple_string_length};
 mod metal;
 mod document_tabs;
 pub use document_tabs::*;
@@ -77,8 +79,8 @@ fn fixture_localization() -> std::sync::Arc<layer_ui::Localizer> {
 
 #[cfg(test)]
 #[unsafe(no_mangle)]
-pub extern "C" fn capy_apple_create(platform: u32) -> *mut CapyApple {
-    apple_launch_localized(platform, "", fixture_localization()).unwrap_or(std::ptr::null_mut())
+pub extern "C" fn capy_apple_create(platform: u32) -> u64 {
+    apple_launch_localized(platform, "", fixture_localization()).unwrap_or(0)
 }
 
 #[derive(serde::Deserialize)]
@@ -116,8 +118,8 @@ impl CapyAppleLaunch {
 /// # Safety
 /// File worker only; json is readable NUL-terminated UTF-8; error is writable when non-null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_prepare_launch(json: *const c_char, error: *mut *mut c_char) -> *mut CapyAppleLaunch {
-    if !error.is_null() { unsafe { *error = std::ptr::null_mut() }; }
+pub unsafe extern "C" fn capy_apple_prepare_launch(json: *const c_char, error: *mut u64) -> u64 {
+    if !error.is_null() { unsafe { *error = 0 }; }
     let result = catch_unwind(|| {
         if json.is_null() { return Err("Missing launch configuration".into()); }
         let source = (unsafe { CStr::from_ptr(json) }).to_str().map_err(|e| e.to_string())?;
@@ -125,41 +127,41 @@ pub unsafe extern "C" fn capy_apple_prepare_launch(json: *const c_char, error: *
         let tags: Vec<&str> = launch.preferred_languages.iter().map(String::as_str).collect();
         let localization = layer_ui::launch_localization(&launch.saved, &tags);
         layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
-        Ok(Box::into_raw(Box::new(CapyAppleLaunch::prepare(&launch.saved, localization, launch.paper_directory, launch.screen))))
+        Ok(handles::store(CapyAppleLaunch::prepare(&launch.saved, localization, launch.paper_directory, launch.screen)))
     }).unwrap_or_else(|payload| Err(layer_host::panic_diagnostic(&*payload)));
     result.unwrap_or_else(|message: String| {
-        if !error.is_null() { unsafe { *error = CString::new(format!("Session launch: {message}").replace('\0', " ")).unwrap().into_raw() }; }
-        std::ptr::null_mut()
+        if !error.is_null() { unsafe { *error = CString::new(format!("Session launch: {message}").replace('\0', " ")).map_or(0,handles::text) }; }
+        0
     })
 }
 /// # Safety
 /// Prepared launch remains live through the exclusive owner call. Writable outputs contain owned text.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_launch(platform: u32, prepared: *const CapyAppleLaunch, bootstrap: *mut *mut c_char, error: *mut *mut c_char) -> *mut CapyApple {
-    if !bootstrap.is_null() { unsafe { *bootstrap = std::ptr::null_mut() }; }
-    if !error.is_null() { unsafe { *error = std::ptr::null_mut() }; }
+pub unsafe extern "C" fn capy_apple_launch(platform: u32, prepared: u64, bootstrap: *mut u64, error: *mut u64) -> u64 {
+    if !bootstrap.is_null() { unsafe { *bootstrap = 0 }; }
+    if !error.is_null() { unsafe { *error = 0 }; }
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let prepared = unsafe { prepared.as_ref() }.ok_or("Missing launch configuration")?;
+        let prepared = handles::shared::<CapyAppleLaunch>(prepared).ok_or("Missing launch configuration")?;
         if !bootstrap.is_null() {
             let view = serde_json::to_string(&layer_ui::bootstrap_view(&prepared.localization)).map_err(|e| e.to_string())?;
             let view = CString::new(view).map_err(|e| e.to_string())?;
-            unsafe { *bootstrap = view.into_raw() };
+            unsafe { *bootstrap = handles::text(view) };
         }
-        apple_launch_prepared(platform, prepared)
+        apple_launch_prepared(platform, &prepared)
     })).unwrap_or_else(|payload| Err(layer_host::panic_diagnostic(&*payload)));
     match result {
         Ok(app) => app,
         Err(message) => {
-            if !error.is_null() { unsafe { *error = CString::new(format!("Session launch: {message}").replace('\0', " ")).unwrap().into_raw() }; }
-            std::ptr::null_mut()
+            if !error.is_null() { unsafe { *error = CString::new(format!("Session launch: {message}").replace('\0', " ")).map_or(0,handles::text) }; }
+            0
         }
     }
 }
 /// # Safety
 /// Prepared launch is owned exactly once; owner readers have finished. Drop on the file worker.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_launch_free(prepared: *mut CapyAppleLaunch) {
-    if !prepared.is_null() { unsafe { drop(Box::from_raw(prepared)) }; }
+pub unsafe extern "C" fn capy_apple_launch_free(prepared: u64) {
+    handles::free::<CapyAppleLaunch>(prepared);
 }
 /// Dispatch workers have small stacks; debug builds of the shared session exceed them.
 pub(crate) fn on_large_stack<T: Send>(name: &str, work: impl FnOnce() -> T + Send) -> Result<T, String> {
@@ -174,11 +176,11 @@ pub(crate) fn on_large_stack<T: Send>(name: &str, work: impl FnOnce() -> T + Sen
     })
 }
 #[cfg(test)]
-fn apple_launch_localized(platform: u32, saved: &str, localization: std::sync::Arc<layer_ui::Localizer>) -> Result<*mut CapyApple, String> {
+fn apple_launch_localized(platform: u32, saved: &str, localization: std::sync::Arc<layer_ui::Localizer>) -> Result<u64, String> {
     let prepared = CapyAppleLaunch::prepare(saved, localization, None, None);
     apple_launch_prepared(platform, &prepared)
 }
-fn apple_launch_prepared(platform: u32, prepared: &CapyAppleLaunch) -> Result<*mut CapyApple, String> {
+fn apple_launch_prepared(platform: u32, prepared: &CapyAppleLaunch) -> Result<u64, String> {
     let platform = match platform {
         0 => layer_ui::Platform::Ios,
         1 => layer_ui::Platform::Mac,
@@ -188,7 +190,7 @@ fn apple_launch_prepared(platform: u32, prepared: &CapyAppleLaunch) -> Result<*m
     host.ui_color = layer_host::UiColor::Tagged(DISPLAY_SPACE);
     host.session.set_document_replacement(false);
     let window = document_tabs::Window::localized(host.session.localization());
-    Ok(Box::into_raw(Box::new(CapyApple {
+    handles::store_app(CapyApple {
         language: layer_ui::LanguageTransition::new(host.session.localization().clone()),
         published_language: None,
         scopes: Default::default(),
@@ -202,7 +204,7 @@ fn apple_launch_prepared(platform: u32, prepared: &CapyAppleLaunch) -> Result<*m
         chrome_facts: Default::default(),
         dismissed_contacts: Default::default(),
         workspaces: None,
-    })))
+    })
 }
 pub struct CapyLanguageTask {
     request: layer_ui::LanguageRequest,
@@ -211,21 +213,22 @@ pub struct CapyLanguageTask {
 /// # Safety
 /// Serial owner only. JSON is an ordered array of preferred system-language tags.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_language_request(app: *mut CapyApple, json: *const c_char) -> *mut CapyLanguageTask {
-    let Some(app) = (unsafe { app.as_mut() }) else { return std::ptr::null_mut(); };
+pub unsafe extern "C" fn capy_apple_language_request(app: u64, json: *const c_char) -> u64 {
+    let Some(mut lease_app)=handles::app(app) else { return 0; };
+    let app=&mut *lease_app;
     app.perform(|a| {
         if json.is_null() { return Err("Missing preferred languages".into()); }
         let tags: Vec<String> = serde_json::from_str(unsafe { CStr::from_ptr(json) }.to_str().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         let tags: Vec<&str> = tags.iter().map(String::as_str).collect();
         Ok(a.language.request(a.host.session.state().settings.language, &tags)
-            .map(|request| Box::into_raw(Box::new(CapyLanguageTask { request, prepared: None }))))
-    }).flatten().unwrap_or(std::ptr::null_mut())
+            .map(|request| handles::mutable(CapyLanguageTask { request, prepared: None })))
+    }).flatten().unwrap_or(0)
 }
 /// # Safety
 /// Preparation worker only; task has no concurrent caller or borrowed editor.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_language_prepare(task: *mut CapyLanguageTask) {
-    if let Some(task) = unsafe { task.as_mut() } {
+pub unsafe extern "C" fn capy_language_prepare(task: u64) {
+    if let Some(mut lease_task)=handles::borrow::<CapyLanguageTask>(task) {let task=&mut *lease_task;
         layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
         task.prepared = Some(layer_ui::Localizer::shared(task.request.language));
     }
@@ -233,15 +236,17 @@ pub unsafe extern "C" fn capy_language_prepare(task: *mut CapyLanguageTask) {
 /// # Safety
 /// Serial owner only after worker preparation; task remains owned by the caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_language_prepared(app: *mut CapyApple, task: *mut CapyLanguageTask) -> bool {
-    let (Some(app), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_mut() }) else { return false; };
+pub unsafe extern "C" fn capy_apple_language_prepared(app: u64, task: u64) -> bool {
+    let (Some(mut lease_app),Some(mut lease_task))=(handles::app(app),handles::borrow::<CapyLanguageTask>(task)) else { return false; };
+    let (app,task)=(&mut *lease_app,&mut *lease_task);
     task.prepared.take().is_some_and(|localization| app.language.prepared(task.request, localization))
 }
 /// # Safety
 /// Serial owner only. Native input capture/composition is supplied by the UI owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_language_publish(app: *mut CapyApple, input_busy: bool) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_language_publish(app: u64, input_busy: bool) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else { return -1; };
+    let app=&mut *lease_app;
     app.perform(|a| {
         let busy = input_busy || a.host.session.localization_input_busy() || a.chrome_facts.held || a.chrome_facts.dragging;
         let Some(localization) = a.language.publish(busy) else { return Ok(if a.language.pending() { 0 } else { -1 }); };
@@ -253,42 +258,28 @@ pub unsafe extern "C" fn capy_apple_language_publish(app: *mut CapyApple, input_
 /// # Safety
 /// Task must be released exactly once, after every preparation/owner call ends.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_language_free(task: *mut CapyLanguageTask) {
-    if !task.is_null() { unsafe { drop(Box::from_raw(task)); } }
+pub unsafe extern "C" fn capy_language_free(task: u64) {
+    handles::free::<CapyLanguageTask>(task);
 }
 /// # Safety
-/// Handle must come from create, with no outstanding calls or borrowed strings.
+/// Call on the serial owner after detaching the native surface.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_destroy(app: *mut CapyApple) {
-    if !app.is_null() {
-        unsafe {
-            drop(Box::from_raw(app));
-        }
-    }
+pub unsafe extern "C" fn capy_apple_destroy(app: u64) {
+    handles::free_app(app);
 }
 /// # Safety
-/// Handle must remain alive throughout this call and use of the borrowed result.
+/// Call on the serial owner. The returned text is owned.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_error(app: *const CapyApple) -> *const c_char {
-    unsafe { app.as_ref() }
-        .and_then(|a| a.error.as_ref())
-        .map_or(std::ptr::null(), |e| e.as_ptr())
-}
-/// # Safety
-/// Text must be an unreleased owned result returned by this library.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_string_free(text: *mut c_char) {
-    if !text.is_null() {
-        unsafe {
-            drop(CString::from_raw(text));
-        }
-    }
+pub unsafe extern "C" fn capy_apple_error(app: u64) -> u64 {
+    handles::app(app)
+        .and_then(|a| a.error.clone())
+        .map_or(0, handles::text)
 }
 /// # Safety
 /// `json` is a NUL-terminated UTF-8 numeric request, valid for this call.
 /// This stateless operation has no session, GPU or file access.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_numeric(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_numeric(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing numeric request", |source| {
         let (localization, request) = control_request::<layer_ui::NumericRequest>(source)?;
         serde_json::to_value(request.resolve().map_err(|reason| reason.message(&localization))?).map_err(|e| e.to_string())
@@ -299,7 +290,7 @@ pub unsafe extern "C" fn capy_apple_numeric(json: *const c_char) -> *mut c_char 
 /// `json` is a NUL-terminated UTF-8 color request, valid for this call.
 /// This stateless operation has no session, GPU or file access.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_color_ui(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_color_ui(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing color request", |source| {
         let (localization, request) = control_request(source)?;
         layer_ui::color_ui_localized(request, &localization)
@@ -309,7 +300,7 @@ pub unsafe extern "C" fn capy_apple_color_ui(json: *const c_char) -> *mut c_char
 /// `json` is a NUL-terminated UTF-8 toolbar presentation request, valid for this call.
 /// This stateless operation has no session, GPU or file access.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_toolbar_ui(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_toolbar_ui(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing toolbar request", |source| {
         let (localization, request) = control_request(source)?;
         layer_ui::toolbar_ui(request, &localization)
@@ -318,13 +309,13 @@ pub unsafe extern "C" fn capy_apple_toolbar_ui(json: *const c_char) -> *mut c_ch
 /// # Safety
 /// `json` is readable NUL-terminated UTF-8 for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_drawer_frame(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_drawer_frame(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing drawer frame", layer_ui::drawer_frame) }
 }
 /// # Safety
 /// `json` is readable NUL-terminated UTF-8 for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_bubble_ui(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_bubble_ui(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing bubble request", |source| {
         layer_host::bubbles::query(serde_json::from_str(source).map_err(|e| e.to_string())?)
     }) }
@@ -332,7 +323,7 @@ pub unsafe extern "C" fn capy_apple_bubble_ui(json: *const c_char) -> *mut c_cha
 /// # Safety
 /// `json` is readable NUL-terminated UTF-8 for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_native_caption(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_native_caption(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing caption request", |source| {
         let (localization, request) = control_request::<layer_ui::NativeCaption>(source)?;
         Ok(serde_json::json!({"text": request.message(&localization)}))
@@ -341,7 +332,7 @@ pub unsafe extern "C" fn capy_apple_native_caption(json: *const c_char) -> *mut 
 /// # Safety
 /// `json` is readable NUL-terminated UTF-8 for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_numeric_labels(json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_apple_numeric_labels(json: *const c_char) -> u64 {
     unsafe { stateless_json(json, "Missing numeric label request", |source| {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -351,7 +342,7 @@ pub unsafe extern "C" fn capy_apple_numeric_labels(json: *const c_char) -> *mut 
     }) }
 }
 unsafe fn stateless_json(json: *const c_char, missing: &str,
-    resolve: impl FnOnce(&str) -> Result<serde_json::Value, String> + std::panic::UnwindSafe) -> *mut c_char {
+    resolve: impl FnOnce(&str) -> Result<serde_json::Value, String> + std::panic::UnwindSafe) -> u64 {
     catch_unwind(|| {
         let result = (|| {
             if json.is_null() {
@@ -364,10 +355,10 @@ unsafe fn stateless_json(json: *const c_char, missing: &str,
         })();
         let response = result.unwrap_or_else(|error| serde_json::json!({"error": error}));
         CString::new(response.to_string())
-            .map(CString::into_raw)
-            .unwrap_or(std::ptr::null_mut())
+            .map(handles::text)
+            .unwrap_or(0)
     })
-    .unwrap_or(std::ptr::null_mut())
+    .unwrap_or(0)
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn capy_apple_color_hit(x: f32, y: f32, size: f32, shape: u32) -> u32 {
@@ -453,13 +444,14 @@ pub unsafe extern "C" fn capy_apple_color_field(
 /// Valid handle; json must be a NUL-terminated UTF-8 string except for request 7.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_request(
-    app: *mut CapyApple,
+    app: u64,
     request: u32,
     json: *const c_char,
-) -> *mut c_char {
-    let Some(app) = (unsafe { app.as_mut() }) else {
-        return std::ptr::null_mut();
+) -> u64 {
+    let Some(mut lease_app)=handles::app(app) else {
+        return 0;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         if request == 7 {
             let Some(bytes) = a.host.take_layout_update_bytes().map_err(|e| e.to_string())? else {
@@ -482,7 +474,7 @@ pub unsafe extern "C" fn capy_apple_request(
             let extension = serde_json::to_vec(&extension)
             .map_err(|e| e.to_string())?;
             return CString::new(layer_host::extend_update(bytes, &extension))
-                .map(|snapshot| Some(snapshot.into_raw()))
+                .map(|snapshot| Some(handles::text(snapshot)))
                 .map_err(|e| e.to_string());
         }
         let value = {
@@ -550,19 +542,19 @@ pub unsafe extern "C" fn capy_apple_request(
         result
             .map(|r| {
                 CString::new(r.to_string())
-                    .map(CString::into_raw)
+                    .map(handles::text)
                     .map_err(|e| e.to_string())
             })
             .transpose()
     })
     .flatten()
-    .unwrap_or(std::ptr::null_mut())
+    .unwrap_or(0)
 }
 /// # Safety
 /// Valid exclusively owned handle, called on the serial owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_scroll(
-    app: *mut CapyApple,
+    app: u64,
     x: f32,
     y: f32,
     dx: f32,
@@ -571,9 +563,10 @@ pub unsafe extern "C" fn capy_apple_scroll(
     zoom: u32,
     horizontal: u32,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         a.host
             .scroll([x, y], [dx, dy], scale, zoom != 0, horizontal != 0)
@@ -585,16 +578,17 @@ pub unsafe extern "C" fn capy_apple_scroll(
 /// Valid exclusively owned handle, called on the serial owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_gesture(
-    app: *mut CapyApple,
+    app: u64,
     x: f32,
     y: f32,
     scale: f32,
     rotation: f32,
     began: u32,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| a.host.gesture([x, y], scale, rotation, began != 0))
         .map_or(-1, |_| 0)
 }
@@ -604,15 +598,16 @@ pub unsafe extern "C" fn capy_apple_gesture(
 /// Cache directory is null or a NUL-terminated UTF-8 path valid for this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_attach(
-    app: *mut CapyApple,
+    app: u64,
     layer: *mut c_void,
     width: u32,
     height: u32,
     scale: f32,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         if layer.is_null() {
             return Err("Missing Metal layer".into());
@@ -625,10 +620,11 @@ pub unsafe extern "C" fn capy_apple_attach(
 /// # Safety
 /// Valid exclusively owned handle. Call once the canvas is ready.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_finish_startup_catalog(app: *mut CapyApple) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+pub unsafe extern "C" fn capy_apple_finish_startup_catalog(app: u64) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         if let Some(gpu) = a.host.session.renderer_mut().0.as_mut() {
             gpu.finish_startup_catalog();
@@ -641,14 +637,15 @@ pub unsafe extern "C" fn capy_apple_finish_startup_catalog(app: *mut CapyApple) 
 /// Valid exclusively owned handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_resize(
-    app: *mut CapyApple,
+    app: u64,
     width: u32,
     height: u32,
     scale: f32,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| a.host.resize(width, height, scale))
         .map_or(-1, |_| 0)
 }
@@ -656,20 +653,22 @@ pub unsafe extern "C" fn capy_apple_resize(
 /// Valid exclusively owned handle. Request presentation after native exposure
 /// without changing document, camera or history.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_redraw(app: *mut CapyApple) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+pub unsafe extern "C" fn capy_apple_redraw(app: u64) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.host.dirty = true;
     0
 }
 /// # Safety
 /// Valid exclusively owned handle; detach before releasing its native layer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_detach(app: *mut CapyApple) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+pub unsafe extern "C" fn capy_apple_detach(app: u64) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         a.host.input(layer_ui::UiInput::Blur)?;
         a.dismissed_contacts.clear();
@@ -683,8 +682,9 @@ pub unsafe extern "C" fn capy_apple_detach(app: *mut CapyApple) -> i32 {
 /// Serial owner only. Retire GPU resources while retaining the CPU session;
 /// attach the retained native layer again to restart rendering.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_suspend_renderer(app: *mut CapyApple) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_suspend_renderer(app: u64) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else { return -1; };
+    let app=&mut *lease_app;
     app.perform(|a| {
         a.metal.stop(&mut a.host, "Canvas stopped. Save the drawing or restart the canvas to continue.".into());
         a.dismissed_contacts.clear();
@@ -695,8 +695,9 @@ pub unsafe extern "C" fn capy_apple_suspend_renderer(app: *mut CapyApple) -> i32
 /// # Safety
 /// Serial owner only. Nonblocking health check, including when no frame is due.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_poll_renderer(app: *mut CapyApple) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_poll_renderer(app: u64) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else { return -1; };
+    let app=&mut *lease_app;
     app.perform(|a| {
         a.gpu_operation(|a| {
             a.metal.observe_failure(&mut a.host, true);
@@ -711,8 +712,9 @@ pub unsafe extern "C" fn capy_apple_poll_renderer(app: *mut CapyApple) -> i32 {
 /// Debug fixtures and unit tests only; affects this editor's device, never the system GPU.
 #[cfg(any(test, debug_assertions))]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_test_gpu_fault(app: *mut CapyApple, validation: u32) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else { return -1; };
+pub unsafe extern "C" fn capy_apple_test_gpu_fault(app: u64, validation: u32) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else { return -1; };
+    let app=&mut *lease_app;
     app.perform(|a| {
         let device = a.host.session.engine().backend().0.as_ref().ok_or("No test GPU")?.device();
         if validation == 1 {
@@ -730,7 +732,7 @@ pub unsafe extern "C" fn capy_apple_test_gpu_fault(app: *mut CapyApple, validati
 /// Records must contain count initialized doubles, alive for this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_pointer(
-    app: *mut CapyApple,
+    app: u64,
     id: u64,
     tool: u32,
     button: u32,
@@ -742,13 +744,9 @@ pub unsafe extern "C" fn capy_apple_pointer(
     unsafe {
         apple_pointer(
             app,
-            id,
-            tool,
-            button,
+            ApplePointerInput {id,tool,button,predicted,view_revision},
             records,
             count,
-            predicted,
-            view_revision,
             std::ptr::null(),
             0,
         )
@@ -759,7 +757,7 @@ pub unsafe extern "C" fn capy_apple_pointer(
 /// Both arrays must remain alive for this call. Updates are token/expecting pairs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_pointer_updates(
-    app: *mut CapyApple,
+    app: u64,
     id: u64,
     tool: u32,
     button: u32,
@@ -775,37 +773,32 @@ pub unsafe extern "C" fn capy_apple_pointer_updates(
     unsafe {
         apple_pointer(
             app,
-            id,
-            tool,
-            button,
+            ApplePointerInput {id,tool,button,predicted:0,view_revision},
             records,
             count,
-            0,
-            view_revision,
             updates,
             correction,
         )
     }
 }
+struct ApplePointerInput {id:u64,tool:u32,button:u32,predicted:u32,view_revision:u64}
 unsafe fn apple_pointer(
-    app: *mut CapyApple,
-    id: u64,
-    tool: u32,
-    button: u32,
+    app: u64,
+    input: ApplePointerInput,
     records: *const f64,
     count: usize,
-    predicted: u32,
-    view_revision: u64,
     updates: *const u64,
     correction: u32,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
+    let ApplePointerInput {id,tool,button,predicted,view_revision}=input;
     app.perform(|a| {
         if records.is_null()
             || count == 0
-            || count % 9 != 0
+            || !count.is_multiple_of(9)
             || count > 8192 * 9
             || tool > 3
             || button > 2
@@ -817,7 +810,7 @@ unsafe fn apple_pointer(
         let records = unsafe { std::slice::from_raw_parts(records, count) };
         if !records.iter().all(|v| v.is_finite())
             || records
-                .chunks_exact(9)
+                .as_chunks::<9>().0.iter()
                 .any(|r| r[7] < 0. || r[8] < 0. || r[8] > 4. || r[8].fract() != 0.)
         {
             return Err("Invalid Apple pointer sample".into());
@@ -826,7 +819,7 @@ unsafe fn apple_pointer(
             return Ok(());
         }
         if a.dismissed_contacts.contains(&id) {
-            if correction == 0 && predicted == 0 && records.chunks_exact(9).any(|r| r[8] >= 3.) {
+            if correction == 0 && predicted == 0 && records.as_chunks::<9>().0.iter().any(|r| r[8] >= 3.) {
                 a.dismissed_contacts.remove(&id);
             }
             return Ok(());
@@ -837,7 +830,7 @@ unsafe fn apple_pointer(
             unsafe { std::slice::from_raw_parts(updates, count / 9 * 2) }
         };
         if updates
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .any(|u| u[1] > 1 || (u[1] != 0 && u[0] == 0) || (correction != 0 && u[0] == 0))
         {
             return Err("Invalid Apple input estimates".into());
@@ -858,7 +851,7 @@ unsafe fn apple_pointer(
                 viewport,
             })?;
             if reply.handled {
-                if !records.chunks_exact(9).any(|r| r[8] >= 3.) {
+                if !records.as_chunks::<9>().0.iter().any(|r| r[8] >= 3.) {
                     a.dismissed_contacts.insert(id);
                 }
                 return Ok(());
@@ -884,14 +877,15 @@ unsafe fn apple_pointer(
 /// Valid handle; costs, if non-NULL, must point to five writable u64 values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_frame(
-    app: *mut CapyApple,
+    app: u64,
     now: u64,
     presentation: u64,
     costs: *mut u64,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         if presentation < now {
             return Err("Presentation precedes observation time".into());
@@ -910,15 +904,15 @@ pub unsafe extern "C" fn capy_apple_frame(
 /// # Safety
 /// Valid handle on its serial owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_canvas_bar_hold(app: *const CapyApple) -> u32 {
-    unsafe { app.as_ref() }.map_or(0, |a| a.host.session.canvas_bar_hold())
+pub unsafe extern "C" fn capy_apple_canvas_bar_hold(app: u64) -> u32 {
+    handles::app(app).map_or(0, |a| a.host.session.canvas_bar_hold())
 }
 
 /// # Safety
 /// Valid handle on its serial owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_shader_input(app: *const CapyApple) {
-    if let Some(gpu) = unsafe { app.as_ref() }.and_then(|a| a.host.session.engine().backend().0.as_ref()) {
+pub unsafe extern "C" fn capy_apple_shader_input(app: u64) {
+    if let Some(app)=handles::app(app) && let Some(gpu)=app.host.session.engine().backend().0.as_ref() {
         gpu.shader_input();
     }
 }
@@ -926,32 +920,32 @@ pub unsafe extern "C" fn capy_apple_shader_input(app: *const CapyApple) {
 /// # Safety
 /// Valid handle on its serial owner, or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_consumed_paint_ns(app: *const CapyApple) -> u64 {
-    unsafe { app.as_ref() }.map_or(0, |a| a.host.session.engine().metrics().last_consumed_paint_ns)
+pub unsafe extern "C" fn capy_apple_consumed_paint_ns(app: u64) -> u64 {
+    handles::app(app).map_or(0, |a| a.host.session.engine().metrics().last_consumed_paint_ns)
 }
 
 /// # Safety
 /// Valid handle on its serial owner, or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_submitted_canvas_updates(app: *const CapyApple) -> u64 {
-    unsafe { app.as_ref() }.and_then(|a| a.host.session.engine().backend().0.as_ref())
-        .map_or(0, |gpu| gpu.submitted_updates())
+pub unsafe extern "C" fn capy_apple_submitted_canvas_updates(app: u64) -> u64 {
+    handles::app(app).map_or(0,|a|a.host.session.engine().backend().0.as_ref().map_or(0,|gpu|gpu.submitted_updates()))
 }
 
 /// # Safety
 /// Valid handle, read on its serial owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_camera_revision(app: *const CapyApple) -> u64 {
-    unsafe { app.as_ref() }.map_or(0, |a| a.host.session.state().camera.revision)
+pub unsafe extern "C" fn capy_apple_camera_revision(app: u64) -> u64 {
+    handles::app(app).map_or(0, |a| a.host.session.state().camera.revision)
 }
 
 /// # Safety
 /// Valid handle on its serial owner. Timing is opt-in and disabled by default.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_gpu_timing(app: *mut CapyApple, enabled: u32) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+pub unsafe extern "C" fn capy_apple_gpu_timing(app: u64, enabled: u32) -> i32 {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         if enabled > 1 {
             return Err("Invalid GPU timing flag".into());
@@ -967,14 +961,15 @@ pub unsafe extern "C" fn capy_apple_gpu_timing(app: *mut CapyApple, enabled: u32
 /// A zero-capacity call may pass NULL samples. Never waits for GPU completion.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_take_gpu_timing(
-    app: *mut CapyApple,
+    app: u64,
     samples: *mut layer_render_wgpu::GpuFrameSample,
     capacity: usize,
     stats: *mut layer_render_wgpu::GpuFrameTimingStats,
 ) -> i32 {
-    let Some(app) = (unsafe { app.as_mut() }) else {
+    let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
+    let app=&mut *lease_app;
     app.perform(|a| {
         if capacity > 256 || stats.is_null() || (capacity > 0 && samples.is_null()) {
             return Err("Invalid GPU timing output buffer".into());

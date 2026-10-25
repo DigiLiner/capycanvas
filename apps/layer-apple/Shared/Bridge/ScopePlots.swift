@@ -6,9 +6,11 @@ struct ScopePlot: @unchecked Sendable {
 }
 
 struct ScopeUpdate: @unchecked Sendable {
+    let identity: String
     let plots: [String: ScopePlot]
     let colors: [Color]
     init(header: JSON, pixels: Data) {
+        identity = header["identity"].string
         colors = header["colors"].array.map { Color(.sRGB, red: $0[0].number / 255, green: $0[1].number / 255, blue: $0[2].number / 255) }
         var plots: [String: ScopePlot] = [:]
         for (kind, view) in header["plots"].object {

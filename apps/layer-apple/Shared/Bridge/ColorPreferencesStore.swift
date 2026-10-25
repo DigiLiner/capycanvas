@@ -12,10 +12,10 @@ final class ColorPreferencesStore: @unchecked Sendable {
     init(locations: StorageLocations?) { self.locations = locations }
     var canSave: Bool { locations != nil }
 
-    private func result(_ pointer: UnsafeMutablePointer<CChar>?) throws -> JSON {
+    private func result(_ pointer: String?) throws -> JSON {
         guard let pointer else { throw HostFailure(message: "Color preferences are unavailable") }
-        defer { capy_apple_string_free(pointer) }
-        let value = try JSON.decode(String(cString: pointer))
+
+        let value = try JSON.decode(pointer)
         if !value["error"].isNull { throw HostFailure(message: value["error"].string) }
         return value
     }
@@ -28,7 +28,7 @@ final class ColorPreferencesStore: @unchecked Sendable {
         func operate(_ output: Int32) throws -> JSON {
             try localized(request).encoded().withCString { action in
                 try color.encoded().withCString { color in
-                    try result(capy_export_presets(file?.fileDescriptor ?? -1, output, action, color))
+                    try result(takeNativeText(capy_export_presets(file?.fileDescriptor ?? -1, output, action, color)))
                 }
             }
         }
@@ -49,12 +49,12 @@ final class ColorPreferencesStore: @unchecked Sendable {
     static func paletteFile(_ request: JSON, bytes: Data = Data(), output: Int32 = -1) throws -> JSON {
         let pointer = try request.encoded().withCString { request in
             bytes.withUnsafeBytes { buffer in
-                capy_palette_file(request, buffer.bindMemory(to: UInt8.self).baseAddress, bytes.count, output)
+                takeNativeText(capy_palette_file(request, buffer.bindMemory(to: UInt8.self).baseAddress, bytes.count, output))
             }
         }
         guard let pointer else { throw HostFailure(message: "Palette files are unavailable") }
-        defer { capy_apple_string_free(pointer) }
-        let value = try JSON.decode(String(cString: pointer))
+
+        let value = try JSON.decode(pointer)
         if !value["error"].isNull { throw HostFailure(message: value["error"].string) }
         return value
     }
@@ -81,13 +81,13 @@ final class ColorPreferencesStore: @unchecked Sendable {
     }
     func exportDraft(recipe: JSON, action: JSON = JSON(["type": "refresh"])) throws -> JSON {
         try recipe.encoded().withCString { recipe in
-            try localized(action).encoded().withCString { try result(capy_export_draft(recipe, $0)) }
+            try localized(action).encoded().withCString { try result(takeNativeText(capy_export_draft(recipe, $0))) }
         }
     }
     private func library(_ action: JSON, bytes: Data = Data()) throws -> JSON {
         try localized(action).encoded().withCString { action in
             try bytes.withUnsafeBytes { buffer in
-                try result(capy_profile_library(action, buffer.bindMemory(to: UInt8.self).baseAddress, bytes.count))
+                try result(takeNativeText(capy_profile_library(action, buffer.bindMemory(to: UInt8.self).baseAddress, bytes.count)))
             }
         }
     }

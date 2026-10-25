@@ -33,17 +33,17 @@ extension EnvironmentValues {
     static func numericLabels(_ label: String, language: String) -> JSON {
         do {
             let text = try JSON(["language": language, "request": ["label": label]]).encoded()
-            guard let response = text.withCString({ capy_apple_numeric_labels($0) }) else { return JSON() }
-            defer { capy_apple_string_free(response) }
-            return try JSON.decode(String(cString: response))
+            guard let response = text.withCString({ takeNativeText(capy_apple_numeric_labels($0)) }) else { return JSON() }
+
+            return try JSON.decode(response)
         } catch { return JSON(["error": error.localizedDescription]) }
     }
     static func caption(_ request: [String: Any], language: String) -> String {
         do {
             let text = try JSON(["language": language, "request": request]).encoded()
-            guard let response = text.withCString({ capy_apple_native_caption($0) }) else { return "" }
-            defer { capy_apple_string_free(response) }
-            return try JSON.decode(String(cString: response))["text"].string
+            guard let response = text.withCString({ takeNativeText(capy_apple_native_caption($0)) }) else { return "" }
+
+            return try JSON.decode(response)["text"].string
         } catch { return error.localizedDescription }
     }
     static var inputBusy: Bool {

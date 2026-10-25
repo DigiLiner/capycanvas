@@ -5,36 +5,30 @@ use std::io::Write;
 use std::mem::ManuallyDrop;
 use std::os::fd::FromRawFd;
 
-/// # Safety
-/// Valid handle and writable length. Returns an owned raw capture released
-/// with `capy_bytes_free`, or null with the error set.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_stroke_recording_data(app: *mut CapyApple, length: *mut usize) -> *mut u8 {
-    let Some(app) = (unsafe { app.as_mut() }) else { return std::ptr::null_mut() };
-    let Some(bytes) = app.perform(|a| a.host.session.stroke_recording().snapshot().map_err(|e| e.to_string())) else {
-        return std::ptr::null_mut();
-    };
-    let bytes = bytes.into_boxed_slice();
-    if !length.is_null() { unsafe { length.write(bytes.len()); } }
-    Box::into_raw(bytes) as *mut u8
+pub extern "C" fn capy_apple_stroke_recording_data(raw:u64)->u64 {
+    let Some(mut app)=handles::app(raw) else {return 0;};
+    app.perform(|app|app.host.session.stroke_recording().snapshot().map_err(|error|error.to_string()))
+        .map_or(0,handles::store)
 }
-
-/// # Safety
-/// Bytes must be an unreleased result of `capy_apple_stroke_recording_data`,
-/// with its original exact length, after all readers have finished.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_bytes_free(bytes: *mut u8, length: usize) {
-    if !bytes.is_null() {
-        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(bytes, length)) });
-    }
+pub extern "C" fn capy_bytes_length(raw:u64)->usize {handles::shared::<Vec<u8>>(raw).map_or(0,|bytes|bytes.len())}
+/// # Safety
+/// Nonempty output is writable and exclusive for length bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_bytes_copy(raw:u64,offset:usize,output:*mut u8,length:usize)->bool {
+    handles::shared::<Vec<u8>>(raw).is_some_and(|bytes|unsafe {layer_host::ffi::copy_bytes(&bytes,offset,output,length)})
 }
+#[unsafe(no_mangle)]
+pub extern "C" fn capy_bytes_free(raw:u64) {handles::free::<Vec<u8>>(raw);}
 
 /// # Safety
 /// Worker only. Borrows count readable bytes and a descriptor open for writing.
 /// Returns null on success or owned error JSON.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_stroke_recording_write(bytes: *const u8, count: usize, output: i32) -> *mut c_char {
+pub unsafe extern "C" fn capy_stroke_recording_write(bytes: *const u8, count: usize, output: i32) -> u64 {
     let result = (|| -> Result<(), String> {
+        if count>layer_engine::recording::MAX_BYTES+4096 {return Err("Recording exceeds supported limits".into());}
         let raw = if count == 0 { &[][..] } else {
             if bytes.is_null() { return Err("Recording bytes are unavailable".into()); }
             unsafe { std::slice::from_raw_parts(bytes, count) }
@@ -44,7 +38,7 @@ pub unsafe extern "C" fn capy_stroke_recording_write(bytes: *const u8, count: us
         file.write_all(&compressed).map_err(|e| e.to_string())
     })();
     match result {
-        Ok(()) => std::ptr::null_mut(),
-        Err(error) => CString::new(serde_json::json!({"error": error}).to_string()).unwrap().into_raw(),
+        Ok(()) => 0,
+        Err(error) => CString::new(serde_json::json!({"error": error}).to_string()).map_or(0,handles::text),
     }
 }

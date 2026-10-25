@@ -13,22 +13,23 @@ pub(super) struct Task {
 /// view without changing the document. The returned task never borrows the app.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_proof_task(
-    app: *mut CapyApple,
+    app: u64,
     request: u32,
     recipe: *const c_char,
-) -> *mut CapyProjectTask {
-    let Some(app) = (unsafe { app.as_mut() }) else {
-        return std::ptr::null_mut();
+) -> u64 {
+    let Some(mut lease_app)=handles::app(app) else {
+        return 0;
     };
+    let app=&mut *lease_app;
     app.perform(|app| {
         let recipe = if recipe.is_null() {
             None
         } else {
-            serde_json::from_str(unsafe { read_title(recipe) }?).map_err(|e| e.to_string())?
+            serde_json::from_str(&unsafe { read_title(recipe) }?).map_err(|e| e.to_string())?
         };
         let session = &app.host.session;
         let job = ProofPreparation::begin(session, (request != 0).then_some(request), recipe).map_err(|reason|reason.proof_message(session.localization()))?;
-        Ok(Box::into_raw(CapyProjectTask::new(
+        Ok(handles::store(*CapyProjectTask::new(
             Payload::Proof(Box::new(Task { job, lut: None })),
             session.state().document_file.epoch,
             session.engine().document().revision,
@@ -36,16 +37,17 @@ pub unsafe extern "C" fn capy_apple_proof_task(
             session.localization().clone(),
         )))
     })
-    .unwrap_or(std::ptr::null_mut())
+    .unwrap_or(0)
 }
 
 /// # Safety
 /// Worker only; cancellation may run concurrently. No session or GPU access.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_proof_build(task: *const CapyProjectTask) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else {
+pub unsafe extern "C" fn capy_project_proof_build(task: u64) -> i32 {
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else {
         return -1;
     };
+    let task=&*lease_task;
     task.perform(|payload| {
         let Payload::Proof(proof) = payload else {
             return Err("Not a proof task".into());
@@ -64,24 +66,38 @@ pub unsafe extern "C" fn capy_project_proof_build(task: *const CapyProjectTask) 
 /// Outputs are aligned and exclusively writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_proof_preservation(
-    task: *const CapyProjectTask,
-    bytes: *mut *const u8,
+    task: u64,
     count: *mut usize,
 ) -> i32 {
-    let Some(task) = (unsafe { task.as_ref() }) else {
+    if count.is_null() { return -1; }
+    unsafe { count.write(0); }
+    let Some(lease_task)=handles::shared::<CapyProjectTask>(task) else {
         return -1;
     };
-    if bytes.is_null() || count.is_null() { return -1; }
-    unsafe { bytes.write(std::ptr::null()); count.write(0); }
+    let task=&*lease_task;
     task.perform_inner(|payload| {
         let Payload::Proof(proof) = payload else {
             return Err("Not a proof task".into());
         };
         if let Some(value) = proof.job.preservation() {
-            unsafe { bytes.write(value.as_ptr()); count.write(value.len()); }
+            unsafe { count.write(value.len()); }
         }
         Ok(())
     })
+}
+
+/// # Safety
+/// Nonempty output is writable and exclusive for length bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_project_proof_preservation_copy(task:u64,offset:usize,output:*mut u8,length:usize)->bool {
+    let Some(task)=handles::shared::<CapyProjectTask>(task) else {return false;};
+    let mut copied=false;
+    let status=task.perform_inner(|payload| {
+        let Payload::Proof(proof)=payload else {return Err("Not a proof task".into());};
+        copied=unsafe {layer_host::ffi::copy_bytes(proof.job.preservation().unwrap_or(&[]),offset,output,length)};
+        Ok(())
+    });
+    status==0&&copied
 }
 
 /// # Safety
@@ -89,12 +105,13 @@ pub unsafe extern "C" fn capy_project_proof_preservation(
 /// replaced ICC; apply repeats the same shared stale-document validation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_proof_check(
-    app: *mut CapyApple,
-    task: *const CapyProjectTask,
+    app: u64,
+    task: u64,
 ) -> i32 {
-    let (Some(app), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else {
+    let (Some(mut lease_app),Some(lease_task))=(handles::app(app),handles::shared::<CapyProjectTask>(task)) else {
         return -1;
     };
+    let (app,task)=(&mut *lease_app,&*lease_task);
     app.perform(|app| {
         task.check_cancelled()?;
         let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -110,13 +127,14 @@ pub unsafe extern "C" fn capy_apple_proof_check(
 /// Editor owner only, after preparation and any required durable ICC copy.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_proof_apply(
-    app: *mut CapyApple,
-    task: *const CapyProjectTask,
+    app: u64,
+    task: u64,
     preserved: bool,
 ) -> i32 {
-    let (Some(app), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else {
+    let (Some(mut lease_app),Some(lease_task))=(handles::app(app),handles::shared::<CapyProjectTask>(task)) else {
         return -1;
     };
+    let (app,task)=(&mut *lease_app,&*lease_task);
     app.perform(|app| {
         task.check_cancelled()?;
         let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -146,13 +164,14 @@ pub unsafe extern "C" fn capy_apple_proof_apply(
 /// errors remain in the form and do not poison the previously valid view.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_proof_failed(
-    app: *mut CapyApple,
-    task: *const CapyProjectTask,
+    app: u64,
+    task: u64,
     message: *const c_char,
 ) -> i32 {
-    let (Some(app), Some(task)) = (unsafe { app.as_mut() }, unsafe { task.as_ref() }) else {
+    let (Some(mut lease_app),Some(lease_task))=(handles::app(app),handles::shared::<CapyProjectTask>(task)) else {
         return -1;
     };
+    let (app,task)=(&mut *lease_app,&*lease_task);
     app.perform(|app| {
         let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
         let Payload::Proof(proof) = &state.payload else {
@@ -161,7 +180,7 @@ pub unsafe extern "C" fn capy_apple_proof_failed(
         app.host.proof.fail(
             &app.host.session,
             &proof.job,
-            unsafe { read_title(message) }?.into(),
+            unsafe { read_title(message) }?,
         );
         Ok(())
     })

@@ -4,11 +4,11 @@ enum ToolbarUI {
     static func resolve(_ request: [String: Any], language: String = "en") -> JSON {
         do {
             let text = try JSON(["language": language, "request": request]).encoded()
-            guard let response = text.withCString({ capy_apple_toolbar_ui($0) }) else {
+            guard let response = text.withCString({ takeNativeText(capy_apple_toolbar_ui($0)) }) else {
                 throw HostFailure(message: "Toolbar request failed")
             }
-            defer { capy_apple_string_free(response) }
-            return try JSON.decode(String(cString: response))
+
+            return try JSON.decode(response)
         } catch { return JSON(["error": error.localizedDescription]) }
     }
     @MainActor private static var cache: [String: JSON] = [:]

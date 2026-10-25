@@ -14,7 +14,7 @@ fn proof(app: &App, action: Value) -> Value {
 fn apple_hdr_edit_proof_export_and_analysis_reuse() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         let color = DocumentColor { space: RgbSpace::DisplayP3, depth: SampleDepth::F16 };
         let job = ProjectJob::create_with(&app, [128, 96], &[json!({"op": "space", "space": color.space}), json!({"op": "depth", "depth": color.depth})]);
@@ -29,7 +29,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
         app.layer_action(json!({"op":"fill_selection"}));
         app.invoke("deselect");
         app.draw_until_idle();
-        let mut original = unsafe { &*app.0 }.host.session.engine().document().clone();
+        let mut original = app.document().clone();
         let raster = raster_samples(active_raster(&original));
         assert!(!raster.0.is_empty());
         assert!(
@@ -42,7 +42,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
             raster
                 .0
                 .values()
-                .flat_map(|(_, b)| b.chunks_exact(8))
+                .flat_map(|(_, b)| b.as_chunks::<8>().0.iter())
                 .any(|b| {
                     let v = layer_core::color::hdr::decode_pixel(std::array::from_fn(|i| {
                         u16::from_le_bytes([b[i * 2], b[i * 2 + 1]])
@@ -75,7 +75,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
         );
         assert_eq!(
             raster_samples(
-                unsafe { &*app.0 }.host.session.engine().document().target_raster(original.working.target.unwrap()).unwrap()
+                app.document().target_raster(original.working.target.unwrap()).unwrap()
             ),
             raster
         );
@@ -103,7 +103,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
         );
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            let a = unsafe { &mut *app.0 };
+            let mut lease_a=app.borrow();let a=&mut *lease_a;
             a.metal.poll_color(&mut a.host).unwrap();
             if a.metal.local_tone.guide.is_some() {
                 break;
@@ -111,8 +111,8 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
             assert!(Instant::now() < deadline, "{:?}", a.metal.local_tone.error);
             std::thread::sleep(Duration::from_millis(10));
         }
-        let count = unsafe { &*app.0 }.metal.local_tone.status()["publications"].clone();
-        let guide = unsafe { &*app.0 }.metal.local_tone.guide.clone().unwrap();
+        let count = app.borrow().metal.local_tone.status()["publications"].clone();
+        let guide = app.borrow().metal.local_tone.guide.clone().unwrap();
         let start = Instant::now();
         proof(
             &app,
@@ -123,7 +123,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
                 &app,
                 json!({"type":"number","phase":"move","key":"exposure","value":i as f32/60.}),
             );
-            let a = unsafe { &mut *app.0 };
+            let mut lease_a=app.borrow();let a=&mut *lease_a;
             a.metal.poll_color(&mut a.host).unwrap();
         }
         proof(
@@ -131,22 +131,22 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
             json!({"type":"number","phase":"up","key":"exposure","value":1.}),
         );
         assert_eq!(
-            unsafe { &*app.0 }.metal.local_tone.status()["publications"],
+            app.borrow().metal.local_tone.status()["publications"],
             count
         );
         assert!(std::sync::Arc::ptr_eq(
             &guide,
-            unsafe { &*app.0 }.metal.local_tone.guide.as_ref().unwrap()
+            app.borrow().metal.local_tone.guide.as_ref().unwrap()
         ));
         eprintln!(
             "APPLE_HDR_CONTROL platform={platform} updates=60 elapsed_ms={:.3} guide_bytes={}",
             start.elapsed().as_secs_f64() * 1000.,
             guide.byte_len()
         );
-        original = unsafe { &*app.0 }.host.session.engine().document().clone();
+        original = app.document().clone();
         // Exact artwork bytes, including the saved rendition.
         let save = ProjectJob::new(&app, false);
-        assert!(!save.0.is_null());
+        assert!(!(save.0==0));
         let mut archive = fixtures::tempfile();
         assert_eq!(
             unsafe { capy_project_write(save.0, archive.as_raw_fd()) },
@@ -170,7 +170,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
             .as_u64()
             .unwrap() as u32;
         for hdr in [false, true] {
-            let mut pointer = std::ptr::null_mut();
+            let mut pointer=0;
             assert_eq!(
                 unsafe { capy_apple_export_task(app.0, id, 2_000_000_000, &mut pointer) },
                 1
@@ -216,7 +216,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
                 }
             );
             assert_project_document(
-                unsafe { &*app.0 }.host.session.engine().document(),
+                &app.document(),
                 &original,
             );
         }
@@ -224,7 +224,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
         let mut bytes = Vec::new();
         archive.read_to_end(&mut bytes).unwrap();
         let restored = App::new(platform);
-        unsafe { &mut *restored.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        restored.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         restored.draw_until_idle();
         let open = ProjectJob::new(&restored, true);
         assert_eq!(
@@ -236,16 +236,15 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
         assert_eq!(unsafe { capy_apple_project_adopt(restored.0, open.0, c"HDR.capy".as_ptr(), c"".as_ptr()) }, 0);
         restored.draw_until_idle();
         assert_saved_document(
-            unsafe { &*restored.0 }.host.session.engine().document(),
+            &restored.document(),
             &original,
         );
         assert_eq!(unsafe { capy_apple_suspend_renderer(restored.0) }, 0);
         let gpu = layer_render_wgpu::WgpuRasterizer::new_native_headless(color).unwrap();
-        let a = unsafe { &mut *restored.0 };
-        a.metal.install_renderer(&mut a.host, gpu.into()).unwrap();
+        restored.with(|a|a.metal.install_renderer(&mut a.host, gpu.into()).unwrap());
         restored.draw_until_idle();
         assert_saved_document(
-            unsafe { &*restored.0 }.host.session.engine().document(),
+            &restored.document(),
             &original,
         );
     }

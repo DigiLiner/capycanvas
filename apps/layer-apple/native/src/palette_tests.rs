@@ -9,9 +9,8 @@ fn palette_file(request: Value, bytes: &[u8], output: Option<&std::fs::File>) ->
         capy_palette_file(text.as_ptr(), if bytes.is_empty() { std::ptr::null() } else { bytes.as_ptr() }, bytes.len(),
             output.map_or(-1, |file| file.as_raw_fd()))
     };
-    let value = serde_json::from_slice(unsafe { CStr::from_ptr(result) }.to_bytes()).unwrap();
-    unsafe { capy_apple_string_free(result) };
-    value
+
+    serde_json::from_slice(handles::take_text(result).to_bytes()).unwrap()
 }
 
 #[test]
@@ -23,11 +22,11 @@ fn apple_palettes_publish_starters_and_sit_in_the_sketch_drawer() {
         let swatch = &panel["swatches"][0];
         assert_eq!(swatch["rgba"].as_array().unwrap().len(), 4);
         assert!(swatch["detail"].as_str().unwrap().contains(" · #"));
-        let policy = unsafe { &*app.0 }.host.session.state().platform;
+        let policy = app.borrow().host.session.state().platform;
         app.action(json!({"type":"restore_workspace","workspace":layer_ui::WorkspaceState {
             layout: layer_ui::WorkspacePreset::Painter.layout(policy), ..Default::default()
         }}));
-        let header = unsafe { &*app.0 }.host.session.state().workspace.layout.header.clone();
+        let header = app.borrow().host.session.state().workspace.layout.header.clone();
         let id = header.entries().find(|entry| entry.item == layer_ui::HeaderItem::Tool { control: layer_ui::ToolbarControl::Color })
             .expect("Sketch has a color tool").id;
         app.action(json!({"type":"measure_header","height":60,"items":[{"id":id,"bounds":{"x":900,"y":0,"width":40,"height":60}}]}));

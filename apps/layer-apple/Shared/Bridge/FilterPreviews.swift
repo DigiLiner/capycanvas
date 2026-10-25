@@ -10,18 +10,17 @@ struct FilterPreviewReply: Sendable {
 /// An immutable Rust allocation, independent of the live editor. Image creation
 /// happens on a utility worker; the render owner only transfers its ownership.
 final class NativeFilterPreviews: @unchecked Sendable {
-    private let handle: OpaquePointer
-    init(_ handle: OpaquePointer) { self.handle = handle }
-    deinit { capy_filter_previews_free(handle) }
+    private let handle: UInt64
+    init(_ handle: UInt64) { self.handle = handle }
+    deinit { capy_filter_previews_free(nativeValue(handle)) }
     struct Decoded: @unchecked Sendable {
         let request: UInt64
         let images: [String: CGImage]
     }
     func decode() -> Decoded? {
         var info = CapyFilterPreviewInfo()
-        capy_filter_previews_read(handle, &info)
-        guard let filters = info.filters, let pixels = info.pixels,
-            let ids = try? JSON.decode(String(cString: filters)).array.map(\.string),
+        guard capy_filter_previews_read(nativeValue(handle), &info), let filters = takeNativeText(info.filters),
+            let ids = try? JSON.decode(filters).array.map(\.string),
             !ids.isEmpty, ids.count <= 8 else { return nil }
         let width = Int(info.width), height = Int(info.height), stride = Int(info.stride)
         guard width > 0, width <= 512, height > 0, height <= 128 * ids.count,
@@ -30,8 +29,8 @@ final class NativeFilterPreviews: @unchecked Sendable {
         let rowHeight = height / ids.count, rowBytes = stride * rowHeight
         var images: [String: CGImage] = [:]
         for (index, id) in ids.enumerated() {
-            let data = Data(bytes: pixels.advanced(by: index * rowBytes), count: rowBytes)
-            guard let provider = CGDataProvider(data: data as CFData),
+            guard let data = copyNativeData(rowBytes, copy: { capy_filter_previews_copy(handle, index * rowBytes + $0, $1, $2) }),
+                let provider = CGDataProvider(data: data as CFData),
                 let image = CGImage(width: width, height: rowHeight, bitsPerComponent: 8, bitsPerPixel: 32,
                     bytesPerRow: stride, space: space,
                     bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),

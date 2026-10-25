@@ -7,16 +7,16 @@ use std::{io::Seek, os::fd::AsRawFd};
 fn native_new_drawing_preserves_space_depth_paper_and_the_captured_order() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         let sheet = |color: DocumentColor, transparent: bool| vec![json!({"op": "space", "space": color.space}), json!({"op": "depth", "depth": color.depth}),
             json!({"op": "paper_color"}), json!({"op": "transparent", "transparent": transparent}), json!({"op": "use_paper_color"})];
         let adopt = |job: &ProjectJob, extent: [u32; 2], color: DocumentColor, transparent: bool| {
             assert_eq!(unsafe {
                 capy_apple_project_adopt(app.0, job.0, c"New drawing".as_ptr(), c"".as_ptr())
-            }, 0, "{:?} / {:?}, requests={}", job.error(), unsafe { &*app.0 }.error, app.state()["requests"]);
+            }, 0, "{:?} / {:?}, requests={}", job.error(), app.borrow().error, app.state()["requests"]);
             app.draw_until_idle();
-            let document = unsafe { &*app.0 }.host.session.engine().document();
+            let document = &app.document();
             assert_eq!(document.composition().color, color);
             assert_eq!([document.composition().size[0], document.composition().size[1]], extent);
             assert_eq!(occurrence_at(document, 1).visible, !transparent);
@@ -43,7 +43,7 @@ fn native_new_drawing_preserves_space_depth_paper_and_the_captured_order() {
         assert_eq!(app.state()["settings"]["new_document"]["last"]["width"], 73_000);
 
         app.stroke(); app.draw_until_idle();
-        let before = unsafe { &*app.0 }.host.session.engine().document().clone();
+        let before = app.document().clone();
         let pixels = app.pixels();
         let job = ProjectJob::new(&app, true);
         assert_eq!(unsafe { capy_project_new(job.0) }, -1);
@@ -51,7 +51,7 @@ fn native_new_drawing_preserves_space_depth_paper_and_the_captured_order() {
         assert_eq!(unsafe {
             capy_apple_project_adopt(app.0, job.0, c"Invalid".as_ptr(), c"".as_ptr())
         }, -1);
-        assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &before);
+        assert_project_document(&app.document(), &before);
         assert!(app.pixels() == pixels, "Rejected New must preserve the live drawing");
     }
 }
@@ -75,7 +75,7 @@ fn native_p3_u8_and_prophoto_u16_survive_save_open_and_gpu_replacement() {
             write_document(&project, &mut file);
             file.rewind().unwrap();
             let app = App::new(platform);
-            unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+            app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
             app.draw_until_idle();
             let open = ProjectJob::new(&app, true);
             assert_eq!(
@@ -92,7 +92,7 @@ fn native_p3_u8_and_prophoto_u16_survive_save_open_and_gpu_replacement() {
             );
             app.draw_until_idle();
             assert_eq!(
-                unsafe { &*app.0 }.host.session.engine().document().composition().color,
+                app.document().composition().color,
                 color
             );
             let blank = app.pixels();
@@ -108,7 +108,7 @@ fn native_p3_u8_and_prophoto_u16_survive_save_open_and_gpu_replacement() {
                 painted != blank,
                 "{platform}/{space:?}: actual stroke required"
             );
-            let document = unsafe { &*app.0 }.host.session.engine().document().clone();
+            let document = app.document().clone();
             let samples: Vec<_> = document.artwork.paint.iter()
                 .flat_map(|(_, _, source)| raster_samples(&source.raster).0.into_values())
                 .collect();
@@ -122,7 +122,7 @@ fn native_p3_u8_and_prophoto_u16_survive_save_open_and_gpu_replacement() {
                 assert!(
                     samples
                         .iter()
-                        .flat_map(|(_, bytes)| bytes.chunks_exact(2))
+                        .flat_map(|(_, bytes)| bytes.as_chunks::<2>().0.iter())
                         .any(|sample| u16::from_le_bytes([sample[0], sample[1]]) % 257 != 0),
                     "16-bit backing must retain more than 8-bit precision"
                 );
@@ -133,14 +133,14 @@ fn native_p3_u8_and_prophoto_u16_survive_save_open_and_gpu_replacement() {
             app.invoke("redo");
             app.draw_until_idle();
             assert_project_document(
-                unsafe { &*app.0 }.host.session.engine().document(),
+                &app.document(),
                 &document,
             );
             assert!(app.pixels() == painted);
 
             {
                 let save = ProjectJob::new(&app, false);
-                assert!(!save.0.is_null());
+                assert!(!(save.0==0));
                 file.set_len(0).unwrap();
                 file.rewind().unwrap();
                 assert_eq!(
@@ -153,7 +153,7 @@ fn native_p3_u8_and_prophoto_u16_survive_save_open_and_gpu_replacement() {
                 let saved = read_document(&mut file);
                 assert_saved_document(&saved, &document);
                 let restored = App::new(platform);
-                unsafe { &mut *restored.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+                restored.borrow().host.session.renderer_mut().0 = Some(native_renderer());
                 restored.draw_until_idle();
                 let open = ProjectJob::new(&restored, true);
                 file.rewind().unwrap();
@@ -168,18 +168,17 @@ fn native_p3_u8_and_prophoto_u16_survive_save_open_and_gpu_replacement() {
                 assert_eq!(result, 0);
                 restored.draw_until_idle();
                 assert_saved_document(
-                    unsafe { &*restored.0 }.host.session.engine().document(),
+                    &restored.document(),
                     &document,
                 );
                 assert!(restored.pixels() == painted);
                 assert_eq!(restored.state()["document_file"]["modified"], false);
                 assert_eq!(unsafe { capy_apple_suspend_renderer(restored.0) }, 0);
                 let gpu = layer_render_wgpu::WgpuRasterizer::new_native_headless(color).unwrap();
-                let owner = unsafe { &mut *restored.0 };
-                owner.metal.install_renderer(&mut owner.host, gpu.into()).unwrap();
+                restored.with(|owner|owner.metal.install_renderer(&mut owner.host, gpu.into()).unwrap());
                 restored.draw_until_idle();
                 assert_saved_document(
-                    unsafe { &*restored.0 }.host.session.engine().document(),
+                    &restored.document(),
                     &document,
                 );
                 assert!(
@@ -204,7 +203,7 @@ fn apple_display_previews_keep_p3_chroma_without_changing_paint_definitions() {
         assert_eq!(panel["swatches"][0]["rgba"], json!([1.,0.5,0.,0.5]));
         assert_eq!(app.state()["colors"], state["colors"]);
         assert_eq!(state["colors"]["foreground"], definition);
-        let colors = &unsafe { &*app.0 }.host.session.state().colors;
+        let colors = app.with(|native|native.host.session.state().colors.clone());
         let validation = |display| layer_ui::color_validation_localized(colors.definition(), colors.rgb_space(), display, false, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
         assert!(validation(DISPLAY_SPACE).ends_with("Outside the document gamut."));
         assert!(validation(layer_core::color::RgbSpace::Srgb).ends_with("Outside the sRGB preview gamut."), "An sRGB fallback still reports the actual lost gamut");

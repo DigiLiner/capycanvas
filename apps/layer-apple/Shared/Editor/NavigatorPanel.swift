@@ -6,9 +6,9 @@ struct NavigatorPanel: View {
         let document = store.state["tabs"][0]
         guard !store.camera.value.isNull,
             let source = try? JSON([store.camera.value.raw, [document["width"].uint, document["height"].uint], [100, 100]]).encoded(),
-            let pointer = source.withCString({ capy_apple_navigator_geometry($0) }) else { return 1 }
-        defer { capy_apple_string_free(pointer) }
-        return (try? JSON.decode(String(cString: pointer)))?["overview_aspect"].number ?? 1
+            let pointer = source.withCString({ takeNativeText(capy_apple_navigator_geometry($0)) }) else { return 1 }
+
+        return (try? JSON.decode(pointer))?["overview_aspect"].number ?? 1
     }
     var body: some View {
         VStack(spacing: store.panelMetrics.spacing) {
@@ -52,9 +52,9 @@ private struct NavigatorDrawing: View {
         let document = store.state["tabs"][0]
         guard size.width > 8, size.height > 8, !store.camera.value.isNull,
             let source = try? JSON([store.camera.value.raw, [document["width"].uint, document["height"].uint], [size.width, size.height]]).encoded(),
-            let pointer = source.withCString({ capy_apple_navigator_geometry($0) }) else { return JSON() }
-        defer { capy_apple_string_free(pointer) }
-        return (try? JSON.decode(String(cString: pointer))) ?? JSON()
+            let pointer = source.withCString({ takeNativeText(capy_apple_navigator_geometry($0)) }) else { return JSON() }
+
+        return (try? JSON.decode(pointer)) ?? JSON()
     }
     private func send(_ phase: String, _ point: CGPoint = .zero, _ size: CGSize = .zero) {
         store.dispatch(["type": "navigator", "phase": phase, "position": [point.x, point.y], "viewport": [size.width, size.height]])

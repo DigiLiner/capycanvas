@@ -2,15 +2,14 @@
 use super::*;
 use serde_json::{Value, json};
 
-fn stateless(call: unsafe extern "C" fn(*const c_char) -> *mut c_char, request: impl Into<Vec<u8>>) -> Value {
+fn stateless(call: unsafe extern "C" fn(*const c_char) -> u64, request: impl Into<Vec<u8>>) -> Value {
     let source = CString::new(request).unwrap();
     let output = unsafe { call(source.as_ptr()) };
-    assert!(!output.is_null());
-    let value = serde_json::from_slice(unsafe { CStr::from_ptr(output) }.to_bytes()).unwrap();
-    unsafe { capy_apple_string_free(output) };
-    value
+    assert!(!(output==0));
+
+    serde_json::from_slice(handles::take_text(output).to_bytes()).unwrap()
 }
-fn localized_stateless(call: unsafe extern "C" fn(*const c_char) -> *mut c_char, request: impl Into<Vec<u8>>) -> Value {
+fn localized_stateless(call: unsafe extern "C" fn(*const c_char) -> u64, request: impl Into<Vec<u8>>) -> Value {
     fixture_localization();
     let request = request.into();
     let request = serde_json::from_slice::<Value>(&request).map(|request| {
@@ -20,16 +19,51 @@ fn localized_stateless(call: unsafe extern "C" fn(*const c_char) -> *mut c_char,
     stateless(call, request)
 }
 
-unsafe fn launch_json(platform: u32, json: *const c_char, bootstrap: *mut *mut c_char, error: *mut *mut c_char) -> *mut CapyApple {
-    if !bootstrap.is_null() { unsafe { *bootstrap = std::ptr::null_mut() }; }
+unsafe fn launch_json(platform: u32, json: *const c_char, bootstrap: *mut u64, error: *mut u64) -> u64 {
+    if !bootstrap.is_null() { unsafe { *bootstrap = 0 }; }
     let prepared = unsafe { capy_apple_prepare_launch(json, error) };
-    if prepared.is_null() { return std::ptr::null_mut(); }
+    if prepared==0 { return 0; }
     let app = unsafe { capy_apple_launch(platform, prepared, bootstrap, error) };
     unsafe { capy_apple_launch_free(prepared) };
     app
 }
 
-struct App(*mut CapyApple);
+struct App(u64);
+impl App {
+    fn borrow(&self)->layer_host::handles::LocalBorrowed<CapyApple> {handles::app(self.0).unwrap()}
+    fn document(&self)->layer_core::Document {self.borrow().host.session.engine().document().clone()}
+    fn with<T>(&self,work:impl FnOnce(&mut CapyApple)->T)->T {work(&mut self.borrow())}
+}
+fn copied_bytes(count:usize,mut copy:impl FnMut(usize,*mut u8,usize)->bool)->Vec<u8> {
+    let mut bytes=vec![0;count];
+    assert!(copy(count,std::ptr::null_mut(),0));
+    for offset in (0..count).step_by(layer_core::package::MAX_RANGE_BYTES) {
+        let length=(count-offset).min(layer_core::package::MAX_RANGE_BYTES);
+        assert!(copy(offset,unsafe {bytes.as_mut_ptr().add(offset)},length));
+    }
+    bytes
+}
+
+#[test]
+fn scope_deltas_publish_a_full_snapshot_when_the_drawing_changes() {
+    fn plots(app:&App)->Option<Value> {
+        let scopes=unsafe {capy_apple_take_scopes(app.0)};
+        if scopes==0 {return None;}
+        let mut info=CapyScopeInfo::default();
+        assert!(unsafe {capy_scopes_read(scopes,&mut info)});
+        let result=serde_json::from_slice(handles::take_text(info.plots).to_bytes()).unwrap();
+        unsafe {capy_scopes_free(scopes)};Some(result)
+    }
+    let app=fixtures::drawing_app(1,[64,48]);app.draw_until_idle();
+    let first=plots(&app).unwrap();assert!(plots(&app).is_none());
+    let task=ProjectJob::create(&app,[32,24]);
+    assert_eq!(unsafe {capy_apple_project_adopt(app.0,task.0,c"Other".as_ptr(),c"".as_ptr())},0);
+    app.draw_until_idle();let second=plots(&app).unwrap();
+    assert_ne!(first["identity"],second["identity"]);
+    assert_eq!(second["plots"].as_object().unwrap().len(),3);
+    assert!(plots(&app).is_none());
+}
+
 #[path = "color_tests.rs"]
 mod color;
 #[path = "source_tests.rs"]
@@ -87,7 +121,7 @@ mod fixtures {
 
     pub(super) fn drawing_app(platform: u32, extent: [u32; 2]) -> App {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
         let project = ProjectJob::create(&app, extent);
         assert_eq!(
@@ -99,7 +133,7 @@ mod fixtures {
     }
 
     pub(super) fn surface(app: &App, [x, y]: [f64; 2]) -> [f64; 2] {
-        let m = unsafe { &*app.0 }.host.session.state().camera.document_to_surface();
+        let m = app.borrow().host.session.state().camera.document_to_surface();
         let [x, y] = [x as f32, y as f32];
         [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]].map(f64::from)
     }
@@ -120,7 +154,7 @@ mod fixtures {
     }
 
     pub(super) fn selection_bounds(app: &App) -> Option<[f32; 4]> {
-        let session = &unsafe { &*app.0 }.host.session;
+        let session = &app.borrow().host.session;
         session.engine().document().working.selection.as_ref().map(|selection| match &selection.shape {
             layer_core::SelectionShape::Pixels(mask) => mask.bounds().map(|v| v as f32),
             _ => {
@@ -465,14 +499,14 @@ fn property_edits_and_gestures_preserve_exact_metal_history_on_both_platforms() 
     for platform in [0, 1] {
         for target in ["paint", "paper", "gaussian_blur", "split_tone"] {
             let app = App::new(platform);
-            unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(
+            app.borrow().host.session.renderer_mut().0 = Some(
                 native_renderer(),
             );
             app.draw_frame();
             app.stroke();
             app.draw_frame();
             if target == "paper" {
-                let document = unsafe { &*app.0 }.host.session.engine().document();
+                let document = &app.document();
                 let paper = layer_core::paper::paper_occurrence(document.scene(), None).unwrap();
                 let id = layer_ui::occurrence_token(paper);
                 app.action(json!({"type":"select_layer","id":id}));
@@ -561,7 +595,7 @@ fn property_edits_and_gestures_preserve_exact_metal_history_on_both_platforms() 
 fn changing_filter_preview_source_does_not_fail_the_editor_and_can_retry() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_frame();
         app.stroke();
         app.draw_frame();
@@ -578,16 +612,16 @@ fn changing_filter_preview_source_does_not_fail_the_editor_and_can_retry() {
         assert_eq!(changed["pending"], false, "A source change retires its old request");
         assert!(changed["error"].is_null());
         let atlas = unsafe { capy_apple_take_filter_previews(app.0) };
-        assert!(atlas.is_null(), "Stale preview pixels must not be published");
-        assert!(unsafe { capy_apple_error(app.0) }.is_null());
+        assert!((atlas==0), "Stale preview pixels must not be published");
+        assert!((unsafe { capy_apple_error(app.0) }==0));
         let pixels = app.pixels();
-        let revision = unsafe { &*app.0 }.host.session.filter_preview_revision();
+        let revision = app.borrow().host.session.filter_preview_revision();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             app.request(2, query.clone()).unwrap();
             let atlas = unsafe { capy_apple_take_filter_previews(app.0) };
-            assert!(unsafe { capy_apple_error(app.0) }.is_null());
-            if !atlas.is_null() {
+            assert!((unsafe { capy_apple_error(app.0) }==0));
+            if !(atlas==0) {
                 let mut info = std::mem::MaybeUninit::<CapyFilterPreviewInfo>::uninit();
                 unsafe { capy_filter_previews_read(atlas, info.as_mut_ptr()) };
                 assert_eq!(unsafe { info.assume_init() }.request, 2);
@@ -598,7 +632,7 @@ fn changing_filter_preview_source_does_not_fail_the_editor_and_can_retry() {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert_eq!(app.pixels(), pixels, "Preview retry cannot change artwork");
-        assert_eq!(unsafe { &*app.0 }.host.session.filter_preview_revision(), revision);
+        assert_eq!(app.borrow().host.session.filter_preview_revision(), revision);
         app.action(json!({"type":"color", "action":{"op":"definition",
             "color":{"space":"Srgb", "rgba":[1.0,0.0,0.0,1.0]}}}));
         app.stroke();
@@ -614,34 +648,34 @@ fn changing_filter_preview_source_does_not_fail_the_editor_and_can_retry() {
 fn filter_preview_abi_keeps_owned_pixels_after_editor_teardown_without_document_edits() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_frame();
         app.stroke();
         app.draw_frame();
         let before = app.pixels();
-        let revision = unsafe { &*app.0 }.host.session.filter_preview_revision();
+        let revision = app.borrow().host.session.filter_preview_revision();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
         let atlas = loop {
             app.request(2, json!({"type":"filter_previews",
                 "filters":["curves","gradient_map"],"size":[96,40]})).unwrap();
             let atlas = unsafe { capy_apple_take_filter_previews(app.0) };
-            assert!(unsafe { capy_apple_error(app.0) }.is_null());
-            if !atlas.is_null() {
+            assert!((unsafe { capy_apple_error(app.0) }==0));
+            if !(atlas==0) {
                 break atlas;
             }
             assert!(std::time::Instant::now() < end, "GPU preview timed out");
             std::thread::sleep(std::time::Duration::from_millis(2));
         };
         assert_eq!(
-            unsafe { &*app.0 }.host.session.filter_preview_revision(),
+            app.borrow().host.session.filter_preview_revision(),
             revision
         );
         assert_eq!(app.pixels(), before);
         drop(app);
-        let pointer = atlas as usize;
+        let pointer = atlas;
         std::thread::spawn(move || unsafe {
-            let atlas = pointer as *mut CapyFilterPreviews;
+            let atlas = pointer;
             let mut info = std::mem::MaybeUninit::<CapyFilterPreviewInfo>::uninit();
             capy_filter_previews_read(atlas, info.as_mut_ptr());
             let info = info.assume_init();
@@ -656,10 +690,10 @@ fn filter_preview_abi_keeps_owned_pixels_after_editor_teardown_without_document_
                 (1, 96, 80, 384, 30720)
             );
             let filters: Value =
-                serde_json::from_slice(CStr::from_ptr(info.filters).to_bytes()).unwrap();
+                serde_json::from_slice(handles::take_text(info.filters).to_bytes()).unwrap();
             assert_eq!(filters, json!(["curves", "gradient_map"]));
-            let pixels = std::slice::from_raw_parts(info.pixels, info.count);
-            assert!(pixels.chunks_exact(4).any(|p| p[3] != 0));
+            let pixels=copied_bytes(info.count,|offset,output,length|capy_filter_previews_copy(atlas,offset,output,length));
+            assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] != 0));
             capy_filter_previews_free(atlas);
         })
         .join()
@@ -667,7 +701,7 @@ fn filter_preview_abi_keeps_owned_pixels_after_editor_teardown_without_document_
     }
 }
 
-struct ProjectJob(*mut CapyProjectTask);
+struct ProjectJob(u64);
 impl Drop for ProjectJob {
     fn drop(&mut self) {
         unsafe { capy_project_free(self.0) }
@@ -685,7 +719,7 @@ impl ProjectJob {
     }
     fn new(app: &App, opening: bool) -> Self {
         if !opening {
-            let pending: Vec<_> = unsafe { &*app.0 }
+            let pending: Vec<_> = app.borrow()
                 .host
                 .session
                 .state()
@@ -700,18 +734,18 @@ impl ProjectJob {
             app.invoke("save_document");
         }
         let task = unsafe { capy_apple_project_task(app.0, u32::from(opening), std::ptr::null()) };
-        assert!(!task.is_null());
+        assert!(!(task==0));
         Self(task)
     }
     fn error(&self) -> Option<String> {
         let value = unsafe { capy_project_error(self.0) };
-        if value.is_null() {
+        if value==0 {
             None
         } else {
-            let result = unsafe { CStr::from_ptr(value) }
+            let result = handles::take_text(value)
                 .to_string_lossy()
                 .into_owned();
-            unsafe { capy_apple_string_free(value) };
+
             Some(result)
         }
     }
@@ -726,21 +760,21 @@ fn project_jobs_save_specific_revisions_and_adopt_only_unchanged_editors() {
     for platform in [0, 1] {
         let mut file = fixtures::tempfile();
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_frame();
         app.stroke();
         app.draw_frame();
         let original_pixels = app.pixels();
-        let original = unsafe { &*app.0 }.host.session.engine().document().clone();
+        let original = app.document().clone();
         let save = ProjectJob::new(&app, false);
         app.action(json!({"type":"set_layer_opacity","opacity":0.25}));
         app.draw_frame();
-        let pointer = save.0 as usize;
+        let pointer = save.0;
         let fd = file.as_raw_fd();
         assert_eq!(
             std::thread::spawn(move || unsafe {
-                capy_project_write(pointer as *const CapyProjectTask, fd)
+                capy_project_write(pointer, fd)
             })
             .join()
             .unwrap(),
@@ -777,10 +811,10 @@ fn project_jobs_save_specific_revisions_and_adopt_only_unchanged_editors() {
         assert_saved_document(&saved, &original);
         let stale = ProjectJob::new(&app, true);
         file.rewind().unwrap();
-        let pointer = stale.0 as usize;
+        let pointer = stale.0;
         assert_eq!(
             std::thread::spawn(move || unsafe {
-                capy_project_read(pointer as *const CapyProjectTask, fd, c"Drawing.capy".as_ptr())
+                capy_project_read(pointer, fd, c"Drawing.capy".as_ptr())
             })
             .join()
             .unwrap(),
@@ -809,10 +843,10 @@ fn project_jobs_save_specific_revisions_and_adopt_only_unchanged_editors() {
         );
         let open = ProjectJob::new(&app, true);
         file.rewind().unwrap();
-        let pointer = open.0 as usize;
+        let pointer = open.0;
         assert_eq!(
             std::thread::spawn(move || unsafe {
-                capy_project_read(pointer as *const CapyProjectTask, fd, c"Drawing.capy".as_ptr())
+                capy_project_read(pointer, fd, c"Drawing.capy".as_ptr())
             })
             .join()
             .unwrap(),
@@ -875,7 +909,7 @@ fn project_cancellation_and_invalid_input_preserve_live_artwork() {
     for platform in [0, 1] {
         let mut file = fixtures::tempfile();
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_frame();
         app.stroke();
@@ -936,10 +970,10 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
     };
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_frame();
-        let initial = unsafe { &*app.0 }.host.session.engine().document().composition().size;
+        let initial = app.document().composition().size;
         let unordered = ProjectJob::new(&app, true);
         assert_eq!(unsafe { capy_project_new(unordered.0) }, -1);
         assert!(unordered.error().is_some());
@@ -950,18 +984,18 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
         assert_eq!(app.state()["new_drawing"]["can_create"], false);
         assert!(app.try_request(0, &json!({"type": "new_drawing", "action": {"op": "create"}})).is_err());
         assert!(!app.state()["new_drawing"].is_null(), "A refused Create keeps the dialog open");
-        assert_eq!(unsafe { &*app.0 }.host.session.engine().document().composition().size, initial);
+        assert_eq!(app.document().composition().size, initial);
         let new = ProjectJob::create(&app, [63, 47]);
         assert_eq!(
             unsafe { capy_apple_project_adopt(app.0, new.0, c"Untitled".as_ptr(), c"".as_ptr()) },
             0
         );
         assert_eq!(
-            unsafe { &*app.0 }.host.session.engine().document().composition().size[0],
+            app.document().composition().size[0],
             63
         );
         assert_eq!(
-            unsafe { &*app.0 }.host.session.engine().document().composition().size[1],
+            app.document().composition().size[1],
             47
         );
         app.action(json!({"type":"set_color","rgba":[0.8,0.2,0.5,0.6]}));
@@ -971,7 +1005,7 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
         app.stroke();
         app.draw_frame();
         let expected = app.pixels();
-        assert!(expected.chunks_exact(4).any(|p| p != [255; 4]), "Export must include actual ink");
+        assert!(expected.as_chunks::<4>().0.iter().any(|p| *p != [255; 4]), "Export must include actual ink");
         app.invoke("export_document");
         let id = app.state()["requests"]
             .as_array()
@@ -981,7 +1015,7 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
             .unwrap()["id"]
             .as_u64()
             .unwrap() as u32;
-        let mut pointer = std::ptr::null_mut();
+        let mut pointer=0;
         assert_eq!(
             unsafe { capy_apple_export_task(app.0, id, 2_000_000_000, &mut pointer) },
             1
@@ -1016,7 +1050,7 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
         // narrows through the display cache.
         assert_eq!(pixels.len(), expected.len());
         assert!(pixels.iter().zip(&expected).all(|(&a, &b)| a.abs_diff(b) <= 1));
-        assert!(pixels.chunks_exact(4).zip(expected.chunks_exact(4)).all(|(a, b)| a[3] == b[3]));
+        assert!(pixels.as_chunks::<4>().0.iter().zip(expected.as_chunks::<4>().0.iter()).all(|(a, b)| a[3] == b[3]));
         drop(reader);
         drop(file);
     }
@@ -1026,16 +1060,17 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
 fn custom_catalog_load_preserves_document_filters() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.action(json!({"type":"effect","action":{"op":"insert","effect":"unsharp_mask"}}));
         app.draw_frame();
-        let before = unsafe { &*app.0 }.host.session.engine().document().clone();
-        let checkpoint = unsafe { &*app.0 }.host.session.engine().document().revision;
+        let before = app.document().clone();
+        let checkpoint = app.document().revision;
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../examples/filters/tent-blur");
         let manifest = std::fs::read_to_string(directory.join("manifest.json")).unwrap();
-        let host = &mut unsafe { &mut *app.0 }.host;
+        app.with(|native| {
+        let host = &mut native.host;
         let change = host.session.load_effect_package(
             &manifest,
             |name| std::fs::read_to_string(directory.join(name))
@@ -1043,6 +1078,7 @@ fn custom_catalog_load_preserves_document_filters() {
             layer_core::EffectInstallMode::Add,
         ).unwrap();
         host.dirty |= change.canvas_wake;
+        });
         assert_eq!(unsafe { capy_apple_project_ready(app.0) }, 1);
         let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while app.state()["filter_load"]["pending"] == true {
@@ -1051,9 +1087,9 @@ fn custom_catalog_load_preserves_document_filters() {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert_eq!(unsafe { capy_apple_project_ready(app.0) }, 0);
-        assert_eq!(unsafe { &*app.0 }.host.session.engine().document(), &before);
+        assert_eq!((&app.document()), &before);
         assert_eq!(
-            unsafe { &*app.0 }.host.session.engine().document().revision,
+            app.document().revision,
             checkpoint
         );
     }
@@ -1105,7 +1141,7 @@ fn application_menu_actions_change_real_pixels_on_both_apple_platforms() {
     }
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_until_idle();
         app.stroke();
@@ -1154,23 +1190,22 @@ impl App {
     fn new(platform: u32) -> Self {
         layer_core::temp_files::set_directory(std::env::temp_dir()).unwrap();
         let app = Self(capy_apple_create(platform));
-        assert!(!app.0.is_null());
+        assert!(!(app.0==0));
         assert_eq!(unsafe { capy_apple_resize(app.0, 1200, 900, 1.) }, 0);
         app
     }
     fn try_request(&self, kind: u32, value: &Value) -> Result<Option<Value>, String> {
         let text = CString::new(value.to_string()).unwrap();
         let result = unsafe { capy_apple_request(self.0, kind, text.as_ptr()) };
-        let reply = (!result.is_null()).then(|| {
-            let reply = serde_json::from_slice(unsafe { CStr::from_ptr(result) }.to_bytes()).unwrap();
-            unsafe { capy_apple_string_free(result) };
-            reply
+        let reply = (!(result==0)).then(|| {
+
+            serde_json::from_slice(handles::take_text(result).to_bytes()).unwrap()
         });
         let error = unsafe { capy_apple_error(self.0) };
-        if error.is_null() {
+        if error==0 {
             Ok(reply)
         } else {
-            Err(unsafe { CStr::from_ptr(error) }.to_string_lossy().into_owned())
+            Err(handles::take_text(error).to_string_lossy().into_owned())
         }
     }
     fn request(&self, kind: u32, value: Value) -> Option<Value> {
@@ -1178,7 +1213,7 @@ impl App {
             .unwrap_or_else(|error| panic!("request {kind} {value}: {error}"))
     }
     fn full_snapshot(&self) -> Value {
-        unsafe { (*self.0).host.invalidate_snapshot() };
+        self.borrow().host.invalidate_snapshot();
         self.request(7, Value::Null).unwrap()
     }
     fn action(&self, action: Value) {
@@ -1218,10 +1253,10 @@ impl App {
         if command == "scale_rotate" { self.draw_until_transform(); }
     }
     fn state(&self) -> Value {
-        serde_json::to_value(unsafe { &*self.0 }.host.session.state()).unwrap()
+        serde_json::to_value(self.borrow().host.session.state()).unwrap()
     }
     fn draw_frame(&self) {
-        let app = unsafe { &mut *self.0 };
+        let mut lease_app=self.borrow();let app=&mut *lease_app;
         app.host
             .prepare_canvas_frame(2_000_000_000, 2_000_000_000, true)
             .unwrap();
@@ -1242,9 +1277,10 @@ impl App {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             self.draw_frame();
-            let session = &unsafe { &*self.0 }.host.session;
+            let native=self.borrow();
+            let session = &native.host.session;
             let engine = session.engine();
-            if unsafe { &*self.0 }.host.startup.brush_ready
+            if native.host.startup.brush_ready
                 && !engine.backend().0.as_ref().unwrap().startup_needs_update(
                     engine.document(), engine.brush(), engine.transform_preview().is_some())
                 && (if active_operation { session.document_idle_reason() != Some(layer_ui::DocumentIdleReason::CanvasInteraction) }
@@ -1324,7 +1360,8 @@ impl App {
         );
     }
     fn pixels(&self) -> Vec<u8> {
-        let renderer = unsafe { &mut *self.0 }
+        let mut native=self.borrow();
+        let renderer = native
             .host
             .session
             .renderer_mut()
@@ -1344,7 +1381,7 @@ impl Drop for App {
 fn apple_raster_project_preserves_exact_pixels_in_a_fresh_gpu_session() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_frame();
         let paper = app.pixels();
@@ -1385,13 +1422,13 @@ fn apple_raster_project_preserves_exact_pixels_in_a_fresh_gpu_session() {
         app.layer_action(json!({"op":"select","id":id,"mask":false}));
         let expected = app.pixels();
         assert!(expected != paper, "Fixture must contain visible artwork");
-        let source = unsafe { &*app.0 };
-        let engine = source.host.session.engine();
-        let selected = layer_ui::occurrence_handle(id).unwrap();
-        let occurrence_id = engine.document().artwork.occurrences.id(selected).unwrap();
-        let mask_handle = engine.document().scene().mask(selected).unwrap().0.source;
-        let mask_id = engine.document().artwork.coverage.id(mask_handle).unwrap();
-        let original = engine.capture_artwork(0).unwrap();
+        let (occurrence_id,mask_handle,mask_id,original,policy)=app.with(|source| {
+            let engine=source.host.session.engine();
+            let selected=layer_ui::occurrence_handle(id).unwrap();
+            let mask=engine.document().scene().mask(selected).unwrap().0.source;
+            (engine.document().artwork.occurrences.id(selected).unwrap(),mask,
+                engine.document().artwork.coverage.id(mask).unwrap(),engine.capture_artwork(0).unwrap(),source.host.session.state().platform)
+        });
         assert!(original.artwork.paint.iter().any(|(_, _, source)| source.base.is_some()),
             "The imported original stays retained alongside edited raster pixels");
         let coverage = raster_samples(&original.artwork.coverage.get(mask_handle).unwrap().raster).0;
@@ -1409,11 +1446,11 @@ fn apple_raster_project_preserves_exact_pixels_in_a_fresh_gpu_session() {
         assert_eq!(raster_samples(&document.artwork.coverage.get(restored_mask).unwrap().raster).0, coverage);
         let gpu = native_renderer();
         let restored = App::new(platform);
-        let host = &mut unsafe { &mut *restored.0 }.host;
-        *host.session =
-            layer_ui::UiSession::new(layer_host::Renderer(Some(gpu.into())), document, [1200, 900], source.host.session.state().platform)
-                .unwrap();
-        host.resize(1200, 900, 1.).unwrap();
+        restored.with(|native| {
+            let host=&mut native.host;
+            *host.session=layer_ui::UiSession::new(layer_host::Renderer(Some(gpu)),document,[1200,900],policy).unwrap();
+            host.resize(1200,900,1.).unwrap();
+        });
         restored.action(json!({"type":"select_layer","id":layer_ui::occurrence_token(restored_occurrence)}));
         restored.draw_until_idle();
         assert!(
@@ -1502,7 +1539,7 @@ fn apple_paint_undo_redo_restores_exact_document_pixels() {
         let app = App::new(platform);
         // A real hardware renderer with no window: these are document/output
         // checks, not display timing or native physical-input acceptance.
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.action(json!({"type": "set_color", "rgba": [0,0,0,1]}));
         app.action(json!({"type": "set_brush_size", "value": 32}));
@@ -1541,12 +1578,12 @@ fn staged_paper_preserves_pending_ink_and_reaches_brush_readiness() {
             Default::default(),
         )
         .unwrap();
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(reference.into());
+        app.borrow().host.session.renderer_mut().0 = Some(reference);
         app.action(json!({"type": "set_color", "rgba": [0,0,0,1]}));
         // Accepted engine work must survive the first paper-only submission.
         app.stroke();
         {
-            let host = &mut unsafe { &mut *app.0 }.host;
+            let host = &mut app.borrow().host;
             host.session.renderer_mut().0 = Some(staged.into());
             host.startup = Default::default();
             host.prepare_canvas_frame(2_000_000_000, 2_000_000_000, false)
@@ -1559,10 +1596,12 @@ fn staged_paper_preserves_pending_ink_and_reaches_brush_readiness() {
         assert!((app.state()["brush"]["opacity"].as_f64().unwrap() - 0.4).abs() < 0.00001);
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
-            let host = &mut unsafe { &mut *app.0 }.host;
-            host.prepare_canvas_frame(2_100_000_000, 2_100_000_000, true)
-                .unwrap();
-            if host.startup.brush_ready && app.pixels() != paper {
+            let ready=app.with(|native| {
+                let host=&mut native.host;
+                host.prepare_canvas_frame(2_100_000_000,2_100_000_000,true).unwrap();
+                host.startup.brush_ready
+            });
+            if ready && app.pixels() != paper {
                 break;
             }
             assert!(
@@ -1585,7 +1624,7 @@ fn image_import_changes_gpu_pixels_is_undoable_and_produces_a_thumbnail() {
     use std::time::{Duration, Instant};
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_until_idle();
         let paper = app.pixels();
@@ -1604,7 +1643,7 @@ fn image_import_changes_gpu_pixels_is_undoable_and_produces_a_thumbnail() {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut waiting = vec![json!([99, id])];
         let mut images = Vec::new();
-        while images.len() < 1 {
+        while images.is_empty() {
             assert!(Instant::now() < deadline, "Thumbnail readback timed out");
             let reply = app
                 .request(2, json!({"type":"layer_thumbnails","requests":waiting}))
@@ -1668,7 +1707,7 @@ fn stateless_color_editors_preserve_tagged_precision_and_convert_previews() {
 fn stateless_numeric_input_uses_shared_policy_without_a_session() {
     let launch = CString::new(json!({"saved":"", "preferred_languages":["en"]}).to_string()).unwrap();
     let prepared = App(unsafe { launch_json(0, launch.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) });
-    assert!(!prepared.0.is_null());
+    assert!(!(prepared.0==0));
     let control = serde_json::to_value(layer_ui::ui_catalog()).unwrap()["layer_opacity"].clone();
     let resolve = |operation| localized_stateless(capy_apple_numeric,
         json!({"control":control,"value":1.,"operation":operation}).to_string());
@@ -1724,7 +1763,7 @@ fn apple_ruler_toggles_flip_their_checkable_commands() {
 fn apple_transform_settings_and_actions_preserve_pixel_transactions() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_until_idle();
         app.stroke();
@@ -1826,7 +1865,7 @@ fn apple_color_hit_classifies_wheel_parts() {
 fn apple_color_actions_change_real_paint_and_transparent_eraser_pixels() {
     for platform in [0, 1] {
         let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
+        app.borrow().host.session.renderer_mut().0 =
             Some(native_renderer());
         app.action(json!({"type":"set_color","rgba":[1,0,0,1]}));
         let brush = app.state()["brush"].clone();
@@ -1836,7 +1875,7 @@ fn apple_color_actions_change_real_paint_and_transparent_eraser_pixels() {
         let painted = app.pixels();
         let reds = |pixels: &[u8]| {
             pixels
-                .chunks_exact(4)
+                .as_chunks::<4>().0.iter()
                 .filter(|p| p[0] > 200 && p[1] < 50 && p[2] < 50)
                 .count()
         };
@@ -1865,15 +1904,15 @@ fn apple_launch_resolves_saved_preference_before_native_session() {
         let saved = json!({"language": {"Explicit": "en"}}).to_string();
         let source = CString::new(json!({"saved": saved, "preferred_languages": ["ja-JP", "ko-KR", "en-US"]}).to_string()).unwrap();
         let app = App(unsafe { launch_json(platform, source.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) });
-        assert!(!app.0.is_null());
-        let localization = unsafe { (*app.0).host.session.localization().clone() };
+        assert!(!(app.0==0));
+        let localization = app.borrow().host.session.localization().clone();
         assert_eq!(localization.language(), layer_ui::UiLanguage::English);
         let bootstrap = app.request(2, json!({"type": "bootstrap"})).unwrap();
         assert_eq!(bootstrap["active_tag"], "en");
         assert_eq!(bootstrap["shipped_tags"], json!(layer_ui::localization::SHIPPED_LANGUAGES.iter().map(|language| language.tag()).collect::<Vec<_>>()));
         assert_eq!(bootstrap["preparing_canvas"], localization.text(layer_ui::MessageId::COMMON_PREPARING_CANVAS).as_ref());
         app.action(json!({"type": "restore_saved_settings", "saved": "{\"language\":{\"Explicit\":\"ja\"}}"}));
-        assert!(std::sync::Arc::ptr_eq(&localization, unsafe { (*app.0).host.session.localization() }));
+        assert!(std::sync::Arc::ptr_eq(&localization, &app.with(|native|native.host.session.localization().clone())));
     }
 }
 
@@ -1886,18 +1925,18 @@ fn apple_launch_rejects_invalid_transport_without_a_session() {
         (0, malformed.as_ptr(), "missing field `saved`"),
         (9, valid.as_ptr(), "Unknown Apple platform 9"),
     ] {
-        let mut error = std::ptr::null_mut();
-        assert!(unsafe { launch_json(platform, source, std::ptr::null_mut(), &mut error) }.is_null());
-        assert!(!error.is_null());
-        let diagnostic = unsafe { CStr::from_ptr(error) }.to_str().unwrap();
+        let mut error = 0;
+        assert!((unsafe { launch_json(platform, source, std::ptr::null_mut(), &mut error) }==0));
+        assert!(!(error==0));
+        let diagnostic=handles::take_text(error).into_string().unwrap();
         assert!(diagnostic.starts_with("Session launch:"), "{diagnostic}");
         assert!(diagnostic.contains(expected), "{diagnostic}");
-        unsafe { capy_apple_string_free(error) };
+
     }
-    let mut error = std::ptr::dangling_mut();
+    let mut error = 7;
     let app = App(unsafe { launch_json(0, valid.as_ptr(), std::ptr::null_mut(), &mut error) });
-    assert!(!app.0.is_null());
-    assert!(error.is_null());
+    assert!(!(app.0==0));
+    assert_eq!(error,0);
 }
 
 #[test]
@@ -1905,7 +1944,7 @@ fn apple_native_boundaries_preserve_panic_diagnostics() {
     let result: Result<(), String> = on_large_stack("capy-diagnostic", || panic!("worker detail"));
     assert_eq!(result.unwrap_err(), "Native operation panicked: worker detail");
     let app = App::new(0);
-    let native = unsafe { &mut *app.0 };
+    let mut lease_native=app.borrow();let native=&mut *lease_native;
     assert!(native.perform::<()>(|a| a.gpu_operation(|_| panic!("renderer detail"))).is_none());
     assert_eq!(native.error.as_ref().unwrap().to_str().unwrap(), "Native operation panicked: renderer detail");
     assert!(native.perform(|_| Ok(())).is_none());
@@ -1918,8 +1957,8 @@ fn apple_launch_configuration_passes_the_display_to_the_startup_sheet() {
     let source = CString::new(json!({"saved":"", "preferred_languages":["en"], "screen":{"extent":[2880,1800],"ppi":220}}).to_string()).unwrap();
     for platform in [0, 1] {
         let app = App(unsafe { launch_json(platform, source.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) });
-        assert!(!app.0.is_null());
-        let document = unsafe { (*app.0).host.session.engine().document() };
+        assert!(!(app.0==0));
+        let document=app.document();
         assert_eq!(document.composition().size, [2400, 1800]);
         assert_eq!(document.composition().resolution, Some(layer_core::ImageResolution::ppi(220)));
     }
@@ -1929,16 +1968,16 @@ fn apple_launch_configuration_passes_the_display_to_the_startup_sheet() {
 fn apple_launch_prepared_context_survives_restore_and_invalid_platform_keeps_bootstrap_copy() {
     let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese);
     let app = App(apple_launch_localized(1, "", localization.clone()).unwrap());
-    assert!(!app.0.is_null());
+    assert!(!(app.0==0));
     app.action(json!({"type": "restore_saved_settings", "saved": "{\"language\":{\"Explicit\":\"en\"}}"}));
-    assert!(std::sync::Arc::ptr_eq(&localization, unsafe { (*app.0).host.session.localization() }));
+    assert!(std::sync::Arc::ptr_eq(&localization, &app.with(|native|native.host.session.localization().clone())));
     assert_eq!(app.request(2, json!({"type": "bootstrap"})).unwrap()["active_tag"], "ja");
     let source = CString::new(r#"{"saved":"","preferred_languages":["en"]}"#).unwrap();
-    let mut bootstrap = std::ptr::null_mut();
-    assert!(unsafe { launch_json(9, source.as_ptr(), &mut bootstrap, std::ptr::null_mut()) }.is_null());
-    assert!(!bootstrap.is_null());
-    let view: Value = serde_json::from_slice(unsafe { CStr::from_ptr(bootstrap) }.to_bytes()).unwrap();
-    unsafe { capy_apple_string_free(bootstrap) };
+    let mut bootstrap = 0;
+    assert!((unsafe { launch_json(9, source.as_ptr(), &mut bootstrap, std::ptr::null_mut()) }==0));
+    assert!(!(bootstrap==0));
+    let view: Value = serde_json::from_slice(handles::take_text(bootstrap).to_bytes()).unwrap();
+
     assert_eq!(view["canvas_init_failed"], "Could not initialize canvas");
     assert_eq!(view["canvas_ready"], "Canvas ready");
 }
@@ -1965,10 +2004,10 @@ fn apple_language_publication_is_atomic_deferred_and_window_local() {
         let begin = |language: &str| {
             app.action(json!({"type":"restore_saved_settings", "saved":json!({"language":{"Explicit":language}}).to_string()}));
             let task = unsafe { capy_apple_language_request(app.0, c"[\"en\"]".as_ptr()) };
-            assert!(!task.is_null());
+            assert!(!(task==0));
             task
         };
-        let document = unsafe { (*app.0).host.session.engine().document().revision };
+        let document = app.borrow().host.session.engine().document().revision;
         let epoch = app.state()["document_file"]["epoch"].clone();
         let camera = app.state()["camera"].clone();
         let old = begin("ja");
@@ -1980,9 +2019,9 @@ fn apple_language_publication_is_atomic_deferred_and_window_local() {
         unsafe { capy_language_free(latest) };
         assert_eq!(unsafe { capy_apple_language_publish(app.0, true) }, 0);
         assert_eq!(app.request(2, json!({"type":"bootstrap"})).unwrap()["active_tag"], "en");
-        unsafe { (*app.0).chrome_facts.held = true };
+        app.borrow().chrome_facts.held = true;
         assert_eq!(unsafe { capy_apple_language_publish(app.0, false) }, 0);
-        unsafe { (*app.0).chrome_facts.held = false };
+        app.borrow().chrome_facts.held = false;
         assert_eq!(unsafe { capy_apple_language_publish(app.0, false) }, 1);
         let snapshot = app.request(7, Value::Null).unwrap();
         assert_eq!(snapshot["bootstrap"]["active_tag"], "ko");
@@ -1990,7 +2029,7 @@ fn apple_language_publication_is_atomic_deferred_and_window_local() {
         assert!(snapshot["catalog"]["native_copy"].is_object());
         assert_eq!(snapshot["state"]["document_file"]["epoch"], epoch);
         assert_eq!(snapshot["state"]["camera"], camera);
-        assert_eq!(unsafe { (*app.0).host.session.engine().document().revision }, document);
+        assert_eq!(app.borrow().host.session.engine().document().revision, document);
         assert_eq!(other.request(2, json!({"type":"bootstrap"})).unwrap()["active_tag"], "en");
         let title = "user 日本語 🖌";
         for language in [layer_ui::UiLanguage::English, layer_ui::UiLanguage::Korean] {
@@ -2006,7 +2045,7 @@ fn apple_launch_uses_each_scene_settings_instead_of_first_process_language() {
     for (platform, language) in [(0, "ja"), (1, "ko"), (0, "en")] {
         let source = CString::new(json!({"saved":json!({"language":{"Explicit":language}}).to_string(),"preferred_languages":["en"]}).to_string()).unwrap();
         let app = App(unsafe { launch_json(platform, source.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) });
-        assert!(!app.0.is_null());
+        assert!(!(app.0==0));
         assert_eq!(app.request(2, json!({"type":"bootstrap"})).unwrap()["active_tag"], language);
     }
 }

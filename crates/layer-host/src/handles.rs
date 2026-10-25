@@ -1,6 +1,8 @@
 use std::{any::{Any, TypeId}, cell::RefCell, collections::BTreeMap, fmt,
     ops::{Deref,DerefMut},
     sync::{Arc, Mutex, OnceLock, TryLockError}, thread::{self, ThreadId}};
+mod local;
+pub use local::{LocalLease,LocalBorrowed};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Handle(u64);

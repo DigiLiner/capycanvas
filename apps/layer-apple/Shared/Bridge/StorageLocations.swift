@@ -38,11 +38,11 @@ struct StorageLocations: Sendable {
 
     private static func resolve(_ request: [String: Any]) throws -> StorageLocations {
         let text = try JSON(request).encoded()
-        guard let pointer = text.withCString({ capy_apple_storage($0) }) else {
+        guard let pointer = text.withCString({ takeNativeText(capy_apple_storage($0)) }) else {
             throw HostFailure(message: "App storage is unavailable")
         }
-        defer { capy_apple_string_free(pointer) }
-        let value = try JSON.decode(String(cString: pointer))
+
+        let value = try JSON.decode(pointer)
         if !value["error"].isNull { throw HostFailure(message: value["error"].string) }
         func location(_ key: String, _ hint: URL.DirectoryHint = .isDirectory) -> URL {
             URL(filePath: value[key].string, directoryHint: hint)
