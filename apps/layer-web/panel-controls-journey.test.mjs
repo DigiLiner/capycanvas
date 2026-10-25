@@ -58,6 +58,8 @@ export async function checkPanelControls({call,evaluate,settle}) {
     if(selector==='.effect-properties'){
       const gaps=await evaluate(`(()=>{const root=document.querySelector('.effect-properties'),heading=root.querySelector('h3'),metadata=root.querySelector('.properties-header'),following=[...root.children].find(n=>n!==heading&&n!==metadata&&n.checkVisibility()&&n.getBoundingClientRect().height>0);return metadata.checkVisibility()?{afterHeading:metadata.getBoundingClientRect().top-heading.getBoundingClientRect().bottom,beforeControls:following?.getBoundingClientRect().top-metadata.getBoundingClientRect().bottom}:null})()`);
       if(gaps){near(gaps.afterHeading,4,`${name} heading-after gap`);near(gaps.beforeControls,6,`${name} metadata/control group gap`);}
+      const addFilter=await evaluate(`(n=>n.checkVisibility()?n.getBoundingClientRect().width:null)(document.querySelector('#properties-add-filter'))`);
+      if(addFilter!=null)assert.equal(addFilter,Math.ceil(addFilter),`${name} Add Filter rounds its natural width up to a whole pixel like GTK`);
     }
     if(selector==='.tool-settings-control'){
       const booleans=await evaluate(`(()=>{const root=document.querySelector('.tool-settings-control');return layerApp.state().tool_actions.filter(a=>a.checkable&&!a.group).map(a=>{const row=root.querySelector('[data-tool-action="'+a.command+'"]'),input=row?.querySelector('input[type=checkbox]'),command=layerApp.state().commands.find(c=>c.id===a.command);return{id:a.command,checkbox:!!input,visible:input?.checkVisibility()??false,checked:input?.checked,selected:command.selected,disabled:input?.disabled,enabled:command.enabled,height:row?.getBoundingClientRect().height}})})()`);

@@ -67,11 +67,11 @@ left-to-right position, with brighter values toward the top; it initially shows
 RGB. Histogram shows how often each value occurs.
 
 Source and channel selectors occupy one toolbar above the graph. Log counts
-changes Histogram's height or Waveform's trace brightness; its toggle and
-clipping buttons sit beside the status below the graph. The toggle and its
-caption share a 26-pixel target. Status and axis labels use secondary text at
-55% opacity. The graph's tooltip
-contains detailed counts. In floating documents, Waveform includes nonpositive
+changes Histogram's height or Waveform's trace brightness. Its toggle has its
+own row below the graph, so a translated caption wraps instead of crowding the
+status and clipping buttons beneath it. The toggle and its caption share a
+26-pixel target. Status and axis labels use secondary text at 55% opacity.
+The graph's tooltip contains detailed counts. In floating documents, Waveform includes nonpositive
 values on its bottom rail. Its scale labels overlay the graph so the trace uses
 the full panel width.
 

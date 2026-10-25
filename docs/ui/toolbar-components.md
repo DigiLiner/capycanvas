@@ -122,7 +122,8 @@ the label/icon outside the value field. Editing stays within the same footprint;
 a tap outside accepts valid text and ends editing. Inputs and dropdowns use the
 panel controls' typography and colors. Horizontal values reserve a fixed width
 from the numeric range, signs, fractional boundaries and units, measured in the
-native font; changing a value or entering an expression never shifts its neighbors.
+native font and rounded up to a whole pixel; the value and its editor are centred
+in it. Changing a value or entering an expression never shifts its neighbors.
 Double-click a numeric label (or its
 horizontal icon) to reset that setting to its tool/preset default. Icon mode
 keeps horizontal dropdown labels readable. Vertical

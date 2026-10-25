@@ -48,6 +48,7 @@ export function createEditorPanels({ selectionUi, app, rasterWorker:fieldWorker,
             const node = button("", () => dispatch(item.action), "tool-choice-button");
             node.bubbleChoice = item.action;
             if(app.bubble_grab({type:'choice',action:item.action}))node.dataset.bubbleSource='';
+            if(item.action.type==='color_picker')node.dataset.pickerStyle='';
             let image;
             if (item.preview != null) {
               image = element("img", "brush-preview"); image.alt = ""; image.draggable = false;

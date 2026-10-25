@@ -222,9 +222,12 @@ choice labels invalidate their intrinsic measurement copy when they change;
 plot publications and control values retain that copy. Scope graphs use the
 available panel space while their controls keep their measured height. Their
 raster follows the actual graph bounds; intrinsic copies keep the natural plot
-height. Log counts keeps a label target at the panel control height. Secondary status, axis and
-layer metadata use one color derived from the published text at 55% opacity.
-Toolbar and canvas bar fitting round widget widths up to whole pixels, so text never truncates and the tiles after it stay on the pixel grid. `histogram.js` retains
+height. Log counts has its own row above the status, with a label target at the panel control
+height. Secondary status, axis and layer metadata use one color derived from the published text
+at 55% opacity.
+Toolbar and canvas bar fitting round widget widths up to whole pixels, so text never truncates and the tiles after it stay on the pixel grid.
+Toolbar number captions and value widths and Add Filter also round up, as GTK labels do, through
+CSS `calc-size()`; browsers without it keep fractional widths. `histogram.js` retains
 the native canvases; Properties updates their embedded plots without replacing
 focused numeric fields. Calibration, Auto Levels and targeted Curves edits use
 shared actions and the existing canvas pointer path.

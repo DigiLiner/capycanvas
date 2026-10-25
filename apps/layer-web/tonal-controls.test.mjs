@@ -126,7 +126,7 @@ export async function checkTonalControls({call,evaluate,settle}) {
     }
     if(effect==='curves'&&enabled('focus')){
       const v=await view();await send({type:'effect',action:{op:'select_page',layer:v.layer,page:'rgb'}});await ready();
-      const p=await evaluate(`(()=>{const r=document.querySelector('.curve-editor').getBoundingClientRect();return{x:r.x+r.width*.4,y:r.y+r.height*.45}})()`);
+      const p=await evaluate(`(()=>{const n=document.querySelector('.curve-editor');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width*.4,y:r.y+r.height*.45}})()`);
       for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...p,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});await ready();
       const before=await checkpoint();
       await press('[data-curve-axis="input"] .number-value');

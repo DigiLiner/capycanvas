@@ -46,8 +46,8 @@ for(const waveform of [false,true]) test(`${waveform?'Waveform':'Histogram'} lat
   };
   let scope,cached,invalidations=0;
   const snapshot=()=>{
-    const [toolbar,graph,footer]=scope.node.children;
-    return {sources:toolbar.children[0].children.map(node=>node.textContent),channels:toolbar.children[1].children.map(node=>node.textContent),axis:graph.children[1].children.map(node=>node.textContent),status:footer.children[0].textContent,log:footer.children[1].children[1].textContent};
+    const [toolbar,graph,log,footer]=scope.node.children;
+    return {sources:toolbar.children[0].children.map(node=>node.textContent),channels:toolbar.children[1].children.map(node=>node.textContent),axis:graph.children[1].children.map(node=>node.textContent),status:footer.children[0].textContent,log:log.children[1].textContent};
   };
   scope=createScope({state:()=>h.state,app:{catalog:()=>({native_copy:{sampler:{source:'Source'},color:{channel:'Channel'}}})},element,button:()=>element('button'),icon:()=>element('svg'),dispatch:()=>assert.fail('Refreshing copy must not dispatch'),waveform,contentChanged:()=>{invalidations++;cached=snapshot();}});
   scope.refresh();cached=snapshot();const initial=invalidations;

@@ -55,8 +55,11 @@ Sketch's Brush and Sculpt retain their three-column drawers. Tool Options uses
 the same complete projection through More tool options.
 
 Tool Set category buttons fill their grid cells, so hover, selection and input
-cover the whole category. A thin horizontal divider separates categories from
-tools when both are shown, using the toolbar's inset separator style.
+cover the whole category. Tool rows keep the icon at the leading edge and
+right-align the name, as brush rows do; only the Color Picker and Eyedropper
+styles keep the name beside the icon. A thin horizontal divider separates
+categories from tools when both are shown, using the toolbar's inset separator
+style.
 GTK tool and filter rows keep their full preview and caption height when the
 panel has room. Shorter panels bring the caption into the preview area before
 scrolling, reducing row height by about a quarter. Every part of a tool row

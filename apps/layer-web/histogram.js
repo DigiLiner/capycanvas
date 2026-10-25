@@ -30,13 +30,10 @@ export function scopeGraph({state,element,kind,waveform=false}) {
   return {node:canvas,refresh,dispose:()=>observer.disconnect()};
 }
 
-export function scopeFooter({state,element,button,icon,dispatch,kind,logarithmic=false}) {
+export function scopeFooter({state,element,button,icon,dispatch,kind}) {
   const send=action=>dispatch({type:'histogram',action});
   const node=element('div','scope-footer'),status=element('span','dim'),clipping=element('div','scope-clipping');
   status.dataset.scopeControl='status';node.append(status);
-  const log=element('input'),text=element('span');log.type='checkbox';log.dataset.scopeControl='log';
-  if(logarithmic) {const label=element('label','scope-log');label.append(log,text);node.append(label);}
-  log.onchange=()=>send({type:kind==='waveform'?'waveform_logarithmic':'logarithmic',enabled:log.checked});
   for(const name of ['shadows','highlights']) {
     const control=button('',()=>send({type:name,enabled:!state().histogram[name]}));
     control.dataset.scopeControl=name;control.append(icon(`tonal-${name}`));clipping.append(control);
@@ -44,7 +41,7 @@ export function scopeFooter({state,element,button,icon,dispatch,kind,logarithmic
   node.append(clipping);
   return {node,refresh(){
     const view=state()[kind];if(!view)return;
-    status.textContent=status.title=view.status;log.checked=view.logarithmic;text.textContent=view.labels[0]??'';
+    status.textContent=status.title=view.status;
     [...clipping.children].forEach((control,i)=>{
       const name=control.dataset.scopeControl;control.title=state().histogram.labels[i+1]??'';
       control.setAttribute('aria-label',control.title);control.setAttribute('aria-pressed',String(state().histogram[name]));
@@ -63,8 +60,11 @@ export function createScope(options) {
   channel.onchange=()=>dispatch({type:'histogram',action:{type:waveform?'waveform_channel':'channel',index:Number(channel.value)}});
   toolbar.append(source,channel);toolbar.hidden=tonal;
   const graph=element('div','scope-graph'),axis=element('div','scope-axis'),lower=element('span'),upper=element('span');
-  const plot=scopeGraph({state,element,kind,waveform}),footer=scopeFooter({...options,kind,logarithmic:!tonal});
-  axis.append(lower,upper);graph.append(plot.node,axis);root.append(toolbar,graph,footer.node);
+  const log=element('label','scope-log'),logToggle=element('input'),logText=element('span');
+  logToggle.type='checkbox';logToggle.dataset.scopeControl='log';log.append(logToggle,logText);log.hidden=tonal;
+  logToggle.onchange=()=>dispatch({type:'histogram',action:{type:waveform?'waveform_logarithmic':'logarithmic',enabled:logToggle.checked}});
+  const plot=scopeGraph({state,element,kind,waveform}),footer=scopeFooter({...options,kind});
+  axis.append(lower,upper);graph.append(plot.node,axis);root.append(toolbar,graph,log,footer.node);
   const choices=(select,labels,index)=>{
     const key=JSON.stringify(labels);
     if(select.dataset.schema!==key){select.dataset.schema=key;select.replaceChildren(...labels.map((label,i)=>{const option=element('option','',label);option.value=i;return option;}));}
@@ -76,7 +76,8 @@ export function createScope(options) {
     choices(source,view.sources,view.source);choices(channel,view.channels,view.channel);
     source.title=copy.sampler.source;source.setAttribute('aria-label',source.title);
     channel.title=copy.color.channel;channel.setAttribute('aria-label',channel.title);
-    [lower.textContent,upper.textContent]=view.axis;plot.refresh();footer.refresh();
+    [lower.textContent,upper.textContent]=view.axis;logToggle.checked=view.logarithmic;logText.textContent=view.labels[0]??'';
+    plot.refresh();footer.refresh();
     const next=JSON.stringify([view.sources,view.channels,view.axis,view.status,view.labels[0]]);
     if(next!==intrinsic){intrinsic=next;options.contentChanged?.();}
   }};

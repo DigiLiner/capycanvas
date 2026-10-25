@@ -134,6 +134,10 @@ export async function checkToolbarComponents({ call, evaluate, settle }) {
   for (const size of [.5, 31.9, 32, 2048]) {
     await send({ type: 'set_tool_setting', id: 'size', value: size });
     assert.deepEqual(await rect(value), initial, 'fixed numeric width');
+    const field = await evaluate(`(()=>{const row=document.querySelector('[data-toolbar-setting=size]'),r=n=>n.getBoundingClientRect(),text=document.createRange(),value=row.querySelector('.number-value');text.selectNodeContents(value);
+      const label=r(row.querySelector('.toolbar-option-label')),track=r(row.querySelector('.number-track')),slider=r(row.querySelector('input.number-slider')),box=r(row.querySelector('.number-value-box')),glyphs=text.getBoundingClientRect();
+      return {label:label.width%1,reserve:box.width%1,insets:[slider.left-track.left,track.right-slider.right],gap:box.left-track.right,offset:Math.abs(Math.round(glyphs.left+glyphs.right-box.left-box.right))/2};})()`);
+    assert.deepEqual(field, { label: 0, reserve: 0, insets: [2, 2], gap: 2, offset: 0 }, `${size}: GTK whole-pixel caption and reserve, slider insets and centered value`);
   }
   await capture('photo-options');
   await send({ type: 'set_tool_setting', id: 'size', value: 12 });

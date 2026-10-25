@@ -171,6 +171,7 @@ export async function checkToolVariations({call,evaluate,settle}) {
         const dockLabels=await evaluate(`[...document.querySelectorAll('${dock} .tool-choice-name')].map(n=>n.textContent)`);
         const categories=slot==='fill'?['Fill','Lasso fill']:rows.map(row=>row.label);
         assert.deepEqual([...dockLabels].sort(),categories.slice().sort(),'docked Tool Set has the scoped categories');
+        if(slot.includes('selection'))assert.deepEqual(await evaluate(`[...document.querySelectorAll('${dock} .tool-choice-name')].map(n=>getComputedStyle(n).textAlign)`),dockLabels.map(()=>'right'),'docked tool rows right-align their names like GTK');
         const alternate=rows.find(row=>row.label!==rows[0].label)||rows[0];
         await click(`${dock} [data-tool-choice="${alternate.label}"]`);assert.equal(await evaluate(`${view}.icon`),alternate.icon,'docked sibling updates its group icon');
         await send({type:'customize',action:{type:'close_expanded'}});await click(groupBody(anchor,selector));await settleDrawer();
