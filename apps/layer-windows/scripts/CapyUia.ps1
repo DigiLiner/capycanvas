@@ -303,8 +303,14 @@ function Capture([string]$Name,[switch]$WithModel,[switch]$Composed){
     if($owner -ne $review.Id){throw 'The capture window no longer belongs to the owned process'}
     & (Join-Path $script:CapyScripts 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $handle.ToInt64() -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed:$Composed -CaptureOnly:($Name -ne 'failure') *> (Join-Path $run ($Name+'.json'))
     $workspace=Workspace-Root
-    if($workspace -and ('CapyRowPointer' -as [type])){@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow($handle)}|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run ($Name+'-layout.json'))}
-    if($WithModel){(Model)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run ($Name+'-model.json'))}
+    if($workspace -and ('CapyRowPointer' -as [type])){
+        $layout=@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow($handle)}
+        [IO.File]::WriteAllText((Join-Path $run ($Name+'-layout.json')),($layout|ConvertTo-Json -Depth 15))
+    }
+    if($WithModel){
+        $model=Model
+        [IO.File]::WriteAllText((Join-Path $run ($Name+'-model.json')),($model|ConvertTo-Json -Depth 80))
+    }
 }
 function Enter-CapyEnvironment([string[]]$Names=@()){
     if($env:CAPY_FIXTURE_CONTEXT -and $run){Update-CapyFixtureContext {param($context);$context.Clear();$context.run=$run;$context.windows=@();$context.closes=@()}}

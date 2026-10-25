@@ -182,7 +182,7 @@ foreach($theme in @('dark','light')){
                 bounds=@{x=($rect.X-$origin.x)/$scale;y=($rect.Y-$origin.y)/$scale;width=$rect.Width/$scale;height=$rect.Height/$scale}}
         }
         $layoutEvidence=Layout-Evidence
-        $layoutEvidence|ConvertTo-Json -Depth 100|Set-Content -LiteralPath (Join-Path $OutputDirectory "layout-$name.json")
+        [IO.File]::WriteAllText((Join-Path $OutputDirectory "layout-$name.json"),($layoutEvidence|ConvertTo-Json -Depth 100))
         $layerElements=@($elements|Where-Object{$_.id -match '^layer-(row-[0-9]+|[0-9]+-(content|mask|thumbnail|mask-thumbnail|visibility|selection|label|meta|drag)|controls|options|flags|footer|blend)$'} |
             ForEach-Object {
                 $entry=$_
@@ -196,8 +196,8 @@ foreach($theme in @('dark','light')){
                 if($arranged.Count -ne 1){throw "Expected one arranged rectangle for $($entry.id)"}
                 @{id=$entry.id;name=$entry.name;type=$entry.type;status=$entry.status;uia_bounds=$entry.bounds;bounds=$arranged[0].bounds}
             })
-        $model|ConvertTo-Json -Depth 100|Set-Content -LiteralPath (Join-Path $OutputDirectory "model-$name.json")
-        $elements|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $OutputDirectory "elements-$name.json")
+        [IO.File]::WriteAllText((Join-Path $OutputDirectory "model-$name.json"),($model|ConvertTo-Json -Depth 100))
+        [IO.File]::WriteAllText((Join-Path $OutputDirectory "elements-$name.json"),($elements|ConvertTo-Json -Depth 6))
         $fixtures+=@{name=$name;viewport=@($Width,$Height);scale=$scale;theme=$theme;palette=$model.state.palette;scenario=$scenario;
             native="native-$name.png";full_client="client-$name.png";surface_offset_pixels=$offset;client_pixels=@($client.right,$client.bottom);
             workspace=$model.windows_workspace.id;titlebar_insets=$model.titlebar_insets;header_model=$model.header.model;workspace_switcher=$model.windows_workspace.switcher_display;
@@ -208,5 +208,5 @@ foreach($theme in @('dark','light')){
         Write-Output "Captured $name at $Width x $Height logical, scale $scale"
     }
 }
-@{schema=1;platform='windows';fixtures=$fixtures;scope='complete XAML drawing surface including custom titlebar; raw client also retained; isolated UI and synthetic commands, not physical input or presentation timing'}|
-    ConvertTo-Json -Depth 100|Set-Content -LiteralPath (Join-Path $OutputDirectory 'fixtures.json')
+$manifest=@{schema=1;platform='windows';fixtures=$fixtures;scope='complete XAML drawing surface including custom titlebar; raw client also retained; isolated UI and synthetic commands, not physical input or presentation timing'}
+[IO.File]::WriteAllText((Join-Path $OutputDirectory 'fixtures.json'),($manifest|ConvertTo-Json -Depth 100))
