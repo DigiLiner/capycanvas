@@ -2110,8 +2110,9 @@ fn native_toolbar_segments_input() {
                     .unwrap();
                 if edge == Edge::Top {
                     assert_eq!(a.y(), b.y());
-                    assert!((b.x() - a.x() - 3. * style.size()[0]).abs() <= 1.);
                     let bar = bar.compute_bounds(&d.w.window).unwrap();
+                    assert!((b.x() - a.x() - 3. * a.width()).abs() <= 1.);
+                    assert!((bar.width() + 10. - 4. * style.size()[0]).abs() <= 1., "segments fill their tiles inside 5 px margins");
                     let choice = d
                         .named("toolbar-choice-variant")
                         .compute_bounds(&d.w.window)

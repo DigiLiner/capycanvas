@@ -1311,10 +1311,6 @@ impl Component {
                     button.add_css_class("tile-button");
                     button.set_hexpand(!*labeled);
                     button.set_vexpand(!*labeled);
-                    if *labeled {
-                        let size = layer_ui::tool_choice_style(*labeled, self.root.imp().style.get()).size();
-                        button.set_size_request(size[0] as i32, size[1] as i32);
-                    }
                     button.set_widget_name(&format!("toolbar-segment-{id}-{index}"));
                     button.child().and_downcast::<gtk::Image>().unwrap().set_pixel_size(16);
                 }

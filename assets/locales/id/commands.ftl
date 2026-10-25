@@ -175,7 +175,7 @@ command-show-rulers = Tampilkan garis bantu
 
 command-snap-rulers = Lekatkan ke garis bantu
 
-command-delete-ruler = Hapus penggaris
+command-delete-ruler = Hapus garis bantu
 
 command-auto-select = Seleksi otomatis
 
@@ -818,7 +818,7 @@ commands-choose-warp-first = Pilih Lengkungkan terlebih dahulu
 
 commands-show-rulers-first = Tampilkan garis bantu terlebih dahulu
 
-commands-select-a-ruler-first = Pilih penggaris terlebih dahulu
+commands-select-a-ruler-first = Pilih garis bantu terlebih dahulu
 
 commands-use-the-polygon-selection-tool = Gunakan alat seleksi poligon
 

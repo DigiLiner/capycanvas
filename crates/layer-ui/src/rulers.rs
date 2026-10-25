@@ -83,7 +83,7 @@ impl<B: CanvasRenderer> UiSession<B> {
             CommandId::ShowRulers => self.rulers.visible = !self.rulers.visible,
             CommandId::SnapRulers => self.rulers.snapping = !self.rulers.snapping,
             CommandId::DeleteRuler => {
-                let selected = self.rulers.selected.ok_or("Select a ruler first")?;
+                let selected = self.rulers.selected.ok_or("Select a guide first")?;
                 let mut rulers = self.engine.document().rulers().collect::<Vec<_>>();
                 rulers.retain(|r| r.id != selected);
                 let edit = self.engine.document().ruler_edit(rulers).map_err(|e| e.to_string())?;

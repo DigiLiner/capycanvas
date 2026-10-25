@@ -175,8 +175,9 @@ The checkbox keeps its caption in Tool Options and moves into overflow
 as a complete control when the lane is too narrow.
 Grid choices can name a setting through `beside`; the settings panel places the
 compact chooser next to that setting's numeric group under the choice label.
-Unlabeled horizontal bars keep one tile of width per choice but match the dropdown's 24px
-height, control corner radius (a capsule at that height) and 16px icons.
+Horizontal bars in toolbars keep their joined segments with the workspace switcher pills'
+dimensions: 26px tall with 8px padding and 16px icons, the pills' radius on the outer corners and
+5px clear on every side. Dropdowns in horizontal toolbars are 26px tall with the same radius.
 The bar stacks on narrow side toolbars and moves into overflow as a whole.
 
 ## Ownership and implementation

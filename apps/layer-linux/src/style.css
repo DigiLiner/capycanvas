@@ -136,11 +136,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-panel.canvas-action-bar { padding: 0; }
 .dock-panel.canvas-action-bar button { min-width: 36px; min-height: 36px; padding: 0; border-radius: calc(var(--tile-radius) * var(--corner-fit)); }
 .canvas-action-bar button:checked { background: var(--selection-bg); }
-.canvas-action-bar button.text-tile, .canvas-action-bar menubutton.text-tile > button, .canvas-action-bar .selection-modes.labeled > button { padding: 0 10px; }
-.canvas-action-bar .selection-modes { margin: 0 6px; }
-.canvas-action-bar .selection-modes > button { min-height: var(--panel-control-height); border-radius: 0; }
-.canvas-action-bar .selection-modes > button:first-child { border-top-left-radius: var(--control-radius); border-bottom-left-radius: var(--control-radius); }
-.canvas-action-bar .selection-modes > button:last-child { border-top-right-radius: var(--control-radius); border-bottom-right-radius: var(--control-radius); }
+.canvas-action-bar button.text-tile, .canvas-action-bar menubutton.text-tile > button { padding: 0 10px; }
 .canvas-action-bar image { -gtk-icon-size: 16px; }
 .canvas-action-bar .canvas-action-bar-label { padding: 0 8px 0 12px; opacity: .8; }
 .dock-panel.join-nw { border-top-left-radius: 0; }
@@ -315,10 +311,13 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .toolbar-component .option-segments.horizontal > button:last-child { border-top-right-radius: calc(var(--tile-radius) * var(--corner-fit)); border-bottom-right-radius: calc(var(--tile-radius) * var(--corner-fit)); }
 .toolbar-component .option-segments.vertical > button:first-child { border-top-left-radius: calc(var(--tile-radius) * var(--corner-fit)); border-top-right-radius: calc(var(--tile-radius) * var(--corner-fit)); }
 .toolbar-component .option-segments.vertical > button:last-child { border-bottom-left-radius: calc(var(--tile-radius) * var(--corner-fit)); border-bottom-right-radius: calc(var(--tile-radius) * var(--corner-fit)); }
-.toolbar-component:not(.vertical-component) .option-segments > button { min-height: 24px; }
-.toolbar-component:not(.vertical-component) .option-segments > button:first-child { border-top-left-radius: var(--control-radius); border-bottom-left-radius: var(--control-radius); }
-.toolbar-component:not(.vertical-component) .option-segments > button:last-child { border-top-right-radius: var(--control-radius); border-bottom-right-radius: var(--control-radius); }
+.toolbar-component.vertical-component .option-labeled-segments > .option-segments > button { min-width: 36px; min-height: 36px; }
+.canvas-action-bar .selection-modes, .toolbar-component:not(.vertical-component) .option-segments { margin: 0 5px; }
+.canvas-action-bar .selection-modes > button, .toolbar-component:not(.vertical-component) .option-segments > button { min-height: 26px; padding: 0 8px; border-radius: 0; }
+.canvas-action-bar .selection-modes > button:first-child, .toolbar-component:not(.vertical-component) .option-segments > button:first-child { border-top-left-radius: calc(13px * var(--corner-fit)); border-bottom-left-radius: calc(13px * var(--corner-fit)); }
+.canvas-action-bar .selection-modes > button:last-child, .toolbar-component:not(.vertical-component) .option-segments > button:last-child { border-top-right-radius: calc(13px * var(--corner-fit)); border-bottom-right-radius: calc(13px * var(--corner-fit)); }
 .toolbar-component dropdown { margin: 0; }
+.toolbar-component:not(.vertical-component) dropdown > button { min-height: 26px; border-radius: calc(13px * var(--corner-fit)); }
 .toolbar-component.vertical-component dropdown > button { padding: 2px; background: transparent; }
 .toolbar-component.vertical-component.labeled-component dropdown > button { padding-left: 8px; padding-right: 6px; }
 .toolbar-component .number-control { margin: 0; }
