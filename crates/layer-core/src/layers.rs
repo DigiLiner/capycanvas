@@ -1261,7 +1261,9 @@ mod organization_tests {
             kind: RasterOperationKind::Transform(ImageTransform::default()),
         };
         let mut mask = CoverageSnapshot::reveal_all(CoverageHandle::from_index(9), [100; 2], [0; 2]);
-        mask.source.operations = Arc::new(vec![op.clone()]);
+        #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared single-threaded Wasm ownership preserves the native Arc contract"))]
+        let operations = Arc::new(vec![op.clone()]);
+        mask.source.operations = operations;
         assert!(mask.validate().is_ok());
         let mut snapshot = RasterOperation { placement: Affine::IDENTITY, coverage: mask.clone(), kind: RasterOperationKind::ApplyMask };
         assert!(snapshot.validate().is_ok());

@@ -70,6 +70,7 @@ impl Context {
     pub fn for_source(source: &PaintSource, alpha_locked: bool) -> Self {
         let mut current = source.clone();
         current.raster = current.raster.without_liquify();
+        #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared paint ownership includes single-threaded Wasm Liquify fields"))]
         let current = Arc::new(current);
         if let Some(state) = source.raster.liquify().filter(|s| s.compatible(source, alpha_locked)) {
             return Self { amount: None, current, original: state.original.clone(), field: Some(state.field.clone()) };

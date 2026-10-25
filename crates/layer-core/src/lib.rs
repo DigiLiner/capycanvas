@@ -1531,13 +1531,15 @@ impl Document {
         self.snapshot_with_context(self.output().context.clone())
     }
     pub fn snapshot_with_context(&self, context: EvaluationContext) -> Arc<SceneSnapshot> {
-        Arc::new(SceneSnapshot::new(
+        #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared scene ownership includes single-threaded Wasm Liquify fields"))]
+        let snapshot = Arc::new(SceneSnapshot::new(
             self.artwork.clone(),
             self.scene_index.clone(),
             self.owner,
             self.revision,
             context,
-        ))
+        ));
+        snapshot
     }
     pub fn has_animated_effects(&self) -> bool {
         let scene = self.scene();

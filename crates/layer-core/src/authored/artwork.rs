@@ -220,7 +220,9 @@ impl Artwork {
     }
     pub fn capture(&self, checkpoint: CaptureCheckpoint) -> Result<ArtworkCapture, &'static str> {
         if checkpoint.document != self.id { return Err("Capture belongs to a different drawing"); }
-        Ok(ArtworkCapture { artwork: Arc::new(self.clone()), checkpoint })
+        #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared artwork ownership includes single-threaded Wasm Liquify fields"))]
+        let artwork = Arc::new(self.clone());
+        Ok(ArtworkCapture { artwork, checkpoint })
     }
 }
 

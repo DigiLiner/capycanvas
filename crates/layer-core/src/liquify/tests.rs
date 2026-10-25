@@ -22,6 +22,7 @@ fn with_state(source: &PaintSource, locked: bool) -> (PaintSource, Arc<State>) {
     let original = Context::for_source(source, locked).original;
     let mut result = source.clone();
     result.raster = RasterRevision::pending();
+    #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared single-threaded Wasm ownership preserves the native Arc contract"))]
     let state = Arc::new(State::new(original, Arc::new(TestField), &result, locked));
     result.raster.set_liquify(state.clone());
     (result, state)
@@ -127,6 +128,7 @@ impl Field for Resources {
 
 fn revision_with_resources(source: &PaintSource, resources: Vec<(u64, usize)>) -> RasterRevision {
     let revision = RasterRevision::backed(Default::default());
+    #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared single-threaded Wasm ownership preserves the native Arc contract"))]
     revision.set_liquify(Arc::new(State::new(Context::for_source(source, false).original,
         Arc::new(Resources(resources)), source, false)));
     revision
@@ -179,6 +181,7 @@ fn retained_tiles_keep_starting_pixels_after_the_live_source_replaces_them() {
     let SourceTarget::Paint(handle) = document.working.target.unwrap() else { panic!() };
     let output = document.artwork.paint.get_mut(handle).unwrap();
     output.raster = RasterRevision::backed(Default::default());
+    #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared single-threaded Wasm ownership preserves the native Arc contract"))]
     output.raster.set_liquify(Arc::new(State::new(Arc::new(original), Arc::new(TestField), output, false)));
     let editor = Editor::new(document);
     let retained = editor.retained_tiles();

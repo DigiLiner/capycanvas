@@ -463,11 +463,13 @@ mod tests {
         let mut pending=document();
         let row=crate::operation_test_support::insert_paint(&mut pending,"Bake",0,None);
         let OccurrenceContent::Paint(paint)=pending.scene().occurrence(row).unwrap().content else {panic!()};
-        pending.artwork.paint.get_mut(paint).unwrap().operations=Arc::new(vec![crate::RasterOperation {
+        #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared single-threaded Wasm ownership preserves the native Arc contract"))]
+        let operations=Arc::new(vec![crate::RasterOperation {
             placement:crate::Affine::IDENTITY,
             coverage:crate::CoverageSnapshot::reveal_all(crate::CoverageHandle::from_index(50),[1024;2],[0;2]),
             kind:crate::RasterOperationKind::Bake {scene:captured.snapshot(),scope:crate::SceneScope::Members(vec![layer].into()),offset:crate::Point::default()},
         }]);
+        pending.artwork.paint.get_mut(paint).unwrap().operations=operations;
 
         let changed=Image::with_id(original.id(),rgba8_source(original.extent,|_,_|[71,29,13,255]));
         let before=pending.clone();
