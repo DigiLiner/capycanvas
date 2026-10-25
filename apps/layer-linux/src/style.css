@@ -137,11 +137,12 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-panel.canvas-action-bar button { min-width: 36px; min-height: 36px; padding: 0; border-radius: calc(var(--tile-radius) * var(--corner-fit)); }
 .canvas-action-bar button:checked { background: var(--selection-bg); }
 .canvas-action-bar button.text-tile, .canvas-action-bar menubutton.text-tile > button, .canvas-action-bar .selection-modes.labeled > button { padding: 0 10px; }
+.canvas-action-bar .selection-modes { margin: 0 6px; }
 .canvas-action-bar .selection-modes > button { min-height: var(--panel-control-height); border-radius: 0; }
 .canvas-action-bar .selection-modes > button:first-child { border-top-left-radius: var(--control-radius); border-bottom-left-radius: var(--control-radius); }
 .canvas-action-bar .selection-modes > button:last-child { border-top-right-radius: var(--control-radius); border-bottom-right-radius: var(--control-radius); }
 .canvas-action-bar image { -gtk-icon-size: 16px; }
-.canvas-action-bar .canvas-action-bar-label { padding: 0 8px; opacity: .8; }
+.canvas-action-bar .canvas-action-bar-label { padding: 0 8px 0 12px; opacity: .8; }
 .dock-panel.join-nw { border-top-left-radius: 0; }
 .dock-panel.join-ne { border-top-right-radius: 0; }
 .dock-panel.join-se { border-bottom-right-radius: 0; }

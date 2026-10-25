@@ -173,7 +173,7 @@ command-ruler = Penggaris
 
 command-show-rulers = Tampilkan garis bantu
 
-command-snap-rulers = Lekatkan ke penggaris
+command-snap-rulers = Lekatkan ke garis bantu
 
 command-delete-ruler = Hapus penggaris
 
