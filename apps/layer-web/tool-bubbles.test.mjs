@@ -133,8 +133,7 @@ export async function checkToolBubbles({call,evaluate,settle}) {
       const gap=await evaluate(`(()=>{const p=layerApp.app.bubbles().find(p=>p.view.id===${id});for(let a=0;a<360;a+=3){const t=a*Math.PI/180,x=55*Math.cos(t),y=55*Math.sin(t);if(layerApp.app.bubble_hit(${id},x,y)==null)return [x,y];}return null})()`);
       assert.ok(gap,'halo leaves canvas gaps');
       assert.equal(await evaluate(`(()=>{const n=document.elementFromPoint(${c[0]+gap[0]},${c[1]+gap[1]});return !!n?.closest('.tool-bubble')})()`),false,'halo gaps belong to the native canvas');
-      await send({type:'invoke',command:'lasso'});await tap(c);v=await view(id);assert.ok(v.selected&&!v.open,'first tap selects without opening');
-      await tap(c);v=await view(id);assert.ok(v.open&&v.rings.length,'second tap opens settings');
+      await send({type:'invoke',command:'lasso'});await tap(c);v=await view(id);assert.ok(v.selected&&v.open&&v.rings.length,'first tap selects and opens settings');
       const ring=v.rings[0],before=await value(ring.setting);
       await stroke((ring.fill>.5?[.9,.6,.2]:[.1,.4,.8]).map(f=>ringPoint(ring,c,f)));assert.notDeepEqual(await value(ring.setting),before,'native arc drag changes its setting');
       const changed=await value(ring.setting);await pointer('down',ringPoint(ring,c,.3));await pointer('move',ringPoint(ring,c,.6));await escape();await pointer('up');assert.deepEqual(await value(ring.setting),changed,'Escape restores cancelled ring adjustment');

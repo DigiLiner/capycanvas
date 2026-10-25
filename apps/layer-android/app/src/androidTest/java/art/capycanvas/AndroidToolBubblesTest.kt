@@ -748,11 +748,10 @@ class AndroidToolBubblesTest {
             waitFor("Double contact resets the shared ring default") { setting(setting) == defaultValue }
             unchangedPaint("Ring edits and resets")
             invoke("lasso"); tap(stable(brush))
-            waitFor("First contact selects without opening") { view(brush).getBoolean("selected") && !view(brush).getBoolean("open") }
-            tap(stable(brush)); waitFor("Second contact opens halo") { view(brush).getBoolean("open") }
+            waitFor("First contact selects and opens sliders") { view(brush).getBoolean("selected") && view(brush).getJSONArray("rings").length() > 0 }
             SystemClock.sleep(250); shot("halo")
             unchangedPaint("Select and halo contacts")
-            tap(stable(brush)); waitFor("Third contact opens chooser") { view(brush).getJSONArray("chooser").length() > 0 }
+            tap(stable(brush)); waitFor("Next contact opens chooser") { view(brush).getJSONArray("chooser").length() > 0 }
             SystemClock.sleep(500); shot("chooser")
             val medium = view(brush).getJSONArray("chooser").objects().first { it.getString("kind") == "medium" && it.getBoolean("enabled") }
             fun choose(item: JSONObject) { val p = item.getJSONArray("center"); tap(center(brush) + Offset(p.getDouble(0).toFloat(), p.getDouble(1).toFloat()) * density) }

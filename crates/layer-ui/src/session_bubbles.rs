@@ -863,6 +863,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         if !view.selected {
             self.close_bubble_parts(None);
             let mut change = self.select_bubble(&bubble)?;
+            if !self.halo_settings().is_empty() {
+                self.set_halo(Some(id));
+            }
+            self.sync_bubbles();
             change.regions |= regions::BUBBLES;
             return Ok(change);
         }
@@ -912,6 +916,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     if !self.halo_settings().is_empty() {
                         self.set_halo(Some(id));
                     }
+                    self.sync_bubbles();
                     change.regions |= regions::BUBBLES;
                     Ok(change)
                 }

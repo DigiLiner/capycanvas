@@ -101,10 +101,9 @@ everything rests.
 
 ## Taps, halos and the chooser
 
-- **Brush:** the first tap selects the brush. The next tap opens its settings
-  halo; the one after closes it. If the brush is already selected, the first tap
-  opens the halo.
-- **Group dial and medium:** select, then halo, then chooser, then close. A tool
+- **Brush:** the first tap selects the brush and opens its settings halo; the
+  next tap closes it. If the brush is already selected, a tap toggles its halo.
+- **Group dial and medium:** select with halo, then chooser, then close. A tool
   without settings goes straight from select to the chooser.
 - **Halo:** the selected brush's settings sit on arcs around the bubble, within
   134 px for one to three settings and 204 px for four to six (2+2, 3+2, 3+3).
@@ -485,8 +484,8 @@ panels are absent from the dock.
 ## Validation
 
 - Chooser picks: `bash tools/performance/workspace-motion.sh gtk --native-test=native_bubble_chooser_sliders`
-  picks brushes from group and medium bubbles, then adjusts their newly shown
-  sliders with mouse and touch in both themes.
+  selects group and medium bubbles with one click, picks their brushes, then
+  adjusts their newly shown sliders with mouse and touch in both themes.
 - Shared: `cargo test --locked -p layer-ui bubble`, which covers geometry,
   pushing, tear-off and put back, tap states, halos, the chooser and its slides,
   beads, the card, stroke fading, menus, history and workspace round trips

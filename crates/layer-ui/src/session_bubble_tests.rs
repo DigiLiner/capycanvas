@@ -529,7 +529,7 @@ fn tap(s: &mut UiSession<Recorder>, id: u32) {
 
 fn open_ring(s: &mut UiSession<Recorder>, id: u32) {
     invoke(s, CommandId::Lasso);
-    for _ in 0..3 {
+    for _ in 0..2 {
         tap(s, id);
     }
     assert!(!view(s, id).chooser.is_empty());
@@ -667,7 +667,7 @@ fn cancelled_and_competing_drags_leave_the_layout_unchanged() {
 }
 
 #[test]
-fn brush_bubbles_come_out_selected_with_their_halo_and_taps_select_then_open_and_close_it() {
+fn brush_bubbles_come_out_selected_with_their_halo_and_taps_select_and_toggle_it() {
     let mut s = desk();
     let pencil = DefaultBrushPreset::PointyPencil as u32;
     let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
@@ -680,8 +680,6 @@ fn brush_bubbles_come_out_selected_with_their_halo_and_taps_select_then_open_and
     s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
     tap(&mut s, id);
     assert_eq!(s.state.brush.preset, pencil);
-    assert!(!view(&s, id).open && view(&s, id).rings.is_empty(), "the first tap only selects");
-    tap(&mut s, id);
     let open = view(&s, id);
     let defaults = tool_settings::ring_defaults(s.engine.configured_brush(), &s.state.tool_settings);
     assert!(open.open && !defaults.is_empty());
@@ -689,10 +687,10 @@ fn brush_bubbles_come_out_selected_with_their_halo_and_taps_select_then_open_and
     assert_eq!(open.rings.iter().map(|r| r.setting).collect::<Vec<_>>(), defaults);
     assert_eq!(open.rings.iter().map(|r| r.arc).collect::<Vec<_>>(), halo_arcs(defaults.len()));
     tap(&mut s, id);
-    assert!(!view(&s, id).open, "the third tap closes it");
+    assert!(!view(&s, id).open, "the next tap closes it");
     s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
     tap(&mut s, id);
-    assert!(!view(&s, id).open);
+    assert!(view(&s, id).open, "selecting the brush opens its settings again");
     s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
     s.dispatch(UiAction::SelectBrush { id: pencil }).unwrap();
     tap(&mut s, id);
@@ -700,14 +698,13 @@ fn brush_bubbles_come_out_selected_with_their_halo_and_taps_select_then_open_and
 }
 
 #[test]
-fn dial_taps_select_then_show_the_halo_then_the_media_ring() {
+fn dial_taps_select_with_the_halo_then_show_the_media_ring() {
     let mut s = desk();
     let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, FAR);
     invoke(&mut s, CommandId::Lasso);
     assert!(!view(&s, id).selected);
     tap(&mut s, id);
     assert!(view(&s, id).selected && view(&s, id).chooser.is_empty());
-    tap(&mut s, id);
     assert!(!view(&s, id).rings.is_empty() && view(&s, id).chooser.is_empty());
     tap(&mut s, id);
     let open = view(&s, id);
@@ -724,7 +721,36 @@ fn dial_taps_select_then_show_the_halo_then_the_media_ring() {
     assert!(brushes.iter().all(|b| b.preview.is_some()));
     assert_eq!(brushes.iter().filter(|b| b.selected).count(), 1);
     tap(&mut s, id);
-    assert!(!view(&s, id).open, "the fourth tap closes it");
+    assert!(!view(&s, id).open, "the next tap closes it");
+}
+
+#[test]
+fn clicking_a_tool_bubble_selects_and_opens_its_sliders_on_every_platform() {
+    for platform in Platform::ALL {
+        for source in [
+            BubbleSource::Medium { group: ToolGroup::Pastel },
+            BubbleSource::Control { control: ToolbarControl::Brush { id: DefaultBrushPreset::PointyPencil as u32 } },
+            BubbleSource::Control { control: ToolbarControl::ToolSlot { slot: ToolSlotId::Drawing } },
+            BubbleSource::Control { control: ToolbarControl::Command { command: CommandId::DrawingBrush } },
+        ] {
+            let mut s = session(platform);
+            s.set_viewport(VIEW, [1200, 900]).unwrap();
+            s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
+            let id = match source {
+                BubbleSource::Medium { group } => take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group } }, FAR),
+                BubbleSource::Control { control } => take_control(&mut s, control, FAR),
+            };
+            invoke(&mut s, CommandId::Lasso);
+            assert!(!view(&s, id).selected);
+            let change = act(&mut s, BubbleAction::Tap { id, position: [0.; 2] }).unwrap();
+            let selected = view(&s, id);
+            let defaults = tool_settings::ring_defaults(s.engine.configured_brush(), &s.state.tool_settings);
+            assert!(selected.selected && selected.chooser.is_empty());
+            assert!(!defaults.is_empty());
+            assert_eq!(selected.rings.iter().map(|ring| ring.setting).collect::<Vec<_>>(), defaults, "{platform:?}/{source:?}");
+            assert_ne!(change.regions & regions::BUBBLES, 0);
+        }
+    }
 }
 
 #[test]
@@ -890,6 +916,9 @@ fn chooser_picks_open_the_selected_tool_halo_on_every_platform() {
                 assert!(!defaults.is_empty());
                 assert_eq!(selected.rings.iter().map(|ring| ring.setting).collect::<Vec<_>>(), defaults, "{platform:?}/{source:?}/{same_tool}");
                 assert_ne!(change.regions & regions::BUBBLES, 0);
+                s.bubble_stroke(PenPhase::Down, [FAR[0], FAR[1] + 80.]);
+                assert!(s.bubble_fade().1.contains(&id), "the new halo participates in stroke fading immediately");
+                s.bubble_stroke(PenPhase::Up, [FAR[0], FAR[1] + 80.]);
                 let ring = selected.rings[0].clone();
                 for phase in [ContactPhase::Down, ContactPhase::Up] {
                     act(&mut s, BubbleAction::Ring { id, phase, position: ring.arc.point(0.7) }).unwrap();
@@ -1079,7 +1108,6 @@ fn halos_stay_until_tapped_or_the_brush_changes_while_choosers_close_on_contacts
     let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
     let dial = take_control(&mut s, ToolbarControl::ToolSlot { slot: ToolSlotId::Marquee }, [300., 300.]);
     tap(&mut s, id);
-    tap(&mut s, id);
     chrome(&mut s, ChromeEvent::Contact { position: [100., 700.], canvas: true }, ChromeFacts::default());
     assert!(view(&s, id).open, "the halo stays");
     s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
@@ -1102,7 +1130,6 @@ fn painting_fades_nearby_bubbles_and_closes_choosers_but_not_the_halo() {
     let pencil = take(&mut s, brush(DefaultBrushPreset::PointyPencil), [300., 300.]);
     let dial = take_control(&mut s, ToolbarControl::ToolSlot { slot: ToolSlotId::Marquee }, [900., 300.]);
     let layers = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, [900., 700.]);
-    tap(&mut s, pencil);
     tap(&mut s, pencil);
     tap(&mut s, layers);
     assert!(view(&s, layers).card.is_some() && view(&s, pencil).open, "opening a card keeps the halo");
