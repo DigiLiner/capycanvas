@@ -264,7 +264,7 @@ fn menu_open(d: &Driver) -> bool {
 }
 
 fn toggle_bubble_sliders(d: &mut Driver, device: &str, id: u32) {
-    let before = find_id(d, id).unwrap().options.show_sliders;
+    let before = state(&d.w).workspace.layout.bubbles.show_sliders;
     let at = center(d, id);
     d.input.perform(serde_json::json!([contact(device, "down", at), { "wait_ms": 900 }, contact(device, "up", at)]));
     pump(200);
@@ -275,7 +275,7 @@ fn toggle_bubble_sliders(d: &mut Driver, device: &str, id: u32) {
     assert_eq!(item.is_active(), before);
     let at = d.point(item.upcast_ref());
     tap(d, device, at);
-    assert_eq!(find_id(d, id).unwrap().options.show_sliders, !before);
+    assert_eq!(state(&d.w).workspace.layout.bubbles.show_sliders, !before);
     assert_eq!(item.is_active(), !before);
     assert!(menu_open(d), "changing Show Sliders keeps the menu open");
     d.input.key(0xff1b);
@@ -702,6 +702,9 @@ fn native_bubble_chooser_sliders() {
                 assert_ne!(value(&d), before, "{name}: the shown slider changes its setting");
                 toggle_bubble_sliders(&mut d, device, id);
                 assert!(find_id(&d, id).unwrap().rings.is_empty(), "{name}: unchecking Show Sliders hides the halo");
+                let spot = canvas_spot(&d, 0.75, 0.5);
+                let other = take(&mut d, BubbleGrab::Variant { variant: ToolVariant::BrushPreset { id: layer_core::DefaultBrushPreset::GPen as u32 } }, spot);
+                assert!(find_id(&d, other).unwrap().rings.is_empty(), "{name}: another tool shares Show Sliders");
                 d.w.dispatch(UiAction::Invoke { command: CommandId::Lasso });
                 let at = center(&d, id);
                 tap(&mut d, device, at);
@@ -716,10 +719,11 @@ fn native_bubble_chooser_sliders() {
                 d.w.dispatch(UiAction::Bubble { action: BubbleAction::PutBack { id } });
                 let spot = canvas_spot(&d, 0.45, 0.5);
                 let id = take(&mut d, grab, spot);
-                assert!(!find_id(&d, id).unwrap().options.show_sliders && find_id(&d, id).unwrap().rings.is_empty(), "{name}: dragging out remembers Show Sliders");
+                assert!(!state(&d.w).workspace.layout.bubbles.show_sliders && find_id(&d, id).unwrap().rings.is_empty(), "{name}: dragging out remembers Show Sliders");
                 capture(&mut d, &format!("{name}-hidden-settings"));
-                toggle_bubble_sliders(&mut d, device, id);
-                assert!(!find_id(&d, id).unwrap().rings.is_empty(), "{name}: checking Show Sliders opens the halo");
+                toggle_bubble_sliders(&mut d, device, other);
+                assert!(state(&d.w).workspace.layout.bubbles.show_sliders);
+                assert!(views(&d).iter().any(|view| view.selected && !view.rings.is_empty()), "{name}: checking Show Sliders in another tool's menu opens the selected tool's halo");
             }
         }
     }

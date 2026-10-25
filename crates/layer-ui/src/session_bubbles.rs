@@ -228,7 +228,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     fn color_bubble(&self, bubble: &ToolBubble) -> ColorBubbleLayout {
-        ColorBubbleLayout::new(bubble.diameter(self.narrow()), self.hdr_color_bubbles())
+        ColorBubbleLayout::new(bubble.diameter(self.narrow(), self.state.workspace.layout.bubbles.show_sliders), self.hdr_color_bubbles())
     }
 
     fn pair_beads(&self) -> PairBeads {
@@ -266,10 +266,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 *open = None;
             }
         }
-        if state.halo.is_some_and(|(id, _)| layout.get(id).is_none_or(|bubble| !bubble.options.show_sliders)) {
+        if state.halo.is_some_and(|(id, _)| !layout.show_sliders || layout.get(id).is_none()) {
             state.halo = None;
         }
-        if state.ring.is_some_and(|ring| layout.get(ring.id).is_none_or(|bubble| !bubble.options.show_sliders)) {
+        if state.ring.is_some_and(|ring| !layout.show_sliders || layout.get(ring.id).is_none()) {
             state.ring = None;
         }
         if state.chooser.is_some_and(|c| layout.get(c.id).is_none()) {
@@ -279,7 +279,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             state.wheel = None;
         }
         state.scroll.retain(|(id, _)| layout.get(*id).is_some());
-        let items: Vec<_> = layout.bubbles.iter().map(|b| (b.id, b.center(viewport), if hdr && b.source.kind() == BubbleKind::Color { Shape::circle(b.diameter(narrow) * 0.5) } else { b.shape(narrow, pair) })).collect();
+        let items: Vec<_> = layout.bubbles.iter().map(|b| (b.id, b.center(viewport), if hdr && b.source.kind() == BubbleKind::Color { Shape::circle(b.diameter(narrow, layout.show_sliders) * 0.5) } else { b.shape(narrow, pair, layout.show_sliders) })).collect();
         if !state.desk.matches(&items, bounds) {
             state.desk.sync(&items, bounds);
         }
@@ -301,7 +301,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             if color.intensity.is_none() && !pill { continue; }
             let mut parts = if color.intensity.is_some() {
                 self.color_bubble_parts(bubble).collisions.clone()
-            } else { vec![bubble.shape(self.narrow(), self.pair_beads())] };
+            } else { vec![bubble.shape(self.narrow(), self.pair_beads(), self.state.workspace.layout.bubbles.show_sliders)] };
             if pill {
                 let b = color.palette_bounds();
                 parts.push(Shape::rect([b.width, b.height]).at([b.x + b.width * 0.5, b.y + b.height * 0.5]));
@@ -350,7 +350,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         };
         let halo = self.halo() == Some(bubble.id);
         let rings: Vec<_> = match kind {
-            BubbleKind::Controls if bubble.options.show_sliders => halo_arcs(CONTROL_RINGS.len())
+            BubbleKind::Controls if state.workspace.layout.bubbles.show_sliders => halo_arcs(CONTROL_RINGS.len())
                 .into_iter()
                 .zip(if bubble.options.swap { CONTROL_RINGS } else { [CONTROL_RINGS[1], CONTROL_RINGS[0]] })
                 .map(|(arc, binding)| match binding.field(state) {
@@ -378,7 +378,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => Vec::new(),
         };
         let readout = rings.iter().find(|r| r.active).map(|r| format!("{} · {}", r.label, r.text));
-        let stamp = self.bubble_state.ring.filter(|r| r.id == bubble.id && tool_settings::shapes_dab(r.setting)).and_then(|r| {
+        let stamp = self.bubble_state.ring.filter(|r| state.workspace.layout.bubbles.show_sliders && r.id == bubble.id && tool_settings::shapes_dab(r.setting)).and_then(|r| {
             let size = ToolbarNumericBinding::BrushSize.field(state)?.value;
             let scale = self.logical_viewport.map_or(1., |v| (state.camera.viewport[0] as f32 / v[0]).max(f32::EPSILON));
             Some(BubbleStamp { center: r.at, diameter: size * state.camera.zoom / scale, color: state.colors.definition() })
@@ -397,8 +397,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             id: bubble.id,
             source: bubble.source,
             kind,
-            diameter: bubble.diameter(narrow),
-            face: bubble_face(kind, bubble.diameter(narrow)),
+            diameter: bubble.diameter(narrow, state.workspace.layout.bubbles.show_sliders),
+            face: bubble_face(kind, bubble.diameter(narrow, state.workspace.layout.bubbles.show_sliders)),
             pair: self.pair_beads(),
             color: (kind == BubbleKind::Color).then(|| self.color_bubble(bubble)),
             label,
@@ -462,8 +462,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         ids.into_iter().filter_map(|id| controls.iter().find(|c| c.id == id)).collect()
     }
 
-    fn bubble_has_sliders(&self, bubble: &ToolBubble) -> bool {
-        bubble.options.show_sliders && !self.halo_settings().is_empty()
+    fn bubble_has_sliders(&self) -> bool {
+        self.state.workspace.layout.bubbles.show_sliders && !self.halo_settings().is_empty()
     }
 
     fn bead_scroll(&self, id: u32) -> [f32; 2] {
@@ -594,7 +594,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let tools = &self.state;
         self.bubble_state
             .halo
-            .filter(|(_, brush)| tools.layer_tools.tool == LayerCanvasTool::Paint && tools.brush.preset == *brush)
+            .filter(|(_, brush)| tools.workspace.layout.bubbles.show_sliders && tools.layer_tools.tool == LayerCanvasTool::Paint && tools.brush.preset == *brush)
             .map(|(id, _)| id)
     }
 
@@ -751,24 +751,34 @@ impl<R: CanvasRenderer> UiSession<R> {
                     Ok(())
                 })
             }
+            BubbleAction::ToggleSliders { id } => {
+                let source = self.bubble(id)?.source;
+                let change = self.edit_bubbles(LayoutChange::Bubble { action: LayoutPanelAction::Customized, source }, |layout| {
+                    layout.bubbles.show_sliders = !layout.bubbles.show_sliders;
+                    Ok(())
+                })?;
+                if self.bubble_has_sliders() {
+                    let target = std::iter::once(self.bubble(id)?).chain(self.state.workspace.layout.bubbles.bubbles.iter())
+                        .find(|bubble| matches!(bubble.source.kind(), BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium) && self.bubble_view(bubble).selected)
+                        .map(|bubble| bubble.id);
+                    if let Some(id) = target {
+                        self.close_bubble_parts(None);
+                        self.set_halo(Some(id));
+                        self.sync_bubbles();
+                    }
+                }
+                Ok(change)
+            }
             BubbleAction::Option { id, option } => {
                 let options = option.apply(self.bubble(id)?.options);
                 self.bubble_action(BubbleAction::SetOptions { id, options })
             }
             BubbleAction::SetOptions { id, options } => {
-                let bubble = self.bubble(id)?;
-                let show = !bubble.options.show_sliders && options.show_sliders && self.bubble_view(bubble).selected;
-                let source = bubble.source;
-                let change = self.edit_bubbles(LayoutChange::Bubble { action: LayoutPanelAction::Customized, source }, |layout| {
+                let source = self.bubble(id)?.source;
+                self.edit_bubbles(LayoutChange::Bubble { action: LayoutPanelAction::Customized, source }, |layout| {
                     layout.bubbles.get_mut(id)?.options = options;
                     Ok(())
-                })?;
-                if show && self.bubble_has_sliders(self.bubble(id)?) {
-                    self.close_bubble_parts(None);
-                    self.set_halo(Some(id));
-                    self.sync_bubbles();
-                }
-                Ok(change)
+                })
             }
             BubbleAction::Resize { id, scale } => {
                 let bubble = self.bubble(id)?;
@@ -878,7 +888,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if !view.selected {
             self.close_bubble_parts(None);
             let mut change = self.select_bubble(&bubble)?;
-            if self.bubble_has_sliders(&bubble) {
+            if self.bubble_has_sliders() {
                 self.set_halo(Some(id));
             }
             self.sync_bubbles();
@@ -892,7 +902,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             if view.kind != BubbleKind::Brush {
                 self.bubble_state.chooser = Some(Chooser { id, medium: None });
             }
-        } else if self.bubble_has_sliders(&bubble) {
+        } else if self.bubble_has_sliders() {
             self.set_halo(Some(id));
         } else if view.kind != BubbleKind::Brush {
             self.bubble_state.chooser = Some(Chooser { id, medium: None });
@@ -928,7 +938,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     self.bubble_state.chooser = None;
                     let mut change = self.dispatch(self.variant_action(variant))?;
                     self.remember_tool_slots();
-                    if self.bubble_has_sliders(&bubble) {
+                    if self.bubble_has_sliders() {
                         self.set_halo(Some(id));
                     }
                     self.sync_bubbles();
@@ -1041,7 +1051,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     fn bead_contact(&mut self, id: u32, phase: ContactPhase, position: [f32; 2]) -> Result<UiChange, String> {
         let bubble = self.bubble(id)?.clone();
-        let size = bubble.diameter(self.narrow());
+        let size = bubble.diameter(self.narrow(), self.state.workspace.layout.bubbles.show_sliders);
         let library = &self.state.color_library;
         let (recent, swatches) = (library.history.len(), library.active_palette().swatches.len());
         match phase {
@@ -1236,7 +1246,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium => {
                 self.close_bubble_parts(None);
                 let change = if self.bubble_view(&bubble).selected { UiChange::default() } else { self.select_bubble(&bubble)? };
-                if self.bubble_has_sliders(&bubble) && self.bubble_view(&bubble).selected {
+                if self.bubble_has_sliders() && self.bubble_view(&bubble).selected {
                     self.set_halo(Some(id));
                 }
                 Ok(change)
@@ -1273,7 +1283,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleGrab::Bubble { .. } => self.bubble_state.desk.center(id).unwrap_or(position),
             BubbleGrab::Rim { .. } => {
                 let center = self.bubble_state.desk.center(id).unwrap_or(position);
-                let radius = self.bubble(id)?.diameter(self.narrow()) * 0.5;
+                let radius = self.bubble(id)?.diameter(self.narrow(), self.state.workspace.layout.bubbles.show_sliders) * 0.5;
                 let away = [position[0] - center[0], position[1] - center[1]];
                 let length = away[0].hypot(away[1]).max(1e-3);
                 [position[0] - away[0] / length * radius, position[1] - away[1] / length * radius]
@@ -1357,7 +1367,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => {}
         }
         if matches!(view.kind, BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium | BubbleKind::Controls) {
-            sections.push(vec![options(MessageId::WORKSPACE_SHOW_SLIDERS_MENU, o.show_sliders, BubbleOption::ShowSliders)]);
+            let mut item = ContextMenuItem::command(text(MessageId::WORKSPACE_SHOW_SLIDERS_MENU), action(BubbleAction::ToggleSliders { id }));
+            item.selected = Some(self.state.workspace.layout.bubbles.show_sliders);
+            sections.push(vec![item]);
         }
         sections.push(vec![ContextMenuItem::command(text(MessageId::WORKSPACE_BUBBLE_PUT_BACK), action(BubbleAction::PutBack { id }))]);
         let title = self.tool_name(bubble, &view).unwrap_or(view.label);

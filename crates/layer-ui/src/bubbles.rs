@@ -117,7 +117,6 @@ impl BubbleSource {
 #[serde(default, deny_unknown_fields)]
 pub struct BubbleOptions {
     pub size: f32,
-    pub show_sliders: bool,
     pub recent: bool,
     pub palette: bool,
     pub pair: bool,
@@ -127,7 +126,7 @@ pub struct BubbleOptions {
 }
 impl Default for BubbleOptions {
     fn default() -> Self {
-        Self { size: COLOR_RING_SIZES[1], show_sliders: true, recent: false, palette: false, pair: false, full: false, fold: true, swap: false }
+        Self { size: COLOR_RING_SIZES[1], recent: false, palette: false, pair: false, full: false, fold: true, swap: false }
     }
 }
 impl BubbleOptions {
@@ -192,21 +191,21 @@ impl ToolBubble {
         self.corner = corner;
         self.offset = [center[0] - point[0], center[1] - point[1]];
     }
-    pub fn diameter(&self, narrow: bool) -> f32 {
+    pub fn diameter(&self, narrow: bool, show_sliders: bool) -> f32 {
         match self.source.kind() {
-            BubbleKind::Controls if self.options.show_sliders => halo_disc(CONTROL_RINGS.len()),
+            BubbleKind::Controls if show_sliders => halo_disc(CONTROL_RINGS.len()),
             BubbleKind::History => HISTORY_BUBBLE[0],
             BubbleKind::Color if narrow => self.options.size.min(COLOR_RING_SIZES[0]),
             BubbleKind::Color => self.options.size,
             _ => TOOL_BUBBLE,
         }
     }
-    pub(crate) fn shape(&self, narrow: bool, pair: PairBeads) -> Shape {
+    pub(crate) fn shape(&self, narrow: bool, pair: PairBeads, show_sliders: bool) -> Shape {
         match self.source.kind() {
-            BubbleKind::Color => Shape::circle(color_reach(self.diameter(narrow), self.options, pair)),
+            BubbleKind::Color => Shape::circle(color_reach(self.diameter(narrow, show_sliders), self.options, pair)),
             BubbleKind::Layers => Shape::rect([TOOL_BUBBLE; 2]),
             BubbleKind::History => Shape::rect(HISTORY_BUBBLE),
-            _ => Shape::circle(self.diameter(narrow) * 0.5),
+            _ => Shape::circle(self.diameter(narrow, show_sliders) * 0.5),
         }
     }
 }
@@ -225,16 +224,22 @@ pub struct KeptOptions {
     pub options: BubbleOptions,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BubbleLayout {
+    pub show_sliders: bool,
     pub bubbles: Vec<ToolBubble>,
     pub rings: Vec<RingSettings>,
     pub kept: Vec<KeptOptions>,
 }
+impl Default for BubbleLayout {
+    fn default() -> Self {
+        Self { show_sliders: true, bubbles: Vec::new(), rings: Vec::new(), kept: Vec::new() }
+    }
+}
 impl BubbleLayout {
     pub fn is_empty(&self) -> bool {
-        self.bubbles.is_empty() && self.rings.is_empty() && self.kept.is_empty()
+        self.show_sliders && self.bubbles.is_empty() && self.rings.is_empty() && self.kept.is_empty()
     }
     pub(crate) fn put_back(&mut self, gone: impl Fn(&ToolBubble) -> bool) {
         let (removed, staying): (Vec<_>, Vec<_>) = std::mem::take(&mut self.bubbles).into_iter().partition(|b| gone(b));
@@ -885,6 +890,7 @@ pub enum BubbleAction {
     PutBack { id: u32 },
     PutBackAll,
     SetOptions { id: u32, options: BubbleOptions },
+    ToggleSliders { id: u32 },
     Option { id: u32, option: BubbleOption },
     ToggleRingSetting { brush: u32, setting: String },
     Palette { id: u32, step: i32 },
@@ -897,7 +903,6 @@ pub enum BubbleAction {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BubbleOption {
-    ShowSliders,
     Recent,
     Palette,
     Pair,
@@ -910,7 +915,6 @@ pub enum BubbleOption {
 impl BubbleOption {
     pub(crate) fn apply(self, mut options: BubbleOptions) -> BubbleOptions {
         match self {
-            Self::ShowSliders => options.show_sliders = !options.show_sliders,
             Self::Recent => options.recent = !options.recent,
             Self::Palette => options.palette = !options.palette,
             Self::Pair => options.pair = !options.pair,

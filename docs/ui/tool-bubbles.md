@@ -102,11 +102,13 @@ everything rests.
 ## Taps, halos and the chooser
 
 - **Show Sliders:** each tool, group, medium and Brush controls bubble has this
-  option checked by default in its hold menu. It controls opening sliders when
+  shared option checked by default in its hold menu. Changing it in any bubble's
+  menu changes it for every tool, group and medium in the workspace, including
+  bubbles taken out later. It controls opening sliders when
   dragging the source out, picking a tool from its chooser or clicking its face.
-  Unchecking it closes its sliders; checking it shows them when the tool is
-  selected. The workspace remembers the choice for that source, including after
-  putting it back and taking it out again. Other tools keep their own choices.
+  Unchecking it closes existing bubble sliders; checking it shows the selected
+  tool's sliders. The workspace remembers the shared choice even after all bubbles
+  are put back.
 - **Brush:** the first tap selects the brush and, with **Show Sliders** checked,
   opens its settings halo; the next tap closes it. If the brush is already
   selected, a tap toggles its halo. With the option unchecked, taps only select.

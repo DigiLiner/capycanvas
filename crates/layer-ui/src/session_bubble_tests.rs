@@ -148,7 +148,7 @@ fn take_source(s: &mut UiSession<Recorder>, source: BubbleSource) -> u32 {
 
 fn show_sliders(s: &UiSession<Recorder>, id: u32) -> ContextMenuItem {
     s.context_menu(ContextTarget::Bubble { id }).unwrap().sections.into_iter().flatten()
-        .find(|item| matches!(item.action, Some(UiAction::Bubble { action: BubbleAction::Option { option: BubbleOption::ShowSliders, .. } }))).unwrap()
+        .find(|item| matches!(item.action, Some(UiAction::Bubble { action: BubbleAction::ToggleSliders { .. } }))).unwrap()
 }
 
 fn take_ring(s: &mut UiSession<Recorder>, at: [f32; 2]) -> u32 {
@@ -938,18 +938,22 @@ fn chooser_picks_open_the_selected_tool_halo_on_every_platform() {
 }
 
 #[test]
-fn every_tool_group_and_medium_bubble_offers_show_sliders_checked_by_default() {
+fn every_tool_group_and_medium_bubble_shares_the_workspace_show_sliders_state() {
     for platform in Platform::ALL {
         let mut s = session(platform);
-        let sources = tools::brush_ids().map(|id| BubbleSource::Control { control: ToolbarControl::Brush { id } })
+        assert!(s.state.workspace.layout.bubbles.show_sliders);
+        let sources: Vec<_> = tools::brush_ids().map(|id| BubbleSource::Control { control: ToolbarControl::Brush { id } })
             .chain(ToolGroup::ALL.into_iter().map(|group| BubbleSource::Medium { group }))
             .chain(ToolSlotId::ALL.into_iter().map(|slot| BubbleSource::Control { control: ToolbarControl::ToolSlot { slot } }))
-            .chain([BubbleSource::Control { control: ToolbarControl::ColorPicker }]);
-        for source in sources {
-            let id = s.state.workspace.layout.allocate().unwrap();
-            s.state.workspace.layout.bubbles.bubbles.push(ToolBubble::new(id, source, FAR, VIEW));
-            assert_eq!(show_sliders(&s, id).selected, Some(true), "{platform:?}/{source:?}");
-            s.state.workspace.layout.bubbles.bubbles.pop();
+            .chain([BubbleSource::Control { control: ToolbarControl::ColorPicker }]).collect();
+        for show in [true, false] {
+            s.state.workspace.layout.bubbles.show_sliders = show;
+            for &source in &sources {
+                let id = s.state.workspace.layout.allocate().unwrap();
+                s.state.workspace.layout.bubbles.bubbles.push(ToolBubble::new(id, source, FAR, VIEW));
+                assert_eq!(show_sliders(&s, id).selected, Some(show), "{platform:?}/{source:?}");
+                s.state.workspace.layout.bubbles.bubbles.pop();
+            }
         }
     }
 }
@@ -978,7 +982,8 @@ fn show_sliders_controls_clicks_choices_and_drag_out_with_workspace_history_on_e
             invoke(&mut s, CommandId::RedoWorkspace);
             assert_eq!(show_sliders(&s, id).selected, Some(false));
             let other = take(&mut s, brush(DefaultBrushPreset::GPen), [850., 500.]);
-            assert_eq!(show_sliders(&s, other).selected, Some(true));
+            assert_eq!(show_sliders(&s, other).selected, Some(false));
+            assert!(view(&s, other).rings.is_empty());
             act(&mut s, BubbleAction::PutBack { id: other }).unwrap();
             invoke(&mut s, CommandId::Lasso);
             tap(&mut s, id);
@@ -1007,6 +1012,49 @@ fn show_sliders_controls_clicks_choices_and_drag_out_with_workspace_history_on_e
             let id = take_source(&mut s, source);
             assert!(!view(&s, id).rings.is_empty());
         }
+    }
+}
+
+#[test]
+fn show_sliders_changes_all_existing_bubbles_and_survives_an_empty_workspace() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        s.set_viewport(VIEW, [1200, 900]).unwrap();
+        let brush = take_source(&mut s, BubbleSource::Control { control: ToolbarControl::Brush { id: DefaultBrushPreset::PointyPencil as u32 } });
+        let group = take_source(&mut s, BubbleSource::Control { control: ToolbarControl::Command { command: CommandId::DrawingBrush } });
+        let medium = take_source(&mut s, BubbleSource::Medium { group: ToolGroup::Pastel });
+        let controls = take_control(&mut s, ToolbarControl::ColorPicker, [850., 500.]);
+        s.dispatch(show_sliders(&s, group).action.unwrap()).unwrap();
+        for id in [brush, group, medium, controls] {
+            assert_eq!(show_sliders(&s, id).selected, Some(false));
+            assert!(view(&s, id).rings.is_empty());
+        }
+        let other_options = BubbleOptions { swap: true, ..view(&s, controls).options };
+        act(&mut s, BubbleAction::SetOptions { id: controls, options: other_options }).unwrap();
+        assert!(!s.state.workspace.layout.bubbles.show_sliders);
+        s.dispatch(show_sliders(&s, brush).action.unwrap()).unwrap();
+        for id in [brush, group, medium, controls] {
+            assert_eq!(show_sliders(&s, id).selected, Some(true));
+        }
+        let selected = if view(&s, group).rings.is_empty() { medium } else { group };
+        assert!(!view(&s, selected).rings.is_empty(), "enabling from another tool's menu reopens the selected tool's sliders");
+        assert!(!view(&s, controls).rings.is_empty());
+        invoke(&mut s, CommandId::UndoWorkspace);
+        assert!(!s.state.workspace.layout.bubbles.show_sliders);
+        assert!(view(&s, selected).rings.is_empty() && view(&s, controls).rings.is_empty());
+        invoke(&mut s, CommandId::RedoWorkspace);
+        assert!(s.state.workspace.layout.bubbles.show_sliders);
+        s.dispatch(show_sliders(&s, controls).action.unwrap()).unwrap();
+        act(&mut s, BubbleAction::SetOptions { id: controls, options: BubbleOptions::default() }).unwrap();
+        act(&mut s, BubbleAction::PutBackAll).unwrap();
+        assert!(s.state.workspace.layout.bubbles.bubbles.is_empty());
+        assert!(s.state.workspace.layout.bubbles.kept.is_empty());
+        assert!(!s.state.workspace.layout.bubbles.is_empty());
+        let restored = serde_json::from_str(&serde_json::to_string(&s.state.workspace).unwrap()).unwrap();
+        s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(restored) }).unwrap();
+        let id = take_source(&mut s, BubbleSource::Medium { group: ToolGroup::Oil });
+        assert_eq!(show_sliders(&s, id).selected, Some(false));
+        assert!(view(&s, id).rings.is_empty());
     }
 }
 
