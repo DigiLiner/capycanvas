@@ -517,7 +517,7 @@ including after a language change; other objects use deterministic JSON.
 in light and dark themes at 242- and 320-pixel panel widths. It checks 8-pixel
 content edges, shared dropdown columns, 4-pixel peer gaps on both axes, controls
 and radii at the shared panel control metrics, 36-pixel slider rows, editor focus
-and squircle radii. Panel captions start
+and squircle radii, and GTK's 16-pixel checkbox box, corner and caption gap. Panel captions start
 at the row top and end above the slider hit area. Properties checks the 4-pixel
 gap after its heading and the 6-pixel gap before the parameter group.
 
@@ -527,6 +527,13 @@ their caption beside the control at every panel width, wrapping it to two lines.
 Radio segments, the Tool panel's selection menu, the Layers blend button and Add
 Filter use GTK's button fill (`--control-fill`). Horizontal Tool Options dropdowns
 take their natural width and refit when the chosen item changes.
+
+Panel and toolbar checkboxes (Log counts, Tool Settings checks, Adjust by speed,
+Center on click, Proof options) stay native inputs for focus, keyboard and
+accessibility but draw like GTK's: a 16-pixel box with a 4-pixel corner, a 2-pixel
+`--divider-line` outline unchecked, the accent fill and check mark checked, and
+4 pixels before the caption in the 26-pixel panel control row. Icon-only Tool
+Options actions centre their icon in the tile in horizontal and vertical toolbars.
 
 `--pointwise-effects` checks Hue range pages and Colorize value retention,
 Threshold and Photo Filter controls, Invert/Desaturate insertion, slider history,

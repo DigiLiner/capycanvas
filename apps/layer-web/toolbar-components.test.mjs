@@ -11,6 +11,11 @@ export async function checkToolbarComponents({ call, evaluate, settle }) {
     await wait(`JSON.parse(layerApp.app.workspace_view()).id==='builtin:workspace:${id}'&&!JSON.parse(layerApp.app.workspace_view()).busy`); await settle();
   }
   const rect = selector => evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()`);
+  async function assertActionIconsCentred(context, expected) {
+    const tiles = await evaluate(`[...document.querySelectorAll('[data-toolbar-component=tool_options] .toolbar-action > button')].filter(b=>b.checkVisibility()&&b.querySelector(':scope > svg')).map(b=>{const t=b.getBoundingClientRect(),svg=b.querySelector(':scope > svg'),i=svg.getBoundingClientRect();return {icon:svg.dataset.asset,offset:[i.x+i.width/2-t.x-t.width/2,i.y+i.height/2-t.y-t.height/2]}})`);
+    assert.equal(tiles.length, expected, `${context}: visible icon-only Tool Options actions`);
+    for (const tile of tiles) assert.deepEqual(tile.offset, [0, 0], `${context}: ${tile.icon} icon is centred in its tile like GTK`);
+  }
   async function click(selector, device = 'mouse', offset = { x: 0, y: 0 }) {
     const b = await rect(selector), x = b.x + b.width / 2 + offset.x, y = b.y + b.height / 2 + offset.y;
     assert.ok(b.width > 0 && b.height > 0, selector);
@@ -157,6 +162,7 @@ export async function checkToolbarComponents({ call, evaluate, settle }) {
     }
   }
   await invoke('rectangle_select');
+  await assertActionIconsCentred('horizontal Rectangle select', 4);
   const segments = await rect('[data-toolbar-choice=selection-mode]'), dropdown = await rect('[data-toolbar-choice=variant] > button');
   assert.deepEqual([segments.y, segments.height], [dropdown.y, dropdown.height], 'segments match the dropdown height');
   for (const [i, device] of ['mouse', 'touch', 'pen'].entries()) {
@@ -175,6 +181,8 @@ export async function checkToolbarComponents({ call, evaluate, settle }) {
     }
   }
   await send({ type: 'move_panel', panel: 'commands', target: { kind: 'edge', edge: 'left', outer: true } });
+  await invoke('ruler'); await settle();
+  await assertActionIconsCentred('vertical Ruler', 3);
   await invoke('brush'); await settle();
   await click('[data-toolbar-setting=size] .toolbar-number-face');
   assert.ok(await evaluate('!!document.querySelector(".toolbar-editor-popover:popover-open input.number-slider")'));

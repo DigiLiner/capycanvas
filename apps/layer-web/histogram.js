@@ -60,7 +60,7 @@ export function createScope(options) {
   channel.onchange=()=>dispatch({type:'histogram',action:{type:waveform?'waveform_channel':'channel',index:Number(channel.value)}});
   toolbar.append(source,channel);toolbar.hidden=tonal;
   const graph=element('div','scope-graph'),axis=element('div','scope-axis'),lower=element('span'),upper=element('span');
-  const log=element('label','scope-log'),logToggle=element('input'),logText=element('span');
+  const log=element('label','scope-log'),logToggle=element('input','panel-check'),logText=element('span');
   logToggle.type='checkbox';logToggle.dataset.scopeControl='log';log.append(logToggle,logText);log.hidden=tonal;
   logToggle.onchange=()=>dispatch({type:'histogram',action:{type:waveform?'waveform_logarithmic':'logarithmic',enabled:logToggle.checked}});
   const plot=scopeGraph({state,element,kind,waveform}),footer=scopeFooter({...options,kind});

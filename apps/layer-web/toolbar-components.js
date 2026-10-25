@@ -16,7 +16,7 @@ export function actionField({ element, button, icon }, spec, send, { label, aria
     if (b.getAttribute('aria-disabled') !== 'true') send({ type: 'invoke', command: spec.state.id });
     else { if (check) b.checked = spec.state.selected; explain?.(b); }
   };
-  const b = check ? element('input') : button('', invoke);
+  const b = check ? element('input', 'panel-check') : button('', invoke);
   if (check) { b.type = 'checkbox'; b.addEventListener('change', invoke); }
   else if (spec.state.icon) b.append(icon(spec.state.icon));
   row.append(b);
