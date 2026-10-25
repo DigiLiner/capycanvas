@@ -458,7 +458,10 @@ impl RetouchSources {
             return Ok(None);
         }
         if let Some(layer) = lone_layer(&frame) {
-            return self.copy_lone_layer(r, layer, coordinate, wait, encoder);
+            return match self.copy_lone_layer(r, layer, coordinate, wait, encoder) {
+                Err(error) if error.is_preparation_pending()=>{self.pending=true;Ok(None)},
+                result => result,
+            };
         }
         if !self.cache.analysis_ready(r)? { return Ok(None); }
         let packet = frame.packet(extent);
@@ -474,7 +477,7 @@ impl RetouchSources {
         if let Some(previous) = previous { r.effect_analyses = previous; }
         if let Err(error) = result {
             self.cache.release(slot);
-            return match error { GpuRasterError::DeferredObjectWork => {self.pending=true;Ok(None)}, error => Err(error) };
+            return if error.is_preparation_pending() {self.pending=true;Ok(None)}else {Err(error)};
         }
         self.counts.captures += 1;
         self.counts.blocking += u64::from(blocking);
@@ -646,15 +649,7 @@ impl RetouchSources {
         }
         let references = (retouch.source == layer_core::RetouchSource::References && !retouch.references.is_empty())
             .then(|| retouch.references.clone());
-        let ends = [[region.min_x(), region.max_x()], [region.min_y(), region.max_y()]];
-        let block = |shift: [f32; 2]| {
-            std::array::from_fn::<i64, 2, _>(|axis| {
-                let [lo, hi] = ends[axis].map(|v| v as f32);
-                let texels = [lo + 0.5, hi - 0.5].map(|p| gather.scale[axis] * p + gather.offset[axis] + shift[axis] - 0.5);
-                (texels[0].min(texels[1]).floor() as i64).div_euclid(i64::from(PAGE_SIZE))
-            })
-        };
-        let blocks = [block([0.; 2]), block([tx, ty])];
+        let blocks=[[0.;2],[tx,ty]].map(|shift|sample_block(region,gather.scale,gather.offset,shift));
         let whole = |values: [f32; 2]| values.iter().all(|v| v.fract() == 0.);
         let exact = gather.scale.iter().all(|s| s.abs() == 1.)
             && whole(gather.offset)
@@ -807,6 +802,15 @@ impl RetouchSources {
     }
 }
 
+fn sample_block(region:PixelRect,scale:[f32;2],offset:[f32;2],shift:[f32;2])->[i64;2] {
+    let ends=[[region.min_x(),region.max_x()],[region.min_y(),region.max_y()]];
+    std::array::from_fn(|axis| {
+        let [lo,hi]=ends[axis].map(|v|v as f32);
+        let texels=[lo+0.5,hi-0.5].map(|p|scale[axis]*p+offset[axis]+shift[axis]-0.5);
+        (texels[0].min(texels[1]).floor() as i64).div_euclid(i64::from(PAGE_SIZE))
+    })
+}
+
 /// The 2x2 pages of the block whose first page is `block`, where they exist.
 fn block_pages(block: [i64; 2]) -> [Option<[u32; 2]>; 4] {
     [[0, 0], [1, 0], [0, 1], [1, 1]].map(|[dx, dy]| {
@@ -838,7 +842,7 @@ fn raw_prepared_view(r: &WgpuRasterizer, layer: SourceTarget, coordinate: [u32; 
     let sources = r.source_tiles.borrow();
     match r.native_color_tile(layer, coordinate) {
         Ok(Some(blob)) => {
-            return sources.prepared_raster_view(&blob, r.document_color().space)
+            return sources.prepared_raster_view(&blob, r.document_color().space, r.document_color().space)
                 .map_or(Prepared::Decode, |view| Prepared::View(view.clone()));
         }
         Err(_) => return Prepared::Decode,
@@ -957,6 +961,18 @@ impl WgpuRasterizer {
             }
         }
         self.retouch = Some(retouch);
+    }
+
+    pub(super) fn required_retouch_sources(&self,packet:FramePacket<'_>,plans:&[Vec<BrushTile>],required:&mut BTreeMap<SourceTarget,BTreeSet<[u32;2]>>) {
+        for (batch,tiles) in packet.dab_batches.iter().zip(plans) {
+            let Some(retouch)=batch.style.retouch.as_ref().filter(|_|batch.style.execution.retouches()) else {continue;};
+            let scale=retouch.flip.map(|flip|if flip {-1.}else {1.});
+            for tile in tiles {
+                let [x,y]=tile.coordinate.map(|v|v*PAGE_SIZE);let local=tile.local;
+                let region=PixelRect::new(x+local.min_x(),y+local.min_y(),x+local.max_x(),y+local.max_y());
+                required.entry(batch.target).or_default().extend(block_pages(sample_block(region,scale,retouch.offset,[0.;2])).into_iter().flatten());
+            }
+        }
     }
 
     pub(super) fn prefetch_retouch(

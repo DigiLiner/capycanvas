@@ -32,6 +32,7 @@ mod object_spatial;
 mod vectors;
 pub(crate) use vectors::{MotionSplit, Prepared, motion_bounds, motion_split, moved_bounds, paths_bounds, prepared, preview_bounds, preview_damage};
 mod bake;
+pub(crate) mod bake_preflight;
 pub(crate) mod resample;
 pub(crate) mod scale;
 
@@ -175,6 +176,7 @@ pub(super) struct Scene {
     used: Vec<bool>,
     jobs: Vec<Job>,
     source_jobs: Vec<std::ops::Range<usize>>,
+    ordered:bool,
     // Retain table capacity across tile batches, but release resource handles
     // after encoding so these tables cannot pin evicted paint/source pages.
     source_bindings: RecentBindings<(bool,[wgpu::TextureView; 3])>,
@@ -432,7 +434,7 @@ impl Scene {
             pool: Vec::new(),
             used: Vec::new(),
             jobs: Vec::new(),
-            source_jobs: Vec::new(),
+            source_jobs: Vec::new(),ordered:false,
             source_bindings: Default::default(),
             compute_bindings: Default::default(),
             output_bindings: Default::default(),
@@ -566,6 +568,10 @@ impl Scene {
             sources::validate_raster(request.blob, request.space)?;
         }
         for request in requests {
+            if !r.snapshot_worker {
+                let view=r.source_tiles.borrow().prepared_raster_view(request.blob,request.space,request.destination).cloned().ok_or(GpuRasterError::DeferredObjectWork)?;
+                encoder.copy_texture_to_texture(view.texture().as_image_copy(),request.working.as_image_copy(),request.working.size());continue;
+            }
             let (tile, pending) = r.source_tiles.borrow_mut().plan_raster(r, request.blob, request.space, request.destination)?;
             self.encode_decode(r, pending, encoder)?;
             // Consume this view before a later request can reuse the slot.
@@ -580,6 +586,11 @@ impl Scene {
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(), GpuRasterError> {
         for request in requests {
+            if !r.snapshot_worker {
+                let space=r.document_color().space;
+                let view=r.source_tiles.borrow().prepared_raster_view(request.blob,space,space).cloned().ok_or(GpuRasterError::DeferredObjectWork)?;
+                r.scene_pipelines.source.copy_scalar(&r.device,encoder,&view,request.working);continue;
+            }
             if r.source_tiles.borrow().uploads_full() {
                 Self::submit_source_uploads(r, encoder)?;
             }
@@ -1623,7 +1634,7 @@ impl Scene {
     }
 
     pub(crate) async fn drain_exact_objects_async(&mut self,r:&mut WgpuRasterizer)->Result<(),GpuRasterError> {
-        while self.exact_object_results.pending() {
+        while self.exact_object_results.pending() || r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending()) {
             if r.snapshot_cancelled.as_ref().is_some_and(|cancelled|cancelled.load(std::sync::atomic::Ordering::Relaxed)) {
                 return Err(GpuRasterError::Color("Snapshot capture cancelled".into()));
             }
@@ -1942,9 +1953,25 @@ impl Scene {
     }
 
     fn encode_query_jobs(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, grid: Option<[u32;4]>) -> Result<(), GpuRasterError> {
+        if self.ordered {return self.encode_ordered_jobs(r,encoder).and_then(|ready|if ready {Ok(())}else {Err(GpuRasterError::DeferredObjectWork)});}
         let result = self.encode_jobs_inner(r, encoder, grid);
         if result.is_err() {self.discard_unencoded_jobs();}
         result
+    }
+
+    fn encode_ordered_jobs(&mut self,r:&mut WgpuRasterizer,encoder:&mut submission::CommandEncoder)->Result<bool,GpuRasterError> {
+        let end=self.jobs.iter().position(|job|matches!(job,Job::DecodedTile(source) if source.prepared().is_none())).unwrap_or(self.jobs.len());
+        let remaining=self.jobs.split_off(end);
+        let ranges=std::mem::take(&mut self.source_jobs);
+        self.source_jobs=ranges.iter().filter_map(|range|{let end=range.end.min(end);(range.start<end).then_some(range.start..end)}).collect();
+        let result=self.encode_jobs_inner(r,encoder,None);
+        self.jobs=remaining;
+        self.source_jobs=ranges.into_iter().filter_map(|range|{let start=range.start.max(end);(start<range.end).then_some(start-end..range.end-end)}).collect();
+        result?;
+        if let Some(Job::DecodedTile(source))=self.jobs.first() {
+            r.source_receipt=Some(Arc::downgrade(source));source.prepare(r)?;return Ok(false);
+        }
+        r.source_receipt=None;Ok(true)
     }
 
     fn discard_unencoded_jobs(&mut self) {
@@ -1958,6 +1985,13 @@ impl Scene {
         encoder: &mut crate::submission::CommandEncoder,
         grid: Option<[u32;4]>,
     ) -> Result<(), GpuRasterError> {
+        if !r.snapshot_worker {
+            let mut pending=false;
+            for job in &self.jobs {
+                if let Job::DecodedTile(source)=job && source.prepared().is_none() {source.prepare(r)?;pending=true;}
+            }
+            if pending {return Err(GpuRasterError::DeferredObjectWork);}
+        }
         let source_jobs = self.source_jobs.clone();
         let job_grid = |i| grid.filter(|_| !source_jobs.iter().any(|range| range.contains(&i)));
         let base = self.record_count;
@@ -2179,7 +2213,7 @@ impl Scene {
                     if r.source_tiles.borrow().uploads_full() {
                         Self::submit_source_uploads(r, encoder)?;
                     }
-                    let bytes = r.source_tiles.get_mut().encode(&r.device, &mut r.uploads, &r.scene_pipelines.source, encoder, pending, &self.binding, ((base + i) * self.stride) as u32)?;
+                    let bytes = r.source_tiles.get_mut().encode(&r.device, &mut r.uploads, &r.scene_pipelines.source, encoder, pending, r.snapshot_worker,&self.binding, ((base + i) * self.stride) as u32)?;
                     let in_flight = r.source_tiles.borrow().charge_upload(encoder, bytes);
                     r.metrics.source_upload_peak_bytes = r.metrics.source_upload_peak_bytes.max(in_flight);
                 }

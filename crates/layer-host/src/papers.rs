@@ -373,7 +373,7 @@ mod tests {
         let parent=layer_ui::paper_library::paper_image_id(&id).unwrap();
         let retained=Image::with_id(parent,Arc::new(original));
         let decoded=layer_core::paper::decode_png(&layer_core::paper::encode_png(retained.storage()).unwrap()).unwrap();
-        let actual=canonical_source(&id,decoded,&[retained.clone()]).unwrap();
+        let actual=canonical_source(&id,decoded,std::slice::from_ref(&retained)).unwrap();
         for (coordinate,tile) in &actual.tiles {assert!(Arc::ptr_eq(tile,&retained.tiles[coordinate]));}
         let wrong=Image::with_id(parent,Arc::new(source(91)));
         assert!(canonical_source(&id,source(42),&[wrong]).is_err());

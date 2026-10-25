@@ -28,7 +28,7 @@ fn rough_gray_paper() -> Document {
 }
 
 fn linear(pixels: &[u8]) -> Vec<f32> {
-    pixels.chunks_exact(4).map(|p| layer_core::color::srgb_decode(f32::from(p[1]) / 255.)).collect()
+    pixels.as_chunks::<4>().0.iter().map(|p| layer_core::color::srgb_decode(f32::from(p[1]) / 255.)).collect()
 }
 
 fn mean(values: &[f32]) -> f32 {

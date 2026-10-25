@@ -26,9 +26,11 @@ impl WgpuRasterizer {
         {
             let region = page_rect(coordinate).intersect(PixelRect::full(self.document_extent));
             let source = loop {
+                self.drain_image_decodes(encoder)?;
                 match capture.region(self, frame.packet(self.document_extent), region, [PAGE_SIZE;2], encoder) {
                     Ok(source) => break source,
                     Err(GpuRasterError::DeferredObjectWork) => {
+                        if let Some(error)=self.decode_pressure.error(layer_core::memory::generation(),self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())) {return Err(error);}
                         #[cfg(target_arch = "wasm32")]
                         return Err(GpuRasterError::DeferredObjectWork);
                         #[cfg(not(target_arch = "wasm32"))]

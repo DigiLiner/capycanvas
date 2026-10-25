@@ -146,7 +146,16 @@ impl OpenEnvironment {
         }
         let mut candidate =
             UiSession::from_project_localized(Renderer(Some(gpu)), project, None, self.viewport, self.platform, self.localization.clone())?;
-        candidate.frame(0, 0)?;
+        loop {
+            check()?;
+            candidate.frame(0, 0)?;
+            if candidate.can_park_document() {break;}
+            let gpu=candidate.renderer_mut().0.as_mut().ok_or("Canvas unavailable")?;
+            gpu.device().poll(wgpu::PollType::Poll).map_err(|error|error.to_string())?;
+            gpu.poll_startup().map_err(|error|error.to_string())?;
+            if Instant::now()>=deadline {return Err("Project canvas preparation timed out".into());}
+            std::thread::sleep(Duration::from_millis(2));
+        }
         check()?;
         Ok(Box::new(candidate))
     }
@@ -159,7 +168,15 @@ mod tests {
 
     #[test]
     fn open_prepares_a_ready_candidate_and_honours_cancellation() {
-        let project = layer_ui::NewDocumentOptions::default().project(&layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
+        let mut project = layer_ui::NewDocumentOptions::default().project(&layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
+        let layer_core::SourceTarget::Paint(target)=project.working.target.unwrap() else {panic!()};
+        let descriptor=project.composition().color.paint_descriptor();
+        let pixels=[23,47,83,255].repeat((layer_core::raster::TILE_SIZE*layer_core::raster::TILE_SIZE) as usize);
+        let tile=layer_core::raster::RasterTile::backed(layer_core::raster::TileBlob::encode(descriptor,&pixels).unwrap());
+        project.artwork.paint.get_mut(target).unwrap().raster=layer_core::raster::RasterRevision::backed(layer_core::raster::RasterData {
+            tiles:[(layer_core::raster::TileKey {plane:layer_core::raster::RasterPlane::Color,coordinate:[0;2]},tile)].into(),
+            ..Default::default()
+        });
         let gpu = WgpuRasterizer::new_native_headless(project.composition().color).unwrap();
         let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese);
         let session = UiSession::from_project_localized(
@@ -178,6 +195,7 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&environment.localization, &localization));
         assert_eq!(environment.viewport, session.state().camera.viewport);
         let mut candidate = environment.prepare(project.clone(), || false).unwrap();
+        assert!(candidate.can_park_document());
         assert!(std::sync::Arc::ptr_eq(candidate.localization(), &localization));
         let gpu = candidate.renderer_mut().0.as_mut().unwrap();
         assert!(gpu.device() == &environment.gpu.device);

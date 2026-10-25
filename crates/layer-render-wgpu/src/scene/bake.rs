@@ -60,6 +60,19 @@ impl Scene {
                 .map(|((_, c), page)| (*c, Image { texture: page.texture.clone(), view: page.view.clone(),
                     plan: display_mips::Plan::window(extent, 0, page_rect(*c).intersect(PixelRect::full(extent))) })));
         }
+        if !r.snapshot_worker {
+            self.jobs.clear();self.source_jobs.clear();self.used.fill(false);
+            for (coordinate,destination) in &pages {
+                let output=self.bake_output(r,source,*coordinate,coverage,(target,operation),low)?;
+                let output=if target.is_coverage() {
+                    let scalar=self.reserve_format(r,true);
+                    self.draw(r,scalar,self.pool[output].view.clone(),Some(destination.view.clone()),[0.,0.,PAGE_SIZE as f32,PAGE_SIZE as f32],[21.,1.,0.,0.],false,Convert::None);
+                    self.free(output);scalar
+                }else {output};
+                self.copy_window_tile(output,destination,*coordinate);
+            }
+            return self.encode_jobs(r,encoder);
+        }
         self.placement_display = false;
         self.stop_before = None;
         let budget = match &r.native_edit {
@@ -106,6 +119,33 @@ impl Scene {
         result
     }
 
+    fn bake_output(&mut self,r:&WgpuRasterizer,source:FramePacket<'_>,coordinate:[u32;2],coverage:&layer_core::CoverageSnapshot,command:layer_masks::CommandCoverage,low:Option<SourceTarget>)->Result<usize,GpuRasterError> {
+                let mut output=if let Some(view)=r.prepared_bake(command.0,command.1,coordinate) {
+                    let output=self.alloc(r,wgpu::Color::TRANSPARENT);
+                    self.draw(r,output,view,None,[0.,0.,PAGE_SIZE as f32,PAGE_SIZE as f32],[1.,1.,0.,0.],false,Convert::None);output
+                }else if r.snapshot_worker {self.group(r,source,None,coordinate)?}else {return Err(GpuRasterError::DeferredObjectWork);};
+                if let Some(low) = low {
+                    let view = r.paint_layers.iter().find(|layer| layer.id == low)
+                        .and_then(|layer| layer.pages.iter().find(|page| page.coordinate == coordinate))
+                        .map(|page| page.active().view.clone());
+                    let low = match view { Some(view) => view, None => self.source_tile(r, source.scene, low, coordinate)?.unwrap_or_else(|| r.empty_view.clone()) };
+                    let detail = self.alloc(r, wgpu::Color::TRANSPARENT);
+                    self.draw(r, detail, self.pool[output].view.clone(), Some(low),
+                        [0., 0., PAGE_SIZE as f32, PAGE_SIZE as f32], [17., 1., 0., 0.], false, Convert::None);
+                    self.free(output);
+                    output = detail;
+                }
+                if coverage.source.default_coverage != 1. || coverage.use_.inverted || coverage.selection.is_some()
+                    || !coverage.source.raster.is_empty() || !coverage.source.operations.is_empty() {
+                    let mask = self.command_mask_at(r, coverage, coordinate, command)?;
+                    let clipped = self.alloc(r, wgpu::Color::TRANSPARENT);
+                    self.draw(r, clipped, self.pool[output].view.clone(), Some(self.pool[mask].view.clone()),
+                        [0., 0., PAGE_SIZE as f32, PAGE_SIZE as f32], [3., 1., 0., 0.], false, Convert::None);
+                    self.free(output); self.free(mask); output = clipped;
+                }
+                Ok(self.converted(r, output, Convert::stored(source)))
+    }
+
     /// Composite `pages`, keeping each to the part inside `extent`; the rest
     /// of a page stays transparent.
     #[expect(clippy::too_many_arguments, reason = "Bake operands retain independent source, coverage and command ownership")]
@@ -123,27 +163,7 @@ impl Scene {
             self.jobs.clear();
             self.used.fill(false);
             for (coordinate, destination) in batch.iter().copied() {
-                let mut output = self.group(r, source, None, *coordinate)?;
-                if let Some(low) = low {
-                    let view = r.paint_layers.iter().find(|layer| layer.id == low)
-                        .and_then(|layer| layer.pages.iter().find(|page| page.coordinate == *coordinate))
-                        .map(|page| page.active().view.clone());
-                    let low = match view { Some(view) => view, None => self.source_tile(r, source.scene, low, *coordinate)?.unwrap_or_else(|| r.empty_view.clone()) };
-                    let detail = self.alloc(r, wgpu::Color::TRANSPARENT);
-                    self.draw(r, detail, self.pool[output].view.clone(), Some(low),
-                        [0., 0., PAGE_SIZE as f32, PAGE_SIZE as f32], [17., 1., 0., 0.], false, Convert::None);
-                    self.free(output);
-                    output = detail;
-                }
-                if coverage.source.default_coverage != 1. || coverage.use_.inverted || coverage.selection.is_some()
-                    || !coverage.source.raster.is_empty() || !coverage.source.operations.is_empty() {
-                    let mask = self.command_mask_at(r, coverage, *coordinate, command)?;
-                    let clipped = self.alloc(r, wgpu::Color::TRANSPARENT);
-                    self.draw(r, clipped, self.pool[output].view.clone(), Some(self.pool[mask].view.clone()),
-                        [0., 0., PAGE_SIZE as f32, PAGE_SIZE as f32], [3., 1., 0., 0.], false, Convert::None);
-                    self.free(output); self.free(mask); output = clipped;
-                }
-                let output = self.converted(r, output, Convert::stored(source));
+                let output = self.bake_output(r,source,*coordinate,coverage,command,low)?;
                 let output = if command.0.is_coverage() {
                     let scalar = self.reserve_format(r, true);
                     self.draw(r, scalar, self.pool[output].view.clone(), Some(destination.view.clone()),

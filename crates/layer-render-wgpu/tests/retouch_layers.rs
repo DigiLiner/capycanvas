@@ -133,14 +133,14 @@ fn a_dodge_and_burn_layer_stores_the_middle_code_and_leaves_the_image_unchanged(
             for (key, tile) in &data.tiles {
                 let bytes = tile.wait_backing().unwrap().decode().unwrap();
                 let samples: Vec<f64> = match depth {
-                    SampleDepth::U16 => bytes.chunks_exact(2).map(|b| f64::from(u16::from_le_bytes([b[0], b[1]]))).collect(),
+                    SampleDepth::U16 => bytes.as_chunks::<2>().0.iter().map(|b| f64::from(u16::from_le_bytes([b[0], b[1]]))).collect(),
                     _ => bytes.iter().map(|b| f64::from(*b)).collect(),
                 };
                 let size = raster::TILE_SIZE;
-                for (i, pixel) in samples.chunks_exact(4).enumerate() {
+                for (i, pixel) in samples.as_chunks::<4>().0.iter().enumerate() {
                     let [x, y] = [key.coordinate[0] * size + i as u32 % size, key.coordinate[1] * size + i as u32 / size];
                     if x < SIZE[0] && y < SIZE[1] {
-                        assert_eq!(pixel, [middle, middle, middle, maximum], "{what}: stored at {x}, {y}");
+                        assert_eq!(*pixel, [middle, middle, middle, maximum], "{what}: stored at {x}, {y}");
                     }
                 }
             }

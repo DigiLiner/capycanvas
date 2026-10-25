@@ -796,6 +796,7 @@ pub trait CanvasRenderer {
     fn has_pending_work(&self) -> bool {
         false
     }
+    fn preparation_paused(&self) -> bool { false }
     /// The layer a placement or transform that just began may move. The
     /// renderer may prepare what drawing its drag needs while idle. None
     /// when the transaction ends.

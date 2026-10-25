@@ -311,7 +311,7 @@ mod tests {
             r.uploads.finish(&encoder);encoder.submit(&r.queue);
             let bytes=crate::layer_tests::page_bytes(&r,&texture);
             if style==3 {assert!(bytes.iter().all(|byte|*byte==0));}
-            else {assert!(bytes.chunks_exact(16).all(|pixel| f32::from_le_bytes(pixel[8..12].try_into().unwrap())>0.000001 && (f32::from_le_bytes(pixel[12..16].try_into().unwrap())-1.).abs()<2e-5));}
+            else {assert!(bytes.as_chunks::<16>().0.iter().all(|pixel| f32::from_le_bytes(pixel[8..12].try_into().unwrap())>0.000001 && (f32::from_le_bytes(pixel[12..16].try_into().unwrap())-1.).abs()<2e-5));}
             eprintln!("clamped source {extent:?} corner={corner} style={style} far={far} actual={actual} planned={planned}");
             bytes
         }

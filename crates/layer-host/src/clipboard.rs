@@ -166,7 +166,7 @@ mod tests {
         assert_eq!((clip.origin, clip.source.extent, clip.policy), ([10, 8], [20, 12], layer_core::authored::PaintBasePolicy::WorkingPixels));
         let copied = rows(&clip.source);
         for (y, row) in copied.iter().enumerate() {
-            for (x, pixel) in row.chunks_exact(4).enumerate() {
+            for (x, pixel) in row.as_chunks::<4>().0.iter().enumerate() {
                 let expected = [((x + 10) * 4) as u8, ((y + 8) * 5) as u8, 200, 255];
                 assert!(pixel.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 1), "({x},{y}) {pixel:?} {expected:?}");
             }
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(layers.scene.artwork.objects.len(), 1);
         let copied = rows(&clip.source);
         for (y, row) in copied.iter().enumerate() {
-            for (x, pixel) in row.chunks_exact(4).enumerate() {
+            for (x, pixel) in row.as_chunks::<4>().0.iter().enumerate() {
                 let expected = [(x * 30) as u8, (y * 40) as u8, 90, 255];
                 assert!(pixel.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 1), "({x},{y}) {pixel:?} {expected:?}");
             }

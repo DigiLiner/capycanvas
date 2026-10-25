@@ -41,7 +41,7 @@ fn image_layer_rows_preview_each_pose_regardless_of_visibility() {
     assert!(red[0]>150 && red[2]<80,"hidden mirrored source previews on the right: {red:?}");
     assert_ne!(rotated,hidden,"different poses have different occurrence thumbnails");
     let (_, outside)=layer_thumbnail(&mut engine,ThumbnailTarget::Occurrence(layers[2]));
-    assert!(outside.chunks_exact(4).all(|pixel|pixel[0]==pixel[1] && pixel[1]==pixel[2]),"an ordinary row shows no pixels for a placement wholly outside the canvas");
+    assert!(outside.as_chunks::<4>().0.iter().all(|pixel|pixel[0]==pixel[1] && pixel[1]==pixel[2]),"an ordinary row shows no pixels for a placement wholly outside the canvas");
     let scene=engine.document().scene();
     assert!(std::sync::Arc::ptr_eq(scene.object_layer(layers[0]).unwrap().image.storage(),scene.object_layer(layers[1]).unwrap().image.storage()));
     let object=scene.object_handle(layers[0]).unwrap();

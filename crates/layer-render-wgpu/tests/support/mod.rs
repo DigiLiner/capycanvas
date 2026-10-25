@@ -15,6 +15,25 @@ use layer_render_wgpu::WgpuRasterizer;
 pub type Engine = CanvasEngine<WgpuRasterizer>;
 pub const SIZE: [u32; 2] = [384, 256];
 
+pub fn submit_settled(r: &mut WgpuRasterizer, frame: layer_render::FramePacket<'_>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let idle = layer_render::FramePacket { dabs: &[], dab_batches: &[], restore_rasters: &[],
+        reset_layers: false, composite_all: false, ..frame };
+    let mut first = true;
+    loop {
+        r.poll_pending(frame.view).unwrap();
+        let next = if first { frame } else { idle };
+        if r.can_submit() && r.raster_dependencies_ready(next, None) {
+            r.submit(next).unwrap();
+            first = false;
+        }
+        r.wait_idle().unwrap();
+        if !first && !r.has_pending_work() && r.raster_ready() && !r.has_pending_submission() { return; }
+        assert!(std::time::Instant::now() < deadline, "renderer work must settle");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 pub struct Image {
     pub size: [u32; 2],
     pub rgba: Vec<u8>,
@@ -39,8 +58,8 @@ impl Image {
         assert_eq!(self.size, other.size, "{what}: size");
         let (pixel, difference) = self
             .rgba
-            .chunks_exact(4)
-            .zip(other.rgba.chunks_exact(4))
+            .as_chunks::<4>().0.iter()
+            .zip(other.rgba.as_chunks::<4>().0.iter())
             .map(|(a, b)| {
                 let channels = if a[3] == 0 && b[3] == 0 { 3..4 } else { 0..4 };
                 channels.map(|c| a[c].abs_diff(b[c])).max().unwrap_or(0)

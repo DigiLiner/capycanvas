@@ -737,7 +737,7 @@ mod tests {
         let original:Vec<_>=geometry.triangles().flatten().collect();
         let winner=|indices:&[u32],point:Point| {
             let mut found=None;
-            for triangle in indices.chunks_exact(3) {
+            for triangle in indices.as_chunks::<3>().0 {
                 let [a,b,c]=std::array::from_fn::<_,3,_>(|i|geometry.vertices[triangle[i] as usize]);
                 let edge=|u:[f32;4],v:[f32;4]|(u[0]-point.x)*(v[1]-point.y)-(u[1]-point.y)*(v[0]-point.x);
                 let area=(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
@@ -774,7 +774,7 @@ mod tests {
             for wx in 0..5 {
                 let range = g.window([(wx * WINDOW_PAGES) as i32, (wy * WINDOW_PAGES) as i32]);
                 let drawn: Vec<[u32; 3]> = g.indices[range.start as usize..range.end as usize]
-                    .chunks_exact(3)
+                    .as_chunks::<3>().0.iter()
                     .map(|t| [t[0], t[1], t[2]])
                     .collect();
                 let positions: Vec<usize> = drawn.iter().map(|t| order[t]).collect();

@@ -40,7 +40,7 @@ fn multilayer_4k_fill_replay_matches_incremental_submissions() {
         r.wait_idle().unwrap();
     }
     let incremental = r.readback_srgb_rgba8().unwrap();
-    assert!(incremental.chunks_exact(4).all(|pixel| pixel[3] > 0));
+    assert!(incremental.as_chunks::<4>().0.iter().all(|pixel| pixel[3] > 0));
     for telemetry in [false, true] {
         r.set_telemetry_enabled(telemetry);
         r.submit(FramePacket {

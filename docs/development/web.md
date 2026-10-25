@@ -142,6 +142,8 @@ attempt cannot signal its own retry capacity. Invalid or individually oversized
 inputs remain validation errors. `--worker-capacity` holds aggregate payload
 capacity through a real detached decode, then checks waiting, exact source-byte
 reconstruction and visible image pixels after release in both themes.
+Private document candidates drive their initial frame to the shared parking
+boundary before restoring session history or adopting the drawing.
 
 Clipboard output carries the full-depth source transfer and a separate PNG for
 other applications. The PNG is a separate reply field, so it cannot change the source transfer

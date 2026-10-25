@@ -17,7 +17,7 @@ const EXTENT: [u32; 2] = [300, 220];
 
 /// Straight linear RGBA of the source fixture.
 fn straight(x: u32, y: u32) -> [f32; 4] {
-    let alpha = if (x / 3 + y / 5) % 7 == 0 {
+    let alpha = if (x / 3 + y / 5).is_multiple_of(7) {
         0.
     } else {
         0.35 + ((x * 7 + y * 5) % 13) as f32 / 20.
@@ -57,7 +57,7 @@ fn source_image(pixel: impl Fn(u32, u32) -> [f32; 4]) -> Arc<SourceImage> {
 fn coverage_byte(x: u32, y: u32) -> u32 {
     if !(40..230).contains(&x) || !(30..180).contains(&y) {
         0
-    } else if x < 60 || y % 23 == 0 {
+    } else if x < 60 || y.is_multiple_of(23) {
         (x * 11 + y * 3) % 256
     } else {
         255
@@ -278,7 +278,7 @@ fn pages(r: &WgpuRasterizer) -> Vec<([u32; 2], [f32; 4])> {
     for page in &r.paint_layers[0].pages {
         let bytes = page_bytes(r, &page.active().texture);
         let origin = page.coordinate.map(|v| v * PAGE_SIZE);
-        for (i, texel) in bytes.chunks_exact(16).enumerate() {
+        for (i, texel) in bytes.as_chunks::<16>().0.iter().enumerate() {
             let [x, y] = [
                 origin[0] + i as u32 % PAGE_SIZE,
                 origin[1] + i as u32 / PAGE_SIZE,
@@ -346,7 +346,7 @@ fn native_transforms_match_an_independent_oracle_for_every_filter_and_map() {
                     moving: false,
                     target: target(&layer),
                     selection: selection.clone(),
-                    transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..map.clone() },
+                    transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..map.clone() },
                         ..Default::default()
                     },
                 };
@@ -382,7 +382,7 @@ fn transforms_that_keep_their_source_place_the_moved_copy_over_the_original() {
         for interpolation in [Interpolation::Nearest, Interpolation::Bicubic] {
             for affine in maps {
                 transaction += 1;
-                let transform = ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..LayerPlacement::from_affine(affine) },
+                let transform = ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..LayerPlacement::from_affine(affine) },
                     keep_source: true,
                 source_from_owner: None,
                 source_base: None,
@@ -432,7 +432,7 @@ fn minified_native_transforms_average_the_pixel_footprint() {
                     ])
                     .unwrap(),
                 ),
-                transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..LayerPlacement::from_affine(Affine::around(
+                transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..LayerPlacement::from_affine(Affine::around(
                         Point::default(),
                         [scale; 2],
                         0.1,
@@ -471,7 +471,7 @@ fn bicubic_and_lanczos_mask_transforms_keep_scalar_coverage_within_the_unit_inte
             moving: false,
             target: mask_target(&layer),
             selection: None,
-            transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..LayerPlacement::from_affine(Affine([3.7, 0.3, -0.2, 3.9, 1.5, 0.5])) },
+            transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..LayerPlacement::from_affine(Affine([3.7, 0.3, -0.2, 3.9, 1.5, 0.5])) },
                 ..Default::default()
             },
         }))
@@ -711,7 +711,7 @@ fn native_mesh_transforms_match_the_cpu_tessellation_including_folds() {
                     moving: false,
                     target: target(&layer),
                     selection: selection.clone(),
-                    transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..layer_core::LayerPlacement { mesh: Some(Arc::new(mesh.clone())), ..Default::default() } },
+                    transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..layer_core::LayerPlacement { mesh: Some(Arc::new(mesh.clone())), ..Default::default() } },
                         ..Default::default()
                     },
                 }))
@@ -774,7 +774,7 @@ fn mask_warps_seeded_from_an_affine_match_the_affine() {
                     moving: false,
                     target: mask_target(&layer),
                     selection: None,
-                    transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..map.clone() },
+                    transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..map.clone() },
                         ..Default::default()
                     },
                 }))

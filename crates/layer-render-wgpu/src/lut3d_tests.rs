@@ -246,7 +246,7 @@ fn literal_domain_coordinates_preserve_adjacent_normal_interiors_and_tetra_ties(
         let code=program.wgsl.sources().unwrap().iter().map(|v|v.as_ref()).collect::<Vec<_>>().join("\n");
         program.entry="cube_coordinate_probe".into();program.wgsl=format!("{code}\nfn cube_coordinate_probe(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{{return vec4<f32>(fx_cube_coordinate(c.r,0u),fx_cube_coordinate(c.g,1u),fx_cube_coordinate(c.b,2u),1.);}}").into();
         let inputs=(0..=8).map(|i|{let v=f32::from_bits(if minimum.is_sign_negative(){minimum.to_bits()-i}else{minimum.to_bits()+i});[v,v,v,1.]}).collect::<Vec<_>>();
-        let actual=render(&mut r,&[layer,pattern(&inputs)]);for i in 0..9{assert_eq!(actual[i],[i as f32/8.,i as f32/8.,i as f32/8.,1.],"normal coordinate {minimum:e}/{maximum:e}/step{i}");}
+        let actual=render(&mut r,&[layer,pattern(&inputs)]);for (i,value) in actual[..9].iter().enumerate(){assert_eq!(*value,[i as f32/8.,i as f32/8.,i as f32/8.,1.],"normal coordinate {minimum:e}/{maximum:e}/step{i}");}
     }
     let mut layer=lookup(table(2,[[0.;3],[1.;3]],false),0,100.);let program=Arc::make_mut(&mut layer.program);
     let code=program.wgsl.sources().unwrap().iter().map(|v|v.as_ref()).collect::<Vec<_>>().join("\n");program.entry="tetra_offset_probe".into();program.wgsl=format!("{code}\nfn tetra_offset_probe(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{{let t=tetrahedron(c.rgb);return vec4<f32>(vec3<f32>(select(t.first,t.second,fx_parameter(b,2u).x<50.)),1.);}}").into();

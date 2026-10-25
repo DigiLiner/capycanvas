@@ -58,8 +58,7 @@ mod tests {
     #[test]
     fn short_pauses_admit_visible_previews_but_keep_background_work_parked() {
         use super::super::{BRUSH, OTHER, BACKGROUND};
-        let mut admission = Admission::default();
-        admission.last_activity = Some(Instant::now() - Duration::from_millis(500));
+        let mut admission = Admission {last_activity:Some(Instant::now() - Duration::from_millis(500)),..Default::default()};
         assert!(admission.allows(BRUSH) && admission.allows(OTHER));
         assert!(!admission.allows(BACKGROUND));
         assert_eq!(admission.delay([OTHER, BACKGROUND].into_iter()), Duration::ZERO);

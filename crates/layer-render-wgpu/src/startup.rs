@@ -381,7 +381,7 @@ impl WgpuRasterizer {
                 required.compute.extend(self.scene_pipelines.scale_pipelines().into_iter().cloned());
             }
             if self.native_edit.is_some() || shader.key.source {
-                required.render.push(self.scene_pipelines.source.pipeline.clone());
+                required.render.extend(self.scene_pipelines.source.required().into_iter().cloned());
             }
             if shader.key.objects {
                 required.compute.extend(self.scene_pipelines.objects.pipelines().map(Clone::clone));

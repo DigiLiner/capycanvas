@@ -68,9 +68,24 @@ windows, bounded separately, and evicted before refusing work under pressure.
 Owner retirement advances the preparation retry generation after payload fields
 drop; the worker reclaims dead ledger entries before admitting the next allocation.
 The render owner reads that generation without scanning owners or querying memory.
+Native preparation under memory pressure registers a shared collector that scans
+on a worker every 250 ms while watched and sleeps when no work is parked. This
+also catches a raw Arc alias released after its enclosing owner's notification.
+Existing host service ticks wake preparation after a generation change. Decode
+results retain their attempt generation, excluding their own temporary cleanup;
+asynchronous attempts count releases within each poll and final future cleanup,
+so releases by other tasks between polls remain retry signals.
 Interactive exact image preparation also decodes parked samples on workers.
 Memory and worker-capacity refusals preserve their typed result: interactive work
 pauses without marking the source corrupt, while snapshot jobs return the refusal.
+Raster restoration prepares private color, coverage and wetness pages before
+publishing them together. Source preparation includes transform and retouch
+footprints, displaced Liquify inputs and brush neighborhoods before authored
+frame work begins. Preparation admits projected outputs alongside retained
+outputs and published pages under the renderer's composition and cache policy.
+Native and browser document candidates finish their initial canvas preparation
+before restoring editor history or adopting the drawing, using the operation's
+existing cancellation and deadline.
 Private buffer owners release their storage before returning its reservation,
 including when a fallible ownership handoff is refused.
 

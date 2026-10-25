@@ -216,6 +216,7 @@ pub(crate) struct RasterDecodeRequest {
     pub destination:RgbSpace,
 }
 pub(crate) struct PreparedRasterTile {
+    pub attempt:u64,
     pub blob:Arc<layer_core::raster::TileBlob>,
     pub space:RgbSpace,
     pub destination:RgbSpace,
@@ -282,6 +283,7 @@ pub fn prepare_image_tile(source:&SourceImage,coordinate:[u32;2],destination:Rgb
     Ok(PreparedSourcePixels::PremultipliedWorkingPixels(Arc::new(bytes)))
 }
 pub(crate) struct PreparedMipTile {
+    pub attempt:u64,
     pub id:PortableId,
     pub source:Arc<SourceImage>,
     pub coordinate:[u32;2],
@@ -304,21 +306,28 @@ pub(crate) fn image_decode_failure<'a>(failures:&'a [crate::moving_projection::F
         .map(|(_,_,_,_,error)|error.as_str())
 }
 
+#[derive(Clone)]
 enum DecodeKey {
-    Image(PortableId,Weak<SourceImage>,[u32;2]),
+    Image(Weak<SourceImage>,[u32;2]),
     Raster(Weak<layer_core::raster::TileBlob>,RgbSpace,RgbSpace),
 }
 impl DecodeKey {
     fn matches(&self,other:&Self)->bool {
         match (self,other) {
-            (Self::Image(id,a,p),Self::Image(other,b,q))=>id==other && a.ptr_eq(b) && p==q,
+            (Self::Image(a,p),Self::Image(b,q))=>a.ptr_eq(b) && p==q,
             (Self::Raster(a,space,destination),Self::Raster(b,other,target))=>a.ptr_eq(b) && space==other && destination==target,
             _=>false,
         }
     }
 }
 #[derive(Default)]
-pub(crate) struct DecodePressure {entries:Vec<(DecodeKey,RgbSpace,u64,DecodeRefusal)>,paused:Option<(DecodeKey,u64,DecodeRefusal)>}
+pub(crate) struct DecodePressure {
+    requests:u64,
+    entries:Vec<(DecodeKey,RgbSpace,u64,DecodeRefusal)>,paused:Option<(DecodeKey,u64,DecodeRefusal)>,
+    notified:Option<u64>,
+    #[cfg(not(target_arch="wasm32"))]
+    watch:Option<(DecodeKey,RgbSpace,layer_core::memory::CollectionWatch)>,
+}
 #[derive(Clone,Copy)]
 enum DecodeRefusal {Memory,Busy}
 impl DecodeRefusal {
@@ -326,45 +335,83 @@ impl DecodeRefusal {
     fn error(self)->GpuRasterError {match self {Self::Memory=>GpuRasterError::Memory(layer_core::memory::MemoryError),Self::Busy=>GpuRasterError::Busy}}
 }
 impl DecodePressure {
-    fn retain(&mut self,generation:u64) {
+    pub fn retain(&mut self,generation:u64) {
         self.entries.retain(|(key,_,epoch,_)|*epoch==generation && match key {
-            DecodeKey::Image(_,source,_)=>source.strong_count()!=0,
+            DecodeKey::Image(source,_)=>source.strong_count()!=0,
             DecodeKey::Raster(source,_,_)=>source.strong_count()!=0,
         });
+        #[cfg(not(target_arch="wasm32"))]
+        if self.watch.as_ref().is_some_and(|(key,_,_)|match key {DecodeKey::Image(owner,_)=>owner.strong_count()==0,DecodeKey::Raster(owner,_,_)=>owner.strong_count()==0}) {self.watch=None;}
     }
     fn remember(&mut self,key:DecodeKey,space:RgbSpace,generation:u64,refusal:DecodeRefusal) {
         self.retain(generation);
         if !self.entries.iter().any(|(stored,context,_,_)|stored.matches(&key) && *context==space) {self.entries.push((key,space,generation,refusal));}
     }
-    fn blocked(&mut self,key:DecodeKey,space:RgbSpace,generation:u64)->bool {
+    pub fn requests(&self)->u64 {self.requests}
+    fn blocked(&mut self,key:DecodeKey,space:RgbSpace,generation:u64)->Result<bool,GpuRasterError> {
+        self.requests=self.requests.wrapping_add(1);
         self.retain(generation);
         let refusal=self.entries.iter().find(|(stored,context,_,_)|stored.matches(&key) && *context==space).map(|(_,_,_,refusal)|*refusal);
-        self.paused=refusal.map(|refusal|(key,generation,refusal));refusal.is_some()
+        #[cfg(not(target_arch="wasm32"))]
+        {
+            if self.watch.as_ref().is_some_and(|(owner,context,_)|!owner.matches(&key)||*context!=space) {self.watch=None;}
+            if matches!(refusal,Some(DecodeRefusal::Memory)) && self.watch.is_none() {
+                self.watch=Some((key.clone(),space,layer_core::memory::CollectionWatch::new().map_err(GpuRasterError::collection_watch_failure)?));
+            }
+        }
+        self.paused=refusal.map(|refusal|(key,generation,refusal));Ok(refusal.is_some())
     }
-    pub fn image(&mut self,id:PortableId,source:&Arc<SourceImage>,coordinate:[u32;2],space:RgbSpace,generation:u64)->bool {
-        self.blocked(DecodeKey::Image(id,Arc::downgrade(source),coordinate),space,generation)
+    pub fn image(&mut self,source:&Arc<SourceImage>,coordinate:[u32;2],space:RgbSpace,generation:u64)->Result<bool,GpuRasterError> {
+        self.blocked(DecodeKey::Image(Arc::downgrade(source),coordinate),space,generation)
     }
-    pub fn raster(&mut self,source:&Arc<layer_core::raster::TileBlob>,from:RgbSpace,to:RgbSpace,generation:u64)->bool {
+    pub fn raster(&mut self,source:&Arc<layer_core::raster::TileBlob>,from:RgbSpace,to:RgbSpace,generation:u64)->Result<bool,GpuRasterError> {
         self.blocked(DecodeKey::Raster(Arc::downgrade(source),from,to),to,generation)
     }
-    pub fn image_failed(&mut self,tile:&PreparedMipTile,space:RgbSpace,generation:u64) {
+    pub fn image_failed(&mut self,tile:&PreparedMipTile,space:RgbSpace) {
         if let Some(refusal)=tile.pixels.as_ref().err().and_then(DecodeRefusal::new) {
-            self.remember(DecodeKey::Image(tile.id,Arc::downgrade(&tile.source),tile.coordinate),space,generation,refusal);
+            self.remember(DecodeKey::Image(Arc::downgrade(&tile.source),tile.coordinate),space,tile.attempt,refusal);
         }
     }
-    pub fn raster_failed(&mut self,tile:&PreparedRasterTile,generation:u64) {
+    pub fn raster_failed(&mut self,tile:&PreparedRasterTile) {
         if let Some(refusal)=tile.pixels.as_ref().err().and_then(DecodeRefusal::new) {
-            self.remember(DecodeKey::Raster(Arc::downgrade(&tile.blob),tile.space,tile.destination),tile.destination,generation,refusal);
+            self.remember(DecodeKey::Raster(Arc::downgrade(&tile.blob),tile.space,tile.destination),tile.destination,tile.attempt,refusal);
         }
     }
     pub fn blocks_background(&self,generation:u64,outstanding:bool)->bool {
         !outstanding && self.paused.as_ref().is_some_and(|(key,epoch,_)|*epoch==generation && match key {
-            DecodeKey::Image(_,source,_)=>source.strong_count()!=0,
+            DecodeKey::Image(source,_)=>source.strong_count()!=0,
             DecodeKey::Raster(source,_,_)=>source.strong_count()!=0,
         })
     }
     pub fn error(&self,generation:u64,outstanding:bool)->Option<GpuRasterError> {
         self.blocks_background(generation,outstanding).then(||self.paused.as_ref().unwrap().2.error())
+    }
+    pub fn clear(&mut self) {*self=Self::default();}
+    pub fn poll_memory_retry(&mut self)->bool {
+        let current=layer_core::memory::generation();
+        self.retain(current);
+        let released=self.paused.as_ref().is_some_and(|(key,epoch,refusal)|*epoch!=current && matches!(refusal,DecodeRefusal::Memory) && match key {
+            DecodeKey::Image(owner,_)=>owner.strong_count()!=0,DecodeKey::Raster(owner,_,_)=>owner.strong_count()!=0,
+        });
+        if released && self.notified!=Some(current) {self.notified=Some(current);true}else {false}
+    }
+    pub fn memory_pressure_waiting(&self)->bool {
+        self.paused.as_ref().is_some_and(|(key,_,refusal)|matches!(refusal,DecodeRefusal::Memory) && match key {
+            DecodeKey::Image(owner,_)=>owner.strong_count()!=0,DecodeKey::Raster(owner,_,_)=>owner.strong_count()!=0,
+        })
+    }
+    pub fn image_ready(&mut self,source:&Arc<SourceImage>,coordinate:[u32;2],space:RgbSpace) {
+        self.ready(&DecodeKey::Image(Arc::downgrade(source),coordinate),space);
+    }
+    pub fn raster_ready(&mut self,blob:&Arc<layer_core::raster::TileBlob>,source:RgbSpace,destination:RgbSpace) {
+        self.ready(&DecodeKey::Raster(Arc::downgrade(blob),source,destination),destination);
+    }
+    fn ready(&mut self,key:&DecodeKey,space:RgbSpace) {
+        self.notified=None;
+        self.entries.retain(|(stored,context,_,_)|!stored.matches(key)||*context!=space);
+        if self.paused.as_ref().is_some_and(|(stored,_,_)|stored.matches(key)) {self.paused=None;}
+        #[cfg(not(target_arch="wasm32"))]
+        if self.watch.as_ref().is_some_and(|(stored,context,_)|stored.matches(key)&&*context==space) {self.watch=None;}
     }
 }
 
@@ -389,8 +436,9 @@ fn contained<T,E:From<String>>(work:impl FnOnce()->Result<T,E>)->Result<T,E> {
 fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoders:&mut std::collections::VecDeque<(Weak<SourceImage>,layer_color::WorkingDecoder)>)->PreparedImageWork {
     match request {
         MipDecodeRequest::Raster(request) => {
+            let attempt=layer_core::memory::DecodeAttempt::new();
             let pixels=contained(||prepare_raster_tile(&request.blob,request.space,cache));
-            PreparedImageWork::Raster(PreparedRasterTile {blob:request.blob,space:request.space,destination:request.destination,pixels})
+            PreparedImageWork::Raster(PreparedRasterTile {attempt:attempt.finish(),blob:request.blob,space:request.space,destination:request.destination,pixels})
         },
         MipDecodeRequest::Coordinates(request) => {
             let pixels=contained(|| if request.destination.strong_count()==0 {Err("Coordinate request cancelled".into())}
@@ -398,6 +446,7 @@ fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_co
             PreparedImageWork::Coordinates {destination:request.destination,pixels}
         },
         MipDecodeRequest::Image(request) => {
+            let attempt=layer_core::memory::DecodeAttempt::new();
             let pixels=contained(|| {
                 if matches!(request.source.interpretation.profile,layer_core::color::ColorProfile::Builtin(_)) {
                     return prepare_image_tile(&request.source,request.coordinate,destination,cache,None);
@@ -413,11 +462,12 @@ fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_co
                 decoders.push_back(decoder);
                 decoded
             });
-            PreparedImageWork::Image(PreparedMipTile {id:request.id,source:request.source,coordinate:request.coordinate,pixels})
+            PreparedImageWork::Image(PreparedMipTile {attempt:attempt.finish(),id:request.id,source:request.source,coordinate:request.coordinate,pixels})
         },
     }
 }
 impl MipDecodeQueue {
+    pub(crate) fn accepts_held(&self,held:usize,receipt:bool)->bool {self.outstanding.len().saturating_add(held)<self.capacity+usize::from(receipt)}
     pub(crate) fn new(device:&PipelineDevice)->Self {
         #[cfg(not(target_arch="wasm32"))]
         {Self::native(device.source_samples.clone(),device.working_space())}
@@ -448,7 +498,7 @@ impl MipDecodeQueue {
     }
     pub(crate) fn request(&mut self,id:PortableId,source:Arc<SourceImage>,coordinate:[u32;2])->bool {
         let weak=Arc::downgrade(&source);
-        self.enqueue(MipDecodeRequest::Image(ImageDecodeRequest {id,source,coordinate}),Some(DecodeKey::Image(id,weak,coordinate)))
+        self.enqueue(MipDecodeRequest::Image(ImageDecodeRequest {id,source,coordinate}),Some(DecodeKey::Image(weak,coordinate)))
     }
     pub(crate) fn request_raster(&mut self,blob:Arc<layer_core::raster::TileBlob>,space:RgbSpace,destination:RgbSpace)->bool {
         let key=DecodeKey::Raster(Arc::downgrade(&blob),space,destination);
@@ -474,7 +524,7 @@ impl MipDecodeQueue {
         let result=self.completed.take()?;
         self.ready.fetch_sub(1,Ordering::AcqRel);
         let key=match &result {
-            PreparedImageWork::Image(tile)=>Some(DecodeKey::Image(tile.id,Arc::downgrade(&tile.source),tile.coordinate)),
+            PreparedImageWork::Image(tile)=>Some(DecodeKey::Image(Arc::downgrade(&tile.source),tile.coordinate)),
             PreparedImageWork::Raster(tile)=>Some(DecodeKey::Raster(Arc::downgrade(&tile.blob),tile.space,tile.destination)),
             PreparedImageWork::Coordinates {..}=>None,
         };
@@ -499,28 +549,68 @@ mod tests {
     use super::*;
     use crate::test_support::{page_texture,upload_page};
     use layer_render::CanvasRenderer;
+    #[cfg(not(target_arch="wasm32"))]
+    #[test]
+    fn collection_startup_failure_is_terminal_instead_of_paused_quota_pressure() {
+        let error=GpuRasterError::collection_watch_failure(layer_core::memory::MemoryError);
+        assert!(!error.is_preparation_pending());
+        assert_eq!(error,GpuRasterError::Color("Image preparation worker unavailable".into()));
+        assert!(GpuRasterError::Memory(layer_core::memory::MemoryError).is_preparation_pending());
+    }
+
+    #[test]
+    fn memory_watch_cancels_when_the_parked_owner_dies_without_another_request() {
+        let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
+        layer_core::memory::images().collect().unwrap();let attempt=layer_core::memory::generation();
+        let image=PreparedMipTile {attempt,id:PortableId::random(),source:source.clone(),coordinate:[0;2],pixels:Err(layer_core::memory::MemoryError.into())};
+        let mut pressure=DecodePressure::default();pressure.image_failed(&image,RgbSpace::Srgb);
+        assert!(pressure.image(&source,[0;2],RgbSpace::Srgb,attempt).unwrap());assert!(pressure.memory_pressure_waiting());
+        #[cfg(not(target_arch="wasm32"))]
+        assert!(pressure.watch.is_some());
+        drop(image);drop(source);assert!(!pressure.memory_pressure_waiting());assert!(!pressure.poll_memory_retry());
+        #[cfg(not(target_arch="wasm32"))]
+        assert!(pressure.watch.is_none());
+        assert!(pressure.entries.is_empty());
+    }
+
+    #[test]
+    fn pressure_release_before_result_delivery_keeps_the_next_request_eligible() {
+        let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);let id=PortableId::random();
+        let blob=source.tiles[&[0;2]].clone();
+        for busy in [false,true] {
+            let budget=layer_core::memory::Budget::new(1);let held=budget.reserve(1).unwrap();let attempt=budget.generation();
+            let image=PreparedMipTile {attempt,id,source:source.clone(),coordinate:[0;2],pixels:Err(if busy {TileError::Busy}else{layer_core::memory::MemoryError.into()})};
+            let raster=PreparedRasterTile {attempt,blob:blob.clone(),space:RgbSpace::Srgb,destination:RgbSpace::Srgb,pixels:Err(if busy {TileError::Busy}else{layer_core::memory::MemoryError.into()})};
+            drop(held);let released=budget.generation();assert_ne!(attempt,released);
+            let mut pressure=DecodePressure::default();pressure.image_failed(&image,RgbSpace::Srgb);
+            assert!(!pressure.image(&source,[0;2],RgbSpace::Srgb,released).unwrap());
+            pressure.raster_failed(&raster);assert!(!pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::Srgb,released).unwrap());
+            assert!(!pressure.blocks_background(released,false));
+        }
+    }
+
     #[test]
     fn pressure_pauses_decode_without_poisoning_sources_and_release_retries() {
         let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
         let id=PortableId::random();let budget=layer_core::memory::Budget::new(1);
         let held=budget.reserve(1).unwrap();let generation=budget.generation();
         let error=budget.reserve(1).err().unwrap();
-        let prepared=PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:Err(error.into())};
+        let prepared=PreparedMipTile {attempt:generation,id,source:source.clone(),coordinate:[0;2],pixels:Err(error.into())};
         let mut failures=Vec::new();let mut pressure=DecodePressure::default();
         assert!(!retain_image_decode(&prepared,RgbSpace::Srgb,&mut failures));
         assert!(failures.is_empty());
-        pressure.image_failed(&prepared,RgbSpace::Srgb,generation);
+        pressure.image_failed(&prepared,RgbSpace::Srgb);
         assert!(!pressure.blocks_background(generation,false),"an unsolicited obsolete result must not pause current work");
-        assert!(pressure.image(id,&source,[0;2],RgbSpace::Srgb,generation));
+        assert!(pressure.image(&source,[0;2],RgbSpace::Srgb,generation).unwrap());
         assert!(pressure.blocks_background(generation,false));
         assert!(!pressure.blocks_background(generation,true),"already accepted jobs must finish before pausing");
         drop(held);let released=budget.generation();assert_ne!(generation,released);
         assert!(!pressure.blocks_background(released,false));
-        assert!(!pressure.image(id,&source,[0;2],RgbSpace::Srgb,released));
+        assert!(!pressure.image(&source,[0;2],RgbSpace::Srgb,released).unwrap());
         let cache=layer_core::raster::DecodedTileCache::new(0);
-        let retry=PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:prepare_image_tile(&source,[0;2],RgbSpace::Srgb,&cache,None)};
+        let retry=PreparedMipTile {attempt:layer_core::memory::generation(),id,source:source.clone(),coordinate:[0;2],pixels:prepare_image_tile(&source,[0;2],RgbSpace::Srgb,&cache,None)};
         assert!(retain_image_decode(&retry,RgbSpace::Srgb,&mut failures));assert!(retry.pixels.is_ok());
-        let invalid=PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:Err("Corrupt tile".into())};
+        let invalid=PreparedMipTile {attempt:layer_core::memory::generation(),id,source:source.clone(),coordinate:[0;2],pixels:Err("Corrupt tile".into())};
         assert!(!retain_image_decode(&invalid,RgbSpace::Srgb,&mut failures));
         assert!(!retain_image_decode(&prepared,RgbSpace::Srgb,&mut failures));
         assert_eq!(image_decode_failure(&failures,id,&source,[0;2],RgbSpace::Srgb),Some("Corrupt tile"));
@@ -528,20 +618,20 @@ mod tests {
     #[test]
     fn pressure_is_scoped_to_raster_owner_context() {
         let blob=Arc::new(layer_core::raster::TileBlob::encode(layer_core::color::PixelDescriptor::COVERAGE8,&vec![0;65536]).unwrap());
-        let raster=PreparedRasterTile {blob:blob.clone(),space:RgbSpace::Srgb,destination:RgbSpace::Srgb,pixels:Err(layer_core::memory::MemoryError.into())};
+        let raster=PreparedRasterTile {attempt:7,blob:blob.clone(),space:RgbSpace::Srgb,destination:RgbSpace::Srgb,pixels:Err(layer_core::memory::MemoryError.into())};
         let mut pressure=DecodePressure::default();
         assert!(pressure.entries.is_empty());
-        pressure.raster_failed(&raster,7);
-        assert!(pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::Srgb,7));
-        assert!(!pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::DisplayP3,7));
+        pressure.raster_failed(&raster);
+        assert!(pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::Srgb,7).unwrap());
+        assert!(!pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::DisplayP3,7).unwrap());
         assert!(!pressure.blocks_background(7,false),"a different explicit context must remain runnable");
         let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
-        let image=PreparedMipTile {id:PortableId::random(),source,coordinate:[0;2],pixels:Err(layer_core::memory::MemoryError.into())};
-        pressure.image_failed(&image,RgbSpace::Srgb,7);
-        assert!(pressure.image(image.id,&image.source,[0;2],RgbSpace::Srgb,7));
-        assert!(!pressure.image(image.id,&image.source,[0;2],RgbSpace::DisplayP3,7));
+        let image=PreparedMipTile {attempt:7,id:PortableId::random(),source,coordinate:[0;2],pixels:Err(layer_core::memory::MemoryError.into())};
+        pressure.image_failed(&image,RgbSpace::Srgb);
+        assert!(pressure.image(&image.source,[0;2],RgbSpace::Srgb,7).unwrap());
+        assert!(!pressure.image(&image.source,[0;2],RgbSpace::DisplayP3,7).unwrap());
         assert!(!pressure.blocks_background(7,false));
-        assert!(pressure.image(image.id,&image.source,[0;2],RgbSpace::Srgb,7));
+        assert!(pressure.image(&image.source,[0;2],RgbSpace::Srgb,7).unwrap());
         drop(image);
         assert!(!pressure.blocks_background(7,false),"another retained failed source must not prolong a closed owner's pause");
         drop(raster);drop(blob);
@@ -551,20 +641,23 @@ mod tests {
     #[test]
     fn retryable_decode_results_pause_interactive_work_and_preserve_snapshot_errors() {
         let mut r=crate::test_support::private_sample_renderer(Default::default());
+        eprintln!("decode retry adapter: {:?}",r.adapter.get_info());
         let space=r.device.working_space();let can_submit=r.can_submit();
         let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);let id=PortableId::random();
         let blob=Arc::new(layer_core::raster::TileBlob::encode(layer_core::color::PixelDescriptor::COVERAGE8,&vec![0;65536]).unwrap());
-        for snapshot in [false,true] {for busy in [false,true] {for raster in [false,true] {
+        layer_core::memory::images().collect().unwrap();
+        for snapshot in [false,true] {for busy in [false,true] {for raster in [false,true] {for early_release in [false,true] {
             let error=if busy {TileError::Busy}else {layer_core::memory::MemoryError.into()};
             let (prepared,key)=if raster {
-                (PreparedImageWork::Raster(PreparedRasterTile {blob:blob.clone(),space,destination:space,pixels:Err(error)}),DecodeKey::Raster(Arc::downgrade(&blob),space,space))
+                (PreparedImageWork::Raster(PreparedRasterTile {attempt:layer_core::memory::generation(),blob:blob.clone(),space,destination:space,pixels:Err(error)}),DecodeKey::Raster(Arc::downgrade(&blob),space,space))
             } else {
-                (PreparedImageWork::Image(PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:Err(error)}),DecodeKey::Image(id,Arc::downgrade(&source),[0;2]))
+                (PreparedImageWork::Image(PreparedMipTile {attempt:layer_core::memory::generation(),id,source:source.clone(),coordinate:[0;2],pixels:Err(error)}),DecodeKey::Image(Arc::downgrade(&source),[0;2]))
             };
             let (send,results)=std::sync::mpsc::sync_channel(1);assert!(send.send(prepared).is_ok());
-            let (requests,_receive)=std::sync::mpsc::sync_channel(1);
+            let (requests,receive)=std::sync::mpsc::sync_channel(1);
             r.snapshot_worker=snapshot;r.decode_pressure=Default::default();
             r.moving_decode=Some((space,MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(1)),outstanding:vec![Some(key)],capacity:1}));
+            if early_release {drop(layer_core::memory::images().reserve(1).unwrap());}
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
             let result=r.drain_image_decode(&mut encoder);
             if snapshot {
@@ -573,22 +666,57 @@ mod tests {
             } else {
                 assert!(matches!(result,Ok(None)));
                 let generation=layer_core::memory::generation();
-                assert!(if raster {r.decode_pressure.raster(&blob,space,space,generation)}else {r.decode_pressure.image(id,&source,[0;2],space,generation)});
-                assert!(!r.has_pending_work(),"a refused decode must not spin background frames");
+                if early_release {
+                    assert!(if raster {r.request_raster_decode(blob.clone(),space).unwrap()}else {r.request_image_decode(id,source.clone(),[0;2]).unwrap()});
+                    assert!(receive.try_recv().is_ok(),"a release before the refusal drains must permit the actual next queued request");
+                } else {
+                    assert!(if raster {r.decode_pressure.raster(&blob,space,space,generation).unwrap()}else {r.decode_pressure.image(&source,[0;2],space,generation).unwrap()});
+                    assert!(!r.has_pending_work(),"a refused decode must not spin background frames");
+                    if !busy {
+                        assert!(r.memory_pressure_waiting());assert!(!r.preparation_paused(),"background pressure is independent of a restore");
+                        drop(layer_core::memory::images().reserve(1).unwrap());
+                        assert!(r.poll_memory_retry());assert!(!r.poll_memory_retry(),"one release wakes a background owner once");
+                    }
+                }
                 assert_eq!(r.can_submit(),can_submit,"decode pressure must leave input submission available");
             }
             assert!(r.failed_image_tiles.is_empty() && r.failed_raster_tiles.is_empty());
-        }}}
+        }}}}
     }
+    #[test]
+    #[cfg(not(target_arch="wasm32"))]
+    fn terminal_retry_and_context_replacement_release_collection_watches() {
+        fn deliver(r:&mut WgpuRasterizer,id:PortableId,source:&Arc<SourceImage>,error:TileError) {
+            let (send,results)=std::sync::mpsc::sync_channel(1);
+            assert!(send.send(PreparedImageWork::Image(PreparedMipTile {attempt:layer_core::memory::generation(),id,source:source.clone(),coordinate:[0;2],pixels:Err(error)})).is_ok());
+            let (requests,_receive)=std::sync::mpsc::sync_channel(1);
+            r.moving_decode=Some((r.device.working_space(),MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(1)),outstanding:vec![Some(DecodeKey::Image(Arc::downgrade(source),[0;2]))],capacity:1}));
+            let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());assert!(matches!(r.drain_image_decode(&mut encoder),Ok(None)));
+        }
+        let mut r=crate::test_support::private_sample_renderer(Default::default());
+        let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);let id=PortableId::random();
+        layer_core::memory::images().collect().unwrap();let space=r.device.working_space();
+        deliver(&mut r,id,&source,layer_core::memory::MemoryError.into());
+        assert!(r.decode_pressure.image(&source,[0;2],space,layer_core::memory::generation()).unwrap());assert!(r.decode_pressure.watch.is_some());
+        drop(layer_core::memory::images().reserve(1).unwrap());assert!(r.poll_memory_retry());
+        assert!(!r.decode_pressure.image(&source,[0;2],space,layer_core::memory::generation()).unwrap());assert!(r.decode_pressure.watch.is_some(),"an accepted retry retains collection until it resolves");
+        deliver(&mut r,id,&source,TileError::Invalid("Invalid retry source".into()));
+        assert!(r.decode_pressure.watch.is_none());assert!(!r.memory_pressure_waiting());assert_eq!(r.failed_image_tiles.len(),1);
+        r.failed_image_tiles.clear();deliver(&mut r,id,&source,layer_core::memory::MemoryError.into());
+        assert!(r.decode_pressure.image(&source,[0;2],space,layer_core::memory::generation()).unwrap());assert!(r.decode_pressure.watch.is_some());
+        let color=r.document_color();r.initialize_native(color).unwrap();
+        assert!(r.decode_pressure.watch.is_none() && r.moving_decode.is_none());assert!(!r.memory_pressure_waiting());
+    }
+
     #[test]
     fn obsolete_image_decode_failure_is_visible_only_to_its_requested_source_and_context() {
         let a=layer_core::color::source::rgba8_source([1;2],|_,_|[1,2,3,255]);
         let b=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
         let (aid,bid)=(PortableId::random(),PortableId::random());
         let weak=Arc::downgrade(&a);let mut failures=Vec::new();
-        let stale=PreparedMipTile {id:aid,source:a.clone(),coordinate:[0;2],pixels:Err("retired A decode".into())};
+        let stale=PreparedMipTile {attempt:layer_core::memory::generation(),id:aid,source:a.clone(),coordinate:[0;2],pixels:Err("retired A decode".into())};
         assert!(!retain_image_decode(&stale,RgbSpace::Srgb,&mut failures));
-        let current=PreparedMipTile {id:bid,source:b.clone(),coordinate:[0;2],pixels:Ok(crate::scene::sources::PreparedSourcePixels::NativeSamples(Arc::new(layer_core::memory::DecodedBytes::copy_from(&[9,8,7,255]).unwrap())))};
+        let current=PreparedMipTile {attempt:layer_core::memory::generation(),id:bid,source:b.clone(),coordinate:[0;2],pixels:Ok(crate::scene::sources::PreparedSourcePixels::NativeSamples(Arc::new(layer_core::memory::DecodedBytes::copy_from(&[9,8,7,255]).unwrap())))};
         assert!(retain_image_decode(&current,RgbSpace::Srgb,&mut failures));
         assert!(image_decode_failure(&failures,bid,&b,[0;2],RgbSpace::Srgb).is_none());
         assert!(image_decode_failure(&failures,aid,&b,[0;2],RgbSpace::Srgb).is_none());
@@ -598,6 +726,37 @@ mod tests {
         assert_eq!(pixels.as_slice(),[9,8,7,255]);
         drop(stale);drop(a);assert_eq!(weak.strong_count(),0);
     }
+    #[cfg(not(target_arch="wasm32"))]
+    #[test]
+    fn out_of_order_source_receipts_consume_held_pixels_once_without_redispatch() {
+        let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();let space=r.device.working_space();
+        let a=layer_core::color::source::rgba8_source([1;2],|_,_|[255,0,0,255]);
+        let b=layer_core::color::source::rgba8_source([1;2],|_,_|[0,0,255,255]);
+        let aid=PortableId::random();let bid=PortableId::random();
+        let pending=|r:&WgpuRasterizer,source:&Arc<SourceImage>|Arc::new(r.source_tiles.borrow_mut().plan(r,source,[0;2]).unwrap().1.unwrap());
+        let (ra,rb)=(pending(&r,&a),pending(&r,&b));
+        let result=|id,source:&Arc<SourceImage>|PreparedImageWork::Image(PreparedMipTile {attempt:layer_core::memory::generation(),id,source:source.clone(),coordinate:[0;2],
+            pixels:prepare_image_tile(source,[0;2],space,&r.device.source_samples,None)});
+        let (send,results)=std::sync::mpsc::sync_channel(2);assert!(send.send(result(bid,&b)).is_ok());assert!(send.send(result(aid,&a)).is_ok());
+        let (requests,receive)=std::sync::mpsc::sync_channel(2);
+        r.moving_decode=Some((space,MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(2)),
+            outstanding:vec![Some(DecodeKey::Image(Arc::downgrade(&a),[0;2])),Some(DecodeKey::Image(Arc::downgrade(&b),[0;2]))],capacity:2}));
+        r.source_receipt=Some(Arc::downgrade(&ra));
+        let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+        r.drain_image_decode(&mut encoder).unwrap();assert_eq!(r.source_results.len(),1);assert!(ra.prepared().is_none());
+        assert!(r.request_image_decode(bid,b.clone(),[0;2]).unwrap());assert!(receive.try_recv().is_err());
+        r.drain_image_decode(&mut encoder).unwrap();assert!(ra.prepared().is_some());assert_eq!(r.source_results.len(),1);
+        r.source_receipt=Some(Arc::downgrade(&rb));assert!(r.held_result_ready());assert!(!r.image_decode_waiting());
+        assert!(r.request_image_decode(bid,b.clone(),[0;2]).unwrap());assert!(receive.try_recv().is_err());
+        r.drain_image_decode(&mut encoder).unwrap();assert!(rb.prepared().is_some());assert!(r.source_results.is_empty());
+        assert!(r.moving_decode.as_ref().is_some_and(|(_,queue)|!queue.pending()));
+        r.drain_image_decode(&mut encoder).unwrap();assert!(r.source_results.is_empty());assert!(receive.try_recv().is_err());
+        let c=layer_core::color::source::rgba8_source([1;2],|_,_|[0,255,0,255]);
+        assert!(r.request_image_decode(bid,c.clone(),[0;2]).unwrap());
+        assert!(matches!(receive.try_recv(),Ok(MipDecodeRequest::Image(request)) if Arc::ptr_eq(&request.source,&c)));
+        assert!(!encoder.has_work(),"raw receipts must not publish into shared GPU cache slots");
+    }
+
     #[cfg(not(target_arch="wasm32"))]
     #[test]
     fn preparation_channel_delivery_precedes_readiness_publication() {
@@ -639,7 +798,7 @@ mod tests {
             assert!(queue.request(id,source.clone(),*tile),"an outstanding tile is not requested twice");
             accepted.push(*tile);
         }
-        assert!(accepted.len()>=1 && accepted.len()<tiles.len(),"outstanding preparation is bounded: {}",accepted.len());
+        assert!(!accepted.is_empty() && accepted.len()<tiles.len(),"outstanding preparation is bounded: {}",accepted.len());
         assert_eq!(queue.outstanding.len(),accepted.len());
         let mut prepared:Vec<_>=drain(&mut queue,accepted.len()).into_iter().map(|result|{
             let PreparedImageWork::Image(tile)=result else {panic!("Image request must return image samples");};
@@ -696,7 +855,7 @@ mod tests {
         let pixels=prepare_image_tile(&embedded,[0;2],RgbSpace::Srgb,&cache,None).unwrap();
         let PreparedSourcePixels::PremultipliedWorkingPixels(bytes)=pixels else {panic!("ICC source must be prepared in working space");};
         assert_eq!(bytes.len(),(PAGE_SIZE*PAGE_SIZE*16) as usize);
-        let values:Vec<_>=bytes[..32].chunks_exact(4).map(|bytes|f32::from_ne_bytes(bytes.try_into().unwrap())).collect();
+        let values:Vec<_>=bytes[..32].as_chunks::<4>().0.iter().map(|bytes|f32::from_ne_bytes(*bytes)).collect();
         assert_eq!(&values[..4],&[0.;4]);
         assert!((values[4]-128./255.).abs()<1e-5);
         assert!((values[5]-0.2158605*128./255.).abs()<2e-4);
@@ -742,7 +901,7 @@ mod tests {
         assert!(images.storage_bytes()<=reserved);
         encoder.submit(&r.queue);
         let bytes=crate::layer_tests::page_bytes(&r,&images.entries[0].image.texture);
-        for pixel in bytes.chunks_exact(16) {
+        for pixel in bytes.as_chunks::<16>().0.iter() {
             let values:[f32;4]=std::array::from_fn(|channel|f32::from_le_bytes(pixel[channel*4..channel*4+4].try_into().unwrap()));
             assert_eq!(values,[0.5,0.5,0.5,1.]);
         }
@@ -820,4 +979,29 @@ mod tests {
         assert!(!images.pending());
         encoder.submit(&r.queue);
     }
+    #[cfg(not(target_arch="wasm32"))]
+    #[test]
+    fn blocking_raw_readback_returns_typed_pressure_without_a_decode_retry_loop() {
+        let mut r=crate::test_support::private_sample_renderer(Default::default());
+        let source=layer_core::color::source::rgba8_source([1;2],|_,_|[29,79,151,255]);
+        let mut document=crate::layer_tests::placement::paint_document([1;2],"Raw readback");
+        crate::layer_tests::placement::paint_mut(&mut document).base=Some(layer_core::authored::PaintBase::new(source.clone().into()));
+        r.submit(crate::test_support::packet(document.scene(),[1;2])).unwrap();
+        r.moving_decode=None;
+        for busy in [false,true] {
+            r.decode_pressure.clear();
+            let error=if busy {TileError::Busy}else {TileError::Memory(layer_core::memory::MemoryError)};
+            let expected=if busy {GpuRasterError::Busy}else {GpuRasterError::Memory(layer_core::memory::MemoryError)};
+            let (send,results)=std::sync::mpsc::sync_channel(1);
+            assert!(send.send(PreparedImageWork::Image(PreparedMipTile {attempt:layer_core::memory::generation(),id:PortableId::random(),
+                source:source.clone(),coordinate:[0;2],pixels:Err(error)})).is_ok());
+            let (requests,_receive)=std::sync::mpsc::sync_channel(1);
+            r.moving_decode=Some((r.device.working_space(),MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(1)),
+                outstanding:vec![Some(DecodeKey::Image(Arc::downgrade(&source),[0;2]))],capacity:1}));
+            assert!(matches!(r.readback_srgb_rgba8(),Err(error) if error==expected));
+            assert!(r.failed_image_tiles.is_empty() && r.failed_raster_tiles.is_empty());
+            assert!(r.can_submit());
+        }
+    }
+
 }

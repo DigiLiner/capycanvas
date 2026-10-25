@@ -1,6 +1,14 @@
 //! One conservative tile plan for brush allocation, copies and evaluation.
 use super::*;
 
+pub(super) fn plan_packet(packet:FramePacket<'_>,extent:impl Fn(SourceTarget)->[u32;2])->Result<Vec<Vec<BrushTile>>,GpuRasterError> {
+    packet.dab_batches.iter().map(|batch| {
+        let start=batch.first_dab as usize;let end=start.checked_add(batch.dab_count as usize).ok_or(GpuRasterError::InvalidDabRange)?;
+        let dabs=packet.dabs.get(start..end).ok_or(GpuRasterError::InvalidDabRange)?;
+        Ok(plan(batch,dabs,extent(batch.target)))
+    }).collect()
+}
+
 #[derive(Clone)]
 pub(super) struct BrushTile {
     pub coordinate: [u32; 2],

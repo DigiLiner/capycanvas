@@ -62,7 +62,7 @@ pub(super) fn mask_values(r: &WgpuRasterizer, target: SourceTarget) -> std::coll
         .iter()
         .filter(|((owner, _), _)| *owner == target)
         .map(|((_, c), page)| {
-            let values = page_bytes(r, &page.texture).chunks_exact(4).map(|v| f32::from_le_bytes(v.try_into().unwrap())).collect();
+            let values = page_bytes(r, &page.texture).as_chunks::<4>().0.iter().map(|v| f32::from_le_bytes(*v)).collect();
             (*c, values)
         })
         .collect()
@@ -180,7 +180,7 @@ fn bicubic_and_lanczos_transforms_clamp_overshoot_at_every_sample_depth() {
             moving: false,
             target: target(&layer),
             selection: None,
-            transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..LayerPlacement::from_affine(Affine([3.7, 0.3, -0.2, 3.9, 1.5, 0.5])) },
+            transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..LayerPlacement::from_affine(Affine([3.7, 0.3, -0.2, 3.9, 1.5, 0.5])) },
                 ..Default::default()
             },
         }))
@@ -189,7 +189,7 @@ fn bicubic_and_lanczos_transforms_clamp_overshoot_at_every_sample_depth() {
         let mut brightest = 0f32;
         for page in &r.paint_layers[0].pages {
             let bytes = page_bytes(&r, &page.active().texture);
-            for texel in bytes.chunks_exact(16) {
+            for texel in bytes.as_chunks::<16>().0 {
                 let v: [f32; 4] = std::array::from_fn(|k| f32::from_le_bytes(texel[k * 4..k * 4 + 4].try_into().unwrap()));
                 assert!(v.iter().all(|c| c.is_finite() && *c >= 0.), "{depth:?} {interpolation:?}: negative lobe {v:?}");
                 assert!(v[3] <= 1., "{depth:?} {interpolation:?}: coverage overshoot {v:?}");
@@ -216,7 +216,7 @@ fn moving_bicubic_previews_draw_bilinearly_and_only_still_previews_commit_in_pla
         moving,
         target: target(&layer),
         selection: None,
-        transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..LayerPlacement::from_affine(affine) },
+        transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..LayerPlacement::from_affine(affine) },
             ..Default::default()
         },
     };
@@ -467,7 +467,7 @@ fn mapped_pixel_selections_resample_through_perspective_like_a_cpu_reference() {
         let inside = (20..90).contains(&x) && (30..100).contains(&y);
         if !inside {
             0
-        } else if (x + y) % 17 == 0 {
+        } else if (x + y).is_multiple_of(17) {
             64
         } else {
             255 - (x * 3 + y) % 200

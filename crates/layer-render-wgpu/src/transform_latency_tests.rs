@@ -205,7 +205,7 @@ fn drag(r: &mut WgpuRasterizer, work: &Workload<'_>, cases: &[Case]) -> f64 {
             moving: true,
             target: work.target,
             selection: Some(selection.clone()),
-            transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..map(0.) }, ..Default::default() },
+            transform: ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..map(0.) }, ..Default::default() },
         };
         if work.native {
             let still = layer_render::TransformPreview {
@@ -265,8 +265,8 @@ fn fitted_drag(r: &mut WgpuRasterizer, layer: &Document, label: &str) -> f64 {
     let work = Workload {
         label,
         scene: layer.scene(),
-        target: target(&layer),
-        view: ViewState { width_px: 1920, height_px: 1080, document_to_surface: [zoom, 0., 0., zoom, 0., 0.], ..view() },
+        target: target(layer),
+        view: ViewState { width_px: 1920, height_px: 1080, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] },
         step: 0.04,
         native: false,
     };
@@ -415,7 +415,7 @@ fn native_photo_transform_latency() {
             label: if layered { "layered photo" } else { "photo" },
             scene: document.scene(),
             target: document.scene().source_target(document.scene().order()[usize::from(layered)]).unwrap(),
-            view: ViewState { width_px: width, height_px: height, document_to_surface: [zoom, 0., 0., zoom, offset[0], offset[1]], ..view() },
+            view: ViewState { width_px: width, height_px: height, document_to_surface: [zoom, 0., 0., zoom, offset[0], offset[1]] },
             step: 1. / 60.,
             native: true,
         };

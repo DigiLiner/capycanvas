@@ -1,6 +1,9 @@
 use std::{cell::Cell,collections::HashMap,sync::{Arc,Mutex,OnceLock,Weak}};
 
-thread_local! {static INPUT:Cell<bool>=Default::default();}
+thread_local! {
+    static INPUT:Cell<bool>=Default::default();
+    static RELEASES:Cell<u64>=Default::default();
+}
 pub fn with_input<T>(work:impl FnOnce()->T)->T {
     struct Restore(bool);
     impl Drop for Restore {fn drop(&mut self) {INPUT.with(|input|input.set(self.0));}}
@@ -30,12 +33,16 @@ fn exhausted()->MemoryError {MemoryError}
 impl Budget {
     pub fn new(maximum:usize)->Self {Self {maximum,state:Mutex::new(State::default()),released:std::sync::atomic::AtomicU64::new(0)}}
     pub fn generation(&self)->u64 {self.released.load(std::sync::atomic::Ordering::Acquire)}
+    fn notify_released(&self) {
+        self.released.fetch_add(1,std::sync::atomic::Ordering::Release);
+        if BUDGET.get().is_some_and(|budget|std::ptr::eq(self,budget)) {RELEASES.with(|released|released.set(released.get().wrapping_add(1)));}
+    }
     fn reclaim(&self,state:&mut State) {
         let before=state.used;
         state.owners.retain(|_,entry| {
             if entry.owner.alive() {true}else{state.used-=entry.bytes;false}
         });
-        if state.used<before {self.released.fetch_add(1,std::sync::atomic::Ordering::Release);}
+        if state.used<before {self.notify_released();}
     }
     pub fn collect(&self)->Result<(),MemoryError> {
         if BUDGET.get().is_some_and(|budget|std::ptr::eq(self,budget)) {crate::raster::DecodedTileCache::collect_shared().map_err(|_|MemoryError)?;}
@@ -69,7 +76,7 @@ impl Reservation<'_> {
     pub fn resize(&mut self,bytes:usize)->Result<(),MemoryError> {
         let mut state=self.budget.state_for(bytes.saturating_sub(self.bytes),self.limit)?;
         let next=state.used.checked_sub(self.bytes).and_then(|used|used.checked_add(bytes)).filter(|used|bytes<=self.bytes || *used<=self.limit).ok_or_else(exhausted)?;
-        if bytes<self.bytes {self.budget.released.fetch_add(1,std::sync::atomic::Ordering::Release);}
+        if bytes<self.bytes {self.budget.notify_released();}
         state.used=next;self.bytes=bytes;Ok(())
     }
     pub fn retain<T:?Sized+Payload+'static>(mut self,value:Arc<T>)->Result<Arc<T>,MemoryError> {
@@ -85,23 +92,143 @@ impl Reservation<'_> {
             let next=state.used.checked_sub(self.bytes).and_then(|used|used.checked_add(bytes)).filter(|used|bytes<=self.bytes || *used<=self.limit).ok_or_else(exhausted)?;
             state.owners.try_reserve(1).map_err(|_|exhausted())?;
             state.owners.insert(key,Entry {owner:Box::new(Allocation(Arc::downgrade(&value))),bytes});
-            if bytes<self.bytes {self.budget.released.fetch_add(1,std::sync::atomic::Ordering::Release);}
+            if bytes<self.bytes {self.budget.notify_released();}
             state.used=next;self.bytes=0;Ok(())
         })();
         match result {Ok(())=>Ok(value),Err(error)=>{drop(value);Err(error)}}
     }
 }
 impl Drop for Reservation<'_> {
-    fn drop(&mut self) {if let Ok(mut state)=self.budget.state.lock() {state.used-=self.bytes;if self.bytes!=0 {self.budget.released.fetch_add(1,std::sync::atomic::Ordering::Release);}}}
+    fn drop(&mut self) {if let Ok(mut state)=self.budget.state.lock() {state.used-=self.bytes;if self.bytes!=0 {self.budget.notify_released();}}}
 }
 pub fn images()->&'static Budget {
     BUDGET.get_or_init(||Budget::new(capacity()))
 }
 pub fn generation()->u64 {BUDGET.get().map_or(0,Budget::generation)}
-pub fn notify_capacity_released() {if let Some(budget)=BUDGET.get() {budget.released.fetch_add(1,std::sync::atomic::Ordering::Release);}}
+pub fn notify_capacity_released() {if let Some(budget)=BUDGET.get() {budget.notify_released();}}
+fn thread_releases()->u64 {RELEASES.with(Cell::get)}
+pub struct DecodeAttempt {generation:u64,releases:u64,_thread:std::marker::PhantomData<std::rc::Rc<()>>}
+impl Default for DecodeAttempt {fn default()->Self {Self::new()}}
+impl DecodeAttempt {
+    pub fn new()->Self {Self::at(generation(),thread_releases())}
+    fn at(generation:u64,releases:u64)->Self {Self {generation,releases,_thread:Default::default()}}
+    fn finish_at(self,releases:u64)->u64 {self.generation.wrapping_add(releases.wrapping_sub(self.releases))}
+    pub fn finish(self)->u64 {self.finish_at(thread_releases())}
+}
+pub struct DecodeFuture<F:std::future::Future> {
+    future:Option<std::pin::Pin<Box<F>>>,generation:u64,releases:u64,
+    _thread:std::marker::PhantomData<std::rc::Rc<()>>,
+}
+pub fn decode_future<F:std::future::Future>(create:impl FnOnce()->F)->DecodeFuture<F> {
+    let attempt=DecodeAttempt::new();let future=Some(Box::pin(create()));
+    DecodeFuture {future,generation:attempt.finish(),releases:0,_thread:Default::default()}
+}
+fn poll_decode<F:std::future::Future>(future:&mut Option<std::pin::Pin<Box<F>>>,releases:&mut u64,mut counter:impl FnMut()->u64,cx:&mut std::task::Context<'_>)->std::task::Poll<F::Output> {
+    let before=counter();
+    let result=future.as_mut().expect("Decode future polled after completion").as_mut().poll(cx);
+    if result.is_ready() {drop(future.take());}
+    *releases=releases.wrapping_add(counter().wrapping_sub(before));result
+}
+impl<F:std::future::Future> std::future::Future for DecodeFuture<F> {
+    type Output=(F::Output,u64);
+    fn poll(self:std::pin::Pin<&mut Self>,cx:&mut std::task::Context<'_>)->std::task::Poll<Self::Output> {
+        let this=self.get_mut();
+        poll_decode(&mut this.future,&mut this.releases,thread_releases,cx)
+            .map(|result|(result,this.generation.wrapping_add(this.releases)))
+    }
+}
 #[derive(Clone,Debug,Default)]
 pub struct OwnerRetirement;
 impl Drop for OwnerRetirement {fn drop(&mut self) {notify_capacity_released();}}
+#[cfg(not(target_arch="wasm32"))]
+pub use collection::CollectionWatch;
+#[cfg(not(target_arch="wasm32"))]
+mod collection {
+    use super::*;
+    use std::{sync::Condvar,thread::JoinHandle,time::Duration};
+
+    #[derive(Default)]
+    struct Watchers {active:usize,closed:bool}
+    #[derive(Default)]
+    struct Shared {state:Mutex<Watchers>,wake:Condvar}
+    struct CollectionMonitor {shared:Arc<Shared>}
+    impl CollectionMonitor {
+        fn start(collect:impl FnMut()->Result<(),MemoryError>+Send+'static)->Result<(Self,JoinHandle<()>),MemoryError> {
+            let shared=Arc::new(Shared::default());let worker=shared.clone();
+            let thread=std::thread::Builder::new().name("capy-memory-collection".into()).spawn(move|| {
+                if worker.run(collect).is_err() {worker.close();}
+            }).map_err(|_|exhausted())?;
+            Ok((Self {shared},thread))
+        }
+        fn watch(&self)->Result<CollectionWatch,MemoryError> {
+            let mut state=self.shared.state.lock().map_err(|_|exhausted())?;
+            if state.closed {return Err(exhausted());}
+            state.active=state.active.checked_add(1).ok_or_else(exhausted)?;
+            drop(state);self.shared.wake.notify_one();Ok(CollectionWatch {shared:self.shared.clone()})
+        }
+    }
+    impl Drop for CollectionMonitor {fn drop(&mut self) {self.shared.close();}}
+    impl Shared {
+        fn close(&self) {
+            if let Ok(mut state)=self.state.lock() {state.closed=true;}
+            self.wake.notify_all();
+        }
+        fn run(&self,mut collect:impl FnMut()->Result<(),MemoryError>)->Result<(),MemoryError> {
+            let mut state=self.state.lock().map_err(|_|exhausted())?;
+            loop {
+                state=self.wake.wait_while(state,|state|state.active==0 && !state.closed).map_err(|_|exhausted())?;
+                if state.closed {return Ok(());}
+                state=self.wake.wait_timeout_while(state,Duration::from_millis(250),|state|state.active!=0 && !state.closed)
+                    .map_err(|_|exhausted())?.0;
+                if state.closed {return Ok(());}
+                if state.active==0 {continue;}
+                drop(state);collect()?;
+                state=self.state.lock().map_err(|_|exhausted())?;
+            }
+        }
+    }
+    pub struct CollectionWatch {shared:Arc<Shared>}
+    impl CollectionWatch {
+        pub fn new()->Result<Self,MemoryError> {
+            static MONITOR:OnceLock<Result<CollectionMonitor,MemoryError>>=OnceLock::new();
+            MONITOR.get_or_init(||CollectionMonitor::start(||images().collect()).map(|(monitor,_)|monitor))
+                .as_ref().map_err(|error|*error)?.watch()
+        }
+    }
+    impl Drop for CollectionWatch {
+        fn drop(&mut self) {
+            if let Ok(mut state)=self.shared.state.lock() {state.active-=1;}
+            self.shared.wake.notify_all();
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn pressure_collection_detects_late_raw_alias_release_and_stops_without_watchers() {
+            use std::sync::mpsc;
+            let budget=Arc::new(Budget::new(512));let owner:Arc<[u8]>=vec![7;128].into();
+            budget.track(&owner).unwrap();let alias=owner.clone();drop(owner);
+            budget.released.fetch_add(1,std::sync::atomic::Ordering::Release);
+            let retirement=budget.generation();assert!(budget.reserve(129).is_err());
+            let (scanned,scans)=mpsc::channel();let (resume,continued)=mpsc::channel();let collecting=budget.clone();
+            let (monitor,thread)=CollectionMonitor::start(move|| {
+                collecting.collect()?;
+                scanned.send(collecting.generation()).map_err(|_|MemoryError)?;
+                continued.recv().map_err(|_|MemoryError)
+            }).unwrap();
+            assert!(matches!(scans.recv_timeout(Duration::from_millis(300)),Err(mpsc::RecvTimeoutError::Timeout)));
+            let watch=monitor.watch().unwrap();
+            assert_eq!(scans.recv_timeout(Duration::from_secs(5)).unwrap(),retirement);
+            assert!(budget.reserve(129).is_err());drop(alias);resume.send(()).unwrap();
+            assert_ne!(scans.recv_timeout(Duration::from_secs(5)).unwrap(),retirement);
+            assert_eq!(budget.state.lock().unwrap().used,0);assert!(budget.reserve(512).is_ok());
+            drop(watch);resume.send(()).unwrap();
+            assert!(matches!(scans.recv_timeout(Duration::from_millis(300)),Err(mpsc::RecvTimeoutError::Timeout)));
+            drop(monitor);thread.join().unwrap();
+        }
+    }
+}
 pub struct DecodedBytes {bytes:Vec<u8>,_memory:Reservation<'static>}
 impl DecodedBytes {
     pub fn zeroed(length:usize)->Result<Self,MemoryError> {
@@ -277,6 +404,47 @@ mod tests {
         let bytes:Arc<[u8]>=vec![1;128].into();let bytes=memory.retain(bytes).unwrap();
         let retained=budget.generation();budget.track(&bytes).unwrap();assert_eq!(budget.generation(),retained);
         drop(bytes);budget.collect().unwrap();assert_ne!(budget.generation(),retained);
+    }
+    #[test]
+    fn decode_attempt_excludes_own_cleanup_and_preserves_other_thread_releases() {
+        use std::sync::atomic::{AtomicU64,Ordering};
+        let global=Arc::new(AtomicU64::new(10));let own=Cell::new(3u64);
+        let attempt=DecodeAttempt::at(global.load(Ordering::Acquire),own.get());
+        global.fetch_add(1,Ordering::Release);own.set(own.get()+1);
+        assert_eq!(attempt.finish_at(own.get()),global.load(Ordering::Acquire));
+        let attempt=DecodeAttempt::at(global.load(Ordering::Acquire),own.get());
+        let other=global.clone();std::thread::spawn(move||other.fetch_add(1,Ordering::Release)).join().unwrap();
+        global.fetch_add(1,Ordering::Release);own.set(own.get()+1);
+        assert_ne!(attempt.finish_at(own.get()),global.load(Ordering::Acquire));
+        assert_eq!(DecodeAttempt::at(u64::MAX,u64::MAX).finish_at(1),1);
+        let baseline=thread_releases();let local=Budget::new(512);
+        drop(local.reserve(10).unwrap());let bytes:Arc<[u8]>=Arc::from([7]);local.track(&bytes).unwrap();drop(bytes);local.collect().unwrap();
+        assert_eq!(thread_releases(),baseline);
+    }
+    #[test]
+    fn decode_future_counts_poll_and_completed_drop_but_not_interleaved_tasks() {
+        use std::{future::Future,pin::Pin,rc::Rc,task::{Context,Poll,Waker}};
+        struct Clock {global:Cell<u64>,thread:Cell<u64>}
+        impl Clock {fn release(&self) {self.global.set(self.global.get()+1);self.thread.set(self.thread.get()+1);}}
+        struct Work {clock:Rc<Clock>,polls:Cell<u8>,_pin:std::marker::PhantomPinned}
+        impl Future for Work {
+            type Output=Result<(),MemoryError>;
+            fn poll(self:Pin<&mut Self>,_:&mut Context<'_>)->Poll<Self::Output> {
+                self.clock.release();self.polls.set(self.polls.get()+1);
+                if self.polls.get()==1 {Poll::Pending}else{Poll::Ready(Err(MemoryError))}
+            }
+        }
+        impl Drop for Work {fn drop(&mut self) {self.clock.release();}}
+        for interleave in [false,true] {
+            let clock=Rc::new(Clock {global:Cell::new(20),thread:Cell::new(3)});let start=clock.global.get();
+            let mut future=Some(Box::pin(Work {clock:clock.clone(),polls:Cell::new(0),_pin:Default::default()}));
+            let mut own=0;let mut cx=Context::from_waker(Waker::noop());
+            assert!(poll_decode(&mut future,&mut own,||clock.thread.get(),&mut cx).is_pending());
+            if interleave {clock.release();}
+            assert_eq!(poll_decode(&mut future,&mut own,||clock.thread.get(),&mut cx),Poll::Ready(Err(MemoryError)));
+            assert!(future.is_none());assert_eq!(own,3);
+            assert_eq!(clock.global.get()-(start+own),u64::from(interleave));
+        }
     }
     #[test]
     fn decoded_byte_growth_reserves_overlap_and_preserves_failed_appends() {

@@ -125,60 +125,7 @@ fn vulkan_headroom(device: &wgpu::Device) -> Option<u64> {
         .max()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn essential_resource_admission_preserves_reported_limits_and_optional_cache_policy() {
-        assert_eq!(resource_allowance(None, Some(4096), 0), 1024);
-        assert_eq!(resource_allowance(Some(8192), Some(4096), 0), 1024);
-        assert_eq!(resource_allowance(Some(1024), Some(4096), 0), 256);
-        assert_eq!(resource_allowance(Some(0), Some(4096), 0), 0);
-        assert_eq!(resource_allowance(Some(4096), Some(0), 0), 0);
-        assert_eq!(resource_allowance(None, Some(0), 0), 0);
-        assert_eq!(resource_allowance(None, None, 0), 0);
-        assert_eq!(resource_allowance(Some(4096), None, 0), 1024);
-        assert_eq!(resource_allowance(None, Some(4096), 128), 1056);
-        assert_eq!(resource_allowance(None, Some(u64::MAX), 0), 512 * 1024 * 1024);
-        assert_eq!(allowance(None, 4, 0), 0);
-    }
-    #[test]
-    #[cfg(target_vendor = "apple")]
-    fn metal_admission_respects_existing_allocations_and_process_headroom() {
-        assert_eq!(metal_headroom(4096, 1024, Some(8192)), Some(3072));
-        assert_eq!(metal_headroom(4096, 1024, Some(512)), Some(512));
-        assert_eq!(metal_headroom(4096, 8192, Some(8192)), Some(0));
-        assert_eq!(metal_headroom(4096, 0, Some(0)), Some(0));
-        assert_eq!(metal_headroom(4096, 0, None), None);
-    }
-    #[test]
-    #[cfg(target_vendor = "apple")]
-    fn unreported_metal_recommendation_is_not_an_exhausted_budget() {
-        assert_eq!(metal_headroom(0, 0, Some(8192)), None);
-        assert_eq!(allowance(metal_headroom(0, 0, Some(8192)), 4, 0), 0);
-    }
-    #[test]
-    fn retaining_a_pyramid_preserves_its_admission_budget() {
-        for divisor in [2, 4] {
-            let initial = allowance(Some(4096), divisor, 0);
-            let retained = initial - 128;
-            assert_eq!(allowance(Some(4096 - retained), divisor, retained), initial);
-            assert!(allowance(Some(0), divisor, retained) < retained);
-            assert_eq!(allowance(None, divisor, retained), 0);
-        }
-    }
-    #[test]
-    fn complete_pyramid_admission_scales_with_remaining_headroom() {
-        assert_eq!(allowance(None, 4, 0), 0);
-        assert_eq!(allowance(Some(1024), 2, 0), 512);
-        assert_eq!(allowance(Some(0), 4, 0), 0);
-        assert_eq!(allowance(Some(1024 * 1024 * 1024), 4, 0), 256 * 1024 * 1024);
-        assert_eq!(
-            allowance(Some(96 * 1024 * 1024 * 1024), 4, 0),
-            24 * 1024 * 1024 * 1024
-        );
-    }
-}
+
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn unified_memory(device: &wgpu::Device) -> bool {
@@ -243,4 +190,59 @@ pub(super) fn resource_budget(device: &wgpu::Device, retained: u64) -> u64 {
     #[cfg(any(target_vendor = "apple", target_os = "windows"))]
     let gpu = device_headroom(device);
     resource_allowance(gpu, layer_color::photo::PhotoMemoryBudget::available_memory(), retained)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn essential_resource_admission_preserves_reported_limits_and_optional_cache_policy() {
+        assert_eq!(resource_allowance(None, Some(4096), 0), 1024);
+        assert_eq!(resource_allowance(Some(8192), Some(4096), 0), 1024);
+        assert_eq!(resource_allowance(Some(1024), Some(4096), 0), 256);
+        assert_eq!(resource_allowance(Some(0), Some(4096), 0), 0);
+        assert_eq!(resource_allowance(Some(4096), Some(0), 0), 0);
+        assert_eq!(resource_allowance(None, Some(0), 0), 0);
+        assert_eq!(resource_allowance(None, None, 0), 0);
+        assert_eq!(resource_allowance(Some(4096), None, 0), 1024);
+        assert_eq!(resource_allowance(None, Some(4096), 128), 1056);
+        assert_eq!(resource_allowance(None, Some(u64::MAX), 0), 512 * 1024 * 1024);
+        assert_eq!(allowance(None, 4, 0), 0);
+    }
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn metal_admission_respects_existing_allocations_and_process_headroom() {
+        assert_eq!(metal_headroom(4096, 1024, Some(8192)), Some(3072));
+        assert_eq!(metal_headroom(4096, 1024, Some(512)), Some(512));
+        assert_eq!(metal_headroom(4096, 8192, Some(8192)), Some(0));
+        assert_eq!(metal_headroom(4096, 0, Some(0)), Some(0));
+        assert_eq!(metal_headroom(4096, 0, None), None);
+    }
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn unreported_metal_recommendation_is_not_an_exhausted_budget() {
+        assert_eq!(metal_headroom(0, 0, Some(8192)), None);
+        assert_eq!(allowance(metal_headroom(0, 0, Some(8192)), 4, 0), 0);
+    }
+    #[test]
+    fn retaining_a_pyramid_preserves_its_admission_budget() {
+        for divisor in [2, 4] {
+            let initial = allowance(Some(4096), divisor, 0);
+            let retained = initial - 128;
+            assert_eq!(allowance(Some(4096 - retained), divisor, retained), initial);
+            assert!(allowance(Some(0), divisor, retained) < retained);
+            assert_eq!(allowance(None, divisor, retained), 0);
+        }
+    }
+    #[test]
+    fn complete_pyramid_admission_scales_with_remaining_headroom() {
+        assert_eq!(allowance(None, 4, 0), 0);
+        assert_eq!(allowance(Some(1024), 2, 0), 512);
+        assert_eq!(allowance(Some(0), 4, 0), 0);
+        assert_eq!(allowance(Some(1024 * 1024 * 1024), 4, 0), 256 * 1024 * 1024);
+        assert_eq!(
+            allowance(Some(96 * 1024 * 1024 * 1024), 4, 0),
+            24 * 1024 * 1024 * 1024
+        );
+    }
 }

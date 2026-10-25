@@ -106,7 +106,7 @@ impl TileSnapshot {
                     Some(Err(error)) => return Err(GpuRasterError::Effect(error)),
                     None => {pending=true;continue;},
                 };
-                let view = r.source_tiles.borrow().prepared_raster_view(&blob, *space).cloned();
+                let view = r.source_tiles.borrow().prepared_raster_view(&blob, *space,r.document_color().space).cloned();
                 if let Some(view) = view { leases.extend(r.source_tiles.borrow().lease(&view)); }
                 else {r.request_raster_decode(blob, *space)?;pending=true;}
                 continue;
@@ -146,7 +146,8 @@ impl TileSnapshot {
                 coordinate,
             })
         {
-            let blob = tile.wait_backing().map_err(GpuRasterError::Effect)?;
+            let blob = if r.snapshot_worker {tile.wait_backing().map_err(GpuRasterError::Effect)?}
+                else {tile.try_backing().ok_or(GpuRasterError::DeferredObjectWork)?.map_err(GpuRasterError::Effect)?};
             return r.backed_raster_tile(&blob, *space, encoder).map(Some);
         }
         match &self.base {
@@ -493,6 +494,85 @@ pub(crate) fn source_region(transform: &layer_core::ImageTransform, region: laye
             max: layer_core::Point { x:(x1+map.support) as f32, y:(y1+map.support) as f32 } }, extent)))
 }
 
+
+
+/// A layer reduced to `level`, shifted right and down by `phase` pixels so
+/// its texels cover the same pixels as the document's.
+pub(crate) struct DisplayInputs {
+    pub level: u32,
+    pub phase: [u32; 2],
+    pub image: display_mips::Image,
+    pub kept: Option<display_mips::Image>,
+    pub sampling: [wgpu::TextureView; 2],
+    uniforms: wgpu::Buffer,
+    binding: Option<wgpu::BindGroup>,
+    pub fine: Option<super::fine::FineInputs>,
+    pub pending: Option<std::collections::VecDeque<PixelRect>>,
+}
+impl DisplayInputs {
+    pub fn new(
+        r: &WgpuRasterizer,
+        level: u32,
+        extent: [u32; 2],
+        phase: [u32; 2],
+        kept: bool,
+    ) -> Self {
+        let plan = display_mips::Plan::at([extent[0] + phase[0], extent[1] + phase[1]], level);
+        let image = display_mips::Image::with_mips(r, plan, display_mips::MAX_LEVEL);
+        let kept = kept.then(|| display_mips::Image::with_mips(r, plan, display_mips::MAX_LEVEL));
+        let sampling = [image.sampling_view(), kept.as_ref().unwrap_or(&image).sampling_view()];
+        Self {
+            level,
+            phase,
+            image, kept, sampling,
+            uniforms: r.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("display resample"),
+                size: resample::UNIFORM_BYTES,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            binding: None,
+            fine: None,
+            pending: None,
+        }
+    }
+    pub fn new_fine(r:&WgpuRasterizer,extent:[u32;2],phase:[u32;2],kept:bool,capacity:usize,pages:std::collections::VecDeque<PixelRect>)->Result<Self,GpuRasterError> {
+        let mut input=Self::new(r,1,extent,phase,kept);
+        input.level=0;
+        input.fine=Some(super::fine::FineInputs::new(r,capacity,kept,input.storage_bytes(),pages)?);
+        Ok(input)
+    }
+    pub fn storage_bytes(&self) -> u64 {
+        self.image.storage_bytes() + self.kept.as_ref().map_or(0, display_mips::Image::storage_bytes) + resample::UNIFORM_BYTES
+            + self.fine.as_ref().map_or(0,super::fine::FineInputs::storage_bytes)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(
+        &mut self,
+        r: &mut WgpuRasterizer,
+        pass: &resample::Resample,
+        encoder: &mut crate::submission::CommandEncoder,
+        level: &wgpu::TextureView,
+        values: &[u8; resample::UNIFORM_BYTES as usize],
+        texels: [u32; 4],
+        mesh: Option<&MeshBuffers>,
+    ) -> Result<(), GpuRasterError> {
+        if let Some(fine)=&self.fine {
+            fine.write_directory(r,encoder,self.phase)?;
+            r.uploads.write(encoder,&self.uniforms,values)?;
+            let binding=pass.fine_binding(&r.device,&self.uniforms,&self.sampling,&fine.view,&fine.directory);
+            pass.encode_mesh(encoder,&binding,level,texels,mesh.map(|mesh|(mesh,mesh.range_for_region(layer_core::Rect::UNBOUNDED))),self.kept.is_some());
+            return Ok(());
+        }
+        r.uploads.write(encoder, &self.uniforms, values)?;
+        let binding = self.binding.get_or_insert_with(|| pass.mesh_binding(&r.device, &self.uniforms, &self.sampling));
+        pass.encode_mesh(encoder, binding, level, texels, mesh.map(|mesh|(mesh,mesh.range_for_region(layer_core::Rect::UNBOUNDED))), self.kept.is_some());
+        Ok(())
+    }
+
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,80 +753,5 @@ mod tests {
             }
         }
     }
-
-}
-
-/// A layer reduced to `level`, shifted right and down by `phase` pixels so
-/// its texels cover the same pixels as the document's.
-pub(crate) struct DisplayInputs {
-    pub level: u32,
-    pub phase: [u32; 2],
-    pub image: display_mips::Image,
-    pub kept: Option<display_mips::Image>,
-    pub sampling: [wgpu::TextureView; 2],
-    uniforms: wgpu::Buffer,
-    binding: Option<wgpu::BindGroup>,
-    pub fine: Option<super::fine::FineInputs>,
-}
-impl DisplayInputs {
-    pub fn new(
-        r: &WgpuRasterizer,
-        level: u32,
-        extent: [u32; 2],
-        phase: [u32; 2],
-        kept: bool,
-    ) -> Self {
-        let plan = display_mips::Plan::at([extent[0] + phase[0], extent[1] + phase[1]], level);
-        let image = display_mips::Image::with_mips(r, plan, display_mips::MAX_LEVEL);
-        let kept = kept.then(|| display_mips::Image::with_mips(r, plan, display_mips::MAX_LEVEL));
-        let sampling = [image.sampling_view(), kept.as_ref().unwrap_or(&image).sampling_view()];
-        Self {
-            level,
-            phase,
-            image, kept, sampling,
-            uniforms: r.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("display resample"),
-                size: resample::UNIFORM_BYTES,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            binding: None,
-            fine: None,
-        }
-    }
-    pub fn new_fine(r:&WgpuRasterizer,extent:[u32;2],phase:[u32;2],kept:bool,capacity:usize,pages:std::collections::VecDeque<PixelRect>)->Result<Self,GpuRasterError> {
-        let mut input=Self::new(r,1,extent,phase,kept);
-        input.level=0;
-        input.fine=Some(super::fine::FineInputs::new(r,capacity,kept,input.storage_bytes(),pages)?);
-        Ok(input)
-    }
-    pub fn storage_bytes(&self) -> u64 {
-        self.image.storage_bytes() + self.kept.as_ref().map_or(0, display_mips::Image::storage_bytes) + resample::UNIFORM_BYTES
-            + self.fine.as_ref().map_or(0,super::fine::FineInputs::storage_bytes)
-    }
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw(
-        &mut self,
-        r: &mut WgpuRasterizer,
-        pass: &resample::Resample,
-        encoder: &mut crate::submission::CommandEncoder,
-        level: &wgpu::TextureView,
-        values: &[u8; resample::UNIFORM_BYTES as usize],
-        texels: [u32; 4],
-        mesh: Option<&MeshBuffers>,
-    ) -> Result<(), GpuRasterError> {
-        if let Some(fine)=&self.fine {
-            fine.write_directory(r,encoder,self.phase)?;
-            r.uploads.write(encoder,&self.uniforms,values)?;
-            let binding=pass.fine_binding(&r.device,&self.uniforms,&self.sampling,&fine.view,&fine.directory);
-            pass.encode_mesh(encoder,&binding,level,texels,mesh.map(|mesh|(mesh,mesh.range_for_region(layer_core::Rect::UNBOUNDED))),self.kept.is_some());
-            return Ok(());
-        }
-        r.uploads.write(encoder, &self.uniforms, values)?;
-        let binding = self.binding.get_or_insert_with(|| pass.mesh_binding(&r.device, &self.uniforms, &self.sampling));
-        pass.encode_mesh(encoder, binding, level, texels, mesh.map(|mesh|(mesh,mesh.range_for_region(layer_core::Rect::UNBOUNDED))), self.kept.is_some());
-        Ok(())
-    }
-
 
 }

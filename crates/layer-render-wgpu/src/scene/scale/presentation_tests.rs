@@ -107,7 +107,7 @@ fn rejected_views_and_abandoned_composition_preserve_artwork() {
         ViewState { document_to_surface: [f32::NAN; 6], ..v },
         ViewState { document_to_surface: [0.; 6], ..v },
         ViewState { width_px: 8192, height_px: 8192,
-            document_to_surface: [1., 0., 0., 1., 0., 0.], ..v },
+            document_to_surface: [1., 0., 0., 1., 0., 0.] },
     ] {
         assert!(r.submit(FramePacket { view: rejected, reset_layers: true,
             ..packet(doc.scene(), [8192; 2]) }).is_err());
@@ -606,7 +606,7 @@ fn photo(extent: [u32; 2]) -> layer_core::Document {
     }, 512 * 1024 * 1024).unwrap();
     let mut row = vec![0u8; extent[0] as usize * 3];
     for y in 0..extent[1] {
-        for (x, pixel) in row.chunks_exact_mut(3).enumerate() {
+        for (x, pixel) in row.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             let x = x as u32;
             let hash = (x.wrapping_mul(0x9e37_79b9) ^ y.wrapping_mul(0x85eb_ca6b)).wrapping_mul(0xc2b2_ae35);
             let wave = ((x / 37 + y / 23) % 7) * 18;

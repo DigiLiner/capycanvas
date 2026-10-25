@@ -21,7 +21,8 @@ fn interpolate(points: &[[f32;2]], x: f64) -> f64 {
     let h: Vec<_> = p.windows(2).map(|v|v[1][0]-v[0][0]).collect();
     let d: Vec<_> = p.windows(2).zip(&h).map(|(v,h)|(v[1][1]-v[0][1])/h).collect();
     let tangent: Vec<_> = (0..p.len()).map(|i| {
-        if i==0 {return d[0];} if i==p.len()-1 {return d[i-1];}
+        if i==0 {return d[0];}
+        if i==p.len()-1 {return d[i-1];}
         if d[i-1]==0. || d[i]==0. || d[i-1].signum()!=d[i].signum() {return 0.;}
         let weight=(h[i-1]+2.*h[i])/(3.*(h[i-1]+h[i]));
         1./(weight/d[i-1]+(1.-weight)/d[i])
@@ -75,7 +76,7 @@ fn calibrate_and_render(mut doc: Document, expected_input: [f32;3], alpha: f32) 
         assert_eq!(curve(&candidate,0),curve(&original,0));
         set_effect(&mut doc,curves,candidate);
         let actual=sample(&doc,ArtworkSource::Visible);
-        for c in 0..3 {close(f64::from(actual[c]),target,2e-6f64.max(2e-4*target.abs()));}
+        for &component in &actual[..3] {close(f64::from(component),target,2e-6f64.max(2e-4*target.abs()));}
         close(f64::from(actual[3]),f64::from(alpha),2e-5*f64::from(alpha));
     }
 }

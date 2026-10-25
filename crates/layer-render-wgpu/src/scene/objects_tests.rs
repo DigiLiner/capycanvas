@@ -997,7 +997,7 @@ fn moving_nearest_objects_publish_level_zero_poses_with_and_without_effects() {
             if !blur {
                 let pixels = float_pixels(&r, r.scale_display.as_ref().unwrap().texture());
                 assert!(pixels.iter().all(|pixel| [[0., 0., 0., 1.], [1.; 4], [0.; 4]].contains(pixel)), "Nearest previews never average source texels");
-                assert!(pixels.iter().any(|pixel| *pixel == [1.; 4]) && pixels.iter().any(|pixel| *pixel == [0., 0., 0., 1.]));
+                assert!(pixels.contains(&[1.; 4]) && pixels.contains(&[0., 0., 0., 1.]));
             }
         }
     }

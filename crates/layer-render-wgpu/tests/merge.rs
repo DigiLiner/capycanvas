@@ -307,7 +307,8 @@ fn bakes_of_blurs_save_and_reopen() {
             doc.apply(edit).unwrap();
             let (mut engine, _input) = engine(doc);
             let original = image(&mut engine, 0);
-            let mut steps: Vec<(&str, Box<dyn Fn(&mut Engine)>)> = vec![
+            type Operation = Box<dyn Fn(&mut Engine)>;
+            let mut steps: Vec<(&str, Operation)> = vec![
                 ("Merge Down", Box::new(|engine: &mut Engine| { merge(engine, MergeKind::Down); })),
                 ("Merge Visible", Box::new(|engine: &mut Engine| { merge(engine, MergeKind::Visible); })),
                 ("Stamp Visible", Box::new(|engine: &mut Engine| { merge(engine, MergeKind::Stamp); })),

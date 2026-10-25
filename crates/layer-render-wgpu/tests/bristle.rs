@@ -195,7 +195,7 @@ fn bristle_paint_scales_with_the_configured_size_and_preserves_frame_cadence() {
         .load = 0.;
     let empty = render(brush, 0.8, 4, false);
     assert!(
-        empty.chunks_exact(4).all(|p| p[0] == 255),
+        empty.as_chunks::<4>().0.iter().all(|p| p[0] == 255),
         "empty brush must deposit no paint"
     );
 }

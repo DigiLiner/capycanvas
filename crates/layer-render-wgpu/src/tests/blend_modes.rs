@@ -317,7 +317,7 @@ fn live_at(r: &mut WgpuRasterizer, scene: SceneView<'_>, level: u32, blend_space
         display.texture()
     };
     crate::layer_tests::page_bytes(r, texture)
-        .chunks_exact(16)
+        .as_chunks::<16>().0.iter()
         .map(|p| std::array::from_fn(|c| f64::from(f32::from_le_bytes(p[c * 4..c * 4 + 4].try_into().unwrap()))))
         .collect()
 }

@@ -95,7 +95,10 @@ impl Capture {
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<source_access::RawTile,GpuRasterError> {
         let frame = r.artwork_frame.clone().ok_or(GpuRasterError::InvalidExtent)?;
-        if self.scene.is_none() { self.scene = Some(scene::Scene::new(r)?); }
+        self.layer_tile_at(r,&frame,id,coordinate,encoder)
+    }
+    pub fn layer_tile_at(&mut self,r:&mut WgpuRasterizer,frame:&Frame,id:SourceTarget,coordinate:[u32;2],encoder:&mut crate::submission::CommandEncoder)->Result<source_access::RawTile,GpuRasterError> {
+        if self.scene.is_none() {self.scene=Some(scene::Scene::new(r)?);}
         self.scene.as_mut().unwrap().layer_tile_for_query(r,frame.scene.view(),id,coordinate,encoder)
     }
     pub fn thumbnail_tile(&mut self, r: &mut WgpuRasterizer, target: layer_render::ThumbnailTarget, coordinate: [u32;2], encoder: &mut submission::CommandEncoder) -> Result<source_access::RawTile, GpuRasterError> {
@@ -228,7 +231,7 @@ fn source_tile_decodes(r: &WgpuRasterizer, scene: SceneView<'_>, tile: [u32; 2])
                 && !resident(target) && sources.prepared_base_view(base, tile).is_none()));
         let native = r.native_backing(target).is_some() || scene.mask(h).is_some_and(|(use_, _)| r.native_backing(SourceTarget::Coverage(use_.source)).is_some());
         source || native && (placed || scene.mask(h).is_some() || (!resident(target)
-            && r.native_color_tile(target, tile).map_or(true, |blob| blob.is_some_and(|blob| sources.prepared_raster_view(&blob, space).is_none()))))
+            && r.native_color_tile(target, tile).map_or(true, |blob| blob.is_some_and(|blob| sources.prepared_raster_view(&blob, space, space).is_none()))))
     })
 }
 

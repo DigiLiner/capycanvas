@@ -91,7 +91,7 @@ fn run(r: &crate::WgpuRasterizer, kernel: &Kernel, uploads: &mut crate::Uploads,
     let gpu = timer.as_ref().map_or(f64::NAN, |t| {
         t.readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         r.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-        let ticks: Vec<u64> = t.readback.slice(..).get_mapped_range().unwrap().chunks_exact(8).map(|b| u64::from_le_bytes(b.try_into().unwrap())).collect();
+        let ticks: Vec<u64> = t.readback.slice(..).get_mapped_range().unwrap().as_chunks::<8>().0.iter().map(|b| u64::from_le_bytes(*b)).collect();
         t.readback.unmap();
         ticks[1].saturating_sub(ticks[0]) as f64 * t.period / 1e6
     });

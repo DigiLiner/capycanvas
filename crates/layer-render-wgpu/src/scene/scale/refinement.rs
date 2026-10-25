@@ -232,7 +232,7 @@ impl Scene {
         let result = cache.refine(self, r, packet, encoder, &mut commands);
         self.scale_commands = Some(commands);
         r.scale_display = Some(cache);
-        if result.is_ok() { write.track(encoder); }
+        if result.is_ok() || matches!(result,Err(GpuRasterError::DeferredObjectWork)) {write.track(encoder);}
         result
     }
 }

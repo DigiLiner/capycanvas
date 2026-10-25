@@ -13656,14 +13656,11 @@ async fn read_canvas_pixels(
     // The ordered worker queue must receive the final document frame before
     // its readback. Merely changing the model does not update GPU pixels.
     loop {
-        let pending = w
-            .gpu
-            .borrow()
-            .as_ref()
-            .ok_or("Canvas unavailable")?
-            .session
-            .engine()
-            .has_pending_document_edits();
+        let pending = {
+            let gpu=w.gpu.borrow();
+            let engine=gpu.as_ref().ok_or("Canvas unavailable")?.session.engine();
+            engine.has_pending_document_edits() || !engine.backend().frames_idle()
+        };
         if !pending {
             break;
         }

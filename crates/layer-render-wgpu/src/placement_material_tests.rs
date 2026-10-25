@@ -69,7 +69,7 @@ fn render(r: &mut WgpuRasterizer, layer: &Document, batches: &[DabBatch], reset:
 
 fn assert_pixels(actual: &[u8], expected: &[u8], context: &str) {
     assert_eq!(actual.len(), expected.len(), "{context}");
-    let changed = actual.chunks_exact(4).zip(expected.chunks_exact(4)).filter(|(a, b)| a != b).count();
+    let changed = actual.as_chunks::<4>().0.iter().zip(expected.as_chunks::<4>().0.iter()).filter(|(a, b)| a != b).count();
     let error = actual.iter().zip(expected).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
     assert!(changed == 0, "{context}: {changed} differing pixels, maximum channel error {error}");
 }
@@ -160,7 +160,7 @@ fn cold_backed_scalar_planes_survive_destructive_affine_mapping_without_live_pag
         } else {
             let error = crate::test_support::max_error_bytes(mapped, &bytes);
             assert!(error <= f32::EPSILON, "cold mapped {key:?}: Float32 error {error}");
-            assert!(mapped.chunks_exact(4).zip(bytes.chunks_exact(4)).all(|(a, b)| {
+            assert!(mapped.as_chunks::<4>().0.iter().zip(bytes.as_chunks::<4>().0.iter()).all(|(a, b)| {
                 let code = |v: &[u8]| (f32::from_le_bytes(v.try_into().unwrap()) * 255.).round() as u8;
                 code(a) == code(b)
             }), "cold mapped {key:?}: exact scalar codes");
@@ -252,7 +252,7 @@ fn perceptual_low_zoom_sparse_material_keeps_dry_photo_pixels_across_halo_page_e
 type Planes = BTreeMap<TileKey, Vec<u8>>;
 
 fn assert_baked_codes(layer: &Document, nonzero_planes: &[RasterPlane], expected: impl Fn(RasterPlane, Point) -> Vec<u8>) {
-    let data = paint(&layer).raster.wait_data().unwrap();
+    let data = paint(layer).raster.wait_data().unwrap();
     let mut planes = std::collections::BTreeSet::new();
     for (key, tile) in &data.tiles {
         if key.plane == RasterPlane::Mask { continue; }
@@ -542,7 +542,7 @@ fn moving_watercolor_crosses_identity_without_rebuilding_the_photo_source() {
         let frame = |scene| FramePacket {
             blend_space: layer_core::BlendSpace::Perceptual,
             view: ViewState { width_px: 640, height_px: 480,
-                document_to_surface: [0.125, 0., 0., 0.125, 64., 48.], ..packet(scene, extent).view },
+                document_to_surface: [0.125, 0., 0., 0.125, 64., 48.] },
             ..packet(scene, extent)
         };
         moving.submit(frame(original.scene())).unwrap();
@@ -595,7 +595,7 @@ fn accepted_photo_keeps_raw_lod_for_sparse_watercolor_and_transform_reopen() {
     };
     let parity = |r: &WgpuRasterizer, layer: &Document, moving: bool| {
         let mut fresh = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-        fresh.prepare_moving_layer(moving.then_some(occurrence_id(&layer)));
+        fresh.prepare_moving_layer(moving.then_some(occurrence_id(layer)));
         submit(&mut fresh, layer);
         let actual = crate::scene::scale::tests::display_pixels(r);
         let expected = crate::scene::scale::tests::display_pixels(&fresh);
@@ -657,7 +657,7 @@ fn accepted_photo_keeps_raw_lod_for_sparse_watercolor_and_transform_reopen() {
     let key = TileKey { plane: RasterPlane::Color, coordinate: [0, 0] };
     let blob = changed_style.tiles[&key].wait_backing().unwrap();
     let mut bytes = blob.decode().unwrap();
-    for pixel in bytes.chunks_exact_mut(4).filter(|pixel| pixel[3] != 0) { pixel[..3].copy_from_slice(&[20, 60, 100]); }
+    for pixel in bytes.as_chunks_mut::<4>().0.iter_mut().filter(|pixel| pixel[3] != 0) { pixel[..3].copy_from_slice(&[20, 60, 100]); }
     changed_style.tiles.insert(key, RasterTile::backed(TileBlob::encode(blob.descriptor, &bytes).unwrap()));
     paint_mut(&mut photo).raster = RasterRevision::backed(changed_style);
     submit(&mut cached, &photo);
@@ -832,7 +832,7 @@ fn assert_destination_halo(pixels: &[u8], samples: &[[i32; 2]], width: f32, labe
     let high = [0, 1].map(|axis| pigment.iter().map(|p| p[axis]).max().unwrap());
     let radius = (width.clamp(1., 16.) * 2.).ceil() as u32;
     let mut halo = 0;
-    for (i, _) in pixels.chunks_exact(4).enumerate().filter(|(_, p)| p[3] != 0) {
+    for (i, _) in pixels.as_chunks::<4>().0.iter().enumerate().filter(|(_, p)| p[3] != 0) {
         let p = [i as u32 % EXTENT[0], i as u32 / EXTENT[0]];
         assert!((0..2).all(|axis| p[axis] >= low[axis].saturating_sub(radius) && p[axis] <= high[axis] + radius),
             "{label}: material at {p:?} exceeds {radius}px destination halo of {low:?}..{high:?}");
@@ -907,7 +907,7 @@ fn nonlinear_material_source_footprints_cover_destination_neighbors_with_portabl
         let geometry = map.mesh.as_ref().map(|mesh| Arc::new(MeshGeometry::new(mesh, map.outer, None)));
         let slots = 16 - usize::from(geometry.is_some());
         for interpolation in [Interpolation::Nearest, Interpolation::Linear, Interpolation::Bicubic, Interpolation::Lanczos] {
-            let transform = ImageTransform { placement: layer_core::LayerPlacement { interpolation: interpolation, ..map.clone() }, ..Default::default() };
+            let transform = ImageTransform { placement: layer_core::LayerPlacement { interpolation, ..map.clone() }, ..Default::default() };
             let splitter = Splitter::new(PixelRect::full(source_extent), &transform, geometry.clone(), |c| c[0] < 32 && c[1] < 32).unwrap();
             let mut jobs = Vec::new();
             splitter.split(PixelRect::new(192, 192, 320, 320), &mut jobs).unwrap();

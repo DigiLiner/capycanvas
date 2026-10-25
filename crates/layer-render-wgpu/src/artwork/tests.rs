@@ -220,8 +220,8 @@ fn filtered_query_crops_match_full_resolution_and_reject_excessive_dependencies(
     let after = crate::layer_tests::page_bytes(&r, &visible);
     assert!(
         after
-            .chunks_exact(4)
-            .all(|v| f32::from_le_bytes(v.try_into().unwrap()) == 1.)
+            .as_chunks::<4>().0.iter()
+            .all(|v| f32::from_le_bytes(*v) == 1.)
     );
 }
 

@@ -7,7 +7,7 @@ fn codes(x: u32, y: u32) -> [u16; 4] {
     [
         ((x * 8191 + y * 31) % 65536) as u16,
         ((x * 17 + y * 16381) % 65536) as u16,
-        if (x / 173 + y / 111) % 2 == 0 {
+        if (x / 173 + y / 111).is_multiple_of(2) {
             65535
         } else {
             0
@@ -37,14 +37,7 @@ fn photo(extent: [u32; 2]) -> Arc<SourceImage> {
     Arc::new(builder.finish().unwrap())
 }
 pub(crate) fn thumbnail(r: &mut WgpuRasterizer, target: ThumbnailTarget) -> Vec<u8> {
-    r.start_thumbnail(7, target).unwrap();
-    r.device
-        .poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: Some(READBACK_TIMEOUT),
-        })
-        .unwrap();
-    r.thumbnails.take().unwrap().unwrap().bytes
+    crate::test_support::thumbnail(r, 7, target)
 }
 
 #[test]
@@ -55,12 +48,12 @@ fn tiny_portrait_photo_thumbnail_has_color_and_checkered_letterbox() {
     artwork.paint.get_mut(target).unwrap().base = Some(layer_core::authored::PaintBase::new((source).into()));
     let document = Document::from_artwork(artwork).unwrap();
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    r.submit(crate::test_support::packet(document.scene(), [24, 48])).unwrap();
+    crate::test_support::submit_settled(&mut r, crate::test_support::packet(document.scene(), [24, 48]));
     let bytes = thumbnail(&mut r, ThumbnailTarget::Source(SourceTarget::Paint(target)));
-    assert!(bytes.chunks_exact(4).all(|p| p[3] == 255));
+    assert!(bytes.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
     assert!(
         bytes
-            .chunks_exact(4)
+            .as_chunks::<4>().0.iter()
             .filter(|p| p[0].abs_diff(p[2]) > 20)
             .count()
             > 100
@@ -76,9 +69,9 @@ fn unplaced_photo_preview_draws_the_photo_before_any_paint() {
     artwork.paint.get_mut(target).unwrap().base = Some(layer_core::authored::PaintBase::new((source).into()));
     let document = Document::from_artwork(artwork).unwrap();
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    r.submit(crate::test_support::packet(document.scene(), [24, 48])).unwrap();
+    crate::test_support::submit_settled(&mut r, crate::test_support::packet(document.scene(), [24, 48]));
     let bytes = thumbnail(&mut r, ThumbnailTarget::Source(SourceTarget::Paint(target)));
-    assert!(bytes.chunks_exact(4).filter(|p| p[0].abs_diff(p[2]) > 20).count() > 100, "the layer preview shows the photo, not an empty checkerboard");
+    assert!(bytes.as_chunks::<4>().0.iter().filter(|p| p[0].abs_diff(p[2]) > 20).count() > 100, "the layer preview shows the photo, not an empty checkerboard");
 }
 
 #[test]
@@ -106,11 +99,24 @@ fn photo_thumbnail_batches_survive_interleaved_layers_edits_and_discarded_comman
     });
     let mut document = Document::from_artwork(artwork).unwrap();
     let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
-    r.submit(crate::test_support::packet(document.scene(), extent)).unwrap();
+    crate::test_support::submit_settled(&mut r, crate::test_support::packet(document.scene(), extent));
     let mut gpu = SourceThumbnails::new(&r);
     let prepare = |gpu: &mut SourceThumbnails, r: &mut WgpuRasterizer, id, discard: bool| {
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
-        let ready = gpu.prepare(r, id, &mut encoder, 1).unwrap();
+        let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
+        let ready = loop {
+            match gpu.prepare(r, id, &mut encoder, 1) {
+                Ok(ready) => break ready,
+                Err(GpuRasterError::DeferredObjectWork) => {},
+                Err(error) => panic!("{error}"),
+            }
+            let mut worker = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+            r.drain_image_decodes(&mut worker).unwrap();
+            r.uploads.finish(&worker); worker.submit(&r.queue);
+            crate::test_support::complete(r);
+            assert!(std::time::Instant::now() < deadline, "thumbnail batch preparation must complete");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
         if !discard { r.uploads.finish(&encoder); encoder.submit(&r.queue); }
         ready
     };
@@ -123,7 +129,7 @@ fn photo_thumbnail_batches_survive_interleaved_layers_edits_and_discarded_comman
     assert_ne!(before, other);
     let SourceTarget::Paint(handle) = targets[0] else { unreachable!() };
     *document.artwork.paint.get_mut(handle).unwrap() = paint([1000, 1000, 45000, 65535]);
-    r.submit(crate::test_support::packet(document.scene(), extent)).unwrap();
+    crate::test_support::submit_settled(&mut r, crate::test_support::packet(document.scene(), extent));
     let mut gpu = r.thumbnails.sources.take().unwrap();
     assert!(!prepare(&mut gpu, &mut r, targets[0], true));
     let mut ready = [false; 2];

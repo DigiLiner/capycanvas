@@ -189,7 +189,7 @@ fn native_material_reduction_preserves_small_hdr_corrections() {
     let source = crate::test_support::page_texture(&r, wgpu::TextureFormat::Rgba32Float);
     let output = crate::test_support::page_texture(&r, wgpu::TextureFormat::Rgba32Float);
     let mut pigment = vec![[0., 0., 0., 1.]; 256 * 256];
-    for (i, value) in [1048576., 1048576.125, 1048576.25, 1048576.375].into_iter().enumerate() {
+    for (i, value) in [1048576., f32::from_bits(0x4980_0001), f32::from_bits(0x4980_0002), f32::from_bits(0x4980_0003)].into_iter().enumerate() {
         pigment[(i / 2) * 256 + i % 2][0] = value;
     }
     let mut appearance = pigment.clone();
@@ -1341,12 +1341,12 @@ fn materialized_display(r: &WgpuRasterizer) -> Image {
             Presentation::Mapped(p) => {
                 let mut values = p.values;
                 let side = (1 << cache.plan.level) as f32;
-                for row in values[..128].chunks_exact_mut(16) { for component in row[..8].chunks_exact_mut(4) {
-                    let n = f32::from_le_bytes(component.try_into().unwrap()) * side;
+                for row in values[..128].as_chunks_mut::<16>().0 { for component in row[..8].as_chunks_mut::<4>().0 {
+                    let n = f32::from_le_bytes(*component) * side;
                     component.copy_from_slice(&n.to_le_bytes());
                 }}
-                for (dst, n) in values[144..160].chunks_exact_mut(4).zip(texels) { dst.copy_from_slice(&n.to_le_bytes()); }
-                for (dst, n) in values[208..216].chunks_exact_mut(4).zip(cache.plan.extent) { dst.copy_from_slice(&(n as f32 / side).to_le_bytes()); }
+                for (dst, n) in values[144..160].as_chunks_mut::<4>().0.iter_mut().zip(texels) { dst.copy_from_slice(&n.to_le_bytes()); }
+                for (dst, n) in values[208..216].as_chunks_mut::<4>().0.iter_mut().zip(cache.plan.extent) { dst.copy_from_slice(&(n as f32 / side).to_le_bytes()); }
                 values
             }
         };
@@ -1530,7 +1530,7 @@ fn scaled_composition_preserves_exact_paint_and_replaces_full_display() {
         let a = r.readback_srgb_rgba8().unwrap();
         let b = exact.readback_srgb_rgba8().unwrap();
         assert_eq!(a.len(), b.len());
-        for (index, (actual, expected)) in a.chunks_exact(4).zip(b.chunks_exact(4)).enumerate() {
+        for (index, (actual, expected)) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0.iter()).enumerate() {
             assert_eq!(actual, expected, "{kind:?} native output pixel {:?}", [index % extent[0] as usize, index / extent[0] as usize]);
         }
     }
@@ -2029,7 +2029,7 @@ fn reduction_samplers_live_with_records_not_page_views() {
             if global.space == naga::AddressSpace::Uniform { records.insert(binding.group); }
             match module.types[global.ty].inner {
                 naga::TypeInner::Image { .. } => { images.insert(binding.group); }
-                naga::TypeInner::Sampler { .. } => samplers.push(binding.clone()),
+                naga::TypeInner::Sampler { .. } => samplers.push(*binding),
                 _ => (),
             }
         }

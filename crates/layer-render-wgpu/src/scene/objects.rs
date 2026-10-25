@@ -440,7 +440,7 @@ fn encode_pending(r: &mut WgpuRasterizer, encoder: &mut crate::submission::Comma
         let mut data = [0; 144];
         if let Some(values) = pending.data { for (destination, value) in data.as_chunks_mut::<4>().0.iter_mut().zip(values) { destination.copy_from_slice(&value.to_ne_bytes()); } }
         r.uploads.write_at(encoder, &records, 0, &data)?;
-        let bytes = r.source_tiles.get_mut().encode(&r.device, &mut r.uploads, &r.scene_pipelines.source, encoder, &pending, &binding, 0)?;
+        let bytes = r.source_tiles.get_mut().encode(&r.device, &mut r.uploads, &r.scene_pipelines.source, encoder, &pending,r.snapshot_worker, &binding, 0)?;
         let in_flight = r.source_tiles.borrow().charge_upload(encoder, bytes);
         r.metrics.source_upload_peak_bytes = r.metrics.source_upload_peak_bytes.max(in_flight);
     Ok(())

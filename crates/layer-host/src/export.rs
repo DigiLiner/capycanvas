@@ -393,7 +393,7 @@ mod tests {
         let mut row = vec![0; photo.row_bytes()];
         for y in 0..6 {
             rows.read(y, &mut row).unwrap();
-            for (x, actual) in row.chunks_exact(4).enumerate() {
+            for (x, actual) in row.as_chunks::<4>().0.iter().enumerate() {
                 let expected = pixel(x as u32, y);
                 assert_eq!(actual[3], expected[3], "({x},{y}) alpha");
                 if expected[3] > 0 {

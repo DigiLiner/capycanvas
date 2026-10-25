@@ -64,9 +64,9 @@ fn image(r: &WgpuRasterizer) -> Vec<u8> {
 }
 fn close(a: &[u8], b: &[u8]) {
     assert_eq!(a.len(), b.len());
-    for (i, (a, b)) in a.chunks_exact(4).zip(b.chunks_exact(4)).enumerate() {
-        let a = f32::from_le_bytes(a.try_into().unwrap());
-        let b = f32::from_le_bytes(b.try_into().unwrap());
+    for (i, (a, b)) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0.iter()).enumerate() {
+        let a = f32::from_le_bytes(*a);
+        let b = f32::from_le_bytes(*b);
         assert!((a - b).abs() <= 3e-6, "working sample {i}: {a} != {b}");
     }
 }
@@ -143,7 +143,7 @@ fn stale_thumbnail_batches_cancel_without_publishing_and_leave_live_artwork_avai
     complete(&r);
     let image = r.take_thumbnail().unwrap().unwrap();
     assert_eq!((image.request_id, image.width, image.height), (77, 32, 32));
-    assert!(image.bytes.chunks_exact(4).all(|pixel| pixel == [0, 0, 255, 255]));
+    assert!(image.bytes.as_chunks::<4>().0.iter().all(|pixel| *pixel == [0, 0, 255, 255]));
     assert!(!r.thumbnails_pending());
     assert_eq!(backing(&root), before);
     r.submit(packet(&current, true)).unwrap();
@@ -718,7 +718,7 @@ fn edited_layer_thumbnails_reduce_only_their_changed_pages_in_bounded_batches() 
         assert!(polls <= pages.div_ceil(crate::thumbnails::BATCH_PAGES), "a filled 24 MP layer is ready after {polls} polls");
         assert_eq!(reduced, pages as u64, "a filled layer reduces each page once");
         let filled_thumbnail = thumbnail(&mut r, id);
-        assert!(filled_thumbnail[5 * 128..27 * 128].chunks_exact(4).all(|pixel| pixel == blue), "the framed 3:2 layer shows the fill");
+        assert!(filled_thumbnail[5 * 128..27 * 128].as_chunks::<4>().0.iter().all(|pixel| *pixel == blue), "the framed 3:2 layer shows the fill");
         let edited = retiled(&document, [0, 0], [250, 20, 20, 255]);
         r.submit(tier_frame(&edited, false)).unwrap();
         complete(&r);
@@ -753,8 +753,8 @@ fn reduced_thumbnails_frame_and_fill_content_that_leaves_most_of_its_pages_trans
     let image = thumbnail(&mut r, id);
     let size = [content.width(), content.height()].map(|v| v as f32 * 32. / content.width().max(content.height()) as f32);
     let low = size.map(|v| (32. - v) / 2.);
-    let rows: Vec<String> = image.chunks_exact(32 * 4).map(|row| row.chunks_exact(4).map(|p| if p[0] < 100 { '#' } else { 'o' }).collect()).collect();
-    for (i, pixel) in image.chunks_exact(4).enumerate() {
+    let rows: Vec<String> = image.as_chunks::<{ 32 * 4 }>().0.iter().map(|row| row.as_chunks::<4>().0.iter().map(|p| if p[0] < 100 { '#' } else { 'o' }).collect()).collect();
+    for (i, pixel) in image.as_chunks::<4>().0.iter().enumerate() {
         let p = [i % 32, i / 32].map(|v| v as f32);
         let inside = (0..2).all(|a| p[a] >= low[a] && p[a] + 1. <= low[a] + size[a]);
         let outside = (0..2).any(|a| p[a] + 1. <= low[a] || p[a] >= low[a] + size[a]);

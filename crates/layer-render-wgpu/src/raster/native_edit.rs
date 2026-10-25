@@ -55,14 +55,16 @@ pub(crate) struct NativeEdit {
     preview_scalars: Option<(NativeEncodeStatus, Vec<wgpu::Buffer>)>,
 }
 impl NativeEdit {
-    fn new(r: &WgpuRasterizer, transfer: NativeTransfer) -> Self {
+    fn new(r: &WgpuRasterizer, transfer: NativeTransfer, admission:Option<&Self>) -> Self {
         let in_place = !crate::native_tiles::native_in_place_features(&r.adapter).is_empty()
             && r.device
                 .features()
                 .contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
-        Self::with_mode(r, transfer, in_place)
+        Self::with_admission(r,transfer,in_place,admission)
     }
-    fn with_mode(r: &WgpuRasterizer, transfer: NativeTransfer, in_place: bool) -> Self {
+    #[cfg(test)]
+    fn with_mode(r: &WgpuRasterizer, transfer: NativeTransfer, in_place: bool) -> Self {Self::with_admission(r,transfer,in_place,None)}
+    fn with_admission(r:&WgpuRasterizer,transfer:NativeTransfer,in_place:bool,admission:Option<&Self>)->Self {
         let scratch_count = if in_place || r.snapshot_worker { 0 } else { MAX_BATCH_TILES };
         let colors = (0..scratch_count)
             .map(|_| Self::scratch_texture(&r.device, wgpu::TextureFormat::Rgba32Float))
@@ -71,9 +73,9 @@ impl NativeEdit {
             .map(|_| Self::scratch_texture(&r.device, wgpu::TextureFormat::R32Float))
             .collect();
         #[cfg(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple"))]
-        let display_complete_bytes = crate::display_memory::complete_budget(&r.device, 0);
+        let display_complete_bytes=admission.map_or_else(||crate::display_memory::complete_budget(&r.device,0),|source|source.display_complete_bytes);
         #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple")))]
-        let display_complete_bytes = 0;
+        let display_complete_bytes=admission.map_or(0,|source|source.display_complete_bytes);
         let recipes = Recipes::shared(&r.device, r.document_color().depth, in_place);
         Self {
             backing: BTreeMap::new(),
@@ -81,9 +83,9 @@ impl NativeEdit {
             display_complete_bytes,
             composition_bytes: {
                 #[cfg(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple"))]
-                { crate::display_memory::composition_budget(&r.device, display_complete_bytes) }
+                {admission.map_or_else(||crate::display_memory::composition_budget(&r.device,display_complete_bytes),|source|source.composition_bytes)}
                 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple")))]
-                { 0 }
+                {admission.map_or(0,|source|source.composition_bytes)}
             },
             #[cfg(test)]
             image_pixel_bytes: None,
@@ -149,12 +151,13 @@ impl NativeEdit {
             + self.preview_scalars.as_ref().map_or(0, |(_, buffers)| STATUS_BYTES + buffers.iter().map(wgpu::Buffer::size).sum::<u64>())
         // Transfer storage is owned/accounted by the shared scene decoder cache.
     }
+    pub(crate) fn image_pixel_allowance(&self)->u64 {
+        self.composition_bytes.max(crate::scene::windows::DEFAULT_IMAGE_PIXEL_BYTES+crate::scene::scale::CACHE_BYTES)
+    }
     pub(crate) fn image_pixel_budget(&self, resident: u64) -> u64 {
         #[cfg(test)]
         if let Some(bytes) = self.image_pixel_bytes { return bytes; }
-        let display = crate::scene::scale::CACHE_BYTES;
-        let floor = crate::scene::windows::DEFAULT_IMAGE_PIXEL_BYTES + display;
-        self.composition_bytes.max(floor).saturating_sub(display.saturating_add(resident))
+        self.image_pixel_allowance().saturating_sub(crate::scene::scale::CACHE_BYTES.saturating_add(resident))
     }
 
 }
@@ -333,14 +336,36 @@ impl WgpuRasterizer {
         Ok(*r)
     }
 
+    pub(crate) fn native_preparation(&self)->Result<Self,GpuRasterError> {
+        let mut renderer=Self::from_wgpu_inner(self.adapter.clone(),self.device.clone(),self.queue.clone(),Initialization::Snapshot)?;
+        renderer.initialize_native_from(self.document_color(),self.native_edit.as_ref())?;
+        renderer.snapshot_worker=false;renderer.scene_pipelines=self.scene_pipelines.clone();renderer.scene=None;
+        renderer.transforms=Some(paint_transform::PaintTransforms::from_recipes(&self.transforms.as_ref().unwrap().recipes()));
+        renderer.source_tiles=std::cell::RefCell::new(crate::scene::sources::DecodedTiles::new(self.document_color().space));
+        if let Some(native)=&mut renderer.native_edit {native.color_cache_bytes=0;}
+        #[cfg(target_arch="wasm32")]
+        {
+            renderer.browser_image_decoder=self.browser_image_decoder.clone();
+            renderer.browser_raster_decoder=self.browser_raster_decoder.clone();
+            renderer.browser_nearest_coordinate_decoder=self.browser_nearest_coordinate_decoder.clone();
+        }
+        Ok(*renderer)
+    }
+
     pub(crate) fn initialize_native(&mut self, color: DocumentColor) -> Result<(), GpuRasterError> {
+        self.initialize_native_from(color,None)
+    }
+    fn initialize_native_from(&mut self,color:DocumentColor,source:Option<&NativeEdit>)->Result<(),GpuRasterError> {
+        self.restore_preflight=None;self.bake_preflight=None;self.source_receipt=None;self.source_results.clear();self.decode_pressure.clear();self.moving_decode=None;
+        #[cfg(target_arch="wasm32")]
+        {self.browser_image_result=Default::default();self.browser_image_wake=Default::default();}
         self.document_color = color;
         self.device = self.device.clone().with_depth(color.depth);
         self.ui_rendition = color.depth.is_float().then_some(Default::default());
         self.scene = None;
         self.source_tiles = std::cell::RefCell::new(crate::scene::sources::DecodedTiles::new(color.space));
-        let transfer = self.prepare_native_transfer(color.space)?;
-        let native = NativeEdit::new(self, transfer);
+        let transfer=if let Some(source)=source {source.transfer.clone()}else {self.prepare_native_transfer(color.space)?};
+        let native=NativeEdit::new(self,transfer,source);
         let allowance = native.display_complete_bytes;
         #[cfg(not(target_arch = "wasm32"))]
         let allowance = if self.snapshot_worker { 0 } else { allowance };

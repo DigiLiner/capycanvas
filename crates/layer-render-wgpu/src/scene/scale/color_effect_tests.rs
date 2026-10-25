@@ -299,7 +299,7 @@ fn native_pointwise_batches(preload: bool, admitted: bool) {
         }
         if state < 2 {
             let independent: Vec<_> = (0..extent[0] * extent[1]).map(|i| {
-                let x = i as u32 % extent[0]; let y = i as u32 / extent[0];
+                let x = i % extent[0]; let y = i / extent[0];
                 let codes = [(x * 3 + y * 7) % 256, (y * 5 + x / 17) % 256, (x / 5 + y / 3) % 256];
                 let luminance: f64 = codes.into_iter().zip(doc.composition().color.space.to_xyz()[1])
                     .map(|(code, weight)| f64::from(code) / 255. * weight).sum();

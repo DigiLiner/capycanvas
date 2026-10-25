@@ -91,8 +91,9 @@ impl Drop for RetirementCompletion {
 }
 enum Pixels {
     Image(Arc<SourceImage>, [u32; 2]),
-    Raster(Arc<TileBlob>, RgbSpace),
+    Raster(Arc<TileBlob>, RgbSpace,RgbSpace),
 }
+#[derive(Clone)]
 pub enum PreparedSourcePixels { NativeSamples(Arc<layer_core::memory::DecodedBytes>), PremultipliedWorkingPixels(Arc<layer_core::memory::DecodedBytes>) }
 
 pub(crate) struct PendingTile {
@@ -102,6 +103,31 @@ pub(crate) struct PendingTile {
     pub data: Option<[f32; 24]>,
     write: crate::submission::CacheWrite,
     pub prepared_pixels: Option<PreparedSourcePixels>,
+    receipt: std::sync::Mutex<Option<PreparedSourcePixels>>,
+}
+impl PendingTile {
+    pub fn prepared(&self)->Option<PreparedSourcePixels> {self.prepared_pixels.clone().or_else(||self.receipt.lock().unwrap().clone())}
+    pub fn matches_image(&self,source:&Arc<SourceImage>,coordinate:[u32;2])->bool {matches!(&self.pixels,Pixels::Image(stored,c) if Arc::ptr_eq(stored,source) && *c==coordinate)}
+    pub fn matches_raster(&self,blob:&Arc<TileBlob>,space:RgbSpace,destination:RgbSpace)->bool {matches!(&self.pixels,Pixels::Raster(stored,from,to) if Arc::ptr_eq(stored,blob) && *from==space && *to==destination)}
+    pub fn accept_image(&self,source:&Arc<SourceImage>,coordinate:[u32;2],pixels:&PreparedSourcePixels)->bool {
+        if !self.matches_image(source,coordinate) {return false;}
+        *self.receipt.lock().unwrap()=Some(pixels.clone());true
+    }
+    pub fn accept_raster(&self,blob:&Arc<TileBlob>,space:RgbSpace,destination:RgbSpace,pixels:&PreparedSourcePixels)->bool {
+        if !self.matches_raster(blob,space,destination) {return false;}
+        *self.receipt.lock().unwrap()=Some(pixels.clone());true
+    }
+    pub fn prepare(&self,r:&mut WgpuRasterizer)->Result<(),GpuRasterError> {
+        if self.prepared().is_some() {return Ok(());}
+        match &self.pixels {
+            Pixels::Image(source,coordinate)=> {
+                let id=source.tiles.get(coordinate).ok_or(GpuRasterError::InvalidImage)?.resource_id();
+                r.request_image_decode(id,source.clone(),*coordinate)?;
+            },
+            Pixels::Raster(blob,space,destination)=> {r.request_raster_decode_to(blob.clone(),*space,*destination)?;},
+        }
+        Ok(())
+    }
 }
 struct NativeSamples<'a> {
     tile: &'a Arc<TileBlob>,
@@ -130,7 +156,7 @@ impl Pixels {
                     space,
                 })
             }
-            Self::Raster(tile, space) => Ok(NativeSamples {
+            Self::Raster(tile, space,_) => Ok(NativeSamples {
                 tile,
                 descriptor: tile.descriptor,
                 channels: match tile.descriptor.channels { 1 => SourceChannels::Gray, 2 => SourceChannels::GrayAlpha, _ => SourceChannels::Rgba },
@@ -230,6 +256,7 @@ impl DecodedTiles {
     ) -> Result<crate::native_tiles::NativeTransfer, GpuRasterError> {
         self.transfer.prepare(device, space).cloned()
     }
+    pub(crate) fn invalidate(&mut self) {for slot in &self.slots {slot.valid.store(false,Ordering::Release);}}
     pub fn prepared_view(
         &self,
         source: &Arc<SourceImage>,
@@ -260,8 +287,8 @@ impl DecodedTiles {
         self.in_flight.bytes.load(Ordering::Acquire)
             > self.limits.upload_bytes - FLOAT_TILE_BYTES
     }
-    pub fn prepared_raster_view(&self, blob: &Arc<TileBlob>, space: RgbSpace) -> Option<&wgpu::TextureView> {
-        let key = Key::raster(blob, space, self.destination);
+    pub fn prepared_raster_view(&self, blob: &Arc<TileBlob>, space: RgbSpace,destination:RgbSpace) -> Option<&wgpu::TextureView> {
+        let key = Key::raster(blob, space, destination);
         self.slots.iter().find(|s| s.key.as_ref().is_some_and(|k| k.matches(&key)) && s.valid.load(Ordering::Acquire))
             .map(|s| &s.view)
     }
@@ -302,7 +329,7 @@ impl DecodedTiles {
             view: tile.view.clone(),
             data: builtin_settings(source, coordinate, self.destination),
             write,
-            prepared_pixels: None,
+            prepared_pixels: None,receipt:Default::default(),
         });
         Ok((tile, pending))
     }
@@ -325,12 +352,12 @@ impl DecodedTiles {
         let (tile, write) =
             self.plan_key(r, Key::raster(blob, space, destination))?;
         let pending = write.map(|write| PendingTile {
-            pixels: Pixels::Raster(blob.clone(), space),
+            pixels: Pixels::Raster(blob.clone(), space,destination),
             texture: tile.texture.clone(),
             view: tile.view.clone(),
             data: Some(data),
             write,
-            prepared_pixels: None,
+            prepared_pixels: None,receipt:Default::default(),
         });
         Ok((tile, pending))
     }
@@ -420,9 +447,12 @@ impl DecodedTiles {
         pipelines: &Pipelines,
         encoder: &mut crate::submission::CommandEncoder,
         pending: &PendingTile,
+        snapshot_worker:bool,
         uniforms: &wgpu::BindGroup,
         offset: u32,
     ) -> Result<u64, GpuRasterError> {
+        let prepared_pixels=pending.prepared();
+        if !snapshot_worker && prepared_pixels.is_none() {return Err(GpuRasterError::DeferredObjectWork);}
         let bytes = if pending.data.is_some() {
             let samples = pending.pixels.native()?;
             let index = samples.depth.bytes().ilog2() as usize;
@@ -459,13 +489,13 @@ impl DecodedTiles {
                     "Source tile has the wrong sample representation".into(),
                 ));
             }
-            let decoded = match &pending.prepared_pixels {
+            let decoded = match &prepared_pixels {
                 Some(PreparedSourcePixels::NativeSamples(samples)) => samples.clone(),
                 Some(PreparedSourcePixels::PremultipliedWorkingPixels(_)) => return Err(GpuRasterError::Color("Working source pixels have native decode settings".into())),
                 None => device.source_samples.decode(samples.tile).map_err(GpuRasterError::from)?,
             };
             let step = samples.depth.bytes();
-            let prepared = pending.prepared_pixels.is_some();
+            let prepared = prepared_pixels.is_some();
             let channels = if prepared { 4 } else { samples.channels.count() };
             if decoded.len() != (PAGE_SIZE * PAGE_SIZE) as usize * channels * step {
                 return Err(GpuRasterError::Color("Prepared source samples have the wrong size".into()));
@@ -502,7 +532,7 @@ impl DecodedTiles {
             let Pixels::Image(source, coordinate) = &pending.pixels else {
                 unreachable!()
             };
-            match &pending.prepared_pixels {
+            match &prepared_pixels {
                 Some(PreparedSourcePixels::PremultipliedWorkingPixels(bytes)) => {
                     if bytes.len() as u64 != FLOAT_TILE_BYTES { return Err(GpuRasterError::InvalidExtent); }
                     uploads.write_texture(encoder, &pending.texture, PAGE_SIZE * 16, |mapped| mapped.copy_from_slice(bytes))?;
@@ -702,9 +732,18 @@ fn rgb_settings(
 pub(crate) struct Pipelines {
     layout: wgpu::BindGroupLayout,
     pub pipeline: Deferred<wgpu::RenderPipeline>,
+    scalar_layout:wgpu::BindGroupLayout,
+    scalar:Deferred<wgpu::RenderPipeline>,
 }
 impl Pipelines {
+    pub fn required(&self)->[&Deferred<wgpu::RenderPipeline>;2] {[&self.pipeline,&self.scalar]}
     pub fn new(device: &PipelineDevice, uniforms: &wgpu::BindGroupLayout) -> Self {
+        let scalar_layout=crate::bindings::layout(device,"restored scalar source",&[crate::bindings::texture(0,wgpu::ShaderStages::FRAGMENT,false)]);
+        let scalar_pipeline_layout=device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {label:Some("restored scalar"),bind_group_layouts:&[Some(&scalar_layout)],immediate_size:0});
+        let scalar={let device=device.clone();Deferred::pipeline(move|mode| {
+            let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("restored scalar"),source:wgpu::ShaderSource::Wgsl(include_str!("scalar_restore.wgsl").into())});
+            fullscreen_pipeline_recipe(mode,&device,&scalar_pipeline_layout,&shader,"fragment_main",None,device.scalar_format(),"restored scalar")
+        })};
         let layout = crate::bindings::layout(device, "integer source samples", &[
             crate::bindings::texture_of(
                 0,
@@ -742,7 +781,13 @@ impl Pipelines {
                 "decode source tile",
             )
         });
-        Self { layout, pipeline }
+        Self { layout, pipeline,scalar_layout,scalar }
+    }
+    pub fn copy_scalar(&self,device:&PipelineDevice,encoder:&mut crate::submission::CommandEncoder,source:&wgpu::TextureView,target:&wgpu::Texture) {
+        let binding=crate::bindings::group(device,"restored scalar source",&self.scalar_layout,[wgpu::BindingResource::TextureView(source)]);
+        let view=target.create_view(&Default::default());
+        let mut pass=encoder.color_pass("restored scalar",&view,wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT));
+        pass.set_pipeline(&self.scalar);pass.set_bind_group(0,&binding,&[]);pass.draw(0..3,0..1);
     }
 }
 

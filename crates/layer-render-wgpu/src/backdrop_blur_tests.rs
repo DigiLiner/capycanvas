@@ -337,8 +337,8 @@ fn measure(r: &WgpuRasterizer, iterations: u32, mut encode: impl FnMut(&mut wgpu
     r.device().poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
     let period = r.queue().get_timestamp_period() as f64;
     let data = readback.slice(..).get_mapped_range().unwrap();
-    let stamps: Vec<u64> = data.chunks_exact(8).map(|c| u64::from_ne_bytes(c.try_into().unwrap())).collect();
-    let mut ms: Vec<f64> = stamps.chunks_exact(2).skip((iterations as usize / 10).min(10)).map(|p| (p[1] - p[0]) as f64 * period / 1e6).collect();
+    let stamps: Vec<u64> = data.as_chunks::<8>().0.iter().map(|c| u64::from_ne_bytes(*c)).collect();
+    let mut ms: Vec<f64> = stamps.as_chunks::<2>().0.iter().skip((iterations as usize / 10).min(10)).map(|p| (p[1] - p[0]) as f64 * period / 1e6).collect();
     ms.sort_by(f64::total_cmp);
     ms
 }

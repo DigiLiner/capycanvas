@@ -147,6 +147,57 @@ pub(crate) fn complete(r: &WgpuRasterizer) {
         .unwrap();
 }
 
+pub(crate) fn submit_settled(r: &mut WgpuRasterizer, frame: FramePacket<'_>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let idle = FramePacket { dabs: &[], dab_batches: &[], restore_rasters: &[],
+        reset_layers: false, composite_all: false, ..frame };
+    let mut first = true;
+    loop {
+        r.poll_pending(frame.view).unwrap();
+        let next = if first { frame } else { idle };
+        if r.can_submit() && r.raster_dependencies_ready(next, None) {
+            r.submit(next).unwrap();
+            first = false;
+        }
+        r.wait_idle().unwrap();
+        if !first && !r.has_pending_work() && r.raster_ready() && !r.has_pending_submission() { return; }
+        assert!(std::time::Instant::now() < deadline, "renderer work must settle");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+pub(crate) fn query_ready<T>(r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
+    mut query: impl FnMut(&mut WgpuRasterizer, &mut crate::submission::CommandEncoder) -> Result<T, GpuRasterError>) -> T {
+    let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
+    loop {
+        r.drain_image_decodes(encoder).unwrap();
+        match query(r, encoder) {
+            Ok(value) => return value,
+            Err(GpuRasterError::DeferredObjectWork) => {},
+            Err(error) => panic!("{error}"),
+        }
+        scene::Scene::submit_chunk(r, encoder, "test query preparation").unwrap();
+        assert!(std::time::Instant::now() < deadline, "query preparation must complete");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+pub(crate) fn thumbnail(r: &mut WgpuRasterizer, id: u64, target: layer_render::ThumbnailTarget) -> Vec<u8> {
+    let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
+    while !r.prepare_thumbnail_batch(target).unwrap() {
+        complete(r);
+        assert!(std::time::Instant::now() < deadline, "thumbnail preparation must complete");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    r.request_thumbnail(id, target).unwrap();
+    loop {
+        complete(r);
+        if let Some(image) = r.take_thumbnail() { return image.unwrap().bytes; }
+        assert!(std::time::Instant::now() < deadline, "thumbnail readback must complete");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 pub(crate) fn document_texture(r: &WgpuRasterizer) -> &wgpu::Texture {
     let cache = r.scale_display.as_ref().unwrap();
     assert_eq!(cache.plan.level, 0);
@@ -248,7 +299,7 @@ pub(crate) fn depth_source(extent: [u32; 2], depth: layer_core::color::SampleDep
 
 pub(crate) fn floats(bytes: &[u8]) -> Vec<[f32; 4]> {
     bytes
-        .chunks_exact(16)
+        .as_chunks::<16>().0.iter()
         .map(|p| std::array::from_fn(|i| f32::from_le_bytes(p[i * 4..i * 4 + 4].try_into().unwrap())))
         .collect()
 }
@@ -266,8 +317,8 @@ pub(crate) fn max_error(a: &[[f32; 4]], b: &[[f32; 4]]) -> f32 {
 }
 
 pub(crate) fn max_error_bytes(a: &[u8], b: &[u8]) -> f32 {
-    a.chunks_exact(4).zip(b.chunks_exact(4))
-        .map(|(a, b)| (f32::from_le_bytes(a.try_into().unwrap()) - f32::from_le_bytes(b.try_into().unwrap())).abs())
+    a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0.iter())
+        .map(|(a, b)| (f32::from_le_bytes(*a) - f32::from_le_bytes(*b)).abs())
         .fold(0., f32::max)
 }
 

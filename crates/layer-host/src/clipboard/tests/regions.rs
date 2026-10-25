@@ -30,7 +30,8 @@ fn frames_until(owner: &mut NativeHost, ready: impl Fn(&layer_core::Document) ->
     loop {
         let now = started.elapsed().as_nanos() as u64;
         owner.prepare_canvas_frame(now, now, true).unwrap();
-        if owner.startup.canvas_ready && ready(owner.session.engine().document()) { break; }
+        if owner.startup.canvas_ready && owner.session.can_park_document() && !owner.session.engine().raster_backing_pending()
+            && ready(owner.session.engine().document()) { break; }
         assert!(started.elapsed() < std::time::Duration::from_secs(30), "canvas startup timed out");
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
@@ -38,7 +39,7 @@ fn frames_until(owner: &mut NativeHost, ready: impl Fn(&layer_core::Document) ->
 
 fn raw(owner: &mut NativeHost, target: SourceTarget) -> Arc<SourceImage> {
     frames_until(owner, |_| true);
-    let gpu = crate::tasks::gpu(&mut owner.session).unwrap().snapshot_gpu();
+    let gpu = crate::tasks::gpu(&owner.session).unwrap().snapshot_gpu();
     let scene = owner.session.engine().scene_snapshot();
     let extent = scene.view().composition().size;
     let mut renderer = gpu.capture_scene(scene, SceneScope::Raw(target), Default::default()).unwrap();

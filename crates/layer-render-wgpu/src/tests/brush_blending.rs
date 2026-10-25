@@ -100,7 +100,7 @@ impl Canvas {
 
     fn pixels(&self) -> Vec<[f64;4]> {
         crate::layer_tests::page_bytes(&self.r, crate::test_support::document_texture(&self.r))
-            .chunks_exact(16)
+            .as_chunks::<16>().0.iter()
             .map(|p| std::array::from_fn(|c| f64::from(f32::from_le_bytes(p[c * 4..][..4].try_into().unwrap()))))
             .collect()
     }
@@ -223,7 +223,7 @@ fn dry_flow_batch_dose_matches_ordered_contacts_and_closed_form() {
                     base.copy_to(&output, &mut encoder);
                     { let mut pass = encoder.begin_compute_pass(&Default::default());
                         let pipeline = r.pipelines.dry_material.selected_kernel(&batch.style, MaterialOperation::Deposit, false, if enabled && !reference {8192} else {0});
-                        pass.set_pipeline(&pipeline);
+                        pass.set_pipeline(pipeline);
                         pass.set_bind_group(0, &binding, &[0]);
                         pass.set_bind_group(1, r.paint_target_binding(&batch.style), &[0]);
                         pass.set_bind_group(2, &sources, &[0]);
@@ -615,12 +615,12 @@ fn independent_full_page_dispatch_preserves_contact_hull_pixels() {
             base.copy_to(&output,&mut encoder);
             {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("full independent page"),timestamp_writes:None});
                 let pipeline = kernels.selected_kernel(&style,MaterialOperation::Deposit,false,if aggregate {8192}else{0}|if fine{16384}else{0});
-                pass.set_pipeline(&pipeline);
+                pass.set_pipeline(pipeline);
                 pass.set_bind_group(0,&binding,&[0]);pass.set_bind_group(1,r.paint_target_binding(&style),&[0]);pass.set_bind_group(2,&sources,&[0]);
                 pass.set_bind_group(3,&r.texture_sets.iter().find(|s|s.key==key).unwrap().bind_group,&[]);pass.dispatch_workgroups(8,128,1);}
             encoder.submit(&r.queue);let reference=crate::test_support::float_pixels(r,&output.texture);
             painted+=reference.iter().filter(|p|p[3]>0.).count();
-            for (pixel,(a,b)) in actual[i].chunks_exact(16).zip(reference).enumerate() {let a:[f32;4]=std::array::from_fn(|c|f32::from_le_bytes(a[c*4..c*4+4].try_into().unwrap()));
+            for (pixel,(a,b)) in actual[i].as_chunks::<16>().0.iter().zip(reference).enumerate() {let a:[f32;4]=std::array::from_fn(|c|f32::from_le_bytes(a[c*4..c*4+4].try_into().unwrap()));
                 assert_eq!(a[3]==0.,b[3]==0.,"{name} tile{coord:?} pixel{pixel}: strict zero support");
                 for c in 0..4 {maximum=maximum.max((a[c]-b[c]).abs());assert!((a[c]-b[c]).abs()<=1e-6,"{name} tile{coord:?} pixel{pixel} channel{c}: clipped{a:?} != uncropped{b:?}");}}
         }

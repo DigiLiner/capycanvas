@@ -528,7 +528,7 @@ fn writeback_corpus(in_place: bool) {
                         },
                     );
                     if !in_place { assert!(page_bytes(&r, &working) == bytes, "writeback modified working source"); }
-                    for (i, encoded) in canonical_bytes.chunks_exact(16).enumerate() {
+                    for (i, encoded) in canonical_bytes.as_chunks::<16>().0.iter().enumerate() {
                         let x = i as u32 % 256;
                         let y = i as u32 / 256;
                         if x < region[0]
@@ -666,11 +666,11 @@ fn native_restore_writeback_capture_round_trip_preserves_committed_codes() {
                     let canonical_bytes = page_bytes(&r, &canonical);
                     let mut max_error = 0f32;
                     for (a, b) in restored
-                        .chunks_exact(4)
-                        .zip(canonical_bytes.chunks_exact(4))
+                        .as_chunks::<4>().0.iter()
+                        .zip(canonical_bytes.as_chunks::<4>().0.iter())
                     {
-                        let a = f32::from_le_bytes(a.try_into().unwrap());
-                        let b = f32::from_le_bytes(b.try_into().unwrap());
+                        let a = f32::from_le_bytes(*a);
+                        let b = f32::from_le_bytes(*b);
                         max_error = max_error.max((a - b).abs());
                     }
                     assert!(max_error <= 0.00000024, "canonical mismatch: {max_error}");
@@ -708,7 +708,7 @@ fn half_gray_alpha_publication_saturates_and_matches_canonical_pixels() {
         r.capture_tiles(&[TileCapture {source:CaptureSource::Packed(&output),tile:tile.clone()}],Some(&status)).unwrap().finish().unwrap();
         let bytes=tile.wait_backing().unwrap().decode().unwrap();
         let cache=page_bytes(&r,canonical);
-        for (i,((encoded,linear),pixel)) in bytes.chunks_exact(4).zip(cache.chunks_exact(16)).zip(&pixels).enumerate() {
+        for (i,((encoded,linear),pixel)) in bytes.as_chunks::<4>().0.iter().zip(cache.as_chunks::<16>().0.iter()).zip(&pixels).enumerate() {
             let alpha=f16::from_f32(pixel[3]);
             let expected=if alpha.to_bits()&32767==0 {[0u16;2]} else {[f16::from_f32(if pixel[0]>0. {65504.} else {-65504.}).to_bits(),alpha.to_bits()]};
             let actual:[u16;2]=std::array::from_fn(|c|u16::from_le_bytes(encoded[c*2..c*2+2].try_into().unwrap()));
@@ -746,7 +746,7 @@ fn hdr_half_publication_preserves_finite_codes_subnormals_and_canonical_cache() 
         read_status(&r,&status).unwrap();
         let actual=page_bytes(&r,&output);
         let cache=page_bytes(&r,&canonical);
-        for (i, ((bytes,linear),pixel)) in actual.chunks_exact(8).zip(cache.chunks_exact(16)).zip(&pixels).enumerate() {
+        for (i, ((bytes,linear),pixel)) in actual.as_chunks::<8>().0.iter().zip(cache.as_chunks::<16>().0.iter()).zip(&pixels).enumerate() {
             let straight=if alpha>0. { [pixel[0]/alpha,pixel[1]/alpha,pixel[2]/alpha,alpha] } else { [0.;4] };
             let expected=layer_core::color::hdr::encode_pixel(straight).unwrap();
             for c in 0..4 {
@@ -792,7 +792,7 @@ fn half_publication_saturates_finite_rgb_and_reconstructs_quantized_alpha() {
         submit(&r,&encoder,&status,&[batch],true);
         read_status(&r,&status).unwrap();
         let bytes=page_bytes(&r,&output);let cache=page_bytes(&r,&canonical);
-        for (i,((encoded,linear),pixel)) in bytes.chunks_exact(8).zip(cache.chunks_exact(16)).zip(&pixels).enumerate() {
+        for (i,((encoded,linear),pixel)) in bytes.as_chunks::<8>().0.iter().zip(cache.as_chunks::<16>().0.iter()).zip(&pixels).enumerate() {
             let alpha=f16::from_f32(pixel[3]);
             let expected=if alpha.to_bits()&32767==0 {[0u16;4]} else {
                 let rgb=[0,1,2].map(|c|f16::from_f32((f64::from(pixel[c])/f64::from(pixel[3])).clamp(-65504.,65504.) as f32).to_bits());

@@ -86,6 +86,7 @@ impl crate::WgpuRasterizer {
         if requests.is_empty() {
             return Ok(());
         }
+        self.prepare_raster_uploads(&requests.iter().map(|request|(request.blob.clone(),request.space,request.destination)).collect::<Vec<_>>())?;
         self.submit_restore(|r, scene, encoder| scene.restore_native_tiles(r, requests, encoder))
     }
     /// Restorations submit their own commands, possibly while a frame is still

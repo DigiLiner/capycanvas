@@ -657,7 +657,7 @@ fn document_edits_keep_filter_previews_and_their_retry_completes() {
         app.draw_frame();
         assert_ne!(app.pixels(), pixels, "Drawing must still publish new ink");
         app.invoke("undo");
-        app.draw_frame();
+        app.draw_until_idle();
         assert_eq!(app.pixels(), pixels, "Drawing and Undo still work after cancellation");
     }
 }
@@ -1912,7 +1912,7 @@ fn apple_color_actions_change_real_paint_and_transparent_eraser_pixels() {
             "Transparent paint must erase with the current tip"
         );
         app.invoke("undo");
-        app.draw_frame();
+        app.draw_until_idle();
         assert!(app.pixels() == painted);
     }
 }

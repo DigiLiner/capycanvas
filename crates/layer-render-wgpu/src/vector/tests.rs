@@ -125,7 +125,8 @@ fn emulate(batch: &Batch, pool: &[u32]) -> Vec<[f64; 4]> {
     out
 }
 
-fn fine(item: &PathItem, level: u32) -> (Vec<Vec<[f64; 2]>>, Vec<(Vec<([f64; 2], [f64; 2])>, bool)>) {
+type FineGeometry = (Vec<Vec<[f64; 2]>>, Vec<(Vec<([f64; 2], [f64; 2])>, bool)>);
+fn fine(item: &PathItem, level: u32) -> FineGeometry {
     let scale = 1. / f64::from(1 << level);
     let map = |p: [f64; 2]| [p[0] * scale, p[1] * scale];
     let stroke = item.style.strokes().next();

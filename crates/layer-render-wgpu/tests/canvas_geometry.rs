@@ -706,7 +706,7 @@ impl Samples {
         let mut values = Vec::new();
         for y in 0..image.extent[1] {
             rows.read(y, &mut row).unwrap();
-            values.extend(row.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])));
+            values.extend(row.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes([b[0], b[1]])));
         }
         Self { width: image.extent[0] as usize, channels: image.interpretation.channels.count(), values }
     }
@@ -761,9 +761,9 @@ fn smooth_resizing_keeps_the_photo_interpretation_and_averages_in_linear_light()
     for y in 1..128 {
         for x in 1..191 {
             let actual = result.at([x, y]);
-            for c in 0..3 {
+            for (c,&component) in actual[..3].iter().enumerate() {
                 let linear = [[0, 0], [1, 0], [0, 1], [1, 1]].iter().map(|[dx, dy]| p3_linear(source.at([2 * x + dx, 2 * y + dy])[c])).sum::<f64>() / 4.;
-                worst = worst.max((f64::from(actual[c]) - p3_code(linear)).abs());
+                worst = worst.max((f64::from(component) - p3_code(linear)).abs());
             }
         }
     }

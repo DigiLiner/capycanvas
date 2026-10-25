@@ -231,12 +231,20 @@ fn native_pointwise_captures_reuse_source_bindings_across_strips() {
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     let mut frame = packet(doc.scene(), extent);
     frame.view.document_to_surface = [0.25, 0., 0., 0.25, 0., 0.];
+    crate::test_support::submit_settled(&mut r, frame);
+    r.scale_display.as_mut().unwrap().valid.clear();
+    assert!(r.can_submit());
+    assert!(r.raster_dependencies_ready(frame, None));
     r.submit(frame).unwrap();
+    #[expect(clippy::mutable_key_type,reason="Texture view keys use stable resource identities")]
     let bindings = r.scene.as_ref().unwrap().source_bindings.entries.clone();
     assert!(bindings.len() > 4);
     let expected = display_pixels(&r);
     r.scale_display.as_mut().unwrap().valid.clear();
+    assert!(r.can_submit());
+    assert!(r.raster_dependencies_ready(frame, None));
     r.submit(frame).unwrap();
+    #[expect(clippy::mutable_key_type,reason="Texture view keys use stable resource identities")]
     let current = &r.scene.as_ref().unwrap().source_bindings.entries;
     for (key, (_, binding)) in bindings {
         assert_eq!(&current[&key].1, &binding);
@@ -550,7 +558,7 @@ fn finite_radius_windows_match_full_chains_through_navigation_damage_and_support
             frame.view.height_px = 128;
             frame.view.document_to_surface = [scale, 0., 0., scale, -origin[0] * scale, -origin[1] * scale];
             let whole = FramePacket { view: layer_render::ViewState { width_px: extent[0], height_px: extent[1],
-                document_to_surface: [scale, 0., 0., scale, 0., 0.], ..frame.view }, ..frame };
+                document_to_surface: [scale, 0., 0., scale, 0., 0.] }, ..frame };
             window.submit(frame).unwrap();
             full.submit(whole).unwrap();
             let plan = window.scale_display.as_ref().unwrap().plan;
@@ -917,7 +925,7 @@ fn pointwise_curve_edits_reuse_sources_and_bound_window_passes_with_masked_coord
             let mut frame=packet(doc.scene(),extent);frame.blend_space=space;frame.composite_all=false;
             frame.view.width_px=640;frame.view.height_px=480;
             frame.view.document_to_surface=[0.5,0.,0.,0.5,-190.,-130.];
-            let whole=FramePacket{view:layer_render::ViewState{width_px:extent[0],height_px:extent[1],document_to_surface:[0.5,0.,0.,0.5,0.,0.],..frame.view},..frame};
+            let whole=FramePacket{view:layer_render::ViewState{width_px:extent[0],height_px:extent[1],document_to_surface:[0.5,0.,0.,0.5,0.,0.]},..frame};
             let updates=window.scene.as_ref().and_then(|scene|scene.scale_sources.entries.get(&paint)).map(|source|source.updates);
             window.submit(frame).unwrap();full.submit(whole).unwrap();
             assert_window_matches_full(&window,&full, (space, step, "curves"));
@@ -1255,7 +1263,7 @@ fn native_bilinear_sampling_is_convex_at_finite_rgb_extremes_on_both_axes() {
         let mut source=original(Field::Constant([limit,-limit,limit,1.]));
         Arc::make_mut(&mut source.program).wgsl=format!(
             "fn gaussian_original_field(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{{let sign=select(-1.,1.,(u32(floor(p.x))+u32(floor(p.y)))%2u==0u);return vec4<f32>(sign*{limit:?},-sign*{limit:?},sign*{limit:?},1.);}}").into();
-        for [dx,dy] in [[0.,0.],[-0.25,0.],[0.,-0.25],[-0.25,-0.25],[0.5,0.5]] {
+        for [dx,dy] in [[0f64,0.],[-0.25,0.],[0.,-0.25],[-0.25,-0.25],[0.5,0.5]] {
             let mut sampled=gaussian_fixture("gaussian_blur",0.,EffectResolution::Native);
             let program=Arc::make_mut(&mut sampled.program);
             program.entry="bilinear_probe".into();
@@ -1264,7 +1272,7 @@ fn native_bilinear_sampling_is_convex_at_finite_rgb_extremes_on_both_axes() {
             let doc=gaussian_document(extent,color,[sampled,source.clone()]);
             r.submit(packet(doc.scene(),extent)).unwrap();
             let actual=pixels(&r,crate::test_support::document_texture(&r))[3*8+3];
-            let x=3.+f64::from(dx);let y=3.+f64::from(dy);let fx=x-x.floor();let fy=y-y.floor();
+            let x=3.+dx;let y=3.+dy;let fx=x-x.floor();let fy=y-y.floor();
             let mut expected=0.;for j in 0..2 {for i in 0..2 {
                 let sign=if (x.floor() as i32+i+y.floor() as i32+j)%2==0 {1.}else{-1.};
                 expected+=sign*f64::from(limit)*if i==0 {1.-fx}else{fx}*if j==0 {1.-fy}else{fy};

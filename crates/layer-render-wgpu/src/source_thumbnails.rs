@@ -194,10 +194,8 @@ impl SourceThumbnails {
         // the canvas. Placement changes only the display pass.
         let extent = r.target_extent(layer);
         let overview = self.overview(r, &base, extent, encoder, &mut tile_limit)?;
-        let ready = overview.remaining.is_empty()
-            && self.prepare_paint(r, layer, &overview, encoder, tile_limit)?;
-        self.retain(overview);
-        Ok(ready)
+        let result=if overview.remaining.is_empty() {self.prepare_paint(r,layer,&overview,encoder,tile_limit)}else {Ok(false)};
+        self.retain(overview);result
     }
     fn retain(&mut self, overview: Overview) {
         self.cache.push_back(overview);
@@ -243,16 +241,17 @@ impl SourceThumbnails {
                 valid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             }
         };
+        let mut pending=None;
         if !overview.remaining.is_empty() {
             let write = crate::submission::CacheWrite::new();
             while *tile_limit > 0 {
-                let Some(coordinate) = overview.remaining.pop_front() else {
+                let Some(coordinate) = overview.remaining.front().copied() else {
                     break;
                 };
-                *tile_limit -= 1;
-                let tile = r
-                    .paint_base_tile(base, coordinate, encoder)?
-                    .unwrap();
+                let tile=match r.paint_base_tile(base,coordinate,encoder) {
+                    Ok(Some(tile))=>tile,Ok(None)=>return Err(GpuRasterError::InvalidExtent),
+                    Err(error) if error.is_preparation_pending()=>{pending=Some(error);break;},Err(error)=>return Err(error),
+                };
                 self.integrate(
                     r,
                     encoder,
@@ -264,10 +263,12 @@ impl SourceThumbnails {
                     &overview.contributions,
                     overview.tiles[&coordinate],
                 )?;
+                overview.remaining.pop_front();*tile_limit-=1;
             }
             write.track(encoder);
             overview.valid = write.validity();
         }
+        if let Some(error)=pending {self.retain(overview);return Err(error);}
         Ok(overview)
     }
     fn prepare_paint(
@@ -296,9 +297,13 @@ impl SourceThumbnails {
                     .intersect(PixelRect::full(overview.extent)).is_empty()).collect(), valid: write.validity() }
         };
         let changed = cached.is_none() || (!prepared.remaining.is_empty() && tile_limit > 0);
+        let mut pending=None;
         for _ in 0..tile_limit {
-            let Some(coordinate) = prepared.remaining.pop_front() else { break };
-            let tile = r.raw_layer_tile(layer, coordinate, encoder)?.unwrap();
+            let Some(coordinate)=prepared.remaining.front().copied() else {break;};
+            let tile=match r.raw_layer_tile(layer,coordinate,encoder) {
+                Ok(Some(tile))=>tile,Ok(None)=>return Err(GpuRasterError::InvalidExtent),
+                Err(error) if error.is_preparation_pending()=>{pending=Some(error);break;},Err(error)=>return Err(error),
+            };
             self.integrate(
                 r,
                 encoder,
@@ -310,12 +315,13 @@ impl SourceThumbnails {
                 &overview.contributions,
                 overview.tiles.get(&coordinate).copied().unwrap_or_default(),
             )?;
+            prepared.remaining.pop_front();
         }
         if changed { write.track(encoder); prepared.valid = write.validity(); }
         let ready = prepared.remaining.is_empty();
         self.prepared.push_back(prepared);
         while self.prepared.len() > OVERVIEWS { self.prepared.pop_front(); }
-        Ok(ready)
+        if let Some(error)=pending {return Err(error);}Ok(ready)
     }
     pub fn render(
         &mut self,
@@ -323,7 +329,9 @@ impl SourceThumbnails {
         layer: SourceTarget,
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<PageSurface, GpuRasterError> {
-        self.prepare(r, layer, encoder, usize::MAX)?;
+        if !self.prepare(r,layer,encoder,usize::MAX)? {
+            return Err(r.decode_pressure.error(layer_core::memory::generation(),r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())).unwrap_or(GpuRasterError::DeferredObjectWork));
+        }
         let pixels = self.prepared.back().unwrap().pixels.clone();
         self.display(r, &pixels, encoder)
     }

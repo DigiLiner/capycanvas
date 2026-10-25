@@ -540,6 +540,13 @@ pub(super) async fn prepare_session(
         localization,
     )
     .map_err(js)?;
-    candidate.frame(0, 0).map_err(js)?;
+    loop {
+        if let Some(check)=cancelled && check.call0(&JsValue::NULL)?.as_bool()==Some(true){return Err(js("Opening cancelled"));}
+        candidate.frame(0, 0).map_err(js)?;
+        if candidate.can_park_document() {break;}
+        if js_sys::Date::now()-start>60_000. {return Err(js("Project canvas preparation timed out"));}
+        candidate.renderer_mut().0.as_mut().ok_or_else(||js("Canvas unavailable"))?.compile_startup_step(false).await.map_err(js)?;
+        yield_browser().await?;
+    }
     Ok(candidate)
 }

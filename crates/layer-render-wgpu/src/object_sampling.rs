@@ -561,7 +561,7 @@ mod tests {
         uploads.finish(&encoder);
                 encoder.submit(&r.queue);
         let actual=crate::layer_tests::page_bytes(&r,&output);
-        for (actual,expected) in actual.chunks_exact(4).zip(bytes.chunks_exact(4)) {assert_eq!(f32::from_le_bytes(actual.try_into().unwrap()),f32::from_le_bytes(expected.try_into().unwrap()));}
+        for (actual,expected) in actual.as_chunks::<4>().0.iter().zip(bytes.as_chunks::<4>().0.iter()) {assert_eq!(f32::from_le_bytes(*actual),f32::from_le_bytes(*expected));}
     }
     #[test]
     fn gpu_tent_accumulates_partial_source_tiles_against_uncapped_reference() {
@@ -695,7 +695,7 @@ mod tests {
             let count=(length-first).min(65536);
             let bytes=prepare_nearest_coordinates(inverse,size,first,count).unwrap();
             assert_eq!(bytes.len(),count as usize*8);
-            for (offset,pair) in bytes.chunks_exact(8).enumerate() {
+            for (offset,pair) in bytes.as_chunks::<8>().0.iter().enumerate() {
                 let index=first+offset as u32;
                 let x=f64::from(index%size[0])+0.5;let y=f64::from(index/size[0])+0.5;
                 let expected=reference::sample([inverse[0]*x+inverse[4],y+inverse[5]],[inverse[0],0.,0.,1.],true,|x,y|[x as f64,y as f64,0.,1.]);

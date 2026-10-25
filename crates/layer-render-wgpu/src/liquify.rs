@@ -30,10 +30,19 @@ impl Tile {
     }
 
     fn source_bounds(&self, extent: [u32; 2], preview: bool) -> PixelRect {
-        let diameter = (self.bounds.max.x - self.bounds.min.x).hypot(self.bounds.max.y - self.bounds.min.y);
-        let level = (diameter / if preview { 2. } else { 4. }).max(1.).log2().ceil().clamp(0., 8.) as u32;
-        pixel_rect(material_sources::expand(self.bounds, (1u32 << level) as f32), extent)
+        field_source_bounds(self.bounds,extent,preview)
     }
+}
+
+fn field_source_bounds(bounds:Rect,extent:[u32;2],preview:bool)->PixelRect {
+    let diameter=(bounds.max.x-bounds.min.x).hypot(bounds.max.y-bounds.min.y);
+    let level=(diameter/if preview {2.}else {4.}).max(1.).log2().ceil().clamp(0.,8.) as u32;
+    pixel_rect(material_sources::expand(bounds,(1u32<<level) as f32),extent)
+}
+fn field_input_bounds(batch:&DabBatch,dabs:&[Dab],coordinate:[u32;2],extent:[u32;2],fields:impl Iterator<Item=([u32;2],Rect)>)->(PixelRect,Rect) {
+    let trace=if batch.style.liquify.as_ref().is_some_and(|c|c.amount.is_some()) {page_rect(coordinate).to_rect()}else {material_sources::sample_rect(batch,dabs,coordinate)};
+    let input=pixel_rect(trace,extent).expand(1,extent);
+    (input,fields.filter(|(at,_)|!page_rect(*at).intersect(input).is_empty()).fold(trace,|bounds,(_,field)|bounds.union(field)))
 }
 
 #[derive(Debug)]
@@ -212,6 +221,9 @@ impl Liquify {
                     && batch.target == *target && batch.stroke_id == stroke.id) { stroke.preview_tiles.clear(); }
             }
         }
+        Self::extend_required_plans(r,packet,plans);
+    }
+    pub fn extend_required_plans(r:&WgpuRasterizer,packet:FramePacket<'_>,plans:&mut [Vec<BrushTile>]) {
         let previews: Vec<_> = packet.dab_batches.iter().enumerate()
             .filter(|(_, batch)| batch.kind == DabBatchKind::Preview && has_brush_work(batch)).collect();
         let reduced = previews.first().filter(|(_, batch)| previews.len() == 1
@@ -246,6 +258,30 @@ impl Liquify {
                     plans[index].push(BrushTile { coordinate, local, dabs: 0..0, indices: Vec::new() });
                 }
             }
+        }
+    }
+
+    pub fn required_sources(r:&WgpuRasterizer,packet:FramePacket<'_>,plans:&[Vec<BrushTile>],required:&mut BTreeMap<SourceTarget,std::collections::BTreeSet<[u32;2]>>) {
+        let mut fields:BTreeMap<SourceTarget,(StrokeId,BTreeMap<[u32;2],Rect>)>=BTreeMap::new();
+        for (batch,tiles) in packet.dab_batches.iter().zip(plans).filter(|(batch,_)|batch.style.execution==BrushExecution::Liquify) {
+            let preview=batch.kind==DabBatchKind::Preview;
+            if fields.get(&batch.target).is_some_and(|(id,_)|*id!=batch.stroke_id || batch.stroke_start && !preview) {fields.remove(&batch.target);}
+            let fields=fields.entry(batch.target).or_insert_with(|| {
+                let live=r.liquify.as_ref().and_then(|liquify|liquify.strokes.get(&batch.target)).filter(|stroke|stroke.id==batch.stroke_id && !(batch.stroke_start && !preview));
+                let previous=batch.style.liquify.as_ref().and_then(|c|c.field.as_ref()).and_then(|field|field.as_any().downcast_ref::<Field>()).filter(|field|field.device==*r.device);
+                (batch.stroke_id,live.map(|stroke|&stroke.field).or(previous).map_or_default(|field|field.tiles.iter().map(|(at,tile)|(*at,tile.bounds)).collect()))
+            });
+            let extent=packet.scene.target_extent(batch.target);
+            let dabs=&packet.dabs[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize];
+            let mut outputs=Vec::new();
+            for tile in tiles {
+                if !preview && tile.dabs.is_empty() && batch.style.liquify.as_ref().is_none_or(|c|c.amount.is_none()) {continue;}
+                let (_,bounds)=field_input_bounds(batch,dabs,tile.coordinate,extent,fields.1.iter().map(|(at,bounds)|(*at,*bounds)));
+                let coordinates=required.entry(batch.target).or_default();coordinates.insert(tile.coordinate);
+                coordinates.extend(page_coordinates(field_source_bounds(bounds,extent,preview)));
+                outputs.push((tile.coordinate,bounds));
+            }
+            if !preview {fields.1.extend(outputs);}
         }
     }
 
@@ -408,11 +444,9 @@ impl Liquify {
             }
             if preview { self.unchanged_previews.remove(&(batch.target, tile.coordinate)); }
             Self::original(r, stroke, batch.target, tile.coordinate, encoder, &mut reductions)?;
-            let trace_bounds = if batch.style.liquify.as_ref().is_some_and(|c| c.amount.is_some()) { page_rect(tile.coordinate).to_rect() } else { material_sources::sample_rect(batch, dabs, tile.coordinate) };
-            let input_bounds = pixel_rect(trace_bounds, extent).expand(1, extent);
-            let input_tiles: Vec<_> = stroke.field.tiles.iter().filter(|(at, _)| !page_rect(**at).intersect(input_bounds).is_empty())
-                .map(|(at, tile)| (*at, tile.clone())).collect();
-            let bounds = input_tiles.iter().fold(trace_bounds, |bounds, (_, tile)| bounds.union(tile.bounds));
+            let (input_bounds,bounds)=field_input_bounds(batch,dabs,tile.coordinate,extent,stroke.field.tiles.iter().map(|(at,tile)|(*at,tile.bounds)));
+            let input_tiles:Vec<_>=stroke.field.tiles.iter().filter(|(at,_)|!page_rect(**at).intersect(input_bounds).is_empty())
+                .map(|(at,tile)|(*at,tile.clone())).collect();
             let output = Arc::new(Tile::at_block(r, bounds, block));
             let chunks = input_tiles.len().div_ceil(count).max(1);
             let first_record = r.prepare_records((0..chunks).map(|chunk| {

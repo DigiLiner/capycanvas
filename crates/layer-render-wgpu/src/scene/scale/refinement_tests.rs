@@ -271,7 +271,7 @@ fn idle_refinement_batches_pages_and_yields_to_new_artwork() {
             r.background_ready.store(true, std::sync::atomic::Ordering::Release);
             assert_settled(&mut r, frame, &pixels(&exact, crate::test_support::document_texture(&exact)));
             let mut changed=doc.clone();
-            changed.artwork.occurrences.get_mut(fill_id).unwrap().visible=!visible;
+            changed.artwork.occurrences.get_mut(fill_id).unwrap().visible= !visible;
             r.background_ready=Arc::new(std::sync::atomic::AtomicBool::new(false));
             r.background_refinement=true;
             let submissions=r.metrics.submissions;

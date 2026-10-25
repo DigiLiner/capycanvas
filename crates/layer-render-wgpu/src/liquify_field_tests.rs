@@ -1382,3 +1382,20 @@ fn sustained_pinch_preview_keeps_opaque_center_at_finite_footprint() {
             "finite Pinch preview must preserve source component {component}: {center:?} vs {original:?}, native J={center_j}");
     }
 }
+
+#[test]
+fn a_new_stroke_prepares_the_displaced_footprint_of_its_saved_field() {
+    let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let extent=[2048;2];let document=placement::paint_document(extent,"saved field bounds");
+    let source=Arc::new(placement::paint(&document).clone());
+    let field=Field {device:(*r.device).clone(),tiles:[([0;2],Arc::new(Tile::new(&r,PixelRect::new(0,0,1536,1536))))].into(),originals:Default::default()};
+    let mut style=preset_style(DefaultBrushPreset::LiquifyPush);
+    style.liquify=Some(Arc::new(layer_core::liquify::Context {current:source.clone(),original:source,amount:Some(0.5),field:Some(Arc::new(field))}));
+    let mut batch=crate::test_support::dab_batch(placement::target(&document),style,layer_core::Rect::from_extent([256;2]));
+    batch.stroke_start=true;batch.dab_count=0;
+    let packet=FramePacket {dab_batches:std::slice::from_ref(&batch),..crate::test_support::packet(document.scene(),extent)};
+    let tiles=vec![vec![BrushTile {coordinate:[0;2],local:PixelRect::full([PAGE_SIZE;2]),dabs:0..0,indices:Vec::new()}]];
+    let mut required=Default::default();Liquify::required_sources(&r,packet,&tiles,&mut required);
+    assert!(required[&batch.target].contains(&[5,5]));
+    assert!(required[&batch.target].contains(&[0,0]));
+}

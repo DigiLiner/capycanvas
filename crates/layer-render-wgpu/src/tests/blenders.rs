@@ -704,7 +704,7 @@ fn painterly_blends_high_contrast_hdr_without_a_variance_ceiling() {
         let mut canvas = canvas();
         canvas.fill(canvas.base, [0., 0., 0., 1.]);
         let bytes: Vec<_> = (0..PAGE_SIZE * PAGE_SIZE).flat_map(|i| {
-            let mut hash = (i as u32).wrapping_mul(747796405).wrapping_add(2891336453);
+            let mut hash = i.wrapping_mul(747796405).wrapping_add(2891336453);
             hash = ((hash >> ((hash >> 28) + 4)) ^ hash).wrapping_mul(277803737);
             hash = (hash >> 22) ^ hash;
             let value = if hash & 1 == 0 { 0. } else { scale };

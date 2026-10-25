@@ -244,6 +244,10 @@ impl NativeHost {
     pub fn take_service_changes(&mut self) -> u32 {
         std::mem::take(&mut self.service_changes)
     }
+    pub fn poll_memory_retry(&mut self)->bool {
+        let retry=self.session.renderer_mut().0.as_mut().is_some_and(|gpu|gpu.poll_memory_retry());
+        self.dirty|=retry;retry
+    }
     pub fn renderer_options(&self) -> RendererOptions {
         RendererOptions {
             ui_color: self.ui_color,
@@ -1334,12 +1338,32 @@ mod tests {
         }
     }
 
-    fn gpu_host(platform: layer_ui::Platform, size: [u32; 2]) -> (layer_render_wgpu::WgpuRasterizer, NativeHost) {
+    #[repr(transparent)]
+    struct GpuReference(Option<layer_render_wgpu::WgpuRasterizer>);
+    impl GpuReference {
+        fn new() -> Self {
+            let mut reference = Self(None);
+            reference.0 = Some(layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap());
+            reference
+        }
+    }
+    impl std::ops::Deref for GpuReference {
+        type Target = layer_render_wgpu::WgpuRasterizer;
+        fn deref(&self) -> &Self::Target { self.0.as_ref().unwrap() }
+    }
+    impl Drop for GpuReference {
+        fn drop(&mut self) {
+            drop(self.0.take());
+            layer_render_wgpu::finish_shader_compiler_shutdown();
+        }
+    }
+
+    fn gpu_host(platform: layer_ui::Platform, size: [u32; 2]) -> (GpuReference, NativeHost) {
         gpu_document_host(platform, layer_ui::new_drawing(size[0], size[1], &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap())
     }
 
-    fn gpu_document_host(platform: layer_ui::Platform, document: layer_core::Document) -> (layer_render_wgpu::WgpuRasterizer, NativeHost) {
-        let reference = layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    fn gpu_document_host(platform: layer_ui::Platform, document: layer_core::Document) -> (GpuReference, NativeHost) {
+        let reference = GpuReference::new();
         let gpu = GpuContext::of(&reference).rasterizer(Default::default(), &RendererOptions::default(), true).unwrap();
         let mut host = NativeHost::new(platform).unwrap();
         *host.session = UiSession::from_project(Renderer(Some(gpu)), document, None, [640, 480], platform).unwrap();
@@ -1804,6 +1828,7 @@ mod tests {
 
     #[test]
     fn command_reason_queries_current_input_while_published_commands_stay_stable() {
+        let _shutdown = GpuReference(None);
         let mut host = NativeHost::new(layer_ui::Platform::Android).unwrap();
         host.session.renderer_mut().0 = Some(layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap().into());
         let query = json!({"type": "command_reason", "command": "add_layer"});
@@ -1867,7 +1892,7 @@ mod tests {
         let image=layer_core::authored::Image::new(std::sync::Arc::new(builder.finish().unwrap()));
         let (layer,edit)=document.create_object_layer_edit("Photo",layer_core::ImageObject::new(image),None,0).unwrap();document.apply(edit).unwrap();
         let object=document.scene().object_handle(layer).unwrap();
-        let reference=layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let reference=GpuReference::new();
         let gpu=GpuContext::of(&reference).rasterizer(Default::default(),&RendererOptions::default(),true).unwrap();
         let mut host=NativeHost::new(layer_ui::Platform::Android).unwrap();
         *host.session=UiSession::from_project(Renderer(Some(gpu)),document,None,[640,480],layer_ui::Platform::Android).unwrap();
@@ -2805,6 +2830,7 @@ mod tests {
     #[test]
     #[ignore = "Requires an explicitly selected hardware GPU"]
     fn estimated_input_tokens_reach_committed_stroke_corrections() {
+        let _shutdown = GpuReference(None);
         let gpu = layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         assert_ne!(gpu.adapter().get_info().device_type, wgpu::DeviceType::Cpu);
         let mut host = NativeHost::new(layer_ui::Platform::Mac).unwrap();

@@ -256,7 +256,7 @@ fn tonal_61mp_performance() {
     .unwrap();
     let mut row = vec![0u8; extent[0] as usize * 3];
     for y in 0..extent[1] {
-        for (x, p) in row.chunks_exact_mut(3).enumerate() {
+        for (x, p) in row.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             let v = ((x as u32 * 13 + y * 7 + ((x as u32 ^ y) & 31)) % 256) as u8;
             p.copy_from_slice(&[v, v, v]);
         }

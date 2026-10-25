@@ -115,6 +115,10 @@ impl Drop for Frame {
     }
 }
 impl Frame {
+    fn backdrop_packet<'a>(&'a self,scope:&'a SceneScope)->FramePacket<'a> {
+        FramePacket {scene:self.scene.view().with_scope(scope),inspect_mask:None,selection_overlays:None,dabs:&[],dab_batches:&[],restore_rasters:&[],
+            reset_layers:true,composite_all:true,..self.packet()}
+    }
     fn packet(&self) -> FramePacket<'_> {
         FramePacket {
             commit_rasters: self.commit_rasters,
@@ -196,6 +200,7 @@ enum Command {
 struct FrameReport {
     context: std::sync::RwLock<EvaluationContext>,
     pending_work: AtomicBool,
+    preparation_paused: AtomicBool,
     retouch_miss: std::sync::atomic::AtomicU64,
     retouch_waiting: std::sync::atomic::AtomicU64,
     paper_drawn: std::sync::atomic::AtomicU64,
@@ -789,6 +794,7 @@ impl CanvasRenderer for RenderWorker {
     fn has_pending_work(&self) -> bool {
         self.report.pending_work.load(Ordering::Acquire)
     }
+    fn preparation_paused(&self)->bool {self.report.preparation_paused.load(Ordering::Acquire)}
     fn set_transform_preview(
         &mut self,
         preview: Option<&layer_render::TransformPreview>,
@@ -1252,6 +1258,7 @@ impl Worker {
                 .poll(wgpu::PollType::Poll)
                 .map_err(error)?;
             self.child.dispatch()?;
+            if self.renderer.poll_memory_retry() {self.report_frame(report);wake_canvas(&self.area);}
             let (revision, screen) = self.child.screen_color();
             if self.screen_reported != Some(revision) {
                 self.screen_reported = Some(revision);
@@ -1306,19 +1313,20 @@ impl Worker {
                 }
                 self.report_frame(report);
             }
-            while startup_progress.canvas_ready && self.renderer.can_submit()
-                && pending_frames.front().is_some_and(|f| f.dabs.is_empty() || startup_progress.brush_ready)
+            while (!self.backdrop_submitted || startup_progress.canvas_ready) && self.renderer.can_submit()
+                && pending_frames.front().is_some_and(|f| !self.backdrop_submitted || f.dabs.is_empty() || startup_progress.brush_ready)
             {
                 let frame = pending_frames.front().unwrap();
-                if !self.renderer.raster_dependencies_ready(frame.packet(), frame.transform_preview.as_ref()) { break; }
+                if !self.dependencies_ready(frame) {self.report_frame(report);break;}
                 let mut frame = pending_frames.pop_front().unwrap();
                 #[cfg(test)]
                 timing.begin(frame.queued_ns);
-                self.draw(&mut frame, false, #[cfg(test)] &mut timing)?;
-                document_drawn = true;
-                last_canvas_frame = std::time::Instant::now();
-                self.report_frame(report);
-                count.fetch_sub(1, Ordering::Release);
+                let backdrop=!self.backdrop_submitted;
+                self.draw(&mut frame,backdrop,#[cfg(test)] &mut timing)?;
+                last_canvas_frame=std::time::Instant::now();
+                if backdrop {pending_frames.push_front(frame);}else {
+                    document_drawn=true;self.report_frame(report);count.fetch_sub(1,Ordering::Release);
+                }
             }
             if telemetry_enabled && let Ok(mut snapshot) = worker_telemetry.try_lock() {
                 *snapshot = self.renderer.telemetry();
@@ -1372,8 +1380,8 @@ impl Worker {
             // A small preview can wait through continuous drawing/navigation.
             // Batching bounds interruption when input resumes during idle work;
             // the quiet period keeps those batches from competing every frame.
-            let thumbnail_ready = !pending_thumbnails.is_empty()
-                && last_canvas_frame.elapsed() >= Duration::from_millis(50);
+            let thumbnail_index=pending_thumbnails.iter().position(|(_,target)|!self.renderer.thumbnail_preparation_paused(*target));
+            let thumbnail_ready=thumbnail_index.is_some() && last_canvas_frame.elapsed()>=Duration::from_millis(50);
             if context_capture.is_some() {
                 if pending_frames.is_empty() && !self.renderer.has_pending_submission() {
                     let request = context_capture.take().unwrap();
@@ -1386,14 +1394,14 @@ impl Worker {
             let next = if document_drawn && !deferred.is_empty() {
                 Ok(deferred.pop_front().unwrap())
             } else if !startup_progress.complete
-                || !pending_frames.is_empty()
+                || !pending_frames.is_empty() && !self.renderer.preparation_paused()
                 || self.renderer.has_pending_submission()
                 || self.renderer.effect_validation_pending()
                 || self.renderer.filter_previews_pending()
                 || self.pending_present
                 || stamp_flight || pending_stamp.is_some()
                 || self.renderer.thumbnails_pending()
-                || !pending_thumbnails.is_empty()
+                || thumbnail_index.is_some()
                 || self.renderer.color_sample_pending()
                 || self.renderer.selection_paint_pending()
                 || self.renderer.region_pending()
@@ -1401,6 +1409,8 @@ impl Worker {
                 || self.presenter.screen_check_busy()
             {
                 receiver.recv_timeout(Duration::from_millis(if thumbnail_ready || self.renderer.region_pending() { 1 } else { 8 }))
+            } else if self.renderer.memory_pressure_waiting() {
+                receiver.recv_timeout(SCREEN_CHECK_DELAY)
             } else if self.hdr_encoding.is_some() {
                 // Display changes arrive on Wayland even when artwork is idle.
                 receiver.recv_timeout(Duration::from_millis(100))
@@ -1436,7 +1446,8 @@ impl Worker {
                     // A whole-photo thumbnail scan used to block this owner for
                     // ~200 ms even though every camera frame rendered in <2 ms.
                     if thumbnail_ready && count.load(Ordering::Acquire) == 0
-                        && let Some(&(id, target)) = pending_thumbnails.front()
+                        && let Some(index)=thumbnail_index
+                        && let Some(&(id,target))=pending_thumbnails.get(index)
                     {
                         let result = self.renderer.prepare_thumbnail_batch(target).and_then(|ready| {
                             if ready { self.renderer.request_thumbnail(id, target).map(|_| true) } else { Ok(false) }
@@ -1444,9 +1455,9 @@ impl Worker {
                         self.report_frame(report);
                         match result {
                             Ok(false) => (),
-                            Ok(true) => { pending_thumbnails.pop_front(); },
+                            Ok(true) => {pending_thumbnails.remove(index);},
                             Err(layer_render_wgpu::GpuRasterError::ThumbnailUnavailable(_)) => {
-                                pending_thumbnails.pop_front();
+                                pending_thumbnails.remove(index);
                                 reply.send(Reply::ThumbnailCancelled(id)).map_err(error)?;
                                 wake_canvas(&self.area);
                             }
@@ -1652,7 +1663,7 @@ impl Worker {
                         self.inject_validation_failure();
                     }
                     if !self.renderer.can_submit() || !pending_frames.is_empty()
-                        || !self.renderer.raster_dependencies_ready(frame.packet(), frame.transform_preview.as_ref()) || self.backdrop_submitted
+                        || !self.dependencies_ready(&frame) || self.backdrop_submitted
                         && (!startup_progress.canvas_ready
                             || (!frame.dabs.is_empty() && !startup_progress.brush_ready))
                     {
@@ -1836,6 +1847,7 @@ impl Worker {
     /// idle canvas when it newly does. A retouching stroke that missed its
     /// source is kept for the session to replay.
     fn report_frame(&mut self, report: &FrameReport) {
+        report.preparation_paused.store(self.renderer.preparation_paused(),Ordering::Release);
         if let Ok(mut context) = report.context.try_write() { *context = self.renderer.evaluation_context(); }
         if let Some(stroke) = self.renderer.take_retouch_miss() {
             report.retouch_miss.store(stroke.0, Ordering::Release);
@@ -1901,6 +1913,12 @@ impl Worker {
         self.last_view = Some((view, surround));
         self.pending_present = true;
     }
+    fn dependencies_ready(&mut self,frame:&Frame)->bool {
+        if self.backdrop_submitted {self.renderer.raster_dependencies_ready(frame.packet(),frame.transform_preview.as_ref())}else {
+            let scope=SceneScope::Members(Arc::from(frame.scene.view().constant_backdrop()));
+            self.renderer.raster_dependencies_ready(frame.backdrop_packet(&scope),None)
+        }
+    }
     fn draw(
         &mut self,
         frame: &mut Frame,
@@ -1930,19 +1948,7 @@ impl Worker {
         if backdrop {
             let scene = frame.scene.view();
             let scope = SceneScope::Members(Arc::from(scene.constant_backdrop()));
-            self.renderer
-                .submit(FramePacket {
-                    scene: scene.with_scope(&scope),
-                    inspect_mask: None,
-                    selection_overlays: None,
-                    dabs: &[],
-                    dab_batches: &[],
-                    restore_rasters: &[],
-                    reset_layers: true,
-                    composite_all: true,
-                    ..frame.packet()
-                })
-                .map_err(error)?;
+            self.renderer.submit(frame.backdrop_packet(&scope))                .map_err(error)?;
             self.backdrop_submitted = true;
         } else {
             self.renderer.set_transform_preview(frame.transform_preview.as_ref()).map_err(error)?;

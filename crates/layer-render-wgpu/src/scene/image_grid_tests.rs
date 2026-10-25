@@ -31,8 +31,8 @@ fn independent_pointwise_tiles_share_a_compute_pass() {
                 _ => value,
             }
         });
-        for pixel in result.chunks_exact(16) { for (bytes, value) in pixel.chunks_exact(4).zip(expected) {
-            assert!((f64::from(f32::from_le_bytes(bytes.try_into().unwrap())) - value).abs() < 2e-6);
+        for pixel in result.as_chunks::<16>().0 { for (bytes, value) in pixel.as_chunks::<4>().0.iter().zip(expected) {
+            assert!((f64::from(f32::from_le_bytes(*bytes)) - value).abs() < 2e-6);
         } }
     }
 }
@@ -63,8 +63,8 @@ fn normal_composition_converts_in_its_final_destination() {
         let alpha = 1. - (1. - f64::from(color[3]) * 0.7).powi(count);
         let expected = [f64::from(color[0]) * 2. * alpha, f64::from(color[1]) * 2. * alpha, f64::from(color[2]) * 2. * alpha, alpha];
         let result = crate::layer_tests::page_bytes(&r, &scene.pool[output].texture);
-        for pixel in result.chunks_exact(16) { for (bytes, value) in pixel.chunks_exact(4).zip(expected) {
-            assert!((f64::from(f32::from_le_bytes(bytes.try_into().unwrap())) - value).abs() < 2e-6);
+        for pixel in result.as_chunks::<16>().0 { for (bytes, value) in pixel.as_chunks::<4>().0.iter().zip(expected) {
+            assert!((f64::from(f32::from_le_bytes(*bytes)) - value).abs() < 2e-6);
         } }
         scene.free(output);
     }
@@ -94,10 +94,10 @@ fn complete_compute_composition_replaces_the_clear_but_partial_writes_preserve_i
         r.uploads.finish(&encoder);
         encoder.submit(&r.queue);
         let result = crate::layer_tests::page_bytes(&r, &scene.pool[output].texture);
-        for (i, bytes) in result.chunks_exact(16).enumerate() {
+        for (i, bytes) in result.as_chunks::<16>().0.iter().enumerate() {
             let expected = if i as u32 % PAGE_SIZE < width { [0.35, 0.3, 0.35, 1.] } else { [0.3, 0.4, 0.6, 1.] };
-            for (bytes, value) in bytes.chunks_exact(4).zip(expected) {
-                assert!((f32::from_le_bytes(bytes.try_into().unwrap()) - value).abs() < 1e-6);
+            for (bytes, value) in bytes.as_chunks::<4>().0.iter().zip(expected) {
+                assert!((f32::from_le_bytes(*bytes) - value).abs() < 1e-6);
             }
         }
         assert_eq!(passes, 1, "width {width}: the clear and the composition share one compute pass");
@@ -170,7 +170,7 @@ fn effect_grids_preserve_document_coordinates_and_partial_edge_centers() {
             r.uploads.finish(&encoder);
             encoder.submit(&r.queue);
             let bytes = crate::layer_tests::page_bytes(&r, &result.texture);
-            for (index, pixel) in bytes.chunks_exact(16).enumerate() {
+            for (index, pixel) in bytes.as_chunks::<16>().0.iter().enumerate() {
                 let [x, y] = [index as u32 % output.size[0], index as u32 / output.size[0]];
                 let px = center(x, output.bounds.min_x(), output.bounds.max_x(), output.level);
                 let py = center(y, output.bounds.min_y(), output.bounds.max_y(), output.level);
@@ -289,7 +289,7 @@ fn authored_spatial_references_preserve_builtin_windows_and_orientation() {
                 encoder.submit(&r.queue);
                 previous = output;
             }
-            crate::layer_tests::page_bytes(r, &previous.texture).chunks_exact(16)
+            crate::layer_tests::page_bytes(r, &previous.texture).as_chunks::<16>().0.iter()
                 .map(|pixel| std::array::from_fn::<_,4,_>(|i| f32::from_le_bytes(pixel[i*4..i*4+4].try_into().unwrap())))
                 .collect::<Vec<_>>()
         };
@@ -376,7 +376,7 @@ fn multipass_opacity_reads_original_finite_support_independently_of_intermediate
             previous = output.view.clone();
             result = Some(output);
         }
-        crate::layer_tests::page_bytes(r, &result.unwrap().texture).chunks_exact(16)
+        crate::layer_tests::page_bytes(r, &result.unwrap().texture).as_chunks::<16>().0.iter()
             .map(|bytes| std::array::from_fn::<_, 4, _>(|i| f32::from_le_bytes(bytes[i*4..i*4+4].try_into().unwrap())))
             .collect::<Vec<_>>()
     };

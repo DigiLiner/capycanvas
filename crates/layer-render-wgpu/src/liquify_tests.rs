@@ -8,7 +8,7 @@ const MARKER: [f32; 2] = [96., 64.];
 fn marker_centroid(r: &mut WgpuRasterizer) -> [f32; 2] {
     let image = r.readback_srgb_rgba8().unwrap();
     let mut sum = [0.; 3];
-    for (i, p) in image.chunks_exact(4).enumerate() {
+    for (i, p) in image.as_chunks::<4>().0.iter().enumerate() {
         let weight = f32::from(p[3]) / 255.;
         sum[0] += weight * (i % 128) as f32;
         sum[1] += weight * (i / 128) as f32;

@@ -140,7 +140,7 @@ fn render(r: &mut WgpuRasterizer, document: &Document) -> Vec<[f32; 4]> {
     }
     assert!(!layer_render::CanvasRenderer::has_pending_work(r), "the composite settles");
     crate::layer_tests::page_bytes(r, crate::test_support::document_texture(r))
-        .chunks_exact(16)
+        .as_chunks::<16>().0.iter()
         .map(|p| std::array::from_fn(|c| f32::from_le_bytes(p[c * 4..c * 4 + 4].try_into().unwrap())))
         .collect()
 }
@@ -244,7 +244,7 @@ fn coverage(r: &mut WgpuRasterizer, mask: &CoverageSnapshot) -> Vec<f32> {
     let view = crate::test_support::view(EXTENT);
     r.submit(FramePacket { view, reset_layers: true, ..packet(b.0.scene(), EXTENT) }).unwrap();
     crate::layer_tests::page_bytes(r, crate::test_support::document_texture(r))
-        .chunks_exact(16)
+        .as_chunks::<16>().0.iter()
         .map(|p| f32::from_le_bytes(p[12..16].try_into().unwrap()))
         .collect()
 }

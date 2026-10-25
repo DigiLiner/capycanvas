@@ -39,7 +39,7 @@ fn filter_microbench() {
         .map(|t| t.create_view(&Default::default()));
     let photo = std::fs::read(std::env::var("CAPY_FILTER_PHOTO_RGBA").unwrap()).unwrap();
     let linear: Vec<u8> = photo
-        .chunks_exact(4)
+        .as_chunks::<4>().0.iter()
         .flat_map(|p| {
             let decode = |x: u8| {
                 let v = x as f32 / 255.;

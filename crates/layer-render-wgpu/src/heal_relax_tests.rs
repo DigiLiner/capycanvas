@@ -105,8 +105,8 @@ fn relaxation_matches_sparse_block_reference() {
         readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         r.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
         let bytes = readback.slice(..).get_mapped_range().unwrap();
-        for (i, (bytes, expected)) in bytes.chunks_exact(4).zip(expected.iter().flatten()).enumerate() {
-            let actual = f32::from_le_bytes(bytes.try_into().unwrap());
+        for (i, (bytes, expected)) in bytes.as_chunks::<4>().0.iter().zip(expected.iter().flatten()).enumerate() {
+            let actual = f32::from_le_bytes(*bytes);
             assert!((actual - expected).abs() < 0.000002, "scale {scale}, cell {}, channel {}: {actual} != {expected}", i / 4, i % 4);
         }
     }

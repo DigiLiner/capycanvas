@@ -205,6 +205,7 @@ impl CapyHost {
         }
     }
     fn poll_services(&mut self) -> Result<(), String> {
+        self.native.poll_memory_retry();
         if self.display_checked.is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(500)) {
             self.display_checked = Some(std::time::Instant::now());
             let display = self.test_display.clone().unwrap_or_else(|| self.display_probe.poll(self.window).clone());

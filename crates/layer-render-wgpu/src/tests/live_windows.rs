@@ -20,12 +20,12 @@ fn close(actual: &[u8], reference: &[u8]) {
     assert_eq!(actual.len(), reference.len());
     let mut maximum = 0f32;
     for (i, (a, b)) in actual
-        .chunks_exact(4)
-        .zip(reference.chunks_exact(4))
+        .as_chunks::<4>().0.iter()
+        .zip(reference.as_chunks::<4>().0.iter())
         .enumerate()
     {
-        let a = f32::from_le_bytes(a.try_into().unwrap());
-        let b = f32::from_le_bytes(b.try_into().unwrap());
+        let a = f32::from_le_bytes(*a);
+        let b = f32::from_le_bytes(*b);
         let error = (a - b).abs();
         assert!(error <= 3e-6, "sample {i}: {a} != {b}");
         maximum = maximum.max(error);
@@ -403,6 +403,7 @@ fn frequency_separation_at_sigma_85_bakes_discrete_gaussian_and_survives_history
         for _ in 0..1000 {
             if !engine.has_pending_document_edits(){return;}
             engine.render_frame_at(0).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         panic!("Frequency Separation did not publish its raster results");
     };

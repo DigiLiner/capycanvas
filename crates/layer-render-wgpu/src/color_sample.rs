@@ -11,7 +11,7 @@ pub(super) struct ColorSampler {
     tx: mpsc::Sender<Result<ColorSample, GpuRasterError>>,
     rx: mpsc::Receiver<Result<ColorSample, GpuRasterError>>,
     pending: bool,
-    waiting: Option<(ColorSampleRequest, Arc<artwork::Frame>)>,
+    waiting: Option<(ColorSampleRequest, Option<Arc<artwork::Frame>>)>,
 }
 impl ColorSampler {
     pub(super) fn storage_bytes(&self) -> u64 {
@@ -49,14 +49,13 @@ impl WgpuRasterizer {
         if self.color_sample_pending() {
             return Ok(false);
         }
-        let frame = (request.source == ColorSampleSource::Composite).then(|| self.artwork_frame.clone())
-            .flatten();
+        let frame=self.artwork_frame.clone();
         self.encode_color_sample(request, frame)
     }
 
     pub(super) fn poll_color_sample(&mut self) -> Option<Result<ColorSample, GpuRasterError>> {
         if let Some((request, frame)) = self.color_sampler.waiting.take()
-            && let Err(error) = self.encode_color_sample(request, Some(frame)) {
+            && let Err(error) = self.encode_color_sample(request, frame) {
             return Some(Err(error));
         }
         let _ = self.device.poll(wgpu::PollType::Poll);
@@ -114,9 +113,10 @@ impl WgpuRasterizer {
         );
         // Sparse missing pages contribute transparent black, never old buffer
         // contents. Copy each contiguous row segment across page boundaries.
+        self.drain_image_decodes(&mut encoder)?;
         encoder.clear_buffer(&buffer, 0, None);
         let composite = if request.source == ColorSampleSource::Composite {
-            let frame = frame.ok_or(GpuRasterError::InvalidExtent)?;
+            let frame = frame.clone().ok_or(GpuRasterError::InvalidExtent)?;
             let mut capture = mem::take(&mut self.color_sampler.capture);
             let region = PixelRect::new(left, top, right, bottom);
             let result = capture.region(
@@ -130,7 +130,7 @@ impl WgpuRasterizer {
             if matches!(result, Err(GpuRasterError::DeferredObjectWork)) {
                 self.uploads.finish(&encoder);
                 encoder.submit(&self.queue);
-                self.color_sampler.waiting = Some((request, frame));
+                self.color_sampler.waiting = Some((request, Some(frame)));
                 return Ok(true);
             }
             Some(result?.texture)
@@ -147,8 +147,14 @@ impl WgpuRasterizer {
                     ColorSampleSource::Composite => (composite.clone().unwrap(), [left, top]),
                     ColorSampleSource::Source(id) => {
                         let mut capture = mem::take(&mut self.color_sampler.capture);
-                        let result = capture.layer_tile(self, id, [tx, ty], &mut encoder);
+                        let result=match &frame {Some(frame)=>capture.layer_tile_at(self,frame,id,[tx,ty],&mut encoder),None=>Err(GpuRasterError::InvalidExtent)};
                         self.color_sampler.capture = capture;
+                        if matches!(result, Err(GpuRasterError::DeferredObjectWork)) {
+                            self.uploads.finish(&encoder);
+                            encoder.submit(&self.queue);
+                            self.color_sampler.waiting = Some((request, frame));
+                            return Ok(true);
+                        }
                         (result?.texture, [tx * PAGE_SIZE, ty * PAGE_SIZE])
                     }
                 };
@@ -226,5 +232,29 @@ impl WgpuRasterizer {
         );
         self.color_sampler.pending = true;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_cold_offscreen_source_sample_waits_for_the_shared_decode_queue() {
+        let extent=[513;2];let mut artwork=layer_core::Artwork::new(extent).unwrap();
+        let (_,target)=crate::test_support::add_paint(&mut artwork,"source",extent);
+        let SourceTarget::Paint(handle)=target else {unreachable!()};
+        artwork.paint.get_mut(handle).unwrap().base=Some(layer_core::authored::PaintBase::new(layer_core::color::source::rgba8_source(extent,|_,_|[255,0,0,255]).into()));
+        let document=layer_core::Document::from_artwork(artwork).unwrap();
+        let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        r.ensure_document_metadata(extent,document.scene()).unwrap();
+        r.artwork_frame=Some(Arc::new(artwork::Frame::new(crate::test_support::packet(document.scene(),extent),document.scene().snapshot().context)));
+        assert!(r.start_color_sample(ColorSampleRequest {request_id:9,source:ColorSampleSource::Source(target),position:[400;2],area:layer_render::ColorSampleArea::Average5}).unwrap());
+        assert!(r.color_sampler.waiting.is_some());assert!(r.paint_layers[0].pages.is_empty());
+        let deadline=std::time::Instant::now()+Duration::from_secs(10);
+        loop {
+            if let Some(sample)=r.poll_color_sample() {let sample=sample.unwrap();assert_eq!(sample.request_id,9);assert_eq!(sample.rgba,[1.,0.,0.,1.]);break;}
+            assert!(std::time::Instant::now()<deadline);std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(r.paint_layers[0].pages.is_empty());assert!(!r.color_sample_pending());
     }
 }

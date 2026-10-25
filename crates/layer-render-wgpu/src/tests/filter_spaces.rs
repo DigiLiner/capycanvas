@@ -45,7 +45,7 @@ fn composite(space: BlendSpace, effects: &[EffectInstance], source: Arc<layer_co
         r.submit(FramePacket { reset_layers: false, composite_all: false, ..packet }).unwrap();
     }
     crate::layer_tests::page_bytes(&r, crate::test_support::document_texture(&r))
-        .chunks_exact(16)
+        .as_chunks::<16>().0.iter()
         .map(|p| std::array::from_fn(|c| f64::from(f32::from_le_bytes(p[c * 4..][..4].try_into().unwrap()))))
         .collect()
 }

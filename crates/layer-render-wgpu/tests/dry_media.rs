@@ -340,7 +340,7 @@ fn every_dry_medium_preserves_committed_pressure_and_tilt_with_prediction_and_zo
             0.15 + 0.8*(t*std::f32::consts::PI).sin(),
             [1.3*t, 0.2*t]);
         let real = paint(brush.clone(), Run { cadence: 1, ..Default::default() }, path);
-        assert!(real.rgba.chunks_exact(4).any(|p| p[3] > 0), "{preset:?} paints");
+        assert!(real.rgba.as_chunks::<4>().0.iter().any(|p| p[3] > 0), "{preset:?} paints");
         for scale in [1., 0.1] {
             let predicted = paint(brush.clone(), Run { cadence: 8, feedback: true, scale, ..Default::default() }, path);
             predicted.assert_near(&real, 5, &format!("{preset:?} prediction scale={scale}"));
@@ -358,11 +358,11 @@ fn pressure_recruits_contacts_without_forcing_the_rim_or_zero_force_to_paint() {
         for pressure in [0., 0.15, 0.45, 1.] {
             let image = line(brush.clone(), pressure, 0.85, Run::default());
             let mut recruited = 0;
-            for (before, after) in previous.chunks_exact(4).zip(image.rgba.chunks_exact(4)) {
+            for (before, after) in previous.as_chunks::<4>().0.iter().zip(image.rgba.as_chunks::<4>().0.iter()) {
                 assert!(after[3] >= before[3], "{preset:?} pressure={pressure} loses contact: {} -> {}", before[3], after[3]);
                 recruited += usize::from(before[3] == 0 && after[3] > 0);
             }
-            if pressure == 0. { assert!(image.rgba.chunks_exact(4).all(|p| p[3] == 0), "{preset:?}: zero pressure paints"); }
+            if pressure == 0. { assert!(image.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 0), "{preset:?}: zero pressure paints"); }
             if pressure == 1. { assert!(recruited > 0, "{preset:?}: pressure must recruit empty contacts"); }
             previous = image.rgba;
         }
@@ -377,7 +377,7 @@ fn pressure_recruits_contacts_without_forcing_the_rim_or_zero_force_to_paint() {
         let low=line(reference.clone(),0.272,0.75,Run::default());
         reduced.assert_near(&low,2,&format!("Strength scales clamped material pressure only: corner={corner} offset={offset}"));
         let full=line(reference.clone(),1.,0.75,Run::default());
-        let lost=full.rgba.chunks_exact(4).zip(reduced.rgba.chunks_exact(4)).filter(|(a,b)|a[3]>0 && b[3]==0).count();
+        let lost=full.rgba.as_chunks::<4>().0.iter().zip(reduced.rgba.as_chunks::<4>().0.iter()).filter(|(a,b)|a[3]>0 && b[3]==0).count();
         assert!(lost>0,"corner={corner} offset={offset}: reduced Strength removes eligible contacts, not just their pigment dose");
         println!("Strength pressure control: corner={corner} offset={offset} lost_contacts={lost} material_pressure=0.272");
         for y in 88..169 {
@@ -385,7 +385,7 @@ fn pressure_recruits_contacts_without_forcing_the_rim_or_zero_force_to_paint() {
             assert!(actual.abs_diff(expected)<=2,"Strength pressure quadrature corner={corner} offset={offset} y={y}: GPU {actual}, expected {expected}");
         }
         brush.flow=0.;let empty=line(brush,0.8,0.75,Run::default());
-        assert!(empty.rgba.chunks_exact(4).all(|p|p[3]==0),"corner={corner} offset={offset}: Strength zero");
+        assert!(empty.rgba.as_chunks::<4>().0.iter().all(|p|p[3]==0),"corner={corner} offset={offset}: Strength zero");
     }
     for hardness in [0.,0.5,1.] {
         let mut brush=analytic(0.,1.4);brush.flow=0.3;
@@ -398,7 +398,7 @@ fn pressure_recruits_contacts_without_forcing_the_rim_or_zero_force_to_paint() {
         }
         brush.flow=0.8;let high=line(brush.clone(),0.8,0.,Run::default());
         let mut recruited=0;let mut empty=0;
-        for (a,b) in low.rgba.chunks_exact(4).zip(high.rgba.chunks_exact(4)) {
+        for (a,b) in low.rgba.as_chunks::<4>().0.iter().zip(high.rgba.as_chunks::<4>().0.iter()) {
             assert!(b[3]>=a[3],"hardness={hardness}: material pressure loses contact");
             recruited+=usize::from(a[3]==0 && b[3]>0);
             empty+=usize::from(b[3]==0);
@@ -481,7 +481,7 @@ fn strip_pixel_area(pixel: [usize; 2], center: [f64; 2], normal: [f64; 2], half:
 #[test]
 fn fine_contact_alpha_matches_independent_pixel_area_for_rotated_sweeps() {
     for (diameter, angle, direction, phase, flow, offset) in [
-        (2., 0., 0., 0., 0.3, 0.), (2., 0., 0., 0.5, 1., 0.35),
+        (2., 0., 0f64, 0., 0.3, 0.), (2., 0., 0., 0.5, 1., 0.35),
         (2., 0.7, 0.4, 0.25, 0.3, 0.35), (2., 0.7, 0.9, 0.5, 1., 0.),
         (4., 0.7, 0., 0.375, 1., 0.), (4., 0., 0.7, 0.625, 0.3, 0.35),
     ] {
@@ -493,7 +493,7 @@ fn fine_contact_alpha_matches_independent_pixel_area_for_rotated_sweeps() {
         for pose in &mut brush.contact.as_mut().unwrap().dry.as_mut().unwrap().poses {
             pose.radii = [1., 0.5]; pose.relief = [0.; 3];
         }
-        let (s, c) = f64::from(direction).sin_cos();
+        let (s, c) = direction.sin_cos();
         let normal = [-s, c];
         let center = [128.5+phase*normal[0], 128.5+phase*normal[1]];
         let image = paint(brush.clone(), Run::default(), |t| {
@@ -583,14 +583,14 @@ fn dry_taps_leave_one_peak_pressure_imprint_only_on_release() {
             brush.flow = strength;
             let reference = contact_stages(brush.clone(), false,
                 &[(center, 0.6), (center, 0.6), (center, 0.6)]);
-            assert!(reference.last().unwrap().rgba.chunks_exact(4).any(|p| p[3] > 0),
+            assert!(reference.last().unwrap().rgba.as_chunks::<4>().0.iter().any(|p| p[3] > 0),
                 "{preset:?} Strength={strength}: release leaves an imprint");
             for feedback in [false, true] {
                 let jitter = contact_stages(brush.clone(), feedback,
                     &[(center, 0.6), (center, 0.2), ([128.55, 128.5], 0.2),
                         ([128.45, 128.5], 0.2), (center, 0.2)]);
                 for image in &jitter[..2] {
-                    assert!(image.rgba.chunks_exact(4).all(|p| p[3] == 0),
+                    assert!(image.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 0),
                         "{preset:?} Strength={strength} feedback={feedback}: held pen paints before release");
                 }
                 jitter.last().unwrap().assert_near(reference.last().unwrap(), 1,
@@ -646,7 +646,7 @@ fn sampled_dry_hairpins_and_squiggles_preserve_nonflat_pressure_tilt_and_opacity
                 (position,0.3+0.6*angle.sin(),[0.6*angle.sin(),0.35*angle.cos()])
             };
             let reference=paint(brush.clone(),Run {samples:128,cadence:1,..Default::default()},pose);
-            assert!(reference.rgba.chunks_exact(4).filter(|p|p[3]>0).count()>256,
+            assert!(reference.rgba.as_chunks::<4>().0.iter().filter(|p|p[3]>0).count()>256,
                 "{preset:?} diameter={diameter} hairpin={hairpin}: nonflat curve must leave visible paint");
             for feedback in [false,true] {
                 let batched=paint(brush.clone(),Run {samples:128,cadence:7,feedback,..Default::default()},pose);

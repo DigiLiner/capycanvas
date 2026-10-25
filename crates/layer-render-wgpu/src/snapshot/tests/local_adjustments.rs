@@ -315,7 +315,7 @@ fn cold_clone_reference_prepares_local_guides_without_a_settled_preview() {
     let mut moved=engine.document().artwork.occurrences.get(owner).unwrap().clone();moved.offset= [8, 0];
     let change=RecordChange::replace(&engine.document().artwork.occurrences,owner,Some(moved)).unwrap();
     engine.apply_edit(layer_core::Edit::Occurrence(change)).unwrap();
-    let mut source=layer_core::CloneSource::default();source.aligned=false;source.set(Point{x:3.,y:6.});engine.set_clone_source(source);
+    let mut source=layer_core::CloneSource{aligned:false,..Default::default()};source.set(Point{x:3.,y:6.});engine.set_clone_source(source);
     for (sequence,phase) in [(3,layer_engine::PenPhase::Down),(4,layer_engine::PenPhase::Up)] {
         input.push(crate::test_support::pen(sequence,phase,[20.,14.],layer_engine::SampleFlags::PRIMARY)).unwrap();
     }

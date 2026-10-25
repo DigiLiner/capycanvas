@@ -125,7 +125,7 @@ fn native_half_float_multiply_brush_saturates_finite_output() {
     stroke(&mut live,&mut input,1,64.);
     flush(&mut live);
     let data=backing(&paint(live.document()).raster);
-    assert!(data.values().any(|bytes|bytes.chunks_exact(8).any(|p|layer_core::color::hdr::decode_samples(SampleDepth::F16,p).unwrap()[0]==65504.)));
+    assert!(data.values().any(|bytes|bytes.as_chunks::<8>().0.iter().any(|p|layer_core::color::hdr::decode_samples(SampleDepth::F16,p).unwrap()[0]==65504.)));
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn native_half_float_exposure_bake_saturates_finite_output() {
     let data=backing(&paint(live.document()).raster);
     assert!(!data.is_empty());
     for bytes in data.values() {
-        for pixel in bytes.chunks_exact(8) {assert_eq!(layer_core::color::hdr::decode_samples(SampleDepth::F16,pixel).unwrap(),[65504.,65504.,65504.,1.]);}
+        for pixel in bytes.as_chunks::<8>().0 {assert_eq!(layer_core::color::hdr::decode_samples(SampleDepth::F16,pixel).unwrap(),[65504.,65504.,65504.,1.]);}
     }
 }
 
@@ -711,7 +711,7 @@ fn prevalidated_mixed_tracking_marks_only_actual_canonical_changes() {
         let side=4u32;
         let flags=r.device.create_buffer(&wgpu::BufferDescriptor {label:Some("native canonical changed cells"),
             size:16+u64::from(256/side).pow(2)*4,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
-        r.queue.write_buffer(&flags,0,&[side,1,0,0].map(u32::to_le_bytes).as_flattened());
+        r.queue.write_buffer(&flags,0,[side,1,0,0].map(u32::to_le_bytes).as_flattened());
         for expected in [1u32,0u32] {
             let inputs=pages.iter().map(|page|(page.clone(),RasterTile::pending(color.paint_descriptor()),LayerColorMode::FullColor)).collect();
             let mut job=r.native_capture_job(NativeFrame {capture:None,publications:Vec::new(),canonical_pages:Vec::new()},inputs).unwrap();
@@ -935,8 +935,8 @@ fn srgb8_codes_and_coverage_are_independent_through_native_publication() {
     submit(&mut r, &layers, true);
     let samples = working(&r, target(&layers));
     for (i, (encoded, actual)) in bytes
-        .chunks_exact(4)
-        .zip(samples[&key].chunks_exact(16))
+        .as_chunks::<4>().0.iter()
+        .zip(samples[&key].as_chunks::<16>().0.iter())
         .enumerate()
     {
         let alpha = encoded[3] as f64 / 255.;
@@ -1065,7 +1065,7 @@ fn deferred_native_outputs_preserve_versions_and_status_during_following_frames(
     r.submit(packet(&layers, false)).unwrap();
     r.device.poll(wgpu::PollType::Wait { submission_index: r.last_submission.clone(), timeout: Some(READBACK_TIMEOUT) }).unwrap();
     for snapshot in [&first, &second, &layers] {
-        for root in [&paint(&snapshot).raster, mask_raster(&snapshot)] {
+        for root in [&paint(snapshot).raster, mask_raster(snapshot)] {
             assert!(root.wait_data().unwrap().tiles.values().all(|t| t.try_backing().is_none()));
         }
     }
@@ -1263,7 +1263,7 @@ fn native_gradient_dither_changes_integer_code_boundaries_without_bias() {
         let changed=plain.iter().zip(&actual).filter(|(a,b)|a!=b).count();
         let mean=plain.iter().zip(&actual).map(|(a,b)|f64::from(*b)-f64::from(*a)).sum::<f64>()/plain.len() as f64;
         let varied=(0..1024).filter(|&x|(1..128).any(|y|actual[y*1024+x]!=actual[x])).count();
-        let runs=|image:&Vec<u16>| {let mut count=0usize;for row in image.chunks_exact(1024){count+=1+row.windows(2).filter(|pair|pair[0]!=pair[1]).count();}image.len() as f64/count as f64};
+        let runs=|image:&Vec<u16>| {let mut count=0usize;for row in image.as_chunks::<1024>().0{count+=1+row.windows(2).filter(|pair|pair[0]!=pair[1]).count();}image.len() as f64/count as f64};
         let plain_band=runs(&plain);let dither_band=runs(&actual);
         let range=actual.iter().fold([u16::MAX,0],|[a,b],&v|[a.min(v),b.max(v)]);
         println!("DITHER_CODES {route} {space:?} {depth:?} changed={changed}/{} row_varied_columns={varied}/1024 mean_delta={mean} band_px={plain_band}->{dither_band} range={range:?}",plain.len());
@@ -1292,7 +1292,7 @@ fn layer_color_modes_convert_originals_constrain_edits_and_survive_history_and_r
             for tile in gray.wait_data().unwrap().tiles.values() { assert_eq!(tile.descriptor().channels, 2); }
             let gray_pixels = live.backend_mut().readback_srgb_rgba8().unwrap();
             assert_ne!(gray_pixels, original);
-            for p in gray_pixels.chunks_exact(4) { assert!(p[0].abs_diff(p[1]) <= 1 && p[1].abs_diff(p[2]) <= 1, "{space:?} {depth:?} {p:?}"); }
+            for p in gray_pixels.as_chunks::<4>().0 { assert!(p[0].abs_diff(p[1]) <= 1 && p[1].abs_diff(p[2]) <= 1, "{space:?} {depth:?} {p:?}"); }
             assert!(live.undo().unwrap()); flush(&mut live);
             assert_eq!(paint(live.document()).color_mode, LayerColorMode::FullColor);
             assert_eq!(live.backend_mut().readback_srgb_rgba8().unwrap(), original);
@@ -1319,7 +1319,7 @@ fn layer_color_modes_convert_originals_constrain_edits_and_survive_history_and_r
                 coverage: reveal_all([256; 2], [0, 0]), kind: layer_core::RasterOperationKind::Fill { color: [0.1, 0.8, 0.2, 0.8], alpha_locked: false } }).unwrap();
             flush(&mut reopened);
             let filled = reopened.backend_mut().readback_srgb_rgba8().unwrap();
-            assert!(filled.chunks_exact(4).all(|p| (p[..3] == [0; 3] || p[..3] == [255; 3]) && p[3] == 255));
+            assert!(filled.as_chunks::<4>().0.iter().all(|p| (p[..3] == [0; 3] || p[..3] == [255; 3]) && p[3] == 255));
             reopened.set_layer_color_mode(occurrence_id(reopened.document()), LayerColorMode::FullColor).unwrap(); flush(&mut reopened);
             assert_eq!(reopened.backend_mut().readback_srgb_rgba8().unwrap(), filled);
             for tile in paint(reopened.document()).raster.wait_data().unwrap().tiles.values() { assert_eq!(tile.descriptor().channels, 4); }
@@ -1346,8 +1346,8 @@ fn reduced_color_empty_layers_constrain_colored_brush_strokes_and_restore_undo()
         assert!(!painted.is_empty());
         assert!(paint(live.document()).raster.wait_data().unwrap().tiles.values().all(|t| t.descriptor().channels == 2));
         let pixels = live.backend_mut().readback_srgb_rgba8().unwrap();
-        assert!(pixels.chunks_exact(4).any(|p| p[3] != 0));
-        for p in pixels.chunks_exact(4) {
+        assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] != 0));
+        for p in pixels.as_chunks::<4>().0 {
             assert_eq!(p[0], p[1]); assert_eq!(p[1], p[2]);
             if mode == LayerColorMode::TwoTone { assert!([0, 255].contains(&p[0]) && [0, 255].contains(&p[3])); }
         }

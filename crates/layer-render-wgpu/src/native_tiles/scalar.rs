@@ -4,10 +4,11 @@
 use super::{MAX_BATCH_TILES, NativeEncodeStatus, STATUS_BYTES, buffer_entry};
 use crate::{GpuRasterError, PipelineDevice};
 use layer_core::color::{AlphaAssociation, SampleDepth, PixelDescriptor, TransferEncoding};
+use layer_render::CanvasRenderer;
 
 /// Exact native coverage restored into a private R32Float working candidate.
 pub struct NativeScalarRestore<'a> {
-    pub blob: &'a layer_core::raster::TileBlob,
+    pub blob: &'a std::sync::Arc<layer_core::raster::TileBlob>,
     pub working: &'a wgpu::Texture,
 }
 impl crate::WgpuRasterizer {
@@ -42,6 +43,8 @@ impl crate::WgpuRasterizer {
         if requests.is_empty() {
             return Ok(());
         }
+        let space=self.document_color().space;
+        self.prepare_raster_uploads(&requests.iter().map(|request|(request.blob.clone(),space,space)).collect::<Vec<_>>())?;
         self.submit_restore(|r, scene, encoder| scene.restore_native_scalars(r, requests, encoder))
     }
 }
@@ -50,6 +53,7 @@ pub(crate) fn restore_upload(
     request: &NativeScalarRestore<'_>,
     encoder: &mut crate::submission::CommandEncoder,
 ) -> Result<u64, GpuRasterError> {
+    if !r.snapshot_worker {return Err(GpuRasterError::DeferredObjectWork);}
     let bytes = request.blob.decode().map_err(GpuRasterError::from)?;
     let step = usize::from(request.blob.descriptor.bits_per_channel / 8);
     let reciprocal = reciprocal(if step == 1 { SampleDepth::U8 } else { SampleDepth::U16 });

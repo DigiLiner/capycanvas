@@ -120,7 +120,7 @@ fn offset_photo_incremental_composition_matches_rebuild_with_alpha_edges() {
                 reset_layers: step == 0,
                 ..packet(photo.scene(), canvas)
             }).unwrap();
-            images.push(page_bytes(&r, crate::test_support::document_texture(&r)));
+            images.push(page_bytes(r, crate::test_support::document_texture(r)));
         }
         let misses = r.metrics().source_tile_misses;
         if let Some(before) = source_misses { assert_eq!(misses, before, "moving reuses source pixels"); }
@@ -166,7 +166,7 @@ fn offset_photo_incremental_composition_matches_rebuild_with_alpha_edges() {
                     assert!(r.metrics.composited_pixels - before < u64::from(canvas[0]) * u64::from(canvas[1]),
                         "an offset contact must not rebuild the entire canvas");
                 }
-                images.push(page_bytes(&r, crate::test_support::document_texture(&r)));
+                images.push(page_bytes(r, crate::test_support::document_texture(r)));
             }
             let maximum = crate::test_support::max_error_bytes(&images[0], &images[1]);
             assert!(maximum < 0.0001, "prediction={prediction}, {mode:?}, opacity={opacity}: {maximum}");
@@ -190,7 +190,7 @@ fn offset_photo_incremental_composition_matches_rebuild_with_alpha_edges() {
                     composite_all: full,
                     ..packet(photo.scene(), canvas)
                 }).unwrap();
-                images.push(page_bytes(&r, crate::test_support::document_texture(&r)));
+                images.push(page_bytes(r, crate::test_support::document_texture(r)));
             }
             assert!(images[0] != baseline.unwrap(), "mask painting changes live pixels");
             let maximum = crate::test_support::max_error_bytes(&images[0], &images[1]);
@@ -642,8 +642,8 @@ fn page_zero_copies_reclear_both_formats_and_reduced_extents() {
                 let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
                 r.encode_clear_value(&mut encoder, &page.view, "dirty zero page", 1.);
                 encoder.submit(&r.queue);
-                assert!(crate::layer_tests::page_bytes(&r, &page.texture).chunks_exact(4)
-                    .all(|word| word == 1f32.to_le_bytes()));
+                assert!(crate::layer_tests::page_bytes(&r, &page.texture).as_chunks::<4>().0.iter()
+                    .all(|word| *word == 1f32.to_le_bytes()));
                 page.preview.set(Some((target(&layer), [0, 0])));
                 let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
                 page.clear(&r.zero_pages, &mut encoder);

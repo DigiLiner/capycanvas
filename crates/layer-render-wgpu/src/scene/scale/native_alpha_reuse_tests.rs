@@ -176,7 +176,7 @@ fn native_alpha_reuse_admits_warm_pages_beside_cold_output_pages() {
         }
         let flags=r.changed_cells.as_ref().unwrap().reusable(target,[0,0]).unwrap();
         let bytes=pollster::block_on(crate::local_tone::read_buffer_async(&r.device,&r.queue,flags)).unwrap();
-        assert!(bytes[16..].chunks_exact(4).all(|v|u32::from_le_bytes(v.try_into().unwrap())==0));
+        assert!(bytes[16..].as_chunks::<4>().0.iter().all(|v|u32::from_le_bytes(*v)==0));
         let mut cache=r.scale_display.take().unwrap();
         assert_eq!(cache.plan.level,2);
         assert!(cache.evaluation==Evaluation::Display);
@@ -423,7 +423,7 @@ fn native_alpha_reuse_real_unchanged_stores_leave_gpu_flags_clear() {
                 page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),[None, None],Some(flags.clone())),
                     ||panic!("real warm Engine prediction must execute actual tracked display output"));
                 let bytes = pollster::block_on(crate::local_tone::read_buffer_async(&r.device, &r.queue, flags)).unwrap();
-                let changed = bytes[16..].chunks_exact(4).filter(|cell| u32::from_le_bytes((*cell).try_into().unwrap()) != 0).count();
+                let changed = bytes[16..].as_chunks::<4>().0.iter().filter(|cell| u32::from_le_bytes(**cell) != 0).count();
                 assert_eq!(changed, 0, "{name} unchanged warm real stores must leave every GPU dirty-cell flag clear: candidates={}, forced={}",
                     r.metrics.native_effect_reuse_candidate_cells, r.metrics.native_effect_forced_cells);
             }
@@ -578,7 +578,7 @@ fn native_alpha_reuse_idle_preparation_preserves_flags_until_the_next_contact() 
         let flags = r.changed_cells.as_ref().unwrap().buffer(target, [0, 0]).unwrap().clone();
         let read = |r: &WgpuRasterizer| pollster::block_on(crate::local_tone::read_buffer_async(&r.device, &r.queue, &flags)).unwrap();
         let prior = read(&r);
-        assert!(prior[16..].chunks_exact(4).any(|cell| u32::from_le_bytes(cell.try_into().unwrap()) != 0), "{name} actual tracked stores must mark changed cells");
+        assert!(prior[16..].as_chunks::<4>().0.iter().any(|cell| u32::from_le_bytes(*cell) != 0), "{name} actual tracked stores must mark changed cells");
         let mut cells = r.changed_cells.take().unwrap();
         r.document_damage.clear(); r.transform_damage.clear();
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
@@ -598,7 +598,7 @@ fn native_alpha_reuse_idle_preparation_preserves_flags_until_the_next_contact() 
         r.submit(FramePacket { dabs: std::slice::from_ref(&dab), dab_batches: std::slice::from_ref(&batch), ..frame }).unwrap();
         assert!(r.metrics.native_effect_reuse_candidate_cells > candidates, "{name} next contact must restore eligible reuse");
         assert!(r.changed_cells.as_ref().unwrap().reusable(target, [0, 0]).is_some());
-        assert!(read(&r)[16..].chunks_exact(4).all(|cell| u32::from_le_bytes(cell.try_into().unwrap()) == 0), "{name} next unchanged contact must clear prior flags before stores");
+        assert!(read(&r)[16..].as_chunks::<4>().0.iter().all(|cell| u32::from_le_bytes(*cell) == 0), "{name} next unchanged contact must clear prior flags before stores");
         assert_pixels_equal(&display_pixels(&r), &before, r.scale_display.as_ref().unwrap().plan.size[0], name);
         let plan = r.scale_display.as_ref().unwrap().plan;
         r.submit(FramePacket { view: crate::test_support::view(extent), composite_all: true, ..frame }).unwrap();
@@ -776,7 +776,7 @@ fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
             page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),[None, None],Some(expected)),
                 ||panic!("{name} {blend:?} level{level} step{step}: actual kernel/output binding must have expected tracking"));
             let data=pollster::block_on(crate::local_tone::read_buffer_async(&r.device,&r.queue,flags)).unwrap();
-            let dirty=data[16..].chunks_exact(4).filter(|v|u32::from_le_bytes((*v).try_into().unwrap())!=0).count();
+            let dirty=data[16..].as_chunks::<4>().0.iter().filter(|v|u32::from_le_bytes(**v)!=0).count();
             if step==1 {assert_eq!(dirty,0,"identical retained prediction must leave every cell clear");assert_eq!(Some(page.primary.view.clone()),previous);}
             if step==2 || step==3 {assert!(dirty>0,"changed retained prediction must mark actual cells");}
             if !tracked {assert!(cells.reusable(target,coordinate).is_none(),"cold/rebound output must force full native effect work");}
@@ -797,7 +797,7 @@ fn fused_prediction_one_pixel_compares_signed_zero_and_tiny_alpha_bits() {
     let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let (texture,view)=create_color_target(&r.device,[1,1],"tracked one-pixel contribution");
     let flags=r.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("one-cell comparison flags"),
-        contents:&[256u32,1,0,0,0].map(u32::to_le_bytes).as_flattened(),usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST|wgpu::BufferUsages::COPY_SRC});
+        contents:[256u32,1,0,0,0].map(u32::to_le_bytes).as_flattened(),usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST|wgpu::BufferUsages::COPY_SRC});
     let doc=document_at([256;2]);let target=source_at(&doc,0);
     let dab=crate::tests::test_dab([0.,0.],[0.,0.,0.,1.],0.8);
     let batch=dab_batch(target,crate::layer_tests::preset_style(DefaultBrushPreset::GPen),dab.bounds());

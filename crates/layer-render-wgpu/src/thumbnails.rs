@@ -10,8 +10,14 @@ pub(super) struct Thumbnails {
     tx: mpsc::Sender<Result<ReadbackImage, GpuRasterError>>,
     rx: mpsc::Receiver<Result<ReadbackImage, GpuRasterError>>,
     pending: usize,
+    paused:Vec<PausedThumbnail>,
     gpu: Option<PreviewPipeline>,
     pub(super) sources: Option<crate::source_thumbnails::SourceThumbnails>,
+}
+struct PausedThumbnail {
+    target:ThumbnailTarget,revision:u64,epoch:u64,memory:bool,
+    #[cfg(not(target_arch="wasm32"))]
+    _watch:Option<layer_core::memory::CollectionWatch>,
 }
 impl Thumbnails {
     pub fn new() -> Self {
@@ -19,7 +25,7 @@ impl Thumbnails {
         Self {
             tx,
             rx,
-            pending: 0,
+            pending: 0,paused:Vec::new(),
             gpu: None,
             sources: None,
         }
@@ -113,7 +119,36 @@ impl WgpuRasterizer {
     }
     /// Prepare at most four source or paint pages, or reduce a batch of
     /// changed layer pages, before requesting readback.
+    pub fn thumbnail_preparation_paused(&self,target:ThumbnailTarget)->bool {
+        let epoch=layer_core::memory::generation();
+        self.thumbnails.paused.iter().any(|pause|pause.target==target && pause.revision==self.artwork_revision && pause.epoch==epoch)
+            && self.validate_thumbnail(target).is_ok()
+    }
+    pub(crate) fn thumbnail_memory_waiting(&self)->bool {
+        self.thumbnails.paused.iter().any(|pause|pause.memory && pause.revision==self.artwork_revision && self.validate_thumbnail(pause.target).is_ok())
+    }
+    pub(crate) fn poll_thumbnail_retry(&mut self)->bool {
+        let epoch=layer_core::memory::generation();let mut released=false;
+        let mut paused=std::mem::take(&mut self.thumbnails.paused);
+        paused.retain(|pause| {
+            if pause.revision!=self.artwork_revision || self.validate_thumbnail(pause.target).is_err() {return false;}
+            if pause.epoch!=epoch {released=true;false}else {true}
+        });
+        self.thumbnails.paused=paused;released
+    }
+    fn pause_thumbnail(&mut self,target:ThumbnailTarget,epoch:u64,error:&GpuRasterError)->Result<(),GpuRasterError> {
+        let memory=match error {GpuRasterError::Memory(_)=>true,GpuRasterError::Busy=>false,_=>return Ok(()),};
+        if epoch!=layer_core::memory::generation() {return Ok(());}
+        #[cfg(not(target_arch="wasm32"))]
+        let watch=memory.then(layer_core::memory::CollectionWatch::new).transpose().map_err(GpuRasterError::collection_watch_failure)?;
+        self.thumbnails.paused.push(PausedThumbnail {target,revision:self.artwork_revision,epoch,memory,
+            #[cfg(not(target_arch="wasm32"))] _watch:watch});Ok(())
+    }
     pub fn prepare_thumbnail_batch(&mut self, target: ThumbnailTarget) -> Result<bool, GpuRasterError> {
+        let epoch=layer_core::memory::generation();
+        self.thumbnails.paused.retain(|pause|pause.revision==self.artwork_revision && pause.epoch==epoch);
+        if self.thumbnail_preparation_paused(target) {return Ok(false);}
+        let requests=self.decode_pressure.requests();
         self.validate_thumbnail(target)?;
         let source_target = self.thumbnail_source(target);
         if let Some(source) = source_target && !self.prepare_selection_thumbnail(source)? { return Ok(false); }
@@ -123,6 +158,7 @@ impl WgpuRasterizer {
                 label: Some("background photo thumbnail batch"),
             },
         );
+        self.drain_image_decodes(&mut encoder)?;
         let source = if source_target.is_some_and(|source| self.tiled_sources.contains_key(&source)) {
             let mut gpu = self.thumbnails.sources.take()
                 .unwrap_or_else(|| crate::source_thumbnails::SourceThumbnails::new(self));
@@ -138,7 +174,16 @@ impl WgpuRasterizer {
             self.thumbnails.gpu = Some(gpu);
             result
         };
-        let ready = result?;
+        self.thumbnails.paused.retain(|pause|pause.target!=target);
+        let ready=match result {
+            Ok(ready)=>ready,
+            Err(error) if error.is_preparation_pending()=>{self.pause_thumbnail(target,epoch,&error)?;false},
+            Err(error)=>return Err(error),
+        };
+        if !ready && self.decode_pressure.requests()!=requests
+            && let Some(error)=self.decode_pressure.error(layer_core::memory::generation(),self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())) {
+            self.thumbnails.paused.retain(|pause|pause.target!=target);self.pause_thumbnail(target,epoch,&error)?;
+        }
         self.uploads.finish(&encoder);
         encoder.submit(&self.queue);
         Ok(ready)
@@ -770,7 +815,7 @@ impl PreviewPipeline {
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<PageSurface, GpuRasterError> {
         if !self.prepare(r, target, encoder, usize::MAX, usize::MAX)? {
-            return Err(GpuRasterError::Effect("Thumbnail shader preparation pending".into()));
+            return Err(r.decode_pressure.error(layer_core::memory::generation(),r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())).unwrap_or(GpuRasterError::DeferredObjectWork));
         }
         Ok(self.prepared.pop_back().unwrap().result)
     }
@@ -862,5 +907,40 @@ impl BoundsPipeline {
         pass.set_bind_group(0, &output, &[]);
         pass.set_bind_group(1, &record, &[0]);
         pass.dispatch_workgroups(extent[0].saturating_sub(origin[0]).min(256).div_ceil(32), extent[1].saturating_sub(origin[1]).min(256).div_ceil(32), 1);
+    }
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+    #[test]
+    fn a_thumbnail_retains_cold_pages_while_pressure_parks_and_then_resumes() {
+        let extent=[600,300];let mut artwork=layer_core::Artwork::new(extent).unwrap();
+        let (_,target)=crate::test_support::add_paint(&mut artwork,"source",extent);
+        let SourceTarget::Paint(handle)=target else {unreachable!()};
+        let source=layer_core::color::source::rgba8_source(extent,|_,_|[255,0,0,255]);
+        artwork.paint.get_mut(handle).unwrap().base=Some(layer_core::authored::PaintBase::new(source.clone().into()));
+        let document=layer_core::Document::from_artwork(artwork).unwrap();
+        let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        r.ensure_document_metadata(extent,document.scene()).unwrap();
+        let packet=crate::test_support::packet(document.scene(),extent);
+        r.artwork_frame=Some(Arc::new(artwork::Frame::new(packet,document.scene().snapshot().context)));
+        let target=ThumbnailTarget::Source(target);
+        let failed=crate::object_image_mips::PreparedMipTile {attempt:layer_core::memory::generation(),id:layer_core::authored::PortableId::random(),source:source.clone(),coordinate:[0;2],pixels:Err(layer_core::memory::MemoryError.into())};
+        r.decode_pressure.image_failed(&failed,r.device.working_space());
+        for _ in 0..3 {
+            assert!(!r.prepare_thumbnail_batch(target).unwrap());assert!(r.thumbnail_preparation_paused(target));
+            assert!(r.thumbnail_memory_waiting());assert!(r.paint_layers[0].pages.is_empty());
+            assert!(r.moving_decode.as_ref().is_none_or(|(_,queue)|!queue.pending()));
+        }
+        layer_core::memory::notify_capacity_released();assert!(r.poll_memory_retry());
+        let deadline=std::time::Instant::now()+Duration::from_secs(20);
+        while !r.prepare_thumbnail_batch(target).unwrap() {
+            assert!(std::time::Instant::now()<deadline);r.wait_idle().unwrap();std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!r.thumbnail_preparation_paused(target));assert!(!r.thumbnail_memory_waiting());
+        let bytes=crate::source_thumbnails::tests::thumbnail(&mut r,target);
+        let center=(16*32+16)*4;assert_eq!(&bytes[center..center+4],&[255,0,0,255]);
+        assert!(r.paint_layers[0].pages.is_empty());
     }
 }

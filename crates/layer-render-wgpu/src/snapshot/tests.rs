@@ -65,7 +65,7 @@ fn package_previews_preserve_capture_color_alpha_sdr_and_source_only_fallback() 
         assert_eq!(preview.checkpoint, checkpoint);
         assert_eq!(preview.preview.size(), [512,2]);
         assert!(preview.preview.pixels().iter().zip(&expected).all(|(a,b)| a.abs_diff(*b)<=1));
-        assert!(preview.preview.pixels().chunks_exact(4).all(|p| p[3].abs_diff(128)<=1));
+        assert!(preview.preview.pixels().as_chunks::<4>().0.iter().all(|p| p[3].abs_diff(128)<=1));
         let package = PreparedPackage::prepare(&saved, Some(preview), &cancelled).unwrap();
         assert_eq!(package.preview_status, PreviewStatus::Included);
         let mut bytes = Vec::new(); package.write(&mut bytes, &cancelled).unwrap();
@@ -212,7 +212,7 @@ fn gaussian_all_sigmas_export_png_with_valid_opaque_and_partial_coverage() {
             assert_eq!(decoded.extent,extent);assert_eq!(decoded.interpretation.depth,SampleDepth::U16);
             let mut bytes=vec![0;decoded.row_bytes()];decoded.rows().read(0,&mut bytes).unwrap();
             let alpha=(c[3]*65535.).round() as u16;
-            assert!(bytes.chunks_exact(8).all(|p|u16::from_le_bytes(p[6..8].try_into().unwrap()).abs_diff(alpha)<=1));
+            assert!(bytes.as_chunks::<8>().0.iter().all(|p|u16::from_le_bytes(p[6..8].try_into().unwrap()).abs_diff(alpha)<=1));
         }
     }
     }
@@ -300,7 +300,7 @@ fn float32_exr_and_deliberate_pq_sdr_delivery_leave_master_unchanged() {
     assert_eq!(image.interpretation, target);
     let mut bytes = vec![0; image.row_bytes()];
     image.rows().read(0, &mut bytes).unwrap();
-    for (encoded, expected) in bytes.chunks_exact(16).zip(input) {
+    for (encoded, expected) in bytes.as_chunks::<16>().0.iter().zip(input) {
         assert_eq!(layer_core::color::hdr::decode_samples(SampleDepth::F32, encoded).unwrap().map(f32::to_bits), expected.map(f32::to_bits));
     }
     let mut pq = Vec::new();
@@ -472,7 +472,7 @@ fn frame(document: &Document) -> (WgpuRasterizer, Vec<[f32; 4]>) {
     .unwrap();
     let bytes = crate::layer_tests::page_bytes(&r, crate::test_support::document_texture(&r));
     let pixels = bytes
-        .chunks_exact(16)
+        .as_chunks::<16>().0.iter()
         .map(|p| {
             std::array::from_fn(|c| f32::from_le_bytes(p[c * 4..c * 4 + 4].try_into().unwrap()))
         })
@@ -540,7 +540,7 @@ fn snapshot_gray_identity_and_explicit_matte_keep_their_output_contracts() {
     for y in 0..256 {
         input.read(y, &mut row).unwrap();
         let gray = row
-            .chunks_exact(8)
+            .as_chunks::<8>().0.iter()
             .flat_map(|p| [p[0], p[1], p[6], p[7]])
             .collect::<Vec<_>>();
         builder.push_row(&gray).unwrap();
@@ -586,7 +586,7 @@ fn snapshot_gray_identity_and_explicit_matte_keep_their_output_contracts() {
         .write_png(&mut output, &target, Default::default(), Some(matte))
         .unwrap();
     let pixels = raw_rows(&decode(output));
-    assert!(pixels.chunks_exact(8).all(|p| &p[6..8] == [255, 255]));
+    assert!(pixels.as_chunks::<8>().0.iter().all(|p| p[6..8] == [255, 255]));
     for c in 0..3 {
         let actual = u16::from_le_bytes(pixels[c * 2..c * 2 + 2].try_into().unwrap());
         let expected = (RgbSpace::DisplayP3.encode(matte[c] as f64) * 65535.).round() as u16;
@@ -911,7 +911,7 @@ fn gaussian_snapshots_preserve_paired_tap_phase_across_grid_origins() {
     native.test.reference=true;
     native.submit(FramePacket {reset_layers:true,..packet(reopened.scene(),reopened.composition().size)}).unwrap();
     let native=crate::layer_tests::page_bytes(&native,crate::test_support::document_texture(&native));
-    let native:Vec<[f32;4]>=native.chunks_exact(16).map(|p|std::array::from_fn(|c|f32::from_le_bytes(p[c*4..c*4+4].try_into().unwrap()))).collect();
+    let native:Vec<[f32;4]>=native.as_chunks::<16>().0.iter().map(|p|std::array::from_fn(|c|f32::from_le_bytes(p[c*4..c*4+4].try_into().unwrap()))).collect();
     let delta=native.iter().zip(&after).enumerate().flat_map(|(i,(a,b))|(0..4).map(move|c|((a[c]-b[c]).abs(),i,c,a[c],b[c])))
         .max_by(|a,b|a.0.total_cmp(&b.0)).unwrap();
     assert!(delta.0<=2e-6,"Gaussian native whole versus graph translation={translation:?}: {delta:?}");
@@ -1184,7 +1184,7 @@ fn snapshot_dither_is_repeatable_across_formats_and_keeps_master_and_identity_sa
     let rounded = raw_rows(&decode(normal));
     assert_eq!(dithered, raw_rows(&decode(tiff.into_inner())));
     assert_ne!(dithered, rounded);
-    for (a, b) in dithered.chunks_exact(4).zip(rounded.chunks_exact(4)) {
+    for (a, b) in dithered.as_chunks::<4>().0.iter().zip(rounded.as_chunks::<4>().0.iter()) {
         assert_eq!(a[3], b[3]);
         assert!(a[..3].iter().zip(&b[..3]).all(|(a, b)| a.abs_diff(*b) <= 1));
     }
@@ -1250,10 +1250,10 @@ fn flattened_copy_preserves_complete_composition_precision_extent_and_resolution
         .encode_premultiplied(&full, &mut expected, None, [0, 0])
         .unwrap();
     let actual = raw_rows(source);
-    for (a, b) in actual.chunks_exact(2).zip(expected.chunks_exact(2)) {
+    for (a, b) in actual.as_chunks::<2>().0.iter().zip(expected.as_chunks::<2>().0.iter()) {
         assert!(
-            u16::from_le_bytes(a.try_into().unwrap())
-                .abs_diff(u16::from_le_bytes(b.try_into().unwrap()))
+            u16::from_le_bytes(*a)
+                .abs_diff(u16::from_le_bytes(*b))
                 <= 1
         );
     }
@@ -1513,7 +1513,7 @@ fn exported_green(document: &Document) -> Vec<i32> {
     let target = SourceInterpretation { channels: SourceChannels::Rgba, depth: SampleDepth::U8, profile: ColorProfile::Builtin(RgbSpace::Srgb), profile_assumed: false };
     let mut png = Vec::new();
     capture(roundtrip(document)).unwrap().write_png(&mut png, &target, Default::default(), None).unwrap();
-    raw_rows(&layer_color::photo::read_photo(Cursor::new(png), Default::default()).unwrap()).chunks_exact(4).map(|p| i32::from(p[1])).collect()
+    raw_rows(&layer_color::photo::read_photo(Cursor::new(png), Default::default()).unwrap()).as_chunks::<4>().0.iter().map(|p| i32::from(p[1])).collect()
 }
 fn presented_green(document: &Document) -> Vec<i32> {
     let document = &roundtrip(document);
@@ -1524,7 +1524,7 @@ fn presented_green(document: &Document) -> Vec<i32> {
     let (texture, surface) = crate::create_target(&r.device, [width, height], wgpu::TextureFormat::Rgba8UnormSrgb, "relief canvas");
     let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     presenter.present(&r, &surface, view, [0., 0., 0., 1.]).unwrap();
-    crate::layer_tests::page_bytes(&r, &texture).chunks_exact(4).map(|p| i32::from(p[1])).collect()
+    crate::layer_tests::page_bytes(&r, &texture).as_chunks::<4>().0.iter().map(|p| i32::from(p[1])).collect()
 }
 fn assert_canvas_matches_export(document: &Document, export: &[i32], label: &str) {
     let canvas = presented_green(document);

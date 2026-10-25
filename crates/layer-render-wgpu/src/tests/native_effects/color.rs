@@ -314,7 +314,7 @@ fn p21_hue_overlaps_sum_before_clamping_and_do_not_cascade() {
         let mut r = WgpuRasterizer::new_native_headless(DocumentColor { space, depth: SampleDepth::F32 }).unwrap();
         let rgb = transform(physical_hue(30., 0.08), RgbSpace::Srgb, space).map(|v| v as f32);
         for image in [false, true] {
-            let mut hue = Hue::default(); hue.master = [10., -10., 5.];
+            let mut hue = Hue {master:[10., -10., 5.],..Default::default()};
             hue.ranges[0] = [40., 70., 80., 30., 180., 0.]; hue.ranges[1] = [-15., 60., -20., 30., 180., 0.];
             let mut adjustment = effect(2, "hue_saturation", image); configure(&mut adjustment, &hue);
             let first = frame(&mut r, &[adjustment.clone(), source(rgb, 0.37)]);
@@ -462,7 +462,7 @@ fn filter_weights_preserve_exact_original_and_signed_output_endpoints() {
         for rgb in [physical_hue(80.,0.08).map(|v|v as f32),[1.,0.,0.],[0.8,0.15,0.02],[-0.125,0.34,1.25]] {
             for alpha in [0.37,1.,0.5,8e-8] {
                 let input=source(rgb,alpha);
-                let original=frame(&mut renderer,&[input.clone()]);
+                let original=frame(&mut renderer,std::slice::from_ref(&input));
                 let actual=frame(&mut renderer,&[constant(image),input.clone()]);
                 assert_eq!(actual.map(f32::to_bits),adjusted.map(f32::to_bits),"full filter image={image} rgb={rgb:?} alpha={alpha}");
                 let mut document=effect_document(&[constant(image),input],[256;2],renderer.document_color);
@@ -473,7 +473,7 @@ fn filter_weights_preserve_exact_original_and_signed_output_endpoints() {
         }
         for alpha in [0.5,1.] {
             let input=source([1.;3],alpha);
-            let original=frame(&mut renderer,&[input.clone()]);
+            let original=frame(&mut renderer,std::slice::from_ref(&input));
             let mut document=effect_document(&[constant(image),input],[256;2],renderer.document_color);
             let handle=document.scene().order()[0];
             document.artwork.occurrences.get_mut(handle).unwrap().blend=layer_core::LayerBlend::Multiply;

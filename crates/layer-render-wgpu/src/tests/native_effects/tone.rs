@@ -153,7 +153,7 @@ fn table_probe(name: &str, image: bool, component: usize) -> EffectInstance {
 fn samples(r: &mut WgpuRasterizer, layer: &EffectInstance) -> Vec<f32> {
     frame(r, std::slice::from_ref(layer));
     crate::layer_tests::page_bytes(r, crate::test_support::document_texture(r))
-        .chunks_exact(16)
+        .as_chunks::<16>().0.iter()
         .map(|p| f32::from_le_bytes(p[..4].try_into().unwrap()))
         .collect()
 }
@@ -298,7 +298,7 @@ fn native_profiled_curves_match_integer16_reference_through_fused_and_physical_p
             set(&mut curves, "rgb", EffectValue::Curve(points.clone()));
             frame(&mut r, &[curves, input]);
             let bytes = crate::layer_tests::page_bytes(&r, crate::test_support::document_texture(&r));
-            for (code, pixel) in bytes.chunks_exact(16).enumerate() {
+            for (code, pixel) in bytes.as_chunks::<16>().0.iter().enumerate() {
                 let value = f32::from_le_bytes(pixel[..4].try_into().unwrap());
                 let coverage = f32::from_le_bytes(pixel[12..].try_into().unwrap());
                 assert_eq!(coverage, alpha);
@@ -335,7 +335,7 @@ fn hdr_log_curves_and_exposure_retain_range_across_physical_passes() {
         let mut r=WgpuRasterizer::new_native_headless(DocumentColor{space,depth}).unwrap();
         for image in [false,true] {
             for alpha in [0.,1./16777216.,0.5,1.] {
-                let rgb=[-0.25,4.,if depth == SampleDepth::F32 { 1000000.125 } else { 32768. }];
+                let rgb=[-0.25,4.,if depth == SampleDepth::F32 { f32::from_bits(0x4974_2402) } else { 32768. }];
                 let mut curve=effect(2,"curves",image);
                 set(&mut curve,"domain",EffectValue::Choice(1));set(&mut curve,"hdr_stops",EffectValue::Number(4.));
                 set(&mut curve,"rgb",EffectValue::Curve(points.clone()));
@@ -360,7 +360,7 @@ fn final_effect_covers_partial_document_tiles_without_overwriting_neighbors() {
             let document=effect_document(&layers,extent,r.document_color);
             r.submit(FramePacket{ commit_rasters: true,view:ViewState{width_px:extent[0],height_px:extent[1],..test_view()},document_extent:extent,scene:document.scene().with_owner(0,0),selection_overlays:None,inspect_mask:None,dabs:&[],dab_batches:&[],restore_rasters:&[],reset_layers:true,composite_all:true,time_seconds:0.,blend_space:Default::default()}).unwrap();
             let pixels=crate::layer_tests::page_bytes(&r,crate::test_support::document_texture(&r));
-            for (i,p) in pixels.chunks_exact(16).enumerate() {
+            for (i,p) in pixels.as_chunks::<16>().0.iter().enumerate() {
                 let actual: [f32;4]=std::array::from_fn(|c| f32::from_le_bytes(p[c*4..c*4+4].try_into().unwrap()));
                 assert_eq!(actual,[0.25,2.,-0.125,1.],"{depth:?} {extent:?} {},{}",i%extent[0] as usize,i/extent[0] as usize);
             }
@@ -448,6 +448,6 @@ fn native_gradient_signed_hdr_interpolation_keeps_finite_interior_values() {
         let raw=bits.map(f32::from_bits);
         assert!(raw.iter().all(|v|v.is_finite()),"{mix:?}: {raw:?}");
         let actual=std::array::from_fn(|c|if c==3 {1.}else{(f64::from(raw[c])/2f64.powi(127)) as f32});
-        close(actual,[(f64::from(magnitude)/2f64.powi(127)*f64::from(expected)) as f32;3],1.,&format!("signed HDR {mix:?}"));
+        close(actual,[(f64::from(magnitude)/2f64.powi(127)*expected) as f32;3],1.,&format!("signed HDR {mix:?}"));
     }
 }

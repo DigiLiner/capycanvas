@@ -33,7 +33,7 @@ fn large_photo_display_plans_bound_pixels_without_changing_document_dimensions()
 fn value(x: u32, y: u32) -> [f32; 4] {
     let alpha = ((x * 7 + y * 3) % 17) as f32 / 16.;
     [
-        if (x + y) % 2 == 0 { -0.125 } else { 1.125 } * alpha,
+        if (x + y).is_multiple_of(2) { -0.125 } else { 1.125 } * alpha,
         ((x * 13 + y * 29) % 257) as f32 / 256. * alpha,
         ((x / 256 + y / 256) % 7) as f32 / 6. * alpha,
         alpha,

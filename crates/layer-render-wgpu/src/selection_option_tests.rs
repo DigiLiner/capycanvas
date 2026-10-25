@@ -183,8 +183,8 @@ fn selection_resize_uses_circular_extrema_preserves_soft_values_and_clips_edges(
         }
     }
     let words: Vec<u32> = bytes
-        .chunks_exact(4)
-        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        .as_chunks::<4>().0.iter()
+        .map(|b| u32::from_le_bytes(*b))
         .collect();
     let input = Selection::pixels(Arc::new(
         SelectionPixels::bytes([128, 128], [0, 0, 60, 75], words).unwrap(),
@@ -237,7 +237,7 @@ fn binary(selected: impl Fn(i32, i32) -> bool) -> Vec<u8> {
     (0..128 * 128).map(|i| if selected(i % 128, i / 128) { 255 } else { 0 }).collect()
 }
 fn from_bytes(bytes: &[u8]) -> Selection {
-    let words: Vec<u32> = bytes.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
+    let words: Vec<u32> = bytes.as_chunks::<4>().0.iter().map(|b| u32::from_le_bytes(*b)).collect();
     let covered = |i: usize| bytes[i] != 0;
     let (xs, ys): (Vec<u32>, Vec<u32>) = (0..bytes.len()).filter(|&i| covered(i)).map(|i| (i as u32 % 128, i as u32 / 128)).unzip();
     let bounds = match (xs.iter().min(), ys.iter().min()) {
@@ -566,7 +566,7 @@ fn replacing_a_displayed_preview_repaints_only_around_either_outline() {
     let mut full = presenter(&r);
     full.present(&r, &fresh.create_view(&Default::default()), view(), [1.; 4]).unwrap();
     assert!(page_bytes(&r, &retained) == page_bytes(&r, &fresh), "and matches a complete redraw");
-    let outlined = page_bytes(&r, &fresh).chunks_exact(4).filter(|p| p[0] < 10 || p[0] > 245).count();
+    let outlined = page_bytes(&r, &fresh).as_chunks::<4>().0.iter().filter(|p| p[0] < 10 || p[0] > 245).count();
     assert!(outlined > 100, "the preview draws an outline: {outlined}");
 }
 
@@ -596,8 +596,8 @@ fn selection_resize_latency() {
         .map(|i| (20 + (i % 2048 * 13 + i / 2048 * 7) % 200) as u8)
         .collect();
     let words: Vec<_> = bytes
-        .chunks_exact(4)
-        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        .as_chunks::<4>().0.iter()
+        .map(|b| u32::from_le_bytes(*b))
         .collect();
     let input = Selection::pixels(Arc::new(
         SelectionPixels::bytes([2048, 2048], [0, 0, 2048, 2048], words).unwrap(),

@@ -80,15 +80,21 @@ impl WgpuRasterizer {
         previous: &RasterData,
         data: &Arc<RasterData>,
     ) -> Result<(), GpuRasterError> {
+        if !self.snapshot_worker { return self.publish_prepared_restore(target,data); }
+        let (before,selected)=self.select_restore_data(target,previous,data,&BTreeSet::new());
+        self.restore_raster(target,&before,&selected)?;
+        if let Some(native)=&mut self.native_edit {native.backing.insert(target,data.clone());}
+        Ok(())
+    }
+
+    pub(super) fn select_restore_data(&self,target:SourceTarget,previous:&RasterData,data:&RasterData,required:&BTreeSet<[u32;2]>)->(RasterData,RasterData) {
         if let Some(native) = &self.native_edit {
             let paint = self.paint_layers.iter().find(|l| l.id == target);
-            data.validate_storage_index(self.target_extent(target), paint.is_none(), self.document_color())
-                .map_err(GpuRasterError::Effect)?;
             let resident: BTreeSet<_> = paint
                 .into_iter()
                 .flat_map(|l| &l.pages)
                 .map(|p| p.coordinate)
-                .collect();
+                .chain(required.iter().copied()).collect();
             let other_bytes: u64 = self
                 .paint_layers
                 .iter()
@@ -123,15 +129,9 @@ impl WgpuRasterizer {
             before.tiles.retain(|key, _| {
                 key.plane != RasterPlane::Color || resident.contains(&key.coordinate)
             });
-            self.restore_raster(target, &before, &selected)?;
-            self.native_edit
-                .as_mut()
-                .unwrap()
-                .backing
-                .insert(target, data.clone());
-            return Ok(());
+            return (before,selected);
         }
-        self.restore_raster(target, previous, data)
+        (previous.clone(),data.clone())
     }
 
     pub(crate) fn publish_cold_raster(&mut self, target: SourceTarget, data: &Arc<RasterData>) -> Result<(), GpuRasterError> {

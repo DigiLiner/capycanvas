@@ -35,19 +35,19 @@ fn preview(r:&mut WgpuRasterizer,id:u64,request:&BrushStampRequest)->Vec<u8> {
 fn reference(r:&mut WgpuRasterizer,doc:&Document,id:u64,style:DabStyle,dabs:&[layer_render::Dab])->Vec<u8> {
     let batch=DabBatch {material_update:0,stroke_id:StrokeId(id),target:doc.working.target.unwrap(),kind:DabBatchKind::Persistent,
         stroke_start:true,stroke_end:true,first_dab:0,dab_count:dabs.len() as u32,style,damage:Rect::from_extent(SIZE)};
-    r.submit(FramePacket {reset_layers:true,dabs,dab_batches:std::slice::from_ref(&batch),..packet(doc)}).unwrap();
-    r.submit(packet(doc)).unwrap();r.readback_srgb_rgba8().unwrap()
+    support::submit_settled(r,FramePacket {reset_layers:true,dabs,dab_batches:std::slice::from_ref(&batch),..packet(doc)});
+    r.readback_srgb_rgba8().unwrap()
 }
 fn check(r:&mut WgpuRasterizer,doc:&Document,id:u64,name:&str,request:BrushStampRequest,style:DabStyle,dabs:&[layer_render::Dab]) {
     let before=reference(r,doc,id,style,dabs);
     let stamp=preview(r,id,&request);
     let after=r.readback_srgb_rgba8().unwrap();assert_eq!(after,before,"{name}: preview must not change live artwork");
-    let maximum=stamp.iter().zip(before.chunks_exact(4)).map(|(a,p)|a.abs_diff(p[3])).max().unwrap();
+    let maximum=stamp.iter().zip(before.as_chunks::<4>().0.iter()).map(|(a,p)|a.abs_diff(p[3])).max().unwrap();
     if let Ok(path)=std::env::var("LAYER_TEST_ARTIFACTS") {
         let path=std::path::Path::new(&path);std::fs::create_dir_all(path).unwrap();
         let file=std::fs::File::create(path.join(format!("{name}.png"))).unwrap();let mut encoder=png::Encoder::new(file,192,192);
         encoder.set_color(png::ColorType::Grayscale);encoder.set_depth(png::BitDepth::Eight);encoder.write_header().unwrap().write_image_data(&stamp).unwrap();
-        let alpha:Vec<u8>=before.chunks_exact(4).map(|p|p[3]).collect();
+        let alpha:Vec<u8>=before.as_chunks::<4>().0.iter().map(|p|p[3]).collect();
         let file=std::fs::File::create(path.join(format!("{name}.reference.png"))).unwrap();let mut encoder=png::Encoder::new(file,192,192);
         encoder.set_color(png::ColorType::Grayscale);encoder.set_depth(png::BitDepth::Eight);encoder.write_header().unwrap().write_image_data(&alpha).unwrap();
     }

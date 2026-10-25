@@ -170,13 +170,13 @@ fn exported(r: &WgpuRasterizer, document: &Document) -> Vec<u8> {
 }
 
 fn floats(bytes: &[u8]) -> Vec<f32> {
-    bytes.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect()
+    bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect()
 }
 
 /// The encoded composite, decoded on the CPU.
 fn decoded(composite: &[f32]) -> Vec<f32> {
     composite
-        .chunks_exact(4)
+        .as_chunks::<4>().0.iter()
         .flat_map(|p| {
             let a = p[3];
             let decode = |c: f32| if a > 0. { (RgbSpace::Srgb.decode(f64::from(c / a)) * f64::from(a)) as f32 } else { c };
@@ -204,7 +204,7 @@ fn export_and_readback_equal_the_live_composite_in_both_spaces() {
                 assert!((live - export).abs() <= 2e-5, "{depth:?} {space:?} value {i}: decoded composite {live} != export {export}");
             }
             let srgb = r.readback_srgb_rgba8().unwrap();
-            for (i, (code, export)) in srgb.iter().zip(floats(&exported(&r, &document)).chunks_exact(4).flat_map(|p| {
+            for (i, (code, export)) in srgb.iter().zip(floats(&exported(&r, &document)).as_chunks::<4>().0.iter().flat_map(|p| {
                 let a = p[3];
                 [p[0], p[1], p[2]].map(|c| if a > 0. { layer_core::color::srgb_encode(c / a) } else { 0. }).into_iter().chain([a])
             })).enumerate() {
@@ -252,7 +252,7 @@ fn black_at_half_opacity_over_white_is_middle_gray_only_when_blending_perceptual
 }
 
 fn rgba(bytes: &[u8]) -> Vec<Rgba> {
-    floats(bytes).chunks_exact(4).map(|p| std::array::from_fn(|c| f64::from(p[c]))).collect()
+    floats(bytes).as_chunks::<4>().0.iter().map(|p| std::array::from_fn(|c| f64::from(p[c]))).collect()
 }
 
 #[test]

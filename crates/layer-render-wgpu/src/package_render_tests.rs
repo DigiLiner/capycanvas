@@ -125,8 +125,8 @@ fn saved_render_contracts(angular_only:bool) {
         let output=pixels(&gpu,document,*sdr);
         assert_eq!(output.len(),(EXTENT[0]*EXTENT[1]) as usize);assert_eq!(length,output.len()*16);
         let (mut peak,mut square)=(0f64,0f64);let mut witness=None;
-        for (channel,(actual,expected)) in output.iter().flatten().zip(baseline[offset..offset+length].chunks_exact(4)).enumerate() {
-            let expected=f32::from_le_bytes(expected.try_into().unwrap());
+        for (channel,(actual,expected)) in output.iter().flatten().zip(baseline[offset..offset+length].as_chunks::<4>().0.iter()).enumerate() {
+            let expected=f32::from_le_bytes(*expected);
             assert!(actual.is_finite() && expected.is_finite(),"{name}: nonfinite channel {channel}");
             let error=f64::from(*actual)-f64::from(expected);if error.abs()>peak {peak=error.abs();witness=Some((channel,*actual,expected));}square+=error*error;
         }
@@ -152,8 +152,8 @@ fn saved_vector_render_contract() {
     let baseline = include_bytes!("fixtures/vector-renders.rgba32f");
     assert_eq!(baseline.len(), output.len() * 4);
     let (mut peak, mut square) = (0f64, 0f64);
-    for (actual, expected) in output.iter().zip(baseline.chunks_exact(4)) {
-        let error = f64::from(*actual) - f64::from(f32::from_le_bytes(expected.try_into().unwrap()));
+    for (actual, expected) in output.iter().zip(baseline.as_chunks::<4>().0.iter()) {
+        let error = f64::from(*actual) - f64::from(f32::from_le_bytes(*expected));
         peak = peak.max(error.abs());
         square += error * error;
     }

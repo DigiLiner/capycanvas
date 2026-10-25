@@ -258,7 +258,7 @@ fn entire_filter_catalog_renders_masks_freezes_and_animates() {
             id.id()
         );
         assert!(
-            output.chunks_exact(4).any(|p| p[3] > 0),
+            output.as_chunks::<4>().0.iter().any(|p| p[3] > 0),
             "{} must not erase the image",
             id.id()
         );
@@ -266,8 +266,8 @@ fn entire_filter_catalog_renders_masks_freezes_and_animates() {
         if program.kind == layer_core::EffectKind::Adjustment && program.alpha == EffectAlpha::Preserve {
             assert!(
                 output
-                    .chunks_exact(4)
-                    .zip(original.chunks_exact(4))
+                    .as_chunks::<4>().0.iter()
+                    .zip(original.as_chunks::<4>().0.iter())
                     .all(|(a, b)| a[3] == b[3]),
                 "{} preserves alpha",
                 id.id()
@@ -317,8 +317,8 @@ fn entire_filter_catalog_renders_masks_freezes_and_animates() {
         submit(&mut r, EXTENT, &document, 20., false, true, None);
         assert!(
             image(&mut r)
-                .chunks_exact(4)
-                .zip(original.chunks_exact(4))
+                .as_chunks::<4>().0.iter()
+                .zip(original.as_chunks::<4>().0.iter())
                 .all(|(a, b)| a[3] == b[3]),
             "{} clipping preserves base coverage",
             id.id()

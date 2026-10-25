@@ -706,7 +706,7 @@ mod tests {
         renderer.papers.require(&renderer.device, None, &scaled(&hot, 2., false), startup::OTHER).unwrap();
         let started = |papers: &Papers| papers.bakes.iter().filter(|b| matches!(b.stage, Stage::Probing { .. } | Stage::Baking { .. })).map(|b| b.surface.texture.clone()).collect::<Vec<_>>();
         renderer.papers.advance(&renderer.device, &renderer.queue, false, Some(&hot)).unwrap();
-        assert_eq!(started(&renderer.papers), [rough.clone()], "a held paper waits while another advances");
+        assert_eq!(started(&renderer.papers).as_slice(), std::slice::from_ref(&rough), "a held paper waits while another advances");
         renderer.papers.advance(&renderer.device, &renderer.queue, true, None).unwrap();
         renderer.papers.require(&renderer.device, None, &scaled(&rough, 3., false), startup::OTHER).unwrap();
         renderer.papers.require(&renderer.device, None, &scaled(&hot, 3., false), startup::OTHER).unwrap();

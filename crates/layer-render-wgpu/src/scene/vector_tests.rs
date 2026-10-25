@@ -457,7 +457,7 @@ fn vector_layer_thumbnails_show_their_paths() {
         for _ in 0..50 { if r.prepare_thumbnail_batch(layer_render::ThumbnailTarget::Occurrence(layer)).unwrap() { break; } crate::test_support::complete(r); }
         r.request_thumbnail(1, layer_render::ThumbnailTarget::Occurrence(layer)).unwrap();
         crate::test_support::complete(r);
-        r.take_thumbnail().unwrap().unwrap().bytes.chunks_exact(4).filter(|p| p[3] > 128).count()
+        r.take_thumbnail().unwrap().unwrap().bytes.as_chunks::<4>().0.iter().filter(|p| p[3] > 128).count()
     };
     let shown = inked(&mut r);
     assert!(shown > 20, "the thumbnail shows the line: {shown} pixels");
@@ -1379,7 +1379,7 @@ fn width_previews_on_a_display_level_that_keeps_one_layer_image_show_the_paths_a
         let mut fresh = WgpuRasterizer::new_native_headless(applied.document().composition().color).unwrap();
         submit_ready(&mut fresh, FramePacket { view, ..packet(applied.document().scene(), extent) });
         let (shown, expected) = (presented(&r, view), presented(&fresh, view));
-        let differing = shown.chunks_exact(4).zip(expected.chunks_exact(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+        let differing = shown.as_chunks::<4>().0.iter().zip(expected.as_chunks::<4>().0.iter()).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
         assert!(differing <= 64, "the {width} px preview shows what applying it draws, but for {differing} pixels");
     }
 }

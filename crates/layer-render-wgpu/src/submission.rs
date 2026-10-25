@@ -105,6 +105,7 @@ impl CommandEncoder {
         self.total_passes += count as u64;
     }
     pub fn pass_count(&self) -> u64 { self.total_passes }
+    pub fn has_work(&self)->bool {self.resource_work || self.total_passes!=0}
     pub fn can_fit_passes(&self, count: usize) -> bool {
         count <= Self::PASSES_PER_SUBMISSION - self.passes
     }

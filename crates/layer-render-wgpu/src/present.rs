@@ -1514,7 +1514,7 @@ mod tests {
                 renderer.paint_layers.iter().map(|layer| layer.pages.len()).sum::<usize>());
             let (texture, surface) = crate::create_target(renderer.device(), extent, wgpu::TextureFormat::Rgba8UnormSrgb, "restored backdrop");
             presenter.present(&renderer, &surface, packet.view, [0., 0., 0., 1.]).unwrap();
-            assert!(crate::layer_tests::page_bytes(&renderer, &texture).chunks_exact(4).all(|pixel| pixel == [255; 4]));
+            assert!(crate::layer_tests::page_bytes(&renderer, &texture).as_chunks::<4>().0.iter().all(|pixel| *pixel == [255; 4]));
             assert_eq!(restored, (false, 0, 0), "backdrop-only frame must leave excluded native paint undecoded");
             renderer.prepare_startup(&document, &layer_core::default_brush(layer_core::DefaultBrushPreset::GPen), false).unwrap();
             crate::test_support::wait_startup(&mut renderer, Instant::now() + Duration::from_secs(30),
@@ -1531,7 +1531,7 @@ mod tests {
             }
             assert_eq!(renderer.readback_srgb_rgba8().unwrap(), expected, "the full document restores exact native paint");
             presenter.present(&renderer, &surface, packet.view, [0., 0., 0., 1.]).unwrap();
-            assert!(crate::layer_tests::page_bytes(&renderer, &texture).chunks_exact(4).all(|pixel| pixel == [0, 0, 255, 255]));
+            assert!(crate::layer_tests::page_bytes(&renderer, &texture).as_chunks::<4>().0.iter().all(|pixel| *pixel == [0, 0, 255, 255]));
         }
     }
     #[test]
@@ -1612,9 +1612,9 @@ mod tests {
             let pixels = crate::layer_tests::page_bytes(&renderer, &texture);
             let actual = &pixels[(64 * 128 + 64) * 4..][..4];
             let alpha = if overlay.active && !overlay.protected { overlay.color[3] } else { 0. };
-            for channel in 0..3 {
+            for (channel,&sample) in actual[..3].iter().enumerate() {
                 let expected = (layer_core::color::RgbSpace::Srgb.encode(f64::from(1. - alpha + overlay.color[channel] * alpha)) * 255.).round() as u8;
-                assert!(actual[channel].abs_diff(expected) <= 1, "{overlay:?} channel {channel}: {} vs {expected}", actual[channel]);
+                assert!(sample.abs_diff(expected) <= 1, "{overlay:?} channel {channel}: {} vs {expected}", sample);
             }
             assert_eq!(actual[3], 255);
             assert_eq!((renderer.artwork_revision, renderer.composite_revision, renderer.display_selection_revision, renderer.selection_paint_revision), revisions);

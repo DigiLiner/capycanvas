@@ -25,6 +25,13 @@ pub(super) fn retained_targets(scene: SceneView<'_>) -> std::collections::BTreeM
     targets
 }
 
+pub(super) fn neighborhood<const N:usize>(coordinate:[u32;2],offsets:[Option<[i32;2]>;N])->impl Iterator<Item=[u32;2]> {
+    offsets.into_iter().flatten().filter_map(move|[dx,dy]| {
+        let [x,y]=[i64::from(coordinate[0])+i64::from(dx),i64::from(coordinate[1])+i64::from(dy)];
+        Some([u32::try_from(x).ok()?,u32::try_from(y).ok()?])
+    })
+}
+
 pub(super) struct RawTile {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
@@ -56,6 +63,10 @@ pub(super) fn paint_base_bounds(base: &PaintBase) -> PixelRect {
 pub(super) fn paint_base_contains(base: &PaintBase, coordinate: [u32; 2]) -> bool {
     !paint_base_bounds(base).intersect(page_rect(coordinate)).is_empty()
 }
+pub(super) fn paint_base_source_bounds(base:&PaintBase,coordinate:[u32;2])->PixelRect {
+    let bounds=paint_base_bounds(base).intersect(page_rect(coordinate));
+    if bounds.is_empty() {PixelRect::EMPTY}else {PixelRect::new(bounds.min_x()-base.offset[0],bounds.min_y()-base.offset[1],bounds.max_x()-base.offset[0],bounds.max_y()-base.offset[1])}
+}
 
 pub(super) fn plan_paint_base(r: &WgpuRasterizer, base: &PaintBase, coordinate: [u32; 2]) -> Result<Option<PaintBaseRead>, GpuRasterError> {
     let bounds = paint_base_bounds(base).intersect(page_rect(coordinate));
@@ -69,7 +80,7 @@ pub(super) fn plan_paint_base(r: &WgpuRasterizer, base: &PaintBase, coordinate: 
     let (tile, write) = cache.plan_base(r, base, coordinate)?;
     let Some(write) = write else { return Ok(Some(PaintBaseRead {tile,pending:Vec::new(),assembly:None})); };
     let mut leases = vec![cache.lease(&tile.view).unwrap()];
-    let source_bounds = PixelRect::new(bounds.min_x() - base.offset[0], bounds.min_y() - base.offset[1], bounds.max_x() - base.offset[0], bounds.max_y() - base.offset[1]);
+    let source_bounds = paint_base_source_bounds(base,coordinate);
     let mut pending = Vec::with_capacity(4);
     let mut copies = Vec::with_capacity(4);
     for source_coordinate in page_coordinates(source_bounds) {
@@ -130,12 +141,7 @@ impl WgpuRasterizer {
             return Ok(());
         }
         let mut leases = Vec::with_capacity(N);
-        for [dx, dy] in offsets.into_iter().flatten() {
-            let [x, y] = [coordinate[0] as i32 + dx, coordinate[1] as i32 + dy];
-            if x < 0 || y < 0 {
-                continue;
-            }
-            let neighbor = [x as u32, y as u32];
+        for neighbor in neighborhood(coordinate,offsets) {
             if preview && self.preview_page(neighbor).is_some()
             {
                 continue;
@@ -194,7 +200,7 @@ impl WgpuRasterizer {
                 return &page.active().view;
             }
             if let Ok(Some(blob)) = self.native_color_tile(layer.id, neighbor)
-                && let Some(view) = sources.prepared_raster_view(&blob, self.document_color().space)
+                && let Some(view) = sources.prepared_raster_view(&blob, self.document_color().space, self.document_color().space)
             {
                 return view;
             }
@@ -279,7 +285,7 @@ mod tests {
         let plan = plan_paint_base(&r,&base,[1,1]).unwrap().unwrap();
         assert_eq!(plan.pending.len(),4);
         drop(plan);
-        let tile = r.paint_base_tile(&base,[1,1],&mut encoder).unwrap().unwrap();
+        let tile = crate::test_support::query_ready(&mut r,&mut encoder,|r,encoder|r.paint_base_tile(&base,[1,1],encoder)).unwrap();
         submit(&mut r,encoder);
         for (i,actual) in crate::test_support::float_pixels(&r,&tile.texture).into_iter().enumerate() {
             let [x,y]=[i as u32%PAGE_SIZE+239,i as u32/PAGE_SIZE+225];
@@ -288,8 +294,8 @@ mod tests {
         }
         let aligned=PaintBase {offset:[PAGE_SIZE;2],..base};
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        let direct=r.paint_base_tile(&PaintBase::new(source.clone().into()),[0,0],&mut encoder).unwrap().unwrap();
-        let shifted=r.paint_base_tile(&aligned,[1,1],&mut encoder).unwrap().unwrap();
+        let direct=crate::test_support::query_ready(&mut r,&mut encoder,|r,encoder|r.paint_base_tile(&PaintBase::new(source.clone().into()),[0,0],encoder)).unwrap();
+        let shifted=crate::test_support::query_ready(&mut r,&mut encoder,|r,encoder|r.paint_base_tile(&aligned,[1,1],encoder)).unwrap();
         assert_eq!(direct.view,shifted.view);
         assert!(r.paint_base_tile(&aligned,[0,0],&mut encoder).unwrap().is_none());
         submit(&mut r,encoder);
@@ -305,16 +311,22 @@ mod tests {
         paint.raster=RasterRevision::backed(RasterData {tiles:[(TileKey {plane:RasterPlane::Color,coordinate:[1,1]},RasterTile::backed(TileBlob::encode(layer_core::color::DocumentColor::default().paint_descriptor(),&vec![0;256*256*4]).unwrap()))].into(),..Default::default()});
         (Document::from_artwork(artwork).unwrap(),target)
     }
-    fn thumbnail(r:&mut WgpuRasterizer,target:SourceTarget)->Vec<u8>{r.request_thumbnail(1,ThumbnailTarget::Source(target)).unwrap();crate::test_support::complete(r);r.take_thumbnail().unwrap().unwrap().bytes}
+    fn thumbnail(r:&mut WgpuRasterizer,target:SourceTarget)->Vec<u8>{crate::test_support::thumbnail(r,1,ThumbnailTarget::Source(target))}
     fn sample(r:&mut WgpuRasterizer,target:SourceTarget,position:[u32;2])->[f32;4]{
         assert!(r.request_color_sample(ColorSampleRequest {request_id:1,source:ColorSampleSource::Source(target),position,area:ColorSampleArea::Average5}).unwrap());
-        crate::test_support::complete(r);r.take_color_sample().unwrap().unwrap().rgba
+        let deadline=std::time::Instant::now()+READBACK_TIMEOUT;
+        loop {
+            crate::test_support::complete(r);
+            if let Some(sample)=r.take_color_sample() {return sample.unwrap().rgba;}
+            assert!(std::time::Instant::now()<deadline,"source sample must complete");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
     #[test]
     fn paint_base_offset_display_exact_reads_regions_thumbnails_and_material_match_authored_pixels() {
         let (mut offset,target)=document(true);let (mut baked,baked_target)=document(false);let extent=offset.composition().size;
         let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();let mut reference=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-        r.submit(crate::test_support::packet(offset.scene(),extent)).unwrap();reference.submit(crate::test_support::packet(baked.scene(),extent)).unwrap();
+        crate::test_support::submit_settled(&mut r,crate::test_support::packet(offset.scene(),extent));crate::test_support::submit_settled(&mut reference,crate::test_support::packet(baked.scene(),extent));
         let pixels=|r:&WgpuRasterizer|crate::test_support::float_pixels(r,crate::test_support::document_texture(r));
         assert_eq!(pixels(&r),pixels(&reference));
         assert_eq!(thumbnail(&mut r,target),thumbnail(&mut reference,baked_target));
@@ -327,7 +339,7 @@ mod tests {
         for (document,r,target) in [(&mut offset,&mut r,target),(&mut baked,&mut reference,baked_target)] {
             let SourceTarget::Paint(handle)=target else {unreachable!()};document.artwork.paint.get_mut(handle).unwrap().raster=RasterRevision::pending();
             let batches=[crate::test_support::dab_batch(target,crate::tests::test_style(BrushExecution::Dry),Rect {min:Point {x:230.,y:220.},max:Point {x:270.,y:260.}})];
-            r.submit(FramePacket {dabs:&dabs,dab_batches:&batches,composite_all:true,..crate::test_support::packet(document.scene(),extent)}).unwrap();
+            crate::test_support::submit_settled(r,FramePacket {dabs:&dabs,dab_batches:&batches,composite_all:true,..crate::test_support::packet(document.scene(),extent)});
         }
         assert_eq!(pixels(&r),pixels(&reference));
     }
@@ -343,7 +355,7 @@ mod tests {
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
         let mip_bytes=r.source_tiles.borrow().mip_budget();assert!(r.source_tiles.borrow_mut().reserve_mips(mip_bytes,&encoder).unwrap());
         let offsets=std::array::from_fn::<_,9,_>(|i|Some([3*(i as i32%3),3*(i as i32/3)]));
-        r.prepare_raw_neighborhood(target,[1,1],offsets,false,&mut encoder).unwrap();
+        crate::test_support::query_ready(&mut r,&mut encoder,|r,encoder|r.prepare_raw_neighborhood(target,[1,1],offsets,false,encoder));
         let sources=r.source_tiles.borrow();let layer=r.paint_layers.iter().find(|l|l.id==target).unwrap();
         let views=r.raw_layer_neighborhood(&sources,layer,[1,1],offsets,false);
         assert!(views.iter().all(|view|**view!=r.empty_view));

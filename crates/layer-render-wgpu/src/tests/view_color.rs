@@ -113,7 +113,7 @@ fn tool_cursor_bank_draws_distinct_dark_icons_with_light_surrounds_and_clears() 
         let extent = (256. * scale) as u32;
         let target = crate::create_target(r.device(), [extent; 2], wgpu::TextureFormat::Rgba8UnormSrgb, "tool cursor gallery").0;
         let view = ViewState { width_px: extent, height_px: extent,
-            document_to_surface: [scale, 0., 0., scale, 0., 0.], ..view() };
+            document_to_surface: [scale, 0., 0., scale, 0., 0.] };
         p.set_cursor(r.device(), &[], scale);
         p.present(&r, &target.create_view(&Default::default()), view, [0.2, 0.2, 0.2, 1.]).unwrap();
         let before = crate::layer_tests::page_bytes(&r, &target);
@@ -128,7 +128,7 @@ fn tool_cursor_bank_draws_distinct_dark_icons_with_light_surrounds_and_clears() 
         if let Ok(directory) = std::env::var("LAYER_TEST_ARTIFACTS") {
             let path = std::path::Path::new(&directory).join(format!("tool-cursors-{scale}.ppm"));
             let mut bytes = format!("P6\n{extent} {extent}\n255\n").into_bytes();
-            bytes.extend(actual.chunks_exact(4).flat_map(|pixel| pixel[..3].iter().copied()));
+            bytes.extend(actual.as_chunks::<4>().0.iter().flat_map(|pixel| pixel[..3].iter().copied()));
             std::fs::write(path, bytes).unwrap();
         }
         let mut icons = std::collections::HashSet::new();
@@ -264,7 +264,7 @@ fn native_surface_rotation_preserves_artwork_cursor_and_clipped_overview() {
     }).unwrap();
     frame(&mut r, &mut source(RgbSpace::Srgb, [17000, 45000, 5000, 33000]));
     let view = ViewState { width_px: 192, height_px: 128,
-        document_to_surface: [0.45, 0., 0., 0.35, 19., 13.], ..view() };
+        document_to_surface: [0.45, 0., 0., 0.35, 19., 13.] };
     let mut presenter = ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, SdrSurfaceColor::Srgb).unwrap();
     presenter.set_cursor(r.device(), &[layer_render::CursorSegment {
         from: [13., 21.], to: [73., 52.], distance: 0., marker: 1., scale: 1.,
@@ -377,9 +377,9 @@ fn native_export_thumbnails_and_raw_samples_keep_their_declared_color_coordinate
                         complete(&r);
                         let sample = r.take_color_sample().unwrap().unwrap();
                         let working = linear(RgbSpace::ProPhoto, codes, space);
-                        for c in 0..3 {
+                        for (c,&component) in working[..3].iter().enumerate() {
                             assert!(
-                                (f64::from(sample.rgba[c]) - working[c]).abs() < 3e-6,
+                                (f64::from(sample.rgba[c]) - component).abs() < 3e-6,
                                 "{space:?} raw {area:?}"
                             );
                         }
@@ -573,7 +573,7 @@ fn hdr_paint_and_photo_thumbnails_follow_the_sdr_rendition_without_clipping() {
                 channels: SourceChannels::Rgba, depth: SampleDepth::F16,
                 profile: ColorProfile::Builtin(RgbSpace::Srgb), profile_assumed: false,
             }, 4 * 1024 * 1024).unwrap();
-            for row in raw.chunks_exact(256 * 8) { builder.push_row(row).unwrap(); }
+            for row in raw.as_chunks::<{ 256 * 8 }>().0 { builder.push_row(row).unwrap(); }
             paint_mut(&mut layer).base = Some(layer_core::authored::PaintBase::new((Arc::new(builder.finish().unwrap())).into()));
         } else {
             paint_mut(&mut layer).raster = RasterRevision::backed(RasterData {
@@ -930,12 +930,12 @@ fn local_sdr_spatial_guide_matches_cpu_and_preserves_master() {
                                 [expected[0], expected[1], expected[2]].map(f64::from),
                             )
                         };
-                        for c in 0..3 {
+                        for (c,&component) in rgb[..3].iter().enumerate() {
                             let i = (y * 256 + x) * 16 + c * 4;
                             let value =
                                 f32::from_le_bytes(actual[i..i + 4].try_into().unwrap()) as f64;
                             let checker=if (x/16+y/16)%2==0 {1.}else{RgbSpace::Srgb.decode(0.8)};
-                            let expected = (rgb[c] + checker * (1. - p[3] as f64)) * 2.5375;
+                            let expected = (component + checker * (1. - p[3] as f64)) * 2.5375;
                             assert!(
                                 (value - expected).abs() < 0.0005,
                                 "{space:?} {x},{y} contrast={contrast} balance={balance} proof={proof} headroom={headroom}: {value} vs {expected}"
@@ -979,7 +979,7 @@ fn surface_quantization_matches_every_code_with_independent_spatial_noise() {
         let (texture,target)=crate::create_target(r.device(),size,format,"every quantized code");
         let mut presenter=ViewportPresenter::for_surface(&r,format,SdrSurfaceColor::Srgb).unwrap();
         presenter.present(&r,&target,camera,[0.;4]).unwrap();
-        for (i,pixel) in crate::layer_tests::page_bytes(&r,&texture).chunks_exact(4).enumerate() {
+        for (i,pixel) in crate::layer_tests::page_bytes(&r,&texture).as_chunks::<4>().0.iter().enumerate() {
             let x=i as u32%size[0];let y=i as u32/size[0];
             let seed=x.wrapping_mul(0x9e3779b9).wrapping_add(y.wrapping_mul(0x85ebca6b)).wrapping_add(0x3c6ef372);
             let noise=((hash(seed)&65535) as f32+(hash(seed^0xa511e9b3)&65535) as f32+1.)/65536.-1.;
@@ -1032,7 +1032,7 @@ fn surface_triangular_quantization_is_phase_stable_and_format_aware() {
                     for y in 1..7 {for x in 1..7 {let index=(y*border_size[0] as usize+x)*stride;assert_eq!(&bytes[index..index+stride],&bytes[stride..stride*2],"UI surround must remain spatially constant");}}
                 }
                 if format==wgpu::TextureFormat::Rgba16Float {
-                    let samples:Vec<_>=first.chunks_exact(8).map(|p|u16::from_le_bytes(p[..2].try_into().unwrap())).collect();
+                    let samples:Vec<_>=first.as_chunks::<8>().0.iter().map(|p|u16::from_le_bytes(p[..2].try_into().unwrap())).collect();
                     assert!(samples.iter().all(|p|p&0x7c00!=0x7c00),"floating output must remain finite");
                     if alpha==1. {assert!(samples.iter().all(|p|*p==samples[0]),"float surface must not add quantization noise");}
                     continue;

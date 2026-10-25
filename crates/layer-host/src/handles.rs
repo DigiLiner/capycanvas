@@ -273,7 +273,7 @@ mod tests {
         let mut values=Table::default();
         let index=values.vacant().unwrap();
         values.slots[index].entry=Some(entry(3));
-        let old=Handle(1u64<<32|index as u64+1);
+        let old=Handle((1u64<<32)|(index as u64+1));
         assert_eq!(values.remove::<u8>(old).err(),Some(Error::WrongType));
         assert!(values.free.is_empty());
         drop(values.remove::<usize>(old).unwrap());
@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(reused,index);
         assert_eq!(values.slots[reused].generation,2);
         values.slots[reused].entry=Some(entry(5));
-        let current=Handle(2u64<<32|reused as u64+1);
+        let current=Handle((2u64<<32)|(reused as u64+1));
         assert!(values.entry::<usize>(current).is_ok());
         assert_eq!(values.entry::<usize>(old).err(),Some(Error::Invalid));
         assert_eq!(values.entry::<usize>(Handle(1u64<<32|u32::MAX as u64)).err(),Some(Error::Invalid));
@@ -295,11 +295,11 @@ mod tests {
         let index=values.vacant().unwrap();
         values.slots[index].generation=MAX_GENERATION-1;
         values.slots[index].entry=Some(entry(1));
-        let before=Handle((u64::from(MAX_GENERATION-1)<<32)|index as u64+1);
+        let before=Handle((u64::from(MAX_GENERATION-1)<<32)|(index as u64+1));
         drop(values.remove::<usize>(before).unwrap());
         assert_eq!(values.vacant(),Ok(index));
         values.slots[index].entry=Some(entry(2));
-        let last=Handle((u64::from(MAX_GENERATION)<<32)|index as u64+1);
+        let last=Handle((u64::from(MAX_GENERATION)<<32)|(index as u64+1));
         assert!(Handle::from_raw(last.raw()).is_ok());
         drop(values.remove::<usize>(last).unwrap());
         assert!(values.free.is_empty());

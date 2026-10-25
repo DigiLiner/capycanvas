@@ -313,7 +313,7 @@ fn smudge_keeps_to_paint_and_never_writes_image_layers() {
     engine.set_brush(smudge()).unwrap();
     flush(&mut engine);
     stroke(&mut engine, &mut input, 1, [160., 80.], [400., 120.]);
-    assert!((0..2).map(|x| layer_page(engine.backend(), TARGET, [x, 0])).flatten().all(|pixel| pixel[3] == 0.),
+    assert!((0..2).flat_map(|x| layer_page(engine.backend(), TARGET, [x, 0])).all(|pixel| pixel[3] == 0.),
         "smudging empty paint above the image picks up nothing from it");
     assert!(engine.document().scene().object_layer(layer).is_some());
 }

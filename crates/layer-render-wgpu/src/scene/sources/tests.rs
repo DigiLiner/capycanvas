@@ -33,7 +33,9 @@ fn raster_cache_keys_share_generated_contents_and_keep_loaded_owner_identity() {
 
 #[test]
 fn equal_generated_rasters_reuse_gpu_pixels_without_another_sample_decode() {
-    let mut r = crate::test_support::private_sample_renderer(Default::default());
+    let gpu = crate::test_support::private_sample_renderer(Default::default());
+    let mut r = WgpuRasterizer::native_capture_on_gpu(gpu.adapter.clone(), gpu.device.clone(), gpu.queue.clone(), Default::default()).unwrap();
+    drop(gpu);
     let mut scene = Scene::new(&r).unwrap();
     let descriptor = r.document_color().paint_descriptor();
     let bytes = [64, 128, 192, 255].repeat((PAGE_SIZE * PAGE_SIZE) as usize);
@@ -182,7 +184,9 @@ fn repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set() {
 
 #[test]
 fn discarded_source_decodes_cannot_be_reused_as_valid_pixels() {
-    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let gpu = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut r = WgpuRasterizer::native_capture_on_gpu(gpu.adapter.clone(), gpu.device.clone(), gpu.queue.clone(), Default::default()).unwrap();
+    drop(gpu);
     r.source_tiles.get_mut().limits.slots = 2;
     let source = scan_source(3, 32);
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
@@ -350,7 +354,7 @@ fn decoded_sources_preserve_srgb_codes_and_padding() {
     r.uploads.finish(&encoder); encoder.submit(&r.queue);
     let read = crate::layer_tests::page_bytes(&r, &output);
     let mut maximum_error = 0_f64;
-    for (i, p) in read.chunks_exact(16).enumerate() {
+    for (i, p) in read.as_chunks::<16>().0.iter().enumerate() {
         let actual = std::array::from_fn::<_, 4, _>(|c| f32::from_ne_bytes(p[c * 4..c * 4 + 4].try_into().unwrap()));
         let (x, y) = (i % PAGE_SIZE as usize, i / PAGE_SIZE as usize);
         if x >= 255 || y >= 19 { assert_eq!(actual, [0.; 4]); continue; }
@@ -440,7 +444,7 @@ fn prepared_gray_alpha_samples_are_expanded_by_shared_worker_before_upload() {
     let source=Arc::new(builder.finish().unwrap());
     let prepared=crate::prepare_image_tile(&source,[0;2],RgbSpace::Srgb,&r.device.source_samples,None).unwrap();
     let PreparedSourcePixels::NativeSamples(bytes)=&prepared else {panic!("Expected native working samples")};
-    assert!(bytes.chunks_exact(4).all(|pixel|pixel==[96,96,96,192]));
+    assert!(bytes.as_chunks::<4>().0.iter().all(|pixel|*pixel==[96,96,96,192]));
     let reads=r.device.source_samples.stats();let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
     let tile=Scene::decode_prepared(&mut r,&mut encoder,&source,[0;2],prepared).unwrap();
     r.uploads.finish(&encoder);encoder.submit(&r.queue);

@@ -527,7 +527,7 @@ impl Drop for RasterCapture {
 }
 
 impl WgpuRasterizer {
-    pub(super) fn raster_restore_ready(&self, packet: FramePacket<'_>) -> bool {
+    pub(super) fn raster_restore_backing_ready(&self, packet: FramePacket<'_>) -> bool {
         let runtime = self.raster.as_ref();
         let ready = |current: Option<&Target>, data: &RasterData| {
             data.tiles.iter().all(|(key, tile)| {
@@ -630,6 +630,9 @@ impl WgpuRasterizer {
         reset: bool,
         tiles: &[Vec<BrushTile>],
     ) -> Result<Vec<(SourceTarget, PixelRect)>, GpuRasterError> {
+        if let Some(error)=self.take_restore_failure() {return Err(error);}
+        self.validate_restore_publication()?;
+        self.publish_warm_restore_pages()?;
         let mut runtime = self.raster.take().unwrap_or_default();
         let result = (|| {
             let mut damage = Vec::new();
@@ -643,6 +646,7 @@ impl WgpuRasterizer {
             let retained = source_access::retained_targets(packet.scene);
             runtime.targets.retain(|id, _| retained.contains_key(id));
             for (id, revision) in packet.restore_rasters {
+                if retained.get(id).and_then(|scene|scene.raster(*id)).is_some_and(|root|root.try_data().is_some_and(|data|data.is_ok())) {continue;}
                 if let Some(current) = runtime.targets.get_mut(id) {
                     let data = revision.wait_data().map_err(GpuRasterError::Effect)?;
                     self.restore_target(*id, current, data, reset, &mut damage)?;
@@ -662,7 +666,7 @@ impl WgpuRasterizer {
                         None => None,
                     };
                     if let Some(current) = runtime.targets.get_mut(&id) {
-                        if reset || (wanted.is_some() && current.revision != *revision) {
+                        if reset || (wanted.is_some() && (current.revision != *revision || packet.restore_rasters.iter().any(|(target,_)|*target==id))) {
                             let data = wanted.unwrap_or_else(|| current.data.clone());
                             self.restore_target(id, current, data, reset, &mut damage)?;
                             if revision.try_data().is_some() {
@@ -739,6 +743,7 @@ impl WgpuRasterizer {
             Ok(damage)
         })();
         self.raster = Some(runtime);
+        if result.is_ok() {self.consume_restore_preflight();}
         result
     }
 
@@ -829,7 +834,7 @@ impl WgpuRasterizer {
         texture: wgpu::Texture,
     ) -> Result<(), GpuRasterError> {
         let space = self.document_color().space;
-        if self.source_tiles.borrow().prepared_raster_view(&blob, space).is_some() {
+        if self.source_tiles.borrow().prepared_raster_view(&blob, space, space).is_some() {
             if batch.capacity() == 0 { batch.reserve_exact(crate::native_tiles::MAX_BATCH_TILES); }
             batch.push((blob, texture));
             if batch.len() == crate::native_tiles::MAX_BATCH_TILES { self.restore_native_raster_batch(batch)?; }
@@ -868,6 +873,7 @@ impl WgpuRasterizer {
         previous: &RasterData,
         data: &RasterData,
     ) -> Result<(), GpuRasterError> {
+        if !self.snapshot_worker {return self.restore_direct(target,previous,data);}
         let _trace = crate::performance_trace::Span::new(c"capy.restore");
         let index = self.paint_layers.iter().position(|l| l.id == target);
         let mask = index.is_none();
@@ -931,6 +937,13 @@ impl WgpuRasterizer {
             }
         }
         self.restore_native_raster_batch(&mut native_batch)?;
+        self.publish_restored_pages(target,data,staging::PreparedPages {colors,masks,wetness})
+    }
+
+    pub(super) fn publish_restored_pages(&mut self,target:SourceTarget,data:&RasterData,pages:staging::PreparedPages)->Result<(),GpuRasterError> {
+        let staging::PreparedPages {colors,masks,wetness}=pages;
+        let index=self.paint_layers.iter().position(|layer|layer.id==target);
+        if index.is_none() && (!colors.is_empty() || !wetness.is_empty()) {return Err(GpuRasterError::MissingPaintLayer(target));}
         if let Some(index) = index {
             let layer = &mut self.paint_layers[index];
             layer.pages.retain(|p| {
@@ -996,6 +1009,7 @@ mod restore_tests;
 
 pub(super) mod native_edit;
 mod residency;
+pub(super) mod staging;
 
 fn prepare_capture(
     device: &wgpu::Device,
