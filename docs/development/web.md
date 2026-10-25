@@ -244,6 +244,8 @@ deferred header release and pointer IDs reused before a release callback runs.
 
 Viewport checks keep the selected input device active across resizes; touch
 emulation changes only when selecting a device case or restoring test state.
+Wall-clamp contacts use the current shared work area and reject return-home
+targets before dragging.
 Bubble source-journey failures capture the viewport, hit target and native input
 trace before restoring the workspace; enable `LAYER_BUBBLE_INPUT_TRACE=1` to
 retain that trace.
