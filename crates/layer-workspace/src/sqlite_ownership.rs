@@ -71,7 +71,6 @@ impl Ownership {
         self.held.retain(|id,held|rows.get(id).is_some_and(|row|
             row.0==held.owner.id && row.1.as_ref()==Some(&held.owner.epoch) && row.2==held.fence.to_string()));
         for (id,(_,_,_,until)) in rows {
-            input::work()?;
             let live = self.held.contains_key(&id) || self.try_lock(&id)?.is_none();
             if !live {
                 tx.execute(

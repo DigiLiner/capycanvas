@@ -106,7 +106,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                 StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::TheseChangesHaveAlreadyBeenRecoveredOrSaved)
             })?;
         self.flush().await?;
-        let mut entities = Vec::new();let mut budget=crate::input::InputBudget::default();
+        let mut entities = Vec::new();let mut budget=crate::input::InputBudget::stored();
         for write in &batch.writes {
             if write.delete || (write.create && model::is_default_item(&write.id)) {
                 continue;

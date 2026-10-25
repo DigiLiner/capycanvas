@@ -299,6 +299,11 @@ pub(crate) fn unpack(
 ) -> Result<ItemContent, StoreError> {
     unpack_with_budget(text,read,&mut crate::input::InputBudget::default())
 }
+pub(crate) fn unpack_stored(
+    text:&str,read:impl FnMut(&str,usize)->Result<String,StoreError>,
+)->Result<ItemContent,StoreError> {
+    unpack_with_budget(text,read,&mut crate::input::InputBudget::stored())
+}
 pub(crate) fn unpack_with_budget(
     text:&str,mut read:impl FnMut(&str,usize)->Result<String,StoreError>,budget:&mut crate::input::InputBudget,
 )->Result<ItemContent,StoreError> {

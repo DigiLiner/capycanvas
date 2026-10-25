@@ -3,28 +3,25 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 pub(crate) const MAX_INPUT_NODES:usize=layer_core::package::MAX_JSON_NODES;
-pub(crate) struct InputBudget {pub bytes:usize,nodes:usize}
+pub(crate) struct InputBudget {pub bytes:usize,nodes:Option<usize>}
 impl Default for InputBudget {
-    fn default()->Self {Self {bytes:MAX_PACKAGE_BYTES,nodes:MAX_INPUT_NODES}}
+    fn default()->Self {Self {bytes:MAX_PACKAGE_BYTES,nodes:Some(MAX_INPUT_NODES)}}
 }
 impl InputBudget {
+    pub fn stored()->Self {Self {bytes:MAX_PACKAGE_BYTES,nodes:None}}
     pub fn json(&mut self,text:&str)->Result<Value,StoreError> {
         self.bytes=self.bytes.checked_sub(text.len()).ok_or_else(limit)?;
-        #[cfg(feature="native")]
-        {self.nodes=self.nodes.min(crate::sqlite::input::remaining_nodes());}
-        let before=self.nodes;
-        let result=layer_core::package::parse_json_with_budget(text.as_bytes(),MAX_PACKAGE_BYTES,&mut self.nodes)
-            .map_err(|error|StoreError::invalid(error.to_string()));
-        #[cfg(feature="native")]
-        crate::sqlite::input::consumed_nodes(before-self.nodes);
-        #[cfg(not(feature="native"))]
-        let _=before;
-        result
+        match &mut self.nodes {
+            Some(nodes)=>layer_core::package::parse_json_with_budget(text.as_bytes(),MAX_PACKAGE_BYTES,nodes)
+                .map_err(|error|StoreError::invalid(error.to_string())),
+            None=>Ok(serde_json::from_str(text)?),
+        }
     }
 }
 pub(crate) fn limit()->StoreError {StoreError::invalid("Workspace input exceeds supported limits.")}
-pub(crate) fn json<T:DeserializeOwned>(text:&str)->Result<T,StoreError> {
-    Ok(serde_json::from_value(InputBudget::default().json(text)?)?)
+pub(crate) fn stored_json<T:DeserializeOwned>(text:&str)->Result<T,StoreError> {
+    if text.len()>MAX_PACKAGE_BYTES {return Err(limit());}
+    Ok(serde_json::from_str(text)?)
 }
 pub(crate) fn copy(text:&str,remaining:usize)->Result<String,StoreError> {
     if text.len()>remaining {return Err(limit());}
@@ -73,7 +70,7 @@ mod tests {
         let mut measured=InputBudget::default();
         crate::protocol::unpack_with_budget(&root,read,&mut measured).unwrap();
         let used=MAX_PACKAGE_BYTES-measured.bytes;assert!(used>root.len());
-        let mut budget=InputBudget {bytes:used*2-1,nodes:MAX_INPUT_NODES};
+        let mut budget=InputBudget {bytes:used*2-1,nodes:Some(MAX_INPUT_NODES)};
         crate::protocol::unpack_with_budget(&root,read,&mut budget).unwrap();
         assert!(crate::protocol::unpack_with_budget(&root,read,&mut budget).is_err());
     }

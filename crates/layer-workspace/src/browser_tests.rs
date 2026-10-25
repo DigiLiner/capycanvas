@@ -22,12 +22,12 @@ fn normalize(result: Result<StoreResponse, StoreError>) -> serde_json::Value {
 }
 
 #[test]
-fn bounded_schema_inspection_cannot_reset_a_newer_large_snapshot() {
+fn schema_inspection_preserves_newer_snapshots_before_and_after_large_fields() {
     let newer=SCHEMA_VERSION+1;
     let text=format!("{{\"schema\":{newer},\"padding\":[{}0]}}","0,".repeat(layer_core::package::MAX_JSON_NODES));
     assert_eq!(BrowserDatabase::replace(Some(&text)).err().unwrap().kind,ErrorKind::UnsupportedSchema);
     let late=format!("{{\"padding\":\"{}\",\"schema\":{newer}}}","x".repeat(70*1024));
-    assert!(BrowserDatabase::replace(Some(&late)).is_err());
+    assert_eq!(BrowserDatabase::replace(Some(&late)).err().unwrap().kind,ErrorKind::UnsupportedSchema);
     assert!(BrowserDatabase::replace(Some("broken snapshot")).is_ok());
 }
 #[test]

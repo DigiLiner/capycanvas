@@ -71,7 +71,7 @@ impl Default for BrowserDatabase {
     }
 }
 fn content(text: &str, batch: &CommitBatch) -> Result<ItemContent> {
-    protocol::unpack(text, |id,remaining| {
+    protocol::unpack_stored(text, |id,remaining| {
         batch
             .components
             .get(id)
@@ -91,7 +91,7 @@ fn update_ids(
     }
     Ok(field.clone())
 }
-fn schema(text:&str)->Result<Option<u64>> {
+fn schema(text:&str)->Option<u64> {
     struct Schema<'a>(&'a std::cell::Cell<Option<u64>>);
     impl<'de> serde::de::Visitor<'de> for Schema<'_> {
         type Value=Option<u64>;
@@ -107,22 +107,15 @@ fn schema(text:&str)->Result<Option<u64>> {
         }
     }
     use serde::Deserializer;
-    const LIMIT:usize=64*1024;
-    let mut decoder=serde_json::Deserializer::from_slice(&text.as_bytes()[..text.len().min(LIMIT)]);
+    let mut decoder=serde_json::Deserializer::from_str(text);
     let found=std::cell::Cell::new(None);
     let result=decoder.deserialize_map(Schema(&found));
-    if let Some(schema)=found.get() {return Ok(Some(schema));}
-    match result {
-        Ok(schema)=>Ok(schema),
-        Err(_) if text.len()>LIMIT=>Err(crate::input::limit()),
-        Err(_)=>Ok(None),
-    }
+    found.get().or_else(||result.ok().flatten())
 }
 impl BrowserDatabase {
     pub fn decode(text: &str) -> Result<Self> {
-        let value=crate::input::InputBudget::default().json(text)?;
-        match value.get("schema").and_then(serde_json::Value::as_u64) {
-            Some(schema) if schema == u64::from(SCHEMA_VERSION) => Ok(serde_json::from_value(value)?),
+        match schema(text) {
+            Some(schema) if schema == u64::from(SCHEMA_VERSION) => crate::input::stored_json(text),
             Some(schema) if schema > u64::from(SCHEMA_VERSION) => Err(newer_schema()),
             _ => Err(other_schema()),
         }
@@ -130,7 +123,7 @@ impl BrowserDatabase {
     /// `StoreRequest::Reset` for a snapshot that may not decode at all.
     pub fn replace(previous: Option<&str>) -> Result<Self> {
         if previous
-            .map(schema).transpose()?.flatten()
+            .and_then(schema)
             .is_some_and(|schema| schema > u64::from(SCHEMA_VERSION))
         {
             return Err(newer_schema());
@@ -431,7 +424,7 @@ impl BrowserDatabase {
                 let working = w
                     .working_json
                     .as_ref()
-                    .map(|j| crate::input::json(j))
+                    .map(|j| crate::input::stored_json(j))
                     .transpose()?;
                 self.fences
                     .insert(w.id.clone(), if w.claim { "1" } else { "0" }.into());
@@ -471,7 +464,7 @@ impl BrowserDatabase {
                     s.generations.layout = advance(s.generations.layout)?;
                 }
                 if let Some(j) = &w.working_json {
-                    s.entity.working = Some(crate::input::json(j)?);
+                    s.entity.working = Some(crate::input::stored_json(j)?);
                     s.generations.working = advance(s.generations.working)?;
                 }
                 s

@@ -23,14 +23,12 @@ impl SqliteStore {
             },
         )?;
         for entity in changed {
-            input::work()?;
             let old = items.iter().find(|s| s.entity.id == entity.id).unwrap();
             if old.entity.content != entity.content {
                 let mut components = BTreeMap::new();
                 let packed =
                     protocol::pack(serde_json::to_value(entity.content)?, &mut components)?;
                 for (id, json) in components {
-            input::work()?;
                     tx.execute(
                         "INSERT OR IGNORE INTO components(id,json) VALUES(?1,?2)",
                         params![id, json],
@@ -69,7 +67,6 @@ fn collect_components(connection: &Connection) -> Result<()> {
         used: &mut BTreeSet<String>,
         depth: usize,
     ) -> Result<()> {
-        input::work()?;
         if depth > 96 {
             return Err(StoreError::invalid(
                 "Resource references exceed supported depth.",
@@ -80,7 +77,7 @@ fn collect_components(connection: &Connection) -> Result<()> {
                 if let Some(id) = object.get("$workspace_component").and_then(|v| v.as_str()) {
                     if used.insert(id.into()) {
                         let json = component(connection, id,MAX_PACKAGE_BYTES)?;
-                        visit(&input::json(&json)?, connection, used, depth + 1)?;
+                        visit(&crate::input::stored_json(&json)?, connection, used, depth + 1)?;
                     }
                 } else {
                     for value in object.values() {
@@ -99,16 +96,13 @@ fn collect_components(connection: &Connection) -> Result<()> {
     }
     let mut used = BTreeSet::new();
     for text in strings(connection, "SELECT content FROM items",MAX_PACKAGE_BYTES)? {
-            input::work()?;
-        visit(&input::json(&text)?, connection, &mut used, 0)?;
+        visit(&crate::input::stored_json(&text)?, connection, &mut used, 0)?;
     }
     for text in strings(connection, "SELECT payload FROM pending",MAX_PACKAGE_BYTES)? {
-            input::work()?;
-        let batch: CommitBatch = input::json(&text)?;
+        let batch: CommitBatch = crate::input::stored_json(&text)?;
         used.extend(batch.components.keys().cloned());
     }
     for id in strings(connection, "SELECT id FROM components",64)? {
-            input::work()?;
         if !used.contains(&id) {
             connection.execute("DELETE FROM components WHERE id=?1", [id])?;
         }

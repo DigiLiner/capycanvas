@@ -1,4 +1,4 @@
-use crate::protocol::{PreparedWrite, unpack};
+use crate::protocol::{PreparedWrite, unpack_stored as unpack};
 use crate::store_rules::*;
 use crate::*;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -9,9 +9,9 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
-#[path = "sqlite_input.rs"]
-pub(crate) mod input;
-use input::{text,optional_text};
+#[path = "sqlite_rows.rs"]
+mod rows;
+use rows::{text,optional_text};
 const MAX_METADATA_BYTES:usize=MAX_DESCRIPTION_BYTES*8;
 const MAX_IDS_BYTES:usize=MAX_SWITCHER_IDS*(MAX_SWITCHER_ID_BYTES*6+3)+2;
 const MAX_ROW_BYTES: usize = MAX_PACKAGE_BYTES + 64 * 1024;
@@ -70,7 +70,6 @@ impl SqliteStore {
         Self::with_clock(path, Arc::new(SystemClock))
     }
     pub fn with_clock(path: &Path, clock: Arc<dyn Clock>) -> Result<Self> {
-        let _budget=input::Guard::new();
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
         {
@@ -96,7 +95,6 @@ impl SqliteStore {
         }
         options.open(path).map_err(unavailable)?;
         let mut connection = Connection::open(std::fs::canonicalize(path).map_err(unavailable)?)?;
-        input::install(&connection)?;
         use rusqlite::{config::DbConfig, limits::Limit};
         connection.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
         connection.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
@@ -135,7 +133,6 @@ impl SqliteStore {
         }
         preserve(Path::new(tx.path().unwrap_or_default()))?;
         for table in table_names(&tx)? {
-            input::work()?;
             tx.execute(
                 &format!("DROP TABLE \"{}\"", table.replace('"', "\"\"")),
                 [],
@@ -148,7 +145,6 @@ impl SqliteStore {
         Ok(())
     }
     pub fn handle(&mut self, request: StoreRequest) -> Result<StoreResponse> {
-        let _budget=input::Guard::new();
         if let Some(error) = self
             .incompatible
             .as_ref()
@@ -237,7 +233,7 @@ impl SqliteStore {
                     .connection
                     .prepare("SELECT payload FROM pending ORDER BY rowid")?;
                 let mut rows=statement.query([])?;let mut batches=Vec::new();
-                while let Some(row)=rows.next()? {batches.push(input::json(&text(row,0,MAX_PACKAGE_BYTES)?)?);}
+                while let Some(row)=rows.next()? {batches.push(crate::input::stored_json(&text(row,0,MAX_PACKAGE_BYTES)?)?);}
                 Ok(StoreResponse::Pending(batches))
             }
             StoreRequest::Reopen => {
@@ -248,7 +244,6 @@ impl SqliteStore {
         }
     }
     pub fn load(&mut self, id: &str) -> Result<StoredEntity> {
-        let _budget=input::Guard::new();
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -273,7 +268,7 @@ impl SqliteStore {
                 |r| text(r,0,MAX_IDS_BYTES),
             )
             .optional()?;
-        let current: Option<Vec<String>> = current.map(|s| input::json(&s)).transpose()?;
+        let current: Option<Vec<String>> = current.map(|s| crate::input::stored_json(&s)).transpose()?;
         if update_preference(current.as_ref(), expected, &ids, |id| {
             Ok(header(&tx, id)?.kind == "workspace")
         })? {
@@ -291,14 +286,13 @@ impl SqliteStore {
                 |r| text(r,0,MAX_IDS_BYTES),
             )
             .optional()?;
-        let ids: Option<Vec<String>> = json.map(|s| input::json(&s)).transpose()?;
+        let ids: Option<Vec<String>> = json.map(|s| crate::input::stored_json(&s)).transpose()?;
         if let Some(ids) = &ids {
             validate_switcher_ids(ids)?;
         }
         Ok(ids)
     }
     pub fn list(&mut self) -> Result<Vec<ItemSummary>> {
-        let _budget=input::Guard::new();
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -315,7 +309,7 @@ impl SqliteStore {
                 let row=header(&tx,&id);
                 let result = (|| -> Result<ItemSummary> {
                     let row=row.as_ref().map_err(Clone::clone)?;
-                    let metadata: Metadata = input::json(&row.metadata)?;
+                    let metadata: Metadata = crate::input::stored_json(&row.metadata)?;
                     metadata.validate()?;
                     Ok(ItemSummary {
                         id: id.clone(),
@@ -351,7 +345,6 @@ impl SqliteStore {
         Ok(values)
     }
     pub fn claim(&mut self, id: &str, owner: Owner) -> Result<StoredEntity> {
-        let _budget=input::Guard::new();
         let now = self.clock.now_ms();
         let tx = self
             .connection
@@ -378,7 +371,6 @@ impl SqliteStore {
         Ok(result)
     }
     pub fn renew(&mut self, id: &str, owner: &Owner, fence: u64) -> Result<Claim> {
-        let _budget=input::Guard::new();
         let now = self.clock.now_ms();
         let tx = self
             .connection
@@ -398,14 +390,12 @@ impl SqliteStore {
         Ok(claim)
     }
     pub fn release(&mut self, id: &str, owner: &Owner, fence: u64) -> Result<()> {
-        let _budget=input::Guard::new();
         // A delayed release must never clear a successor's claim.
         self.connection.execute("UPDATE items SET owner=NULL,epoch=NULL,lease_until=NULL WHERE id=?1 AND owner=?2 AND epoch=?3 AND fence=?4", params![id, owner.id, owner.epoch, fence.to_string()])?;
         self.ownership.release(id, owner, fence);
         Ok(())
     }
     pub(crate) fn retire_owner(&mut self, owner: &Owner) {
-        let _budget=input::Guard::new();
         // The window no longer exists. Even a failed database cleanup must not
         // pin its kernel locks in a worker shared by the surviving windows.
         // A subsequent transaction reclaims any leftover row; pending deliveries
@@ -417,7 +407,6 @@ impl SqliteStore {
         self.ownership.retire(owner);
     }
     pub fn commit(&mut self, batch: CommitBatch) -> Result<CommitReceipt> {
-        let _budget=input::Guard::new();
         let encoded = batch.encoded()?;
         let hash = content_id(encoded.as_bytes());
         let cancelled: bool = self.connection.query_row(
@@ -438,7 +427,6 @@ impl SqliteStore {
             };
         }
         validate_payload(&batch, |id,remaining| component(&self.connection, id,remaining))?;
-        input::work()?;
         // A pending delivery survives interruption until its receipt is acknowledged.
         self.connection.execute(
             "INSERT INTO pending(id,hash,payload) VALUES(?1,?2,?3) ON CONFLICT(id) DO NOTHING",
@@ -478,7 +466,6 @@ impl SqliteStore {
             };
         }
         for (id, json) in &batch.components {
-            input::work()?;
             tx.execute(
                 "INSERT INTO components(id,json) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING",
                 params![id, json],
@@ -489,7 +476,6 @@ impl SqliteStore {
             items: Vec::new(),
         };
         for id in &batch.abandon_operations {
-            input::work()?;
             if id == &batch.operation_id || id.len() > 128 {
                 return Err(StoreError::invalid("Invalid recovery delivery."));
             }
@@ -502,7 +488,7 @@ impl SqliteStore {
                 })
                 .optional()?;
             if let Some(original) = original {
-                let original: CommitBatch = input::json(&original)?;
+                let original: CommitBatch = crate::input::stored_json(&original)?;
                 let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM items WHERE owner=?1 AND epoch=?2 AND CAST(lease_until AS INTEGER)>?3)",params![original.owner.id,original.owner.epoch,now as i64],|r|r.get(0))?;
                 if original.owner != batch.owner && live {
                     return Err(StoreError::new(
@@ -517,7 +503,6 @@ impl SqliteStore {
         let mut guards = Vec::new();
         let mut released = Vec::new();
         for write in &batch.writes {
-            input::work()?;
             if write.create && write.claim {
                 guards.push((
                     write.id.clone(),
@@ -538,12 +523,11 @@ impl SqliteStore {
                     |row| text(row,0,MAX_IDS_BYTES),
                 )
                 .optional()?;
-            let pins = pins.map(|s| input::json(&s)).transpose()?;
+            let pins = pins.map(|s| crate::input::stored_json(&s)).transpose()?;
             let pins = with_created_pins(pins, &batch.pin_workspaces)?;
             tx.execute("INSERT INTO workspace_switcher(id,workspace_ids) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET workspace_ids=excluded.workspace_ids", [serde_json::to_string(&pins)?])?;
         }
         for (key, id) in &batch.bindings {
-            input::work()?;
             if let Some(id) = id {
                 let row = header(&tx, id)?;
                 check_binding(
@@ -684,9 +668,9 @@ fn load(connection: &Connection, id: &str) -> Result<StoredEntity> {
         })?;
     let entity = Entity {
         id: id.into(),
-        metadata: input::json(&row.metadata)?,
+        metadata: crate::input::stored_json(&row.metadata)?,
         content: unpack(&content, |id,remaining| component(connection, id,remaining))?,
-        working: working.map(|v| input::json(&v)).transpose()?,
+        working: working.map(|v| crate::input::stored_json(&v)).transpose()?,
     };
     entity.validate()?;
     Ok(StoredEntity {
@@ -701,7 +685,7 @@ fn receipt(connection: &Connection, id: &str) -> Result<Option<(String, CommitRe
             Ok((text(r,0,64)?, text(r,1,MAX_PACKAGE_BYTES)?))
         })
         .optional()?
-        .map(|(hash, text)| Ok((hash, input::json(&text)?)))
+        .map(|(hash, text)| Ok((hash, crate::input::stored_json(&text)?)))
         .transpose()
 }
 fn apply_write(
@@ -739,7 +723,7 @@ fn apply_write(
     let row = header(connection, &write.id)?;
     check_claim(row.claim.as_ref(), owner, write.fence, now)?;
     check_update(
-        &input::json(&row.metadata)?,
+        &crate::input::stored_json(&row.metadata)?,
         row.generations,
         write,
     )?;
@@ -792,7 +776,6 @@ fn resolve_name(
 ) -> Result<Metadata> {
     let kind = metadata.kind.key();
     apply_name_policy(metadata, policy, |key| {
-        input::work()?;
         Ok(connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM items WHERE kind=?1 AND name_key=?2 AND id!=?3)",
             params![kind, key, id],

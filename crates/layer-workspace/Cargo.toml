@@ -19,10 +19,10 @@ uuid = { version = "1", features = ["v4", "js"] }
 async-channel = { version = "2", optional = true }
 
 [target.'cfg(not(target_vendor = "apple"))'.dependencies]
-rusqlite = { version = "0.40.2", features = ["bundled", "backup", "limits", "hooks"], optional = true }
+rusqlite = { version = "0.40.2", features = ["bundled", "backup", "limits"], optional = true }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
-rusqlite = { version = "0.40.2", features = ["backup", "limits", "hooks"], optional = true }
+rusqlite = { version = "0.40.2", features = ["backup", "limits"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 libc = { version = "0.2", optional = true }
