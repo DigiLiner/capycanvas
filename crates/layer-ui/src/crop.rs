@@ -150,10 +150,8 @@ impl CropFrame {
     /// The canvas this frame cuts, turned upright about its centre.
     pub fn geometry(self, delete_outside: bool) -> CanvasGeometry {
         let [w, h] = self.size;
-        let low = [self.center.x - w / 2., self.center.y - h / 2.];
-        let high = [self.center.x + w / 2., self.center.y + h / 2.];
-        let origin = low.map(|v| v.round() as i32);
-        let size = std::array::from_fn(|i| (high[i].round() as i32 - origin[i]).max(1) as u32);
+        let origin = [self.center.x - w / 2., self.center.y - h / 2.].map(|v| v.round() as i32);
+        let size = self.size.map(|v| (v.round() as i32).max(1) as u32);
         let upright = self.angle.abs() < 1e-6;
         CanvasGeometry {
             rect: CanvasRect { origin, size },

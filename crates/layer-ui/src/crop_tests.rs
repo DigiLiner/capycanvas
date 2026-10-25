@@ -129,6 +129,13 @@ fn crop_starts_at_the_canvas_with_its_bar_and_blocks_other_edits() {
 }
 
 #[test]
+fn a_square_frame_crops_to_equal_sides_wherever_its_edges_fall() {
+    let frame = crop::CropFrame { center: Point { x: 692.9745, y: 692.5745 }, size: [1385.149; 2], angle: 0. };
+    let rect = frame.geometry(false).rect;
+    assert_eq!((rect.origin, rect.size), ([0, 0], [1385, 1385]));
+}
+
+#[test]
 fn a_ratio_from_the_bar_constrains_handle_drags_that_grow_the_canvas() {
     let mut s = crop_session();
     invoke(&mut s, CommandId::Crop);
