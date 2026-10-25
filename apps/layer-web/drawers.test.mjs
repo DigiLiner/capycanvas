@@ -229,12 +229,16 @@ export async function checkDrawerStyling({call,evaluate,settle}) {
       assert.ok(Math.abs(a.top-strip.top-6)<.01,'First tile retains the standard top padding');
       assert.equal(await evaluate('document.querySelectorAll(".collapsed-column .column-divider").length'),1,'Only the divider between groups is painted');
       assert.ok(Math.abs(b.top-a.bottom-12)<.01,'Collapsed groups use the toolbar divider plus its two gaps');
+      const metrics=await evaluate('layerApp.app.divider_metrics()');
       const line=async(selector,horizontal,name)=>{
-        const r=await rect(selector),p=[r.x+r.width/2,r.y+r.height/2];
-        assert.ok(Math.abs((horizontal?r.height:r.width)-8)<.01,'Dividers retain their standard slot');
+        const r=await rect(selector),across=Math.floor(metrics.size/2-.5)+.5,half=metrics.length/2;
+        assert.ok(Math.abs((horizontal?r.height:r.width)-metrics.size)<.01,'Dividers retain their standard slot');
+        const at=(along,off=0)=>horizontal?[r.x+r.width/2+along,r.y+across+off]:[r.x+across+off,r.y+r.height/2+along];
         const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${dir}/${theme}-${name}.png`,Buffer.from(shot.data,'base64'));
-        const colors=await sample(shot.data,[p,horizontal?[p[0],p[1]+2]:[p[0]+2,p[1]]]);
-        assert.notDeepEqual(colors[0],colors[1],`${theme} ${name}: separator line is visible`);
+        const [middle,beside,end,beyond]=await sample(shot.data,[at(0),at(0,2),at(half-1),at(half+1)]);
+        assert.notDeepEqual(middle,beside,`${theme} ${name}: separator line is visible`);
+        assert.deepEqual(end,middle,`${theme} ${name}: the line runs ${metrics.length} pixels`);
+        assert.deepEqual(beyond,beside,`${theme} ${name}: the line stops short of the lane`);
       };
       await line('.column-divider',true,'column-divider');
       await line('.toolbar-controls .tile-divider',false,'toolbar-divider-horizontal');

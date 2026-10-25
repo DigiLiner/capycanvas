@@ -56,9 +56,23 @@ export async function checkCrop({call,evaluate,settle,device=false}) {
     for(const label of path)await tapRow('.panel-context-menu:popover-open',label,kind);
   };
   const pressBar=async(command,kind)=>{
-    await wait(`!!document.querySelector('${bar} [data-command="${command}"]')&&${visible}`);
+    await wait(visible);
     if(await evaluate(onBar(`[data-command="${command}"]`)))return tap(await middle(`${bar} [data-command="${command}"]`),kind);
     await viaMore([await evaluate(`layerApp.state().commands.find(c=>c.id==='${command}').label`)],kind);
+  };
+  const group=id=>evaluate(`layerApp.app.catalog().tool_action_groups.find(g=>g.id===${JSON.stringify(id)}).label`);
+  const pickOverlay=async(command,kind)=>{
+    const label=await evaluate(`layerApp.state().commands.find(c=>c.id===${JSON.stringify(command)}).label`);
+    assert.equal(await evaluate(`!!document.querySelector('${bar} [data-toolbar-choice="crop-overlay"]')`),false,'Overlay is in More, not on the bar');
+    const name=await group('crop-overlay');
+    await wait(visible);
+    await tap(await middle(`${bar} .canvas-action-bar-more`),kind);
+    await tapRow('.panel-context-menu:popover-open',name,kind);
+    await wait(`!!${menuRow('.panel-context-menu:popover-open',label)}`);
+    const rows=await evaluate(`[...document.querySelectorAll('.panel-context-menu:popover-open .menu-label')].map(n=>n.textContent)`);
+    await tapRow('.panel-context-menu:popover-open',label,kind);
+    await wait(`!document.querySelector('.panel-context-menu:popover-open')`);
+    return rows;
   };
   const pick=async(group,label,kind)=>{
     const choice=`[data-toolbar-choice="${group}"]`;
@@ -148,11 +162,14 @@ export async function checkCrop({call,evaluate,settle,device=false}) {
       if(kind==='mouse') {
         await key('o','KeyO',79);
         await wait(`layerApp.state().commands.find(c=>c.id==='crop_overlay_grid').selected`);
-        assert.equal(await evaluate(`document.querySelector('${bar} [data-toolbar-choice="crop-overlay"] .toolbar-choice-label').textContent`),'Grid','O cycles the overlay');
-        const overlays=await pick('crop-overlay','Diagonal',kind);
-        if(overlays)assert.deepEqual(overlays,['Thirds','Grid','Diagonal','Golden Ratio'],'the Overlay dropdown');
-        assert.equal(await selected('crop_overlay_diagonal'),true);
-        await pick('crop-overlay','Thirds',kind);
+        const overlays=await pickOverlay('crop_overlay_diagonal',kind);
+        for(const command of ['crop_overlay_thirds','crop_overlay_grid','crop_overlay_diagonal','crop_overlay_golden']){
+          const label=await evaluate(`layerApp.state().commands.find(c=>c.id==='${command}').label`);
+          assert.ok(overlays.includes(label),`More › Overlay offers ${label}: ${overlays}`);
+        }
+        await wait(`layerApp.state().commands.find(c=>c.id==='crop_overlay_diagonal').selected`);
+        await pickOverlay('crop_overlay_thirds',kind);
+        await wait(`layerApp.state().commands.find(c=>c.id==='crop_overlay_thirds').selected`);
         await pause(300);
         await shot();
         const paper=await shown(await screen((width+side)/2-80,height-80));
@@ -255,7 +272,7 @@ export async function checkCrop({call,evaluate,settle,device=false}) {
     await key('Escape','Escape',27);
     await wait(`layerApp.state().layer_tools.tool!=='crop'`);
     assert.deepEqual(await size(),[width,height],'Escape cancels the crop');
-    console.log(`PASS crop (${device?'tablet':'desktop'}): with mouse, touch and pen, Ratio ▾ 1:1, a handle drag and Apply crop in one undo step with the image in place; Straighten by a drawn line turns the image; Delete Cropped Pixels leaves nothing for Canvas Size to reveal; a finger on a handle drags it, one finger inside the frame leaves it and two pan the view; C, O, the Overlay dropdown and the Tool Options width work; the shield ${overlay}; captures in ${directory}`);
+    console.log(`PASS crop (${device?'tablet':'desktop'}): with mouse, touch and pen, Ratio ▾ 1:1, a handle drag and Apply crop in one undo step with the image in place; Straighten by a drawn line turns the image; Delete Cropped Pixels leaves nothing for Canvas Size to reveal; a finger on a handle drags it, one finger inside the frame leaves it and two pan the view; C, O, More › Overlay, Delete Cropped Paint Pixels and Reset from More and the Tool Options width work; the shield ${overlay}; captures in ${directory}`);
   } catch(error) {
     await writeFile(`${directory}/failure.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
     console.error('Crop state',await evaluate(`JSON.stringify({error:layerApp.state().host_error,status:document.querySelector('#status').textContent,size:[layerApp.state().tabs[0].width,layerApp.state().tabs[0].height],

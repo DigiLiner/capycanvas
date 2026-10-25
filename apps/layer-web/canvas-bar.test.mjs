@@ -1,13 +1,13 @@
 import { FakeElement as SharedElement } from "./fake-dom.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCanvasBar, GAP, PADDING } from "./canvas-bar.js";
+import { createCanvasBar } from "./canvas-bar.js";
 
 class FakeElement extends SharedElement {
   constructor(tag, className = "") {
     super();
     this.tagName = tag.toUpperCase(); this.className = className; this.children = []; this.parentNode = null;
-    this.attributes = new Map(); this.dataset = {}; this.style = {}; this.hidden = false; this.disabled = false;
+    this.attributes = new Map(); this.dataset = {}; this.style = { setProperty(name, value) { this[name] = value; } }; this.hidden = false; this.disabled = false;
     this.listeners = {}; this.textContent = ""; this.title = ""; this.reads = 0; this.open = false;
   }
   get classList() {
@@ -54,9 +54,9 @@ class FakeElement extends SharedElement {
   }
 }
 
-function action(id, label, { name = label, enabled = true, selected = false, checkable = false, accent = false } = {}) {
-  return { option: { Action: { state: { id, icon: id, label: name, tooltip: `${label} tooltip`, enabled,
-    disabled_reason: enabled ? null : `${id} is unavailable`, selected }, checkable } }, label, accent };
+function action(id, label, { name = label, enabled = true, selected = false, checkable = false, accent = false, iconOnly = false, separated = false } = {}) {
+  return { option: { Action: { state: { id, icon: id, label: name, tooltip: `${name} tooltip`, enabled,
+    disabled_reason: enabled ? null : `${id} is unavailable`, selected }, checkable } }, label, accent, icon_only: iconOnly, separated };
 }
 function view({ kind = "transform", generation = 1n, items, completion, placement = "near_object", label = null } = {}) {
   return {
@@ -72,12 +72,13 @@ function harness({ layout = measure => ({ bounds: { x: 100.2, y: 50, width: 300,
   const element = (tag, className, text) => { const node = new FakeElement(tag, className); if (text != null) node.textContent = text; return node; };
   const button = (text, click, className = "") => { const node = element("button", className, text); node.addEventListener("click", click); return node; };
   const app = {
+    toolbar_ui: request => { assert.deepEqual(request, { type: "style", style: "small" }); return { size: [36, 36], gap: 2, icon: 16, labeled: false }; },
     canvas_bar_layout: measure => { measures.push(structuredClone(measure)); return layout(measure); },
     canvas_bar_menu: (context, shown) => { menus.push({ context, shown }); return { title: "More", sections: [] }; },
     canvas_bar_choice_menu: (context, id) => { choices.push({ context, id }); return choiceMenus[id] ? choiceMenus[id](context) : null; },
   };
   const bar = createCanvasBar({
-    app, workspace, element, button, icon: name => element("svg", name), dispatch: action => dispatched.push(action),
+    app, workspace, element, button, icon: name => element("svg", name), marker: () => element("span", "tool-variations"), dispatch: action => dispatched.push(action),
     glass: { queue: () => glassQueued++ }, reappearMs: 180,
     openMenu: node => { menu.menuOwner = node; menu.model = node.menuModel(); menu.open = true; return menu; },
     explain: node => explained.push(node.dataset.command), presented: () => presented.push(clock),
@@ -91,27 +92,30 @@ function harness({ layout = measure => ({ bounds: { x: 100.2, y: 50, width: 300,
   const pending = () => timers.filter(t => !t.cleared && !t.fired);
   const find = command => bar.root.querySelectorAll("button").find(b => b.dataset.command === command);
   const menuButton = id => bar.root.querySelectorAll("button").find(b => b.dataset.canvasBarMenu === id);
-  return { bar, workspace, dispatched, measures, menus, choices, menu, advance, pending, find, menuButton, explained, presented, glass: () => glassQueued };
+  const row = predicate => bar.root.children.flatMap(n => n.children).find(predicate);
+  const slot = command => find(command).parentNode.parentNode;
+  return { bar, workspace, dispatched, measures, menus, choices, menu, advance, pending, find, menuButton, row, slot, explained, presented, glass: () => glassQueued };
 }
 const edit = (context, action) => ({ type: "canvas_bar_edit", context, action });
 const entry = (label, action, sections = []) => ({ label, selected: null, action, enabled: true, hint: "", bindings: [], sections });
 const choiceMenus = {
-  copy_to_layer: context => ({ title: "Copy to Layer", sections: [[
+  copy: context => ({ title: "Copy", sections: [[
     entry("Copy Selection to New Layer", edit(context, { type: "invoke", command: "copy_selection_to_layer" })),
     entry("Cut Selection to New Layer", edit(context, { type: "invoke", command: "cut_selection_to_layer" }))]] }),
   adjust: context => ({ title: "Adjust", sections: [[
     entry("Color", null, [[entry("Curves", edit(context, { type: "effect", action: { type: "insert", filter: "curves" } }))]])]] }),
 };
-function menuItem(menu, label, icon, primary) {
-  return { label, menu, icon, option: primary ?? { Choice: { id: menu, label, segmented: false, items: [] } } };
+function menuItem(menu, label, icon, primary, { iconOnly = true, separated = false } = {}) {
+  return { label, menu, icon, icon_only: iconOnly, separated, option: primary ?? { Choice: { id: menu, label, segmented: false, items: [] } } };
 }
 function selectionView({ generation = 1n, enabled = true } = {}) {
-  const copy = action("copy_selection_to_layer", "Copy Selection to New Layer", { enabled }).option;
-  return view({ kind: "selection", generation, completion: [], items: [
-    action("deselect", "Deselect"),
-    menuItem("copy_to_layer", "Copy to Layer", "copy-to-layer", copy),
+  const copy = action("copy_selection_to_layer", "", { name: "Copy Selection to New Layer", enabled }).option;
+  return view({ kind: "selection", generation, items: [
+    action("scale_rotate", "", { name: "Transform", iconOnly: true }),
+    menuItem("copy", "Copy", "copy", copy),
     menuItem("adjust", "Adjust", "add-filter"),
-  ] });
+    action("invert_selection", "", { name: "Invert Selection", iconOnly: true, separated: true }),
+  ], completion: [action("deselect", "", { name: "Deselect", iconOnly: true, separated: true })] });
 }
 
 test("the bar is a toolbar in the workspace that stays hidden without a view", () => {
@@ -135,13 +139,15 @@ test("natural control sizes reach the shared fitter, with completion after More"
   assert.deepEqual(measure.items, [20 + 20 + 8 * 7, 20 + 20 + 8 * 6, 20 + 20 + 8 * 5]);
   assert.deepEqual(measure.completion, [20 + 20 + 8 * 6, 20 + 20 + 8 * 5]);
   assert.equal(measure.more, 40);
-  assert.deepEqual([measure.gap, measure.padding, measure.height], [GAP, PADDING, 36 + 2 * PADDING]);
-  const order = h.bar.root.children.filter(n => !n.hidden).map(n => n.className.includes("more") ? "more" : n.children[0]?.dataset?.command ?? "label");
+  assert.deepEqual([measure.gap, measure.padding, measure.height], [2, 0, 36], "Small toolbar tiles, 2 pixels apart, with no padding");
+  assert.equal(h.bar.root.style["--bar-gap"], "2px");
+  assert.equal(h.bar.root.style["--bar-tile"], "36px");
+  const order = h.bar.root.children.filter(n => !n.hidden).map(n => n.className.includes("more") ? "more" : n.querySelectorAll("button")[0]?.dataset.command ?? "label");
   assert.deepEqual(order, ["label", "transform_uniform", "transform_flip_horizontal", "reset_transform", "more", "cancel_transform", "apply_transform"]);
   assert.ok(h.find("apply_transform").classList.contains("suggested-action"));
   assert.ok(!h.find("cancel_transform").classList.contains("suggested-action"));
   assert.equal(h.bar.root.style.transform, "translate(100px, 50px)", "Moves align to device pixels");
-  assert.deepEqual(h.bar.bounds(), { x: 100.2, y: 50, width: 300, height: 48 });
+  assert.deepEqual(h.bar.bounds(), { x: 100.2, y: 50, width: 300, height: 36 });
   assert.ok(h.glass() > 0, "Showing the bar republishes glass");
 });
 
@@ -152,10 +158,10 @@ test("overflowed items hide, completion items never do, and placement reuses mea
   const rows = h.bar.root.children.filter(n => n.classList.contains("canvas-action-bar-item"));
   assert.deepEqual(rows.map(r => r.hidden), [false, true, true]);
   assert.ok(h.bar.root.children.filter(n => n.classList.contains("canvas-action-bar-completion")).every(r => !r.hidden));
-  const reads = h.find("reset_transform").parentNode.reads;
+  const reads = h.slot("reset_transform").reads;
   shown = 3; h.bar.place();
   assert.deepEqual(rows.map(r => r.hidden), [false, false, false]);
-  assert.equal(h.find("reset_transform").parentNode.reads, reads, "Moving the bar performs no DOM reads");
+  assert.equal(h.slot("reset_transform").reads, reads, "Moving the bar performs no DOM reads");
   assert.equal(h.measures.length, 2);
   assert.deepEqual(h.measures[1], h.measures[0]);
 });
@@ -216,18 +222,19 @@ test("every item dispatches a canvas bar edit for its context; disabled items ex
 });
 
 test("segmented mode choices show icon and label and dispatch their own action", () => {
-  const h = harness(), modes = ["Free", "Uniform", "Distort", "Warp"];
+  const h = harness(), modes = ["Free", "Distort", "Warp"];
   const choice = { label: "Mode", option: { Choice: { id: "transform-mode", label: "Mode", segmented: true, items: modes.map((label, i) => ({
     label, icon: label.toLowerCase(), selected: i === 0, preview: null, action: { type: "invoke", command: `transform_${label.toLowerCase()}` } })) } } };
   const v = view({ items: [choice, action("reset_transform", "Reset")] });
   h.bar.refresh(v);
-  const segments = h.bar.root.children.find(n => n.dataset.toolbarChoice === "transform-mode");
+  const segments = h.row(n => n.dataset.toolbarChoice === "transform-mode");
   assert.equal(segments.getAttribute("role"), "radiogroup");
+  assert.ok(!segments.classList.contains("text-tile"), "a radio keeps joined segments rather than one word tile");
   assert.deepEqual(segments.children.map(b => b.children.map(c => c.textContent || c.className)), modes.map(m => [m.toLowerCase(), m]));
-  assert.deepEqual(segments.children.map(b => b.getAttribute("aria-checked")), ["true", "false", "false", "false"]);
-  segments.children[3].click();
+  assert.deepEqual(segments.children.map(b => b.getAttribute("aria-checked")), ["true", "false", "false"]);
+  segments.children[2].click();
   assert.deepEqual(h.dispatched, [{ type: "canvas_bar_edit", context: v.context, action: { type: "invoke", command: "transform_warp" } }]);
-  assert.equal(h.measures[0].items[0], 4 * 40 + 8 * modes.join("").length);
+  assert.equal(h.measures[0].items[0], 3 * 40 + 8 * modes.join("").length);
 });
 
 test("dropdown choices list their items beside the bar and dispatch the chosen one", () => {
@@ -237,7 +244,8 @@ test("dropdown choices list their items beside the bar and dispatch the chosen o
     label, icon: label.toLowerCase(), selected: i === 2, preview: null, action: { type: "invoke", command: `transform_${label.toLowerCase()}` } })) } } };
   const v = view({ items: [choice] });
   h.bar.refresh(v);
-  const dropdown = h.bar.root.children.find(n => n.dataset.toolbarChoice === "transform-interpolation").children[0];
+  const dropdown = h.row(n => n.dataset.toolbarChoice === "transform-interpolation").children[0];
+  assert.ok(dropdown.parentNode.classList.contains("text-tile"), "a value dropdown is a word tile");
   assert.deepEqual(dropdown.children.map(c => c.textContent || c.className), ["bicubic", "Bicubic", "chevron-down"]);
   assert.equal(dropdown.tabIndex, -1);
   dropdown.click();
@@ -318,23 +326,24 @@ test("the bar consumes its own context menu and never takes focus on press", () 
   assert.deepEqual(events, { context: true, mouse: true });
 });
 
-test("menu items are menu buttons with their icon and label that open the shared menu for the current context", () => {
+test("icon-only menu items are tiles with the tool-group corner that open the shared menu for the current context", () => {
   const h = harness(), v = selectionView();
   h.bar.refresh(v);
-  const copy = h.menuButton("copy_to_layer"), adjust = h.menuButton("adjust");
-  assert.deepEqual(copy.children.map(c => c.textContent || c.className), ["copy-to-layer", "Copy to Layer", "chevron-down"]);
-  assert.deepEqual(adjust.children.map(c => c.textContent || c.className), ["add-filter", "Adjust", "chevron-down"]);
-  assert.equal(copy.getAttribute("aria-label"), "Copy to Layer", "More lists an overflowed menu by the same label");
+  const copy = h.menuButton("copy"), adjust = h.menuButton("adjust");
+  assert.deepEqual(copy.children.map(c => c.className), ["copy", "tool-variations"]);
+  assert.deepEqual(adjust.children.map(c => c.className), ["add-filter", "tool-variations"]);
+  assert.ok(!copy.parentNode.classList.contains("text-tile"), "An icon-only menu is a full tile");
+  assert.equal(copy.getAttribute("aria-label"), "Copy", "More lists an overflowed menu by the same label");
   assert.equal(copy.getAttribute("aria-haspopup"), "menu");
   assert.equal(copy.tabIndex, -1, "A menu button never joins the tab order");
   assert.equal(copy.dataset.command, undefined, "A menu button does not run its primary command");
   assert.equal(copy.title, "Copy Selection to New Layer tooltip", "An available primary command names itself");
   assert.equal(adjust.title, "Adjust");
-  assert.equal(h.measures[0].items[1], 20 + 20 + 8 * "Copy to Layer".length + 20, "The fitter measures icon, label and arrow");
+  assert.equal(h.measures[0].items[1], 20 + 20, "The fitter measures the tile alone");
   copy.click();
-  assert.deepEqual(h.choices, [{ context: v.context, id: "copy_to_layer" }]);
+  assert.deepEqual(h.choices, [{ context: v.context, id: "copy" }]);
   assert.equal(h.menu.menuOwner, copy);
-  assert.deepEqual(h.menu.model, choiceMenus.copy_to_layer(v.context), "The menu is the shared model, unchanged");
+  assert.deepEqual(h.menu.model, choiceMenus.copy(v.context), "The menu is the shared model, unchanged");
   assert.ok(h.bar.menuOpen());
   assert.deepEqual(h.dispatched, [], "Opening a menu runs nothing");
   h.menu.open = false;
@@ -349,10 +358,51 @@ test("menu items are menu buttons with their icon and label that open the shared
   assert.deepEqual(category.sections[0][0].action, edit(v.context, { type: "effect", action: { type: "insert", filter: "curves" } }), "Submenu entries keep their wrapped bar edit");
 });
 
+test("a menu that shows its value keeps its caption and arrow", () => {
+  const h = harness();
+  h.bar.refresh(view({ items: [menuItem("warp_grid", "3 × 3", "warp", null, { iconOnly: false })] }));
+  const grid = h.menuButton("warp_grid");
+  assert.deepEqual(grid.children.map(c => c.textContent || c.className), ["warp", "3 × 3", "chevron-down"]);
+  assert.ok(grid.parentNode.classList.contains("text-tile"), "A value menu is a word tile");
+  assert.equal(h.measures[0].items[0], 20 + 20 + 8 * "3 × 3".length + 20);
+});
+
+test("icon-only actions are tiles named by their command; separated items follow a divider", () => {
+  const h = harness(), v = selectionView();
+  h.bar.refresh(v);
+  const transform = h.find("scale_rotate"), deselect = h.find("deselect");
+  assert.deepEqual(transform.children.map(c => c.className), ["scale_rotate"], "An icon-only action shows its icon alone");
+  assert.equal(transform.getAttribute("aria-label"), "Transform");
+  assert.equal(transform.title, "Transform tooltip");
+  assert.ok(!transform.parentNode.classList.contains("text-tile"));
+  const divider = slot => slot.children[0].className.includes("canvas-action-bar-divider") ? slot.children[0] : null;
+  assert.equal(divider(h.slot("scale_rotate")), null);
+  assert.equal(divider(h.menuButton("copy").parentNode.parentNode), null);
+  const invert = divider(h.slot("invert_selection"));
+  assert.ok(invert, "Invert follows a divider");
+  assert.equal(invert.getAttribute("role"), "separator");
+  assert.equal(invert.getAttribute("aria-orientation"), "vertical");
+  assert.ok(divider(deselect.parentNode.parentNode), "An icon exit follows a divider");
+  assert.ok(deselect.parentNode.parentNode.classList.contains("canvas-action-bar-completion"));
+  h.bar.refresh({ ...v, items: v.items.map(item => ({ ...item, separated: false })) });
+  assert.equal(divider(h.slot("invert_selection")), null, "Dropping a divider rebuilds the item");
+});
+
+test("worded actions are word tiles with their label", () => {
+  const h = harness();
+  h.bar.refresh(view({ kind: "selection_layer", label: "Editing Selection 3", items: [action("load_selection_layer", "Load")],
+    completion: [action("return_to_artwork", "Return to Artwork", { accent: true })] }));
+  for (const command of ["load_selection_layer", "return_to_artwork"]) {
+    assert.ok(h.find(command).parentNode.classList.contains("text-tile"), `${command} is a word tile`);
+    assert.equal(h.find(command).children.length, 2);
+  }
+  assert.ok(h.find("return_to_artwork").classList.contains("suggested-action"));
+});
+
 test("a menu whose primary command is disabled explains itself and opens nothing", () => {
   const h = harness();
   h.bar.refresh(selectionView({ enabled: false }));
-  const copy = h.menuButton("copy_to_layer");
+  const copy = h.menuButton("copy");
   assert.equal(copy.getAttribute("aria-disabled"), "true");
   assert.equal(copy.disabled, false, "Disabled menus keep pointer events for their reason tooltip");
   assert.equal(copy.title, "copy_selection_to_layer is unavailable");
@@ -360,7 +410,7 @@ test("a menu whose primary command is disabled explains itself and opens nothing
   assert.deepEqual(h.choices, []);
   assert.equal(h.explained.length, 1);
   h.bar.refresh(selectionView());
-  assert.equal(h.menuButton("copy_to_layer"), copy, "Enabling the primary command retains the button");
+  assert.equal(h.menuButton("copy"), copy, "Enabling the primary command retains the button");
   assert.equal(copy.getAttribute("aria-disabled"), "false");
   copy.click();
   assert.equal(h.choices.length, 1);
@@ -369,19 +419,19 @@ test("a menu whose primary command is disabled explains itself and opens nothing
 test("a new context closes an open bar menu, rebuilds its buttons and queries the new context", () => {
   const h = harness(), first = selectionView();
   h.bar.refresh(first);
-  const copy = h.menuButton("copy_to_layer");
+  const copy = h.menuButton("copy");
   copy.click();
   assert.ok(h.menu.open);
   const next = selectionView({ generation: 2n });
   h.bar.refresh(next);
   assert.equal(h.menu.open, false, "A menu for a previous selection closes");
   assert.ok(!h.bar.menuOpen());
-  assert.notEqual(h.menuButton("copy_to_layer"), copy);
-  h.menuButton("copy_to_layer").click();
-  assert.deepEqual(h.choices.at(-1), { context: next.context, id: "copy_to_layer" });
-  h.bar.refresh(view({ kind: "selection", generation: 3n, completion: [], items: [menuItem("clear", "Clear", "clear-selection")] }));
+  assert.notEqual(h.menuButton("copy"), copy);
+  h.menuButton("copy").click();
+  assert.deepEqual(h.choices.at(-1), { context: next.context, id: "copy" });
+  h.bar.refresh(view({ kind: "selection", generation: 3n, completion: [], items: [menuItem("refine", "Refine", "feather")] }));
   h.menu.open = false;
-  h.menuButton("clear").click();
-  assert.deepEqual(h.choices.at(-1).id, "clear");
+  h.menuButton("refine").click();
+  assert.deepEqual(h.choices.at(-1).id, "refine");
   assert.ok(!h.menu.open && !h.bar.menuOpen(), "A menu the core no longer serves opens nothing");
 });

@@ -802,6 +802,10 @@ impl WebApp {
     pub fn catalog(&self) -> Result<JsValue, JsValue> {
         serialize(&ui_catalog_localized(self.session.localization()))
     }
+    /// The divider slot and centred line shared by toolbars, column groups and the canvas bar.
+    pub fn divider_metrics(&self) -> Result<JsValue, JsValue> {
+        serialize(&serde_json::json!({"size": layer_ui::TOOLBAR_DIVIDER_SIZE, "length": layer_ui::DIVIDER_LENGTH}))
+    }
     pub fn numeric_labels(&self, label: &str) -> Result<JsValue, JsValue> {
         serialize(&layer_ui::NumericLabels::new(label, self.session.localization()))
     }

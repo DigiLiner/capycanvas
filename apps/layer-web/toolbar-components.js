@@ -98,6 +98,9 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
   target(root, item);
   let model, schema = '', fields = [], vertical = false, extent = [0, 0], measured = '', popup;
   let tileStyle = view.tile_style, style = app.toolbar_ui({ type: 'style', style: tileStyle });
+  const controlHeight = liveCopy(app, 'catalog').panel_metrics.control_height;
+  const clear = (app.toolbar_ui({ type: 'style', style: 'small' }).size[1] - controlHeight) / 2;
+  root.style.setProperty('--field-clear', `${clear}px`);
   const preferences = tile.control.style || { text: true, sliders: true };
   const standalone = tile.control.kind !== 'tool_options';
   const copy = liveCopy(app, 'catalog').native_copy.tool_controls;
@@ -353,23 +356,22 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     root.classList.toggle('vertical-component', vertical); root.dataset.tileStyle = tileStyle;
     fields.forEach(f => { f.row.classList.remove('allocated'); f.orient?.(); });
     if (standalone) return;
-    const fieldHeight = 24;
     const sizes = fields.map(f => {
-      if (f.gradient) return [vertical?extent[0]:120,24];
-      if (f.segmented) return vertical ? [extent[0], style.size[1] * (extent[0] < style.size[0] * f.segmented ? f.segmented : 1)] : [style.size[0] * f.segmented, fieldHeight];
+      if (f.gradient) return vertical ? [extent[0], controlHeight] : [120 + 2 * clear, style.size[1]];
+      if (f.segmented) return vertical ? [extent[0], style.size[1] * (extent[0] < style.size[0] * f.segmented ? f.segmented : 1)] : [style.size[0] * f.segmented, style.size[1]];
       if (!f.interval && !f.intrinsic && (vertical || f.action)) return style.size;
       f.row.style.width = 'max-content'; f.row.style.height = 'auto'; f.row.hidden = false;
       const bounds=f.row.getBoundingClientRect();
-      return [bounds.width, Math.max(fieldHeight, bounds.height)];
+      return [Math.ceil(bounds.width), Math.max(controlHeight, bounds.height)];
     });
-    const geometry = app.toolbar_ui({ type: 'options_layout', width: extent[0], height: extent[1], axis: vertical ? 'vertical' : 'horizontal', sizes, button: style.size, gap: vertical ? style.gap : 10 });
+    const geometry = app.toolbar_ui({ type: 'options_layout', width: extent[0], height: extent[1], axis: vertical ? 'vertical' : 'horizontal', sizes, button: style.size, gap: style.gap });
     place(more, geometry.more);
     fields.forEach((f, i) => {
       const bounds = geometry.fields[i];
       if (!bounds && f.row.contains(document.activeElement)) more.focus();
       f.row.hidden = !bounds;
       f.row.classList.toggle('allocated', !!bounds && !vertical);
-      if (bounds) place(f.row, f.segmented && !vertical ? { ...bounds, y: bounds.y + (bounds.height - fieldHeight) / 2, height: fieldHeight } : bounds);
+      if (bounds) place(f.row, (f.segmented || f.gradient) && !vertical ? { x: bounds.x + clear, y: bounds.y + (bounds.height - controlHeight) / 2, width: bounds.width - 2 * clear, height: controlHeight } : bounds);
     });
   }
   root.updateComponent = next => {

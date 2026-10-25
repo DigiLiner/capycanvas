@@ -144,7 +144,8 @@ visible insertion targets attached to their original tile IDs.
 A divider is an 8-pixel slot (`TOOLBAR_DIVIDER_SIZE`) holding a line half a Small
 tile long (`DIVIDER_LENGTH`), centred across the strip, in every tile size. Column
 groups and the canvas action bar use the same divider; GTK builds all three with
-`tiles::divider_slot` and `divider_line`, and Apple with `ToolbarDivider`.
+`tiles::divider_slot` and `divider_line`, Apple with `ToolbarDivider`, and Web draws
+`.tile-divider` from `divider_metrics`.
 
 Actions use the surrounding toolbar’s tile dimensions, centered beside the
 shorter form fields. Hosts supply natural sizes and theme spacing; Rust fits

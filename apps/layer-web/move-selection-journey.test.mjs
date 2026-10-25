@@ -35,11 +35,18 @@ export async function checkMoveSelection({call,evaluate,settle,device=false}) {
   };
   const line=(a,b,steps=8)=>Array.from({length:steps+1},(_,i)=>({x:a.x+(b.x-a.x)*i/steps,y:a.y+(b.y-a.y)*i/steps}));
   const alt=(pressed)=>call('Input.dispatchKeyEvent',{type:pressed?'rawKeyDown':'keyUp',key:'Alt',code:'AltLeft',windowsVirtualKeyCode:18,modifiers:pressed?1:0});
-  const pressBar=async(command,kind)=>{
-    const selector=`${bar} [data-command="${command}"]`;
-    await wait(`!!document.querySelector('${selector}')&&(b=>!b.hidden&&!b.classList.contains('suppressed'))(document.querySelector('${bar}'))`);
-    assert.equal(await evaluate(`document.querySelector('${selector}').closest('.canvas-action-bar-item').hidden`),false,`${kind}: Leave Copy fits on the bar`);
-    await tap(await middle(selector),kind);
+  const openMenu='.panel-context-menu:popover-open';
+  const moreRow=command=>`[...document.querySelectorAll('${openMenu} button')].find(b=>b.querySelector('.menu-label')?.textContent===layerApp.state().commands.find(c=>c.id===${JSON.stringify(command)}).label)`;
+  const openMore=async kind=>{
+    await wait(`(b=>!!b&&!b.hidden&&!b.classList.contains('suppressed'))(document.querySelector('${bar}'))`);
+    await tap(await middle(`${bar} .canvas-action-bar-more`),kind);
+    await wait(`!!document.querySelector('${openMenu}')`);
+  };
+  const fromMore=async(command,kind)=>{
+    assert.equal(await evaluate(`!!document.querySelector('${bar} [data-command="${command}"]')`),false,`${kind}: ${command} is in More, not on the bar`);
+    await openMore(kind);
+    await wait(`!!${moreRow(command)}`);
+    await tap(await evaluate(`(r=>({x:r.x+r.width/2,y:r.y+r.height/2}))(${moreRow(command)}.getBoundingClientRect())`),kind);
   };
   const choose=async command=>{
     if(await tool()==='pick_visible')await invoke('eyedropper');
@@ -76,7 +83,7 @@ export async function checkMoveSelection({call,evaluate,settle,device=false}) {
       await choose('move');
       await wait(`layerApp.state().canvas_bar?.context.kind==='selection'`);
       if(await leaveCopy()!==leave) {
-        await pressBar('move_leave_copy',kind);
+        await fromMore('move_leave_copy',kind);
         await wait(`layerApp.state().commands.find(c=>c.id==='move_leave_copy').selected===${leave}`);
       }
       const before=await anchor();
@@ -91,9 +98,13 @@ export async function checkMoveSelection({call,evaluate,settle,device=false}) {
       assert.ok([0,1].every(i=>{const d=moved[i]-before[i];return Math.abs(d-Math.round(d))<1e-3;}),`${kind}: whole pixels ${JSON.stringify([before,moved])}`);
       if(kind==='mouse'&&leave)for(const name of ['light','dark']) {
         await send({type:'set_theme',theme:name});await pause(250);
-        const r=await rect(bar);
-        await writeFile(`${directory}/leave-copy-${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png',clip:{x:Math.max(0,r.x-40),y:Math.max(0,r.y-160),width:r.width+80,height:r.height+200,scale:1}})).data,'base64'));
-        assert.equal(await evaluate(`document.querySelector('${bar} [data-command="move_leave_copy"]').getAttribute('aria-pressed')`),'true',`${name}: Leave Copy shows as on`);
+        await openMore(kind);await wait(`!!${moreRow('move_leave_copy')}`);
+        const r=await rect(bar),menu=await rect(openMenu),clip={x:Math.max(0,Math.min(r.x,menu.x)-40),y:Math.max(0,Math.min(r.y,menu.y)-40)};
+        Object.assign(clip,{width:Math.max(r.x+r.width,menu.x+menu.width)+40-clip.x,height:Math.max(r.y+r.height,menu.y+menu.height)+40-clip.y,scale:1});
+        await writeFile(`${directory}/leave-copy-${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png',clip})).data,'base64'));
+        assert.equal(await evaluate(`${moreRow('move_leave_copy')}.getAttribute('aria-checked')`),'true',`${name}: Leave Copy shows as on in More`);
+        await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+        await wait(`!document.querySelector('${openMenu}')&&layerApp.state().canvas_bar?.context.kind==='selection'`);
       }
       const keeps=leave!==held;
       await sample(await screen(width*.4+dx,height*.4+dy),p=>near(p,COLORS[kind]),`${kind}: the pixels arrive`);
@@ -104,7 +115,7 @@ export async function checkMoveSelection({call,evaluate,settle,device=false}) {
       await sample(await screen(width*.32,height*.32),p=>near(p,COLORS[kind]),`${kind}: one undo puts the pixels back`);
     }
     if(await leaveCopy())await invoke('move_leave_copy');
-    console.log(`PASS move selection (${device?'tablet':'desktop'}): Move drags the selected pixels by whole pixels with pen, touch and mouse, the selection follows, Leave Copy and Alt keep the original, and one undo restores it; screenshots in ${directory}`);
+    console.log(`PASS move selection (${device?'tablet':'desktop'}): Move drags the selected pixels by whole pixels with pen, touch and mouse, the selection follows, Leave Copy (in More) and Alt keep the original, and one undo restores it; screenshots in ${directory}`);
   } catch(error) {
     await writeFile(`${directory}/failure.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
     console.error('Move selection state',await evaluate(`JSON.stringify({error:layerApp.state().host_error,notice:layerApp.state().notice,status:document.querySelector('#status').textContent,

@@ -209,7 +209,7 @@ available panel space while their controls keep their measured height. Their
 raster follows the actual graph bounds; intrinsic copies keep the natural plot
 height. Log counts keeps a 24-pixel label target. Secondary status, axis and
 layer metadata use one color derived from the published text at 55% opacity.
-Toolbar fitting preserves fractional widget widths. `histogram.js` retains
+Toolbar and canvas bar fitting round widget widths up to whole pixels, so text never truncates and the tiles after it stay on the pixel grid. `histogram.js` retains
 the native canvases; Properties updates their embedded plots without replacing
 focused numeric fields. Calibration, Auto Levels and targeted Curves edits use
 shared actions and the existing canvas pointer path.
@@ -444,7 +444,8 @@ Drawer sizing uses each column's final allocated width and its children's natura
 height. Width changes schedule another measurement even with reduced motion;
 the prior scroll viewport height must not prevent a drawer from shrinking.
 `--drawer-switch` checks complete Palette footers on every toolbar edge with
-ordinary and reduced motion.
+ordinary and reduced motion. `--drawer-style` checks that toolbar and column-group
+dividers draw the shared `divider_metrics` line, centred in its slot.
 
 `--enclose-fill` checks real pointer contacts in both themes against transparent
 reference ink. Two fully enclosed holes fill a separate paint layer; a hole

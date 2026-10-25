@@ -1,22 +1,24 @@
 import { actionField, choiceField } from "./toolbar-components.js";
 import { revealTooltip } from "./tooltips.js";
 
-export const GAP = 4, PADDING = 6;
 const text = value => JSON.stringify(value, (_, v) => typeof v === "bigint" ? String(v) : v);
 export const barSchema = view => text([view.context, view.label ?? null,
-  ...[view.items, view.completion].map(items => items.map(({ option, label, menu, icon }) => menu
+  ...[view.items, view.completion].map(items => items.map(({ option, label, menu, icon, icon_only, separated }) => [icon_only, separated, menu
     ? ["menu", label, menu, icon, option.Action?.state.id]
     : option.Action
       ? ["action", label, option.Action.state.id, option.Action.state.icon, option.Action.state.label, option.Action.checkable]
       : option.Choice
         ? ["choice", label, option.Choice.id, option.Choice.label, option.Choice.segmented, option.Choice.columns, option.Choice.beside, option.Choice.items.map(i => [i.label, i.icon])]
-        : ["other", label]))]);
+        : ["other", label]]))]);
 
-export function createCanvasBar({ app, workspace, element, button, icon, dispatch, glass, openMenu, presented,
+export function createCanvasBar({ app, workspace, element, button, icon, marker, dispatch, glass, openMenu, presented,
   reappearMs, setTimer = setTimeout, clearTimer = clearTimeout, explain = revealTooltip }) {
+  const tiles = app.toolbar_ui({ type: "style", style: "small" });
   const root = element("section", "canvas-action-bar suppressed");
   root.setAttribute("role", "toolbar"); root.setAttribute("aria-label", "Canvas actions");
-  root.style.gap = `${GAP}px`; root.style.padding = `${PADDING}px`; root.hidden = true;
+  root.style.setProperty("--bar-gap", `${tiles.gap}px`); root.style.setProperty("--bar-tile", `${tiles.size[1]}px`);
+  root.style.setProperty("--tile-icon-size", `${tiles.icon}px`);
+  root.hidden = true;
   const label = element("span", "canvas-action-bar-label"); label.hidden = true;
   const more = button("", toggleMenu, "canvas-action-bar-more");
   more.append(icon("more")); more.title = "More"; more.tabIndex = -1;
@@ -73,7 +75,8 @@ export function createCanvasBar({ app, workspace, element, button, icon, dispatc
     });
     b.dataset.canvasBarMenu = item.menu;
     b.setAttribute("aria-label", item.label); b.setAttribute("aria-haspopup", "menu");
-    b.append(icon(item.icon), element("span", "toolbar-action-label", item.label), icon("chevron-down"));
+    if (item.icon_only) b.append(icon(item.icon), marker());
+    else { row.classList.add("text-tile"); b.append(icon(item.icon), element("span", "toolbar-action-label", item.label), icon("chevron-down")); }
     opensMenu(b); row.append(b);
     let tooltip, disabled;
     function update(option) {
@@ -91,37 +94,48 @@ export function createCanvasBar({ app, workspace, element, button, icon, dispatc
     let field;
     if (item.menu) field = menuField(item, context);
     else if (option.Action) {
-      field = actionField({ element, button, icon }, option.Action, send, { label: item.label, ariaDisabled: true, explain });
+      field = actionField({ element, button, icon }, option.Action, send, { label: item.icon_only ? undefined : item.label, ariaDisabled: true, explain });
       field.button.dataset.command = option.Action.state.id;
       if (item.accent) field.button.classList.add("suggested-action");
+      if (!item.icon_only) field.row.classList.add("text-tile");
     } else if (option.Choice) {
       field = choiceField({ app, element, button, icon, openPopup, closePopup }, option.Choice, send, { labels: true });
+      if (!option.Choice.segmented) field.row.classList.add("text-tile");
     } else field = { row: element("div", "toolbar-option"), update() {} };
     for (const node of field.row.querySelectorAll("button")) node.tabIndex = -1;
-    field.row.classList.add(completion ? "canvas-action-bar-completion" : "canvas-action-bar-item");
-    return field;
+    const slot = element("div", completion ? "canvas-action-bar-completion" : "canvas-action-bar-item");
+    if (item.separated) {
+      const divider = element("span", "tile-divider canvas-action-bar-divider");
+      divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical");
+      slot.append(divider);
+    }
+    slot.append(field.row);
+    return { ...field, slot };
   }
   function rebuild() {
     closeMenu(); closePopup();
-    for (const field of fields) field.row.remove();
+    for (const field of fields) field.slot.remove();
     fields = []; sizes = null; layout = null;
     if (!view) return;
-    label.textContent = view.label ?? ""; label.hidden = !view.label;
+    label.textContent = view.label ?? ""; label.hidden = !view.label; label.style.width = "";
     fields = [...view.items.map(item => build(item, view.context, false)), ...view.completion.map(item => build(item, view.context, true))];
-    more.before(...fields.slice(0, view.items.length).map(f => f.row));
-    root.append(...fields.slice(view.items.length).map(f => f.row));
+    more.before(...fields.slice(0, view.items.length).map(f => f.slot));
+    root.append(...fields.slice(view.items.length).map(f => f.slot));
   }
   function measure() {
     root.hidden = false;
-    for (const field of fields) field.row.hidden = false;
-    const count = view.items.length, rows = fields.map(f => f.row);
-    const heights = [more, ...rows].map(node => node.getBoundingClientRect().height);
-    const widths = rows.map(node => node.getBoundingClientRect().width);
+    for (const field of fields) field.slot.hidden = false;
+    const count = view.items.length, slots = fields.map(f => f.slot);
+    const worded = [label, ...slots.flatMap(node => [...node.querySelectorAll(".text-tile > button, .toolbar-segments > button")])];
+    const natural = worded.map(node => node.getBoundingClientRect().width);
+    worded.forEach((node, i) => { node.style.width = natural[i] ? `${Math.ceil(natural[i])}px` : ""; });
+    const heights = [more, ...slots].map(node => node.getBoundingClientRect().height);
     sizes = {
       label: view.label ? label.getBoundingClientRect().width : 0,
-      items: widths.slice(0, count), completion: widths.slice(count),
+      items: slots.slice(0, count).map(node => node.getBoundingClientRect().width),
+      completion: slots.slice(count).map(node => node.getBoundingClientRect().width),
       more: more.getBoundingClientRect().width,
-      height: Math.max(...heights) + 2 * PADDING, gap: GAP, padding: PADDING,
+      height: Math.max(...heights), gap: tiles.gap, padding: 0,
     };
     shown.items = -1;
   }
@@ -131,7 +145,7 @@ export function createCanvasBar({ app, workspace, element, button, icon, dispatc
     const count = Number(layout?.items ?? 0);
     let changed = visible !== shown.visible;
     if (view && count !== shown.items) {
-      fields.slice(0, view.items.length).forEach((field, i) => { if (field.row.hidden !== i >= count) field.row.hidden = i >= count; });
+      fields.slice(0, view.items.length).forEach((field, i) => { if (field.slot.hidden !== i >= count) field.slot.hidden = i >= count; });
       shown.items = count; changed ||= visible;
     }
     if (visible) {

@@ -47,8 +47,8 @@ export async function checkCanvasSize({call,evaluate,settle,device=false}) {
   const openMenu='.panel-context-menu:popover-open';
   const pressBar=async(command,kind)=>{
     const selector=`${bar} [data-command="${command}"]`;
-    await wait(`!!document.querySelector('${selector}')&&(b=>!b.hidden&&!b.classList.contains('suppressed'))(document.querySelector('${bar}'))`);
-    if(!await evaluate(`document.querySelector('${selector}').closest('.canvas-action-bar-item').hidden`))return tap(await middle(selector),kind);
+    await wait(`(b=>!!b&&!b.hidden&&!b.classList.contains('suppressed'))(document.querySelector('${bar}'))`);
+    if(await evaluate(`(n=>!!n&&!n.closest('.canvas-action-bar-item').hidden)(document.querySelector('${selector}'))`))return tap(await middle(selector),kind);
     await tap(await middle(`${bar} .canvas-action-bar-more`),kind);
     const label=await evaluate(`layerApp.state().commands.find(c=>c.id==='${command}').label`);
     const row=`[...document.querySelectorAll('${openMenu} button')].find(b=>b.querySelector('.menu-label')?.textContent===${JSON.stringify(label)})`;
@@ -133,9 +133,7 @@ export async function checkCanvasSize({call,evaluate,settle,device=false}) {
       await tool('rectangle_select');
       await drag(line(await screen(...cut),await screen(...far),6),kind==='touch'?'pen':kind);
       await wait(`layerApp.state().layer_tools.has_selection&&layerApp.state().canvas_bar?.context.kind==='selection'`);
-      const crop=await evaluate(`document.querySelector('${bar} [data-command="crop_canvas_to_selection"]').textContent.trim()`);
-      assert.equal(crop,'Crop',`${kind}: the selection bar offers Crop`);
-      if(await pressBar('crop_canvas_to_selection',kind)==='more')console.log(`${kind}: Crop is in More at this window width`);
+      assert.equal(await pressBar('crop_canvas_to_selection',kind),'more',`${kind}: the selection bar offers Crop Canvas to Selection in More`);
       await wait(`layerApp.state().tabs[0].width<${width}&&layerApp.state().tabs[0].height<${height}`);
       const cropped=await size();
       await sample(insidePoint,p=>near(p,rgba),`${kind}: the image stays in place after the crop`);
@@ -189,7 +187,7 @@ export async function checkCanvasSize({call,evaluate,settle,device=false}) {
       assert.deepEqual(await size(),[width,height],`${kind}: redo restores the original size`);
       await sample(hiddenPoint,p=>near(p,rgba),`${kind}: redo shows the stroke again`);
     }
-    console.log(`PASS canvas size (${device?'tablet':'desktop'}): Crop on the selection bar hides pixels in one undo step, and Image › Canvas Size… with the matching anchor restores the size and position so the hidden strokes reappear, with mouse, touch and pen; growing left and up right after a stroke is never refused; screenshots in ${directory}`);
+    console.log(`PASS canvas size (${device?'tablet':'desktop'}): Crop Canvas to Selection from the selection bar's More hides pixels in one undo step, and Image › Canvas Size… with the matching anchor restores the size and position so the hidden strokes reappear, with mouse, touch and pen; growing left and up right after a stroke is never refused; screenshots in ${directory}`);
   } catch(error) {
     await writeFile(`${directory}/failure.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
     console.error('Canvas size state',await evaluate(`JSON.stringify({error:layerApp.state().host_error,status:document.querySelector('#status').textContent,size:[layerApp.state().tabs[0].width,layerApp.state().tabs[0].height],
