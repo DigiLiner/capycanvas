@@ -1,4 +1,18 @@
 use super::*;
+#[test]
+fn native_status_distinguishes_invalid_pixels_from_unknown_readback_bits() {
+    assert!(NativeEncodeStatus::decode(&[0;4]).is_ok());
+    for value in [1_u32,2,3] {
+        let error=NativeEncodeStatus::decode(&value.to_le_bytes()).unwrap_err().to_string();
+        assert!(error.contains("non-finite values"),"{error}");
+    }
+    for value in [4_u32,8,0x480d0d0e,u32::MAX] {
+        let error=NativeEncodeStatus::decode(&value.to_le_bytes()).unwrap_err().to_string();
+        assert!(error.contains("unknown status word"),"{error}");
+        assert!(error.contains(&format!("{value:#010x}")),"{error}");
+    }
+    for bytes in [&[][..],&[0;3][..],&[0;5][..]] {assert!(NativeEncodeStatus::decode(bytes).is_err());}
+}
 use crate::test_support::{page_texture as texture, upload_page as upload};
 use crate::{READBACK_TIMEOUT, WgpuRasterizer, layer_tests::page_bytes};
 use layer_core::color::RgbSpace;

@@ -175,6 +175,9 @@ impl NativeEncodeStatus {
         }
         if bytes != [0; 4] {
             let status=u32::from_le_bytes(bytes.try_into().unwrap());
+            if status&!3!=0 {
+                return Err(GpuRasterError::Color(format!("Native tile publication returned an unknown status word {status:#010x}")));
+            }
             return Err(GpuRasterError::Color(
                 format!("Color processing produced non-finite values, invalid coverage or RGB outside the selected storage range (status {status:#010x})"),
             ));
