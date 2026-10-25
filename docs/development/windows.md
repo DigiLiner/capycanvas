@@ -779,8 +779,11 @@ to shared tests, Clippy and renderer examples. Run native UI fixtures through
 
 The renderer's ignored
 `dry_material::tests::fine_aggregate_pencil_color_pipeline_prepares_on_hardware`
-checks the fine-tip, aggregate Pencil compute pipeline through the native DXC
-compiler. Place the app's pinned `dxcompiler.dll` beside the renderer test
+checks the fine-tip, aggregate Pencil compute pipeline, elliptical and rounded
+endpoint and turn completion, and Multiply color and coverage pipelines through
+the native DXC compiler. Each case retains its own error scopes and reports its
+contact flags, operation, entry point and blend code. Place the app's pinned
+`dxcompiler.dll` beside the renderer test
 executable before running it. Set `$env:WGPU_ADAPTER_NAME` to a distinctive part
 of your hardware adapter's name. The test requires hardware and rejects software
 adapters; a successful WGSL validation alone does not cover pipeline creation.

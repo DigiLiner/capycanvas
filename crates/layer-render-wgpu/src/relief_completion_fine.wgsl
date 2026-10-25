@@ -2,12 +2,16 @@ fn completion_rounded_pixel(dab:Dab,world:vec2<f32>,paper:f32,dose:f32)->f32 {
     var alpha=0.0;
     for(var row=0u;row<4u;row+=1u) {
         let outer=row==0u || row==3u;
-        let y:f32=0.5*select(0.3399810435848563,0.8611363115940526,outer)*select(-1.0,1.0,row>=2u);
-        let wy:f32=0.5*select(0.6521451548625461,0.3478548451374538,outer);
+        let row_node:f32=select(0.3399810435848563,0.8611363115940526,outer);
+        let y=0.5*row_node*select(-1.0,1.0,row>=2u);
+        let row_weight:f32=select(0.6521451548625461,0.3478548451374538,outer);
+        let wy=0.5*row_weight;
         for(var col=0u;col<4u;col+=1u) {
             let edge=col==0u || col==3u;
-            let x:f32=0.5*select(0.3399810435848563,0.8611363115940526,edge)*select(-1.0,1.0,col>=2u);
-            let wx:f32=0.5*select(0.6521451548625461,0.3478548451374538,edge);
+            let col_node:f32=select(0.3399810435848563,0.8611363115940526,edge);
+            let x=0.5*col_node*select(-1.0,1.0,col>=2u);
+            let col_weight:f32=select(0.6521451548625461,0.3478548451374538,edge);
+            let wx=0.5*col_weight;
             alpha+=wx*wy*(1.0-exp(-dose*completion_exposure(dab,world+vec2<f32>(x,y),paper)));
         }
     }

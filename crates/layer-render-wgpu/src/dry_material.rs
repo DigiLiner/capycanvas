@@ -702,18 +702,43 @@ mod tests {
         let info = renderer.adapter.get_info();
         assert_ne!(info.device_type, wgpu::DeviceType::Cpu, "{info:?}");
         let material = &renderer.pipelines.dry_material;
-        let pipeline = &material.variants.get(&0x6843).expect("fine aggregate Pencil recipe")[0];
         assert_eq!(OPERATIONS[0], MaterialOperation::Deposit);
-        assert!(!pipeline.ready());
-        eprintln!("adapter={info:?} features={:?} in_place={} filterable={} contact=0x6843 operation=Deposit entry=compute_color cache=none",
+        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        brush.rendering.blend_mode = BrushBlendMode::Multiply;
+        let style = layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
+        let (flags, blend) = material_entries(material_slot(&style));
+        assert_eq!((flags, blend), (u32::MAX, 1));
+        let cases = [
+            (0x6843, MaterialOperation::Deposit, false, 0,
+                &material.variants.get(&0x6843).expect("fine aggregate Pencil recipe")[0]),
+            (0x6843 | COMPLETION, MaterialOperation::Deposit, false, 0,
+                &material.variants.get(&(0x6843 | COMPLETION)).expect("fine aggregate Pencil completion recipe")[0]),
+            (0x7043 | COMPLETION, MaterialOperation::Deposit, false, 0,
+                &material.variants.get(&(0x7043 | COMPLETION)).expect("fine aggregate rounded completion recipe")[0]),
+            (flags, MaterialOperation::Coverage, false, blend,
+                material.selected_kernel(&style, MaterialOperation::Coverage, false, 0)),
+            (flags, MaterialOperation::Coverage, true, blend,
+                material.selected_kernel(&style, MaterialOperation::Coverage, true, 0)),
+        ];
+        eprintln!("adapter={info:?} features={:?} in_place={} filterable={} cache=none",
             renderer.device.features(), material.in_place(), renderer.device.features().contains(wgpu::Features::FLOAT32_FILTERABLE));
-        let internal_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Internal);
-        let validation_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        pollster::block_on(pipeline.prepare()).unwrap();
-        let validation = pollster::block_on(validation_scope.pop());
-        let internal = pollster::block_on(internal_scope.pop());
-        assert!(validation.is_none() && internal.is_none(), "validation={validation:?}; internal={internal:?}");
-        assert!(pipeline.ready());
+        let mut failures = Vec::new();
+        for (contact, operation, coverage, blend, pipeline) in cases {
+            let entry = if coverage { "compute_coverage" } else { "compute_color" };
+            assert!(!pipeline.ready(), "contact={contact:#x} operation={operation:?} entry={entry} blend={blend}");
+            eprintln!("BEGIN contact={contact:#x} operation={operation:?} entry={entry} blend={blend}");
+            let internal_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Internal);
+            let validation_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
+            pollster::block_on(pipeline.prepare()).unwrap();
+            let validation = pollster::block_on(validation_scope.pop());
+            let internal = pollster::block_on(internal_scope.pop());
+            eprintln!("END contact={contact:#x} operation={operation:?} entry={entry} blend={blend} validation={validation:?}; internal={internal:?}");
+            if validation.is_some() || internal.is_some() {
+                failures.push(format!("contact={contact:#x} operation={operation:?} entry={entry} blend={blend} validation={validation:?}; internal={internal:?}"));
+            }
+            assert!(pipeline.ready(), "contact={contact:#x} operation={operation:?} entry={entry} blend={blend}");
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]
