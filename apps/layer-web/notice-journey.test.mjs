@@ -74,6 +74,7 @@ export async function checkNotices({call,evaluate,settle,device=false}) {
       await healthy(`${kind} Wand with a reference`);
       if(await evaluate('layerApp.state().layer_tools.has_selection'))await invoke('deselect');
       await send({type:'layer',action:{op:'reference',id:below.id}});
+      await wait(`!layerApp.state().layers.find(l=>l.id==${below.id}).reference`);
       assert.equal((await state()).layers.find(l=>l.id===below.id).reference,false);
     }
 

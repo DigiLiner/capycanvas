@@ -410,6 +410,7 @@ restarting its original deadline or showing a notice that already expired.
 `ResolvedLayout::notice` places it centred at the bottom of the canvas area and no
 wider than that area, or at the window's bottom when the canvas area is too small
 to hold it; a canvas action bar reaching below `bar_floor` lifts it above the bar.
+The anchor follows the bar's current bounds when it returns after a contact.
 It is at most 960 pixels wide. Its actions stay beside the text while the text
 keeps `min_text_width`, which equals `max_width`, so they share a row only with
 text on one line; otherwise they take their own row under it and the text never

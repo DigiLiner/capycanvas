@@ -44,6 +44,7 @@ import androidx.compose.ui.window.PopupProperties
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -178,7 +179,7 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
             } }.toString()
             val control = panelMetrics().height.value
             val sizes = remember(measureKey, preferences.toString(), style, vertical, width, textStyle, density, host.languageTag, control) {
-                options.map { toolOptionSize(it, vertical, width, tileWidth, tileHeight, preferences, ::textWidth, control, language = host.languageTag, style = style) }
+                options.map { toolOptionSize(it, vertical, width, tileWidth, tileHeight, preferences, ::textWidth, control, language = host.languageTag, style = style, density = density) }
             }
             val layoutKey = sizes.toString()
             val layout = remember(width, height, vertical, layoutKey, style) { toolbarUi(host.languageTag, obj("type" to "options_layout", "width" to width, "height" to height,
@@ -210,8 +211,8 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
 }
 
 internal fun toolOptionSize(option: JSONObject, vertical: Boolean, width: Float, tileWidth: Float, tileHeight: Float,
-    preferences: JSONObject, textWidth: (String) -> Float, control: Float, caption: String? = null, language: String = "", style: String = "small"): List<Float> {
-    val clear = if (vertical) 0f else 2 * FieldClear
+    preferences: JSONObject, textWidth: (String) -> Float, control: Float, caption: String? = null, language: String = "", style: String = "small", density: Float = 1f): List<Float> {
+    val clear = if (vertical) 0f else 2 * pixelAligned(FieldClear, density)
     return when {
     option.has("Gradient") -> listOf(if (vertical) width else 120f + clear, control)
     option.has("Range") -> listOf((if (preferences.getBoolean("sliders")) 280f else 100f) + clear, control)
@@ -225,16 +226,16 @@ internal fun toolOptionSize(option: JSONObject, vertical: Boolean, width: Float,
     }
     option.has("Choice") && option.getJSONObject("Choice").getBoolean("segmented") -> {
         val items = option.getJSONObject("Choice").array("items").objects()
-        if (caption != null) listOf(items.sumOf { segmentWidth(it.getString("label"), textWidth).toDouble() }.toFloat() + clear, tileHeight)
+        if (caption != null) listOf(items.sumOf { segmentWidth(it.getString("label"), textWidth, density).toDouble() }.toFloat() + clear, tileHeight)
         else if (vertical) listOf(width, tileHeight * if (width < tileWidth * items.size) items.size else 1)
         else listOf(tileWidth * items.size, control)
     }
     option.has("Action") && option.getJSONObject("Action").optBoolean("checkable") && option.getJSONObject("Action").getJSONObject("state").isNull("icon") ->
         listOf(textWidth(option.getJSONObject("Action").getJSONObject("state").getString("label")) + 24f + clear, tileHeight)
-    option.has("Action") && caption != null -> listOf(if (caption.isEmpty()) tileHeight else captionedWidth(caption, textWidth) + clear, tileHeight)
+    option.has("Action") && caption != null -> listOf(if (caption.isEmpty()) tileHeight else captionedWidth(caption, textWidth, density) + clear, tileHeight)
     vertical || option.has("Action") -> listOf(tileWidth, tileHeight)
-    option.has("Choice") && caption != null -> listOf(ChoicePadding * 2 + 16f + 12f + CaptionGap * 2 +
-        option.getJSONObject("Choice").array("items").objects().maxOf { kotlin.math.ceil(textWidth(it.getString("label"))) } + clear, tileHeight)
+    option.has("Choice") && caption != null -> listOf(menuButtonWidth(option.getJSONObject("Choice").array("items").objects().maxBy { textWidth(it.getString("label")) }.getString("label"),
+        textWidth, density, ChoicePadding) + clear, tileHeight)
     option.has("Choice") -> listOf(168f + clear, control)
     else -> {
         val field = option.getJSONObject("Numeric")
@@ -249,9 +250,12 @@ internal const val FieldClear = 5f
 private const val CaptionPadding = 10f
 private const val CaptionGap = 6f
 private const val ChoicePadding = 8f
-private fun captionedWidth(text: String, textWidth: (String) -> Float) = CaptionPadding * 2 + 16f + CaptionGap + kotlin.math.ceil(textWidth(text))
-private fun segmentWidth(text: String, textWidth: (String) -> Float) = ChoicePadding * 2 + 16f + CaptionGap + kotlin.math.ceil(textWidth(text))
-internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = captionedWidth(caption, textWidth) + CaptionGap + 12f
+internal fun pixelAligned(value: Float, density: Float) = (value * density).roundToInt() / density
+private fun captionedWidth(text: String, textWidth: (String) -> Float, density: Float, padding: Float = CaptionPadding) =
+    2 * pixelAligned(padding, density) + pixelAligned(16f, density) + pixelAligned(CaptionGap, density) + kotlin.math.ceil(textWidth(text) * density) / density
+private fun segmentWidth(text: String, textWidth: (String) -> Float, density: Float) = captionedWidth(text, textWidth, density, ChoicePadding)
+internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float, density: Float, padding: Float = CaptionPadding) =
+    captionedWidth(caption, textWidth, density, padding) + pixelAligned(CaptionGap, density) + pixelAligned(12f, density)
 
 @Composable internal fun ToolOptionField(option: JSONObject, width: Float, vertical: Boolean, style: String, labeled: Boolean,
     preferences: JSONObject, tileWidth: Float, iconSize: Int, edit: (JSONObject) -> Unit,
@@ -468,7 +472,7 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
         val measurer = rememberTextMeasurer()
         val textStyle = LocalTextStyle.current
         val density = LocalDensity.current.density
-        fun weight(item: JSONObject) = if (captions) segmentWidth(item.getString("label")) { measurer.measure(it, textStyle).size.width / density } else 1f
+        fun weight(item: JSONObject) = if (captions) segmentWidth(item.getString("label"), { measurer.measure(it, textStyle).size.width / density }, density) else 1f
         val segment: @Composable (JSONObject, Int, Modifier) -> Unit = { item, index, modifier ->
             HoverTip(item.nullableString("disabled_reason") ?: item.getString("label"), modifier) {
             Row(Modifier.fillMaxSize().testTag(if(prefix=="tool" && id=="selection-mode") "tool-action-${item.getJSONObject("action").getString("command")}" else "$prefix-segment-$id-$index").background(if (item.getBoolean("selected")) colors.active else colors.input)

@@ -100,6 +100,7 @@ fn native_notice_move_on_locked_layer() {
 #[ignore = "isolated compositor, GPU and native mouse delivery"]
 fn native_notice_wand_offers_a_reference() {
     let (_app, w, mut input) = start("art.capycanvas.NoticeWand");
+    let below = ui_session(&w).engine().document().working.occurrence.unwrap();
     w.dispatch(UiAction::Layer {
         action: layer_ui::LayerAction::New { group: false, clipped: false },
     });
@@ -122,7 +123,7 @@ fn native_notice_wand_offers_a_reference() {
     until(
         || {
             ui_session(&w).engine().document().scene().references()
-                == [layer_core::authored::OccurrenceHandle::from_index(0)].into()
+                == [below].into()
         },
         "the notice action marks the layer below as a reference",
     );

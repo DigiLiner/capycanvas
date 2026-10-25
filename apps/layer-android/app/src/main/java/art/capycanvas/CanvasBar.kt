@@ -75,13 +75,13 @@ private class BarFrame {
     fun textWidth(text: String) = measurer.measure(text, textStyle).size.width / density
     val tiles = remember(host.languageTag) { toolbarUi(host.languageTag, obj("type" to "style", "style" to "small")) }
     val tile = tiles.array("size").getDouble(1).toFloat()
-    val gap = tiles.number("gap")
+    val gap = pixelAligned(tiles.number("gap"), density)
     val control = panelMetrics().height.value
     fun fieldWidth(item: JSONObject) = when {
         item.isNull("menu") -> toolOptionSize(item.getJSONObject("option"), false, 0f, tile, tile, BarItemStyle, ::textWidth, control,
-            item.getString("label"), language = host.languageTag)[0]
+            item.getString("label"), language = host.languageTag, density = density)[0]
         item.optBoolean("icon_only") -> tile
-        else -> menuButtonWidth(item.getString("label"), ::textWidth) + 2 * FieldClear
+        else -> menuButtonWidth(item.getString("label"), ::textWidth, density) + 2 * pixelAligned(FieldClear, density)
     }
     fun width(field: Float, item: JSONObject) = field + if (item.optBoolean("separated")) DividerSlot.value + gap else 0f
     val itemFields = remember(view.opt("items"), textStyle, density, tile, control) { items.map(::fieldWidth) }

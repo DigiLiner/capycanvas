@@ -115,6 +115,8 @@ with the same `actionField` and `choiceField` builders as Tool Options; a
 segmented choice keeps its natural width there, and other choices open a
 dropdown. Android uses the same `ToolOptionField` and `toolOptionSize` as its
 Tool Options, with each item's short caption.
+Android measures worded controls by summing the native pixel widths of the text,
+icons, gaps and each padding edge, including at fractional display densities.
 
 Horizontal numeric fields use label/icon, slider, then editable value, with
 the label/icon outside the value field. Editing stays within the same footprint;

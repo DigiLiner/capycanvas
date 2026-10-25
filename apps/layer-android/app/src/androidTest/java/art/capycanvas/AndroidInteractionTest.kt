@@ -185,6 +185,7 @@ class AndroidInteractionTest {
         }
         fixture.put("zen_mode", false)
         restore()
+        InstrumentationRegistry.getArguments().getString("theme")?.let { action(obj("type" to "set_theme", "theme" to it)) }
     }
     @After fun cleanup() {
         try { if (contact) event(MotionEvent.ACTION_CANCEL) }
@@ -2615,6 +2616,17 @@ class AndroidInteractionTest {
             } else {
                 assertEquals("$name: $tag is a panel control", panelControl() * density, r.height, 1.5f)
                 assertEquals("$name: $tag keeps 5 dp clear above", 5 * density, r.top - bar.top, 1.5f)
+                onMain {
+                    fun checkText(node: SemanticsNode) {
+                        node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.let { measure ->
+                            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                            assertTrue(measure(layouts))
+                            for (text in layouts) assertFalse("$name: $tag clips ${text.layoutInput.text}: ${text.size}, ${text.layoutInput.constraints}, width=${text.didOverflowWidth}, height=${text.didOverflowHeight}", text.hasVisualOverflow)
+                        }
+                        node.children.forEach(::checkText)
+                    }
+                    checkText(find(tag)!!)
+                }
             }
         }
         if (shown("canvas-bar-divider-0")) assertEquals("$name: a divider takes an 8 dp slot", 8 * density, bounds("canvas-bar-divider-0").width, 1.5f)
@@ -2729,7 +2741,12 @@ class AndroidInteractionTest {
                 modeless("$name Move notice")
                 waitFor("$name the selection bar returns beside the notice", 3_000) { shown("canvas-action-bar") }
                 val bar = bounds("canvas-action-bar"); val bubble = bounds("canvas-notice")
-                assertEquals("$name the notice keeps its place when the bar returns", raised, bubble)
+                val placement = snapshot().getJSONObject("layout").getJSONObject("notice")
+                val anchor = work.top + placement.number("y") * density
+                val floor = work.top + placement.number("bar_floor") * density
+                val bottom = if (bar.bottom > floor) minOf(anchor, bar.top - 12 * density) else anchor
+                assertEquals("$name the notice follows the shared anchor when the bar returns", bottom, bubble.bottom, 1f)
+                assertEquals("$name the bar keeps the notice centred", raised.center.x, bubble.center.x, 1f)
                 assertFalse("$name the notice never covers the bar: $bubble vs $bar", bubble.overlaps(bar))
                 if (bar.bottom > work.bottom - 120 * density) assertTrue("$name the notice sits above a bottom-edge bar: $bubble vs $bar", bubble.bottom <= bar.top)
                 if (device == MotionEvent.TOOL_TYPE_STYLUS) captureCanvasBar("move-locked-dark", "canvas-notice")

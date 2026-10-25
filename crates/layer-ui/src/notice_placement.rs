@@ -89,6 +89,8 @@ mod tests {
         assert_eq!(placement.above(Some(bar)).y, 788.);
         assert_eq!(placement.above(Some(Bounds { y: 200., ..bar })).y, placement.y, "a bar near the top leaves the notice");
         assert_eq!(placement.above(None).y, placement.y);
+        let returned = Bounds { y: 760., ..bar };
+        assert_eq!(placement.above(Some(returned)).y, 748., "a returning bar uses its current bounds");
     }
 
     #[test]
