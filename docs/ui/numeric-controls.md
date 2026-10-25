@@ -163,6 +163,10 @@ context; they do not select a language for each request. No GPU handle/lock or U
 is needed to evaluate a number. Hosts own native focus, gesture capture,
 unfinished text and transient display state only.
 
+Apple's `NumericTextField` owns native first-responder changes and takes an
+ordinary `Binding<Bool>` for focus. Callers keep that value in `@State`;
+`@FocusState` bindings belong to SwiftUI controls using `.focused(...)`.
+
 Tool settings with `preview: true` forward Down/Move/Up/Cancel through
 `ToolSettingContact`. The shared editor decides which values are previews and
 when to commit or restore them. Liquify Amount uses this contract to keep

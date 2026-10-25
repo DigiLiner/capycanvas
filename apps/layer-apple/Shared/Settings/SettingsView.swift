@@ -237,7 +237,7 @@ private struct PreferenceSwatches: View {
     @State private var editing = false
     @State private var text = ""
     @State private var focusRequest = 0
-    @FocusState private var focused: Bool
+    @State private var focused = false
     private var kind: JSON { row["kind"] }
     private var customSelected: Bool {
         let choices = kind["swatches"].array, index = Int(kind["selected"].uint)
