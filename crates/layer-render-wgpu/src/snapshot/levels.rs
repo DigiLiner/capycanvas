@@ -2,13 +2,7 @@ use super::*;
 use layer_core::{ArtworkQuery,ArtworkSource,levels::LevelsStatistics};
 use wgpu::util::DeviceExt;
 
-pub(crate) fn shader_source(storage: u32) -> &'static str {
-    if storage >= 16384 {
-        concat!(include_str!("levels.wgsl"), "\n", include_str!("levels_count.wgsl"))
-    } else {
-        concat!(include_str!("levels.wgsl"), "\n", include_str!("levels_count_portable.wgsl"))
-    }
-}
+pub(crate) const SHADER: &str = concat!(include_str!("levels.wgsl"), "\n", include_str!("levels_count.wgsl"));
 
 pub(crate) struct LevelsPipeline {
     layout:wgpu::BindGroupLayout,
@@ -25,7 +19,7 @@ impl LevelsPipeline {
                 crate::bindings::buffer(2,wgpu::ShaderStages::COMPUTE,wgpu::BufferBindingType::Storage {read_only:false},false,None),
                 crate::bindings::buffer(3,wgpu::ShaderStages::COMPUTE,wgpu::BufferBindingType::Storage {read_only:false},false,None),
             ]);
-            let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("Levels statistics"),source:wgpu::ShaderSource::Wgsl(shader_source(device.limits().max_compute_workgroup_storage_size).into())});
+            let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("Levels statistics"),source:wgpu::ShaderSource::Wgsl(SHADER.into())});
             let pipeline_layout=device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {label:Some("Levels statistics"),bind_group_layouts:&[Some(&layout)],immediate_size:0});
             let pipeline = |entry| Deferred::compute_module(device, "Levels distribution", &pipeline_layout, &shader, entry);
             Arc::new(Self {layout,measure:pipeline("measure"),count:pipeline("count"),fold:pipeline("fold")})

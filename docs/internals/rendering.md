@@ -1125,10 +1125,8 @@ rounded separately to 16 bytes before comparison with the device limit. Unused
 entry points and variables consume none of that entry point's allowance;
 unresolved override-sized arrays cannot pass this check. Shared device limits
 request 16,384 workgroup bytes when the adapter supports them, retaining the
-16,352-byte minimum. Levels Auto uses its original 4,096-bin workgroup kernel
-when the actual device permits it. At the lower limit, 4,088 workgroup bins and
-eight counters per lane combine into the same 4,096-bin shards. External devices
-with lower requested limits use that portable recipe too.
+16,352-byte minimum. Levels Auto fits that minimum on every device: 4,088
+workgroup bins and eight counters per lane combine into its 4,096-bin shards.
 
 The composition frame, bake destination and temporary image edge do not limit
 source reads. Global filters request the finite retained input domain, subject to

@@ -72,22 +72,11 @@ mod tests {
     }
 
     #[test]
-    fn levels_entries_fit_the_requested_downlevel_storage_budget() {
-        for limit in [16352,16384] {
-            let module = ValidatedModule::parse(crate::snapshot::levels::shader_source(limit)).unwrap();
-            assert_eq!(module.workgroup_storage("measure").unwrap(),2560);
-            assert_eq!(module.workgroup_storage("count").unwrap(),u64::from(limit));
-            assert_eq!(module.workgroup_storage("fold").unwrap(),0);
-        }
-    }
-
-    #[test]
-    fn original_full_histogram_exceeds_the_requested_downlevel_storage_budget() {
-        let module=ValidatedModule::parse(crate::snapshot::levels::shader_source(16384)).unwrap();
-        let limit=u64::from(wgpu::Limits::downlevel_defaults().max_compute_workgroup_storage_size);
-        let actual=module.workgroup_storage("count").unwrap();
-        assert_eq!(actual,16384);
-        assert!(actual>limit,"original histogram {actual} must exceed requested limit {limit}");
+    fn levels_entries_fit_the_downlevel_storage_budget() {
+        let module = ValidatedModule::parse(crate::snapshot::levels::SHADER).unwrap();
+        assert_eq!(module.workgroup_storage("measure").unwrap(),2560);
+        assert_eq!(module.workgroup_storage("count").unwrap(),u64::from(wgpu::Limits::downlevel_defaults().max_compute_workgroup_storage_size));
+        assert_eq!(module.workgroup_storage("fold").unwrap(),0);
     }
 
     #[test]
