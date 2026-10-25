@@ -34,7 +34,7 @@ fn external_webp_reference_samples() {
         let mut maximum = 0;
         let mut total = 0u64;
         let mut partial = 0;
-        for (a, b) in actual.chunks_exact(4).zip(reference.chunks_exact(4)) {
+        for (a, b) in actual.as_chunks::<4>().0.iter().zip(reference.as_chunks::<4>().0.iter()) {
             assert_eq!(a[3], b[3], "{name}: alpha, including compressed ALPH, must be exact");
             partial += usize::from(a[3] > 0 && a[3] < 255);
             for c in 0..3 {

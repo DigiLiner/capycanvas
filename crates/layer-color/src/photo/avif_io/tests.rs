@@ -38,7 +38,7 @@ fn rust_avif_embedded_icc_preserves_primary_samples() {
     assert_eq!(actual.interpretation.profile, ColorProfile::Icc(crate::profile_bytes(&ColorProfile::Builtin(RgbSpace::DisplayP3)).unwrap().into()));
     assert!(!actual.interpretation.profile_assumed);
     for (actual, original) in rows(&actual).into_iter().zip(rows(&original)) {
-        for (actual, original) in actual.chunks_exact(8).zip(original.chunks_exact(8)) {
+        for (actual, original) in actual.as_chunks::<8>().0.iter().zip(original.as_chunks::<8>().0.iter()) {
             assert_eq!(&actual[..6], &original[..6]);
             assert_eq!(&actual[6..], &[255, 255]);
         }

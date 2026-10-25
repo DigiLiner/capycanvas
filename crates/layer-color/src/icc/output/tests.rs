@@ -80,7 +80,7 @@ fn premultiplied_output_preserves_integer16_at_low_alpha() {
                 .encode_premultiplied(&input, &mut output, None, [0, 0])
                 .unwrap();
             for (i, pixel) in codes(&output, SampleDepth::U16)
-                .chunks_exact(4)
+                .as_chunks::<4>().0.iter()
                 .enumerate()
             {
                 let i = i as u32;
@@ -265,7 +265,7 @@ fn icc_rgb_output_matches_direct_encoded_cmm_conversion() {
                     .encode_straight(&linear, &mut output, None, [0, 0])
                     .unwrap();
                 for (i, (actual, expected)) in codes(&output, SampleDepth::U16)
-                    .chunks_exact(4)
+                    .as_chunks::<4>().0.iter()
                     .zip(expected)
                     .enumerate()
                 {
@@ -296,8 +296,8 @@ fn cmyk_output_matches_independent_reference_samples() {
         let bytes = std::fs::read(directory.join(name)).unwrap();
         assert_eq!(bytes.len(), count * 4);
         bytes
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+            .as_chunks::<4>().0.iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect::<Vec<_>>()
     };
     let destination = SourceInterpretation {
@@ -433,8 +433,8 @@ fn output_dither_is_stable_across_chunks_preserves_neutrals_and_does_not_touch_a
         }
         assert_eq!(whole, split, "{space:?}");
         for (i, (pixel, normal)) in whole
-            .chunks_exact(4)
-            .zip(rounded.chunks_exact(4))
+            .as_chunks::<4>().0.iter()
+            .zip(rounded.as_chunks::<4>().0.iter())
             .enumerate()
         {
             assert_eq!(pixel[0], pixel[1]);

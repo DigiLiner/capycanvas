@@ -14,7 +14,7 @@ pub(crate) fn rows(source: &SourceImage) -> Vec<Vec<u8>> {
 
 pub(crate) fn f16_pixels(bytes: &[u8]) -> Vec<[f32; 4]> {
     bytes
-        .chunks_exact(8)
+        .as_chunks::<8>().0.iter()
         .map(|p| {
             layer_core::color::hdr::decode_pixel(std::array::from_fn(|c| {
                 u16::from_le_bytes([p[c * 2], p[c * 2 + 1]])
@@ -32,14 +32,14 @@ pub(crate) fn assert_rgba16_reference(source: &SourceImage, expected: &[u8], nam
     let bytes = rows(source).concat();
     let actual: Vec<u16> = if source.interpretation.depth == SampleDepth::U16 {
         bytes
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|v| u16::from_le_bytes([v[0], v[1]]))
             .collect()
     } else {
         bytes.iter().map(|&v| u16::from(v) * 257).collect()
     };
     assert_eq!(expected.len(), actual.len() * 2, "{name}");
-    for (i, (actual, expected)) in actual.iter().zip(expected.chunks_exact(2)).enumerate() {
+    for (i, (actual, expected)) in actual.iter().zip(expected.as_chunks::<2>().0.iter()).enumerate() {
         assert_eq!(
             *actual,
             u16::from_le_bytes([expected[0], expected[1]]),

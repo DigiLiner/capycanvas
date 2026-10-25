@@ -110,7 +110,7 @@ fn rust_heif_ten_bit_and_embedded_profile_preserve_source_samples() {
         ColorProfile::Builtin(RgbSpace::DisplayP3)
     );
     let expected = ((448f64 / 876. * 1023.).round() as u32 * 65535 + 511) / 1023;
-    for p in rows(&source).concat().chunks_exact(8) {
+    for p in rows(&source).concat().as_chunks::<8>().0.iter() {
         for c in 0..3 {
             assert_eq!(
                 u16::from_le_bytes([p[c * 2], p[c * 2 + 1]]) as u32,
@@ -350,7 +350,7 @@ fn rust_heif_decodes_independent_lossless_red() {
         .source;
     assert_eq!(source.extent, [64, 64]);
     assert_eq!(source.interpretation.depth, SampleDepth::U8);
-    for p in rows(&source).concat().chunks_exact(4) {
+    for p in rows(&source).concat().as_chunks::<4>().0.iter() {
         assert!(p[0] >= 250 && p[1] <= 2 && p[2] <= 2, "{p:?}");
         assert_eq!(p[3], 255);
     }

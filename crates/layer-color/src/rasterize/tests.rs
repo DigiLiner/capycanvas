@@ -104,7 +104,7 @@ fn exact_integer_identity_and_depth_changes_preserve_samples_alpha_and_extent() 
         )
         .unwrap();
         let promoted = rows(&promoted).concat();
-        for (a, b) in rows(&original).concat().into_iter().zip(promoted.chunks_exact(2)) {
+        for (a, b) in rows(&original).concat().into_iter().zip(promoted.as_chunks::<2>().0.iter()) {
             assert_eq!(
                 u16::from_le_bytes([b[0], b[1]]),
                 a as u16 * 257,
@@ -122,7 +122,7 @@ fn exact_integer_identity_and_depth_changes_preserve_samples_alpha_and_extent() 
             || false,
         )
         .unwrap();
-        for (a, b) in rows(&original).concat().chunks_exact(2).zip(rows(&reduced).concat()) {
+        for (a, b) in rows(&original).concat().as_chunks::<2>().0.iter().zip(rows(&reduced).concat()) {
             let code = u16::from_le_bytes([a[0], a[1]]) as u32;
             assert_eq!(b as u32, (code + 128) / 257, "{space:?} {code}");
         }

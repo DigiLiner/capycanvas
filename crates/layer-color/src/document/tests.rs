@@ -369,7 +369,7 @@ fn dither_is_repeatable_coordinate_dependent_and_never_changes_coverage() {
         .unwrap();
     for tile in source_a.tiles.values() {
         let dithered = tile.decode().unwrap();
-        for (a, b) in bytes.chunks_exact(4).zip(dithered.chunks_exact(4)) {
+        for (a, b) in bytes.as_chunks::<4>().0.iter().zip(dithered.as_chunks::<4>().0.iter()) {
             assert_eq!(a[3], b[3]);
             assert!(a[..3].iter().zip(&b[..3]).all(|(a, b)| a.abs_diff(*b) <= 1));
         }
@@ -412,7 +412,7 @@ fn absolute_intent_keeps_the_white_point_difference_and_preserves_alpha() {
     .decode()
     .unwrap();
     assert_ne!(relative, absolute);
-    for (a, b) in relative.chunks_exact(8).zip(absolute.chunks_exact(8)) {
+    for (a, b) in relative.as_chunks::<8>().0.iter().zip(absolute.as_chunks::<8>().0.iter()) {
         assert_eq!(&a[6..], &b[6..]);
     }
 }
@@ -573,8 +573,8 @@ fn float32_depth_promotion_is_exact_demotion_and_cancel_are_atomic() {
     let result = prepare_document_color(&project, promote, LIMIT, || false).unwrap();
     let root = paint(&result.document,0).raster.wait_data().unwrap();
     let output = root.tiles[&key(RasterPlane::Color)].wait_backing().unwrap().decode().unwrap();
-    for (input, output) in half.chunks_exact(2).zip(output.chunks_exact(4)) {
-        assert_eq!(layer_core::color::f16::from_bits(u16::from_le_bytes(input.try_into().unwrap())).to_f32().to_bits(), u32::from_le_bytes(output.try_into().unwrap()));
+    for (input, output) in half.as_chunks::<2>().0.iter().zip(output.as_chunks::<4>().0.iter()) {
+        assert_eq!(layer_core::color::f16::from_bits(u16::from_le_bytes(*input)).to_f32().to_bits(), u32::from_le_bytes(*output));
     }
     assert!(Arc::ptr_eq(&root.tiles[&key(RasterPlane::WatercolorWetness)].wait_backing().unwrap(), &mask));
     let mut editor = Editor::new(project.clone());
@@ -645,8 +645,8 @@ fn conversion_uses_unplaced_source_domain_outside_the_composition() {
     let tile=data.tiles[&TileKey {plane:RasterPlane::Color,coordinate}].wait_backing().unwrap();
     assert_eq!(tile.descriptor,result.document.composition().color.paint_descriptor());
     let output=tile.decode().unwrap();
-    for (input,output) in samples(SampleDepth::U8,4).iter().zip(output.chunks_exact(2)) {
-        assert_eq!(u16::from_le_bytes(output.try_into().unwrap()),u16::from(*input)*257);
+    for (input,output) in samples(SampleDepth::U8,4).iter().zip(output.as_chunks::<2>().0.iter()) {
+        assert_eq!(u16::from_le_bytes(*output),u16::from(*input)*257);
     }
 }
 

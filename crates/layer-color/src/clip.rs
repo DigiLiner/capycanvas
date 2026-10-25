@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(source.interpretation.profile, ColorProfile::Builtin(RgbSpace::Srgb));
         let mut row = vec![0; source.row_bytes()];
         source.rows().read(1, &mut row).unwrap();
-        let samples: Vec<u16> = row.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
+        let samples: Vec<u16> = row.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
         assert_eq!(&samples[..4], &[65535; 4], "straight white");
         assert_eq!(samples[7], 13107, "straight alpha 0.2");
         let photo = crate::photo::read_photo(std::io::Cursor::new(png), Default::default()).unwrap();

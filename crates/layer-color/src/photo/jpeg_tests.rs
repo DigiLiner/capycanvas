@@ -220,7 +220,7 @@ fn baseline_60mp_jpeg_checks_full_image_memory_before_decoding() {
             codec_bytes: 2 * 1024 * 1024 * 1024,
         },
         |_, row| {
-            for p in row.chunks_exact_mut(3) {
+            for p in row.as_chunks_mut::<3>().0.iter_mut() {
                 p.copy_from_slice(&[40, 100, 170]);
             }
             Ok(())
@@ -250,7 +250,7 @@ fn baseline_60mp_jpeg_checks_full_image_memory_before_decoding() {
     let mut row = vec![0; source.row_bytes()];
     for y in [0, 1, 255, 256, extent[1] - 1] {
         rows.read(y, &mut row).unwrap();
-        for p in row.chunks_exact(3) {
+        for p in row.as_chunks::<3>().0.iter() {
             for (a, b) in p.iter().zip([40u8, 100, 170]) {
                 assert!(a.abs_diff(b) <= 2);
             }
@@ -354,7 +354,7 @@ fn external_progressive_and_oriented_jpeg_match_reference_samples_and_budget() {
     let mut row = vec![0; source.row_bytes()];
     for y in [0, 255, 256, 7323] {
         rows.read(y, &mut row).unwrap();
-        assert!(row.chunks_exact(3).all(|p| {
+        assert!(row.as_chunks::<3>().0.iter().all(|p| {
             p.iter()
                 .zip([40u8, 100, 170])
                 .all(|(a, b)| a.abs_diff(b) <= 2)

@@ -567,7 +567,7 @@ mod tests {
             );
             assert_eq!(source.interpretation.depth, SampleDepth::F16);
             let mut expected = vec![[0.; 4]; 64];
-            for (y, actual) in hdr_pixels(&source).chunks_exact(64).enumerate() {
+            for (y, actual) in hdr_pixels(&source).as_chunks::<64>().0.iter().enumerate() {
                 row(y as u32, &mut expected, transparent).unwrap();
                 for (v, p) in actual.iter().zip(&expected) {
                     assert!((v[3] - p[3]).abs() < 0.0005);

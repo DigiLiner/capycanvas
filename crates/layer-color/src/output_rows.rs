@@ -141,7 +141,7 @@ mod tests {
         )
         .unwrap();
         bytes
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|v| u16::from_le_bytes([v[0], v[1]]))
             .collect()
     }
@@ -153,7 +153,7 @@ mod tests {
             |_, row| { row.copy_from_slice(&pixels); Ok(()) }).unwrap();
         let target = SourceInterpretation { channels: SourceChannels::Rgba, depth: SampleDepth::U16,
             profile: ColorProfile::Builtin(RgbSpace::Srgb), profile_assumed: false };
-        let resized: Vec<_> = pixels.chunks_exact(4).map(|p| std::array::from_fn(|c| p.iter().map(|v| v[c]).sum::<f32>() / 4.)).collect();
+        let resized: Vec<_> = pixels.as_chunks::<4>().0.iter().map(|p| std::array::from_fn(|c| p.iter().map(|v| v[c]).sum::<f32>() / 4.)).collect();
         let encode = |source: &[[f32; 4]]| {
             let mut bytes = vec![0; 8 * 8];
             encode_working_rows_with_guide(

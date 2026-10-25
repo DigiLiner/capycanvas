@@ -201,7 +201,7 @@ mod tests {
         let written = write_hdr_png_rows(&mut png, [4, 1], RgbSpace::Srgb, &Default::default(), true, read).unwrap();
         let mut decoder = png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap();
         let row = decoder.next_row().unwrap().unwrap();
-        let expected: Vec<[f32; 4]> = row.data().chunks_exact(8).map(|p| {
+        let expected: Vec<[f32; 4]> = row.data().as_chunks::<8>().0.iter().map(|p| {
             let code = |c: usize| u16::from_be_bytes([p[c * 2], p[c * 2 + 1]]);
             let rgb = rgb::apply(hdr::bt2020_to_srgb(), [0, 1, 2].map(|c| hdr::pq_decode(code(c) as f64 / 65535.) / 203.));
             let a = code(3) as f32 / 65535.;

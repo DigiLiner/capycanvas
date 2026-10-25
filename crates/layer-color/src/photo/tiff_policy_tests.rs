@@ -55,8 +55,8 @@ fn classic_and_big_tiff_interleaved_strips_decode_all_lossless_codec_variants() 
             );
             let decoded: Vec<_> = rows(&source)
                 .concat()
-                .chunks_exact(2)
-                .map(|v| u16::from_le_bytes(v.try_into().unwrap()))
+                .as_chunks::<2>().0.iter()
+                .map(|v| u16::from_le_bytes(*v))
                 .collect();
             assert_eq!(decoded, values);
         }

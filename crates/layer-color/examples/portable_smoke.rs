@@ -53,7 +53,7 @@ pub extern "C" fn portable_heif() -> u32 {
         for y in 0..extent[1] {
             rows.read(y, &mut row).unwrap();
             if depth == SampleDepth::U16 {
-                for p in row.chunks_exact(8) {
+                for p in row.as_chunks::<8>().0.iter() {
                     let value = u16::from_le_bytes([p[0], p[1]]);
                     assert_eq!(value, 33504);
                     assert_eq!(&p[0..2], &p[2..4]);
@@ -61,7 +61,7 @@ pub extern "C" fn portable_heif() -> u32 {
                     assert_eq!(&p[6..8], &[255, 255]);
                 }
             } else {
-                for p in row.chunks_exact(4) {
+                for p in row.as_chunks::<4>().0.iter() {
                     assert_eq!(p[3], 255);
                 }
                 if extent == [64, 64] {
@@ -113,7 +113,7 @@ pub extern "C" fn portable_avif_export() -> u32 {
         let mut rows = source.rows();
         for y in 0..extent[1] {
             rows.read(y, &mut row).unwrap();
-            for (x, p) in row.chunks_exact(8).enumerate() {
+            for (x, p) in row.as_chunks::<8>().0.iter().enumerate() {
                 let pixel = layer_core::color::hdr::decode_pixel(std::array::from_fn(|c| {
                     u16::from_le_bytes([p[c * 2], p[c * 2 + 1]])
                 }))
@@ -165,7 +165,7 @@ pub extern "C" fn portable_smoke() -> u32 {
     assert_eq!(restored.interpretation.profile, embedded);
     let mut row = [0; 48];
     restored.rows().read(0, &mut row).unwrap();
-    assert!(row.chunks_exact(3).all(|p| {
+    assert!(row.as_chunks::<3>().0.iter().all(|p| {
         p.iter()
             .zip([40u8, 100, 170])
             .all(|(a, b)| a.abs_diff(b) <= 2)
@@ -200,7 +200,8 @@ pub extern "C" fn portable_avif() -> u32 {
         source_bytes: 8 * 1024 * 1024,
         dimension: 128,
     };
-    let fixtures: [(&[u8], &[u8], SampleDepth, [u32; 2]); 3] = [
+    type Fixture<'a> = (&'a [u8], &'a [u8], SampleDepth, [u32; 2]);
+    let fixtures: [Fixture<'_>; 3] = [
         (
             include_bytes!("../tests/fixtures/avif/p3-12bit.avif"),
             include_bytes!("../tests/fixtures/avif/p3-12bit.rgba16"),
@@ -245,7 +246,7 @@ pub extern "C" fn portable_avif() -> u32 {
             if depth == SampleDepth::U16 {
                 assert_eq!(row, expected);
             } else {
-                for (a, b) in row.chunks_exact(8).zip(expected.chunks_exact(8)) {
+                for (a, b) in row.as_chunks::<8>().0.iter().zip(expected.as_chunks::<8>().0.iter()) {
                     let pixel = |b: &[u8]| {
                         layer_core::color::hdr::decode_pixel(std::array::from_fn(|c| {
                             u16::from_le_bytes(b[c * 2..c * 2 + 2].try_into().unwrap())

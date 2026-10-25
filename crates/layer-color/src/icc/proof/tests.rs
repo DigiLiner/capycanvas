@@ -131,8 +131,8 @@ fn proof_matches_independent_cmm() {
     let floats = |record: &serde_json::Value| -> Vec<f32> {
         std::fs::read(directory.join(record["file"].as_str().unwrap()))
             .unwrap()
-            .chunks_exact(4)
-            .map(|v| f32::from_le_bytes(v.try_into().unwrap()))
+            .as_chunks::<4>().0.iter()
+            .map(|v| f32::from_le_bytes(*v))
             .collect()
     };
     let intents = [
@@ -206,11 +206,11 @@ fn proof_matches_independent_cmm() {
         let mut raw_disagreements = 0;
         let mut distance_error = 0f64;
         for ((rgb, xyz), gamut) in input
-            .chunks_exact(3)
-            .zip(expected.chunks_exact(3))
-            .zip(gamut.chunks_exact(3))
+            .as_chunks::<3>().0.iter()
+            .zip(expected.as_chunks::<3>().0.iter())
+            .zip(gamut.as_chunks::<3>().0.iter())
         {
-            let result = proof.sample(rgb.try_into().unwrap()).unwrap();
+            let result = proof.sample(*rgb).unwrap();
             let xyz = [xyz[0] as f64, xyz[1] as f64, xyz[2] as f64];
             errors.push(distance(result.xyz, xyz));
             for (actual, expected) in result.xyz.iter().zip(xyz) {

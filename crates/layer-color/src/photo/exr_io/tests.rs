@@ -38,12 +38,9 @@ fn float32_exr_lossless_channels_primaries_white_alpha_and_subnormals() {
             .next()
             .unwrap()
             .unwrap();
-        for (channel, plane) in [3, 2, 1, 0].into_iter().zip(block.data.chunks_exact(16)) {
-            for (pixel, actual) in pixels.iter().zip(plane.chunks_exact(4)) {
-                assert_eq!(
-                    u32::from_ne_bytes(actual.try_into().unwrap()),
-                    pixel[channel].to_bits()
-                );
+        for (channel, plane) in [3, 2, 1, 0].into_iter().zip(block.data.as_chunks::<16>().0.iter()) {
+            for (pixel, actual) in pixels.iter().zip(plane.as_chunks::<4>().0.iter()) {
+                assert_eq!(u32::from_ne_bytes(*actual), pixel[channel].to_bits());
             }
         }
         let image = read_photo(Cursor::new(bytes), Default::default()).unwrap();
@@ -52,7 +49,7 @@ fn float32_exr_lossless_channels_primaries_white_alpha_and_subnormals() {
         assert_eq!(image.interpretation.profile, ColorProfile::Builtin(space));
         let mut row = vec![0; image.row_bytes()];
         image.rows().read(0, &mut row).unwrap();
-        for (bytes, input) in row.chunks_exact(16).zip(pixels) {
+        for (bytes, input) in row.as_chunks::<16>().0.iter().zip(pixels) {
             let actual = hdr::decode_samples(SampleDepth::F32, bytes).unwrap();
             let expected = if input[3] == 0. {
                 [0.; 4]
