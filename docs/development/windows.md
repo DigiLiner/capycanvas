@@ -1003,6 +1003,8 @@ preview pixels, exact Undo, retained controls, resizing and an internal theme
 change. Contacts preserve document revision and modified state. Repeat with
 `-Theme light` to exercise the contacts in both starting themes. It retains the
 owned drawing window and trace directory for capture, input, resize and close.
+The window exercise helper retries transient UI Automation discovery within its
+bounded wait, keeping the same process, HWND and drawing-canvas ownership checks.
 
 The delayed-popup regression uses real native cancellation events and fixture-owned
 reply gates. Build it into a separate output, then run in both themes:
