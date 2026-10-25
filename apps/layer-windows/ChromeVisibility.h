@@ -6,8 +6,10 @@
 namespace CapyUi {
 struct ChromeVisibility:std::enable_shared_from_this<ChromeVisibility>{
     std::optional<bool> shown;bool interactive=true;
+    weak_ref<FrameworkElement> boundElement;
     CompositionTarget::Rendering_revoker frames;
     void apply(FrameworkElement const& element,bool visible,std::function<void()> changed={}){
+        if(boundElement.get()!=element){frames.revoke();shown.reset();boundElement=make_weak(element);}
         if(!shown)interactive=element.IsHitTestVisible();
         element.IsHitTestVisible(visible&&interactive);
         if(shown==visible)return;

@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light','profiles-dark','profiles-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly,[switch]$ProfilesOnly,[switch]$ConfigurationOnly)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light','profiles-dark','profiles-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly,[switch]$ProfilesOnly,[switch]$ConfigurationOnly,[switch]$ZenThemeOnly)
 $ErrorActionPreference='Stop'
 if($Theme.StartsWith('profiles-')){$Theme=$Theme.Substring(9);$ProfilesOnly=$true}
 if($Theme -eq 'light-large'){$Theme='light';$LargeText=$true}
@@ -286,6 +286,78 @@ function Configuration-CaptionSurface{
  Use-Window $second;Invoke 'CloseButton'
  Wait-Until {!(Model).preferences} 'Preferences did not close after configuration localization'
 }
+function Zen-ThemeSurface{
+ $animations=[bool]::Parse((& powershell.exe -NoProfile -NonInteractive -Command '[Windows.UI.ViewManagement.UISettings,Windows.UI.ViewManagement,ContentType=WindowsRuntime]::new().AnimationsEnabled'|Out-String).Trim())
+ Use-Window $first;Focus-Canvas
+ $baseline=Fresh-Model
+ $layout=$baseline.state.workspace.layout|ConvertTo-Json -Depth 90 -Compress
+ $document=$baseline.state.document_file|ConvertTo-Json -Depth 20 -Compress
+ $brush=$baseline.state.brush|ConvertTo-Json -Depth 30 -Compress
+ $history=@($baseline.state.commands|Where-Object {$_.id -in @('undo','redo')}|Select-Object id,enabled)|ConvertTo-Json -Compress
+ $camera=Camera|ConvertTo-Json -Depth 15 -Compress;$gpu=$baseline.windows_gpu_generation
+ $normal=@(((Control 'title-bar' -Arranged).Current.ItemStatus|ConvertFrom-Json).actual_items|ForEach-Object {'header-item-'+$_.id})
+ if(!$normal.Count -or $baseline.chrome_hidden -or $baseline.state.workspace.zen_mode){throw 'Zen theme fixture requires ordinary native header controls'}
+ $null=Control 'panel-tab-layers' -Arranged
+ function Check-ZenOwner{
+  $view=Fresh-Model
+  if(($view.state.workspace.layout|ConvertTo-Json -Depth 90 -Compress) -ne $layout -or ($view.state.document_file|ConvertTo-Json -Depth 20 -Compress) -ne $document -or ($view.state.brush|ConvertTo-Json -Depth 30 -Compress) -ne $brush -or (@($view.state.commands|Where-Object {$_.id -in @('undo','redo')}|Select-Object id,enabled)|ConvertTo-Json -Compress) -ne $history -or (Camera|ConvertTo-Json -Depth 15 -Compress) -ne $camera -or $view.windows_gpu_generation -ne $gpu){throw 'Inactive Zen theme publication changed layout, camera, brush, artwork, history or GPU ownership'}
+ }
+ function Wait-ZenNative([bool]$Hidden){
+  Wait-Until {
+   $view=Model;if(!$view -or $view.chrome_hidden -ne $Hidden -or $view.state.workspace.zen_mode -ne $Hidden){return $false}
+   $header=Find 'title-bar';if(!$header){return $false}
+   $actual=@(($header.Current.ItemStatus|ConvertFrom-Json).actual_items)
+   $layers=Find 'panel-tab-layers' -Visible
+   if($Hidden){
+    if($actual.Count -or $layers){return $false}
+    foreach($id in $normal){if(Find $id -Visible){return $false}}
+    foreach($id in @('application-menu-file','application-primary-menu','application-menus','workspace-switcher-options','header-recovery-menu','header-overflow-0','header-overflow-1','header-overflow-2')){if(Find $id -Visible){return $false}}
+   }else{
+    if(!$layers -or $actual.Count -ne $normal.Count){return $false}
+    foreach($id in $normal){$item=Find $id -Visible;if(!$item){return $false};$bounds=$item.Current.BoundingRectangle;if($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){return $false}}
+   }
+   $true
+  } 'Zen state and native header/panel visibility did not agree' 15
+  Check-ZenOwner
+ }
+ function Zen-HeaderPixels([string]$Name){
+  $bounds=$root.Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($bounds.X+20),[int]($bounds.Y+20))
+  Capture-Window $first $Name
+  $bitmap=[Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')));$locked=$null;$sha=[Security.Cryptography.SHA256]::Create()
+  try{
+   $height=[int][Math]::Ceiling((Fresh-Model).header_presentation_height*[CapyRowPointer]::GetDpiForWindow([IntPtr]$first.hwnd)/96.)
+   if($height -le 0 -or $height -gt $bitmap.Height){throw 'Native header pixel bounds are unavailable'}
+   $locked=$bitmap.LockBits([Drawing.Rectangle]::new(0,0,$bitmap.Width,$height),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
+   $bytes=[byte[]]::new([Math]::Abs($locked.Stride)*$locked.Height);[Runtime.InteropServices.Marshal]::Copy($locked.Scan0,$bytes,0,$bytes.Length)
+   [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','')
+  }finally{if($locked){$bitmap.UnlockBits($locked)};$sha.Dispose();$bitmap.Dispose()}
+ }
+ Key 9;Wait-ZenNative $true
+ Capture-Window $first 'zen-theme-baseline'
+ Use-Window $second;Menu-Command 'edit' 'settings';Invoke-Id 'preference-page-appearance'
+ $records=[Collections.Generic.List[object]]::new()
+ $themes=if($Theme -eq 'dark'){@('light','dark')}else{@('dark','light')}
+ foreach($next in $themes){
+  Use-Window $second
+  $row=@((Fresh-Model).preferences.pages.groups.rows|Where-Object id -eq 'theme')[0]
+  $index=if($next -eq 'dark'){2}else{1}
+  if(!$row -or $row.kind.options.Count -le $index){throw 'Shared native theme preference options are unavailable'}
+  Choose-Option 'preference-choice-theme' $row.kind.options[$index]
+  Wait-Until {(Model $second).state.theme -eq $next -and (Model $first).state.theme -eq $next -and (Model $first).chrome_hidden -and (Model $first).state.workspace.zen_mode} 'Inactive Zen window did not adopt the shared theme while staying hidden' 30
+  Use-Window $first;Wait-ZenNative $true
+  $before=Zen-HeaderPixels ('zen-theme-'+$next+'-inactive')
+  Focus-Canvas;Key 9;Wait-ZenNative $false
+  Capture-Window $first ('zen-theme-'+$next+'-normal')
+  Focus-Canvas;Key 9;Wait-ZenNative $true
+  $after=Zen-HeaderPixels ('zen-theme-'+$next+'-reentered')
+  if($before -ne $after){throw 'Inactive theme publication left native header pixels that disappear after normal/Zen restoration'}
+  $records.Add(@{theme=$next;hidden_native_header_and_panels='passed';normal_native_return='passed';same_theme_header_pixels=$before})
+ }
+ Focus-Canvas;Key 9;Wait-ZenNative $false
+ Use-Window $second;Invoke 'CloseButton'
+ Wait-Until {!(Model).preferences} 'Preferences did not close after the inactive Zen theme journey'
+ @{theme=$Theme;transitions=$records;animations_enabled=$animations;reduced_motion=if($animations){'unverified; current Windows animations are enabled'}else{'settled native visibility and restoration passed with Windows animations disabled'};layout_camera_brush_artwork_history_and_gpu='unchanged';frame_pacing='unverified';evidence=$run}
+}
 try{
  Enter-CapyEnvironment
  $previousTextScale=Text-Scale
@@ -308,7 +380,12 @@ try{
  Menu-Command 'file' 'new_window'
  Wait-Until {@(Windows).Count -eq 2} 'Second window did not register' 45
  $second=@(Windows|Where-Object id -ne $first.id)[0];Ready $second
- if(@($NoticeOnly,$HeaderOnly,$BlendOnly,$GroupedToolsOnly,$ConfigurationOnly,$ProfilesOnly|Where-Object {$_}).Count -gt 1){throw 'Choose one focused localization mode'}
+ if(@($NoticeOnly,$HeaderOnly,$BlendOnly,$GroupedToolsOnly,$ConfigurationOnly,$ProfilesOnly,$ZenThemeOnly|Where-Object {$_}).Count -gt 1){throw 'Choose one focused localization mode'}
+ if($ZenThemeOnly){
+  [CapyRowPointer]::Initialize([uint32]$review.Id)
+  Zen-ThemeSurface|ConvertTo-Json -Depth 6|Tee-Object -FilePath (Join-Path $run 'results.json')
+  $completed=$true;return
+ }
  if($ConfigurationOnly){
   [CapyRowPointer]::Initialize([uint32]$review.Id)
   Configuration-CaptionSurface

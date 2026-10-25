@@ -309,6 +309,11 @@ window's Preferences while Brush size configuration stays open. It checks
 retained hint, visibility and control captions, native identities and unchanged
 layout, brush, artwork, history and GPU ownership. Run both themes.
 
+`-ZenThemeOnly` changes the theme through another window while the first stays
+in Zen. It checks hidden native controls, unchanged drawing and workspace state,
+normal restoration and exact header pixels after reentering Zen in the same theme.
+Run both themes; its recorded Windows animation setting does not qualify frame pacing.
+
 Activating Preferences deliberately sends shared Blur, restoring the tool used
 before temporary eyedropping. The sampler journey checks that restoration, then
 reenters the picker and checks current captions and unchanged sample choices.
