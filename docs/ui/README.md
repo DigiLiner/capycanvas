@@ -154,9 +154,9 @@ them without changing the shared roles:
 Plain labels and headings align with the content's leading edge, without another
 label inset. Full-width controls and right-aligned fields end at its trailing
 edge. Related dropdown rows share a label column sized from their captions.
-Web panels at 360 px or narrower stack dropdown captions above their fields so
-translated values can use the full width. Labels wrap between words, and dialog
-buttons keep their captions together.
+Captions stay beside their controls at every width and wrap to two lines, on
+every host. Labels wrap between words, and dialog buttons keep their captions
+together.
 Numeric readouts and their text editors use 6-pixel horizontal padding, including
 inline fields. Checkboxes and button captions retain the space for their
 indicators and icons; slider tracks and gradient handles retain their internal
