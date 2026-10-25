@@ -1084,18 +1084,14 @@ fn native_move_drags_selected_pixels() {
         filled_selection(&w, layer_ui::occurrence_token(paint));
         w.dispatch(UiAction::Invoke { command: CommandId::Move });
         until(
-            || {
-                let offered = state(&w).canvas_bar.is_some_and(|b| {
-                    b.items.iter().any(|i| matches!(&i.option, layer_ui::ToolOption::Action { state, .. } if state.id == CommandId::MoveLeaveCopy))
-                });
-                offered && shown(&w)
-            },
-            "Move offers Leave Copy on the selection bar",
+            || state(&w).canvas_bar.is_some_and(|b| b.context.kind == layer_ui::CanvasBarKind::Selection) && shown(&w),
+            "Move keeps the selection bar",
         );
         pump(300);
         let leave = |w: &Workspace| state(w).commands.iter().any(|c| c.id == CommandId::MoveLeaveCopy && c.selected);
         if leave(&w) != leave_copy {
-            tap_bar(&w, &mut native, device, CommandId::MoveLeaveCopy, || leave(&w) == leave_copy, "Leave Copy toggles on the bar");
+            choose_from_more(&w, &mut native, device, &["Leave Copy"]);
+            until(|| leave(&w) == leave_copy, "Leave Copy toggles in More");
         }
         if let (Device::Mouse, true) = (device, leave_copy) {
             let dir = artifact_dir("../../artifacts/move-selection");

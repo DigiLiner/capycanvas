@@ -60,8 +60,8 @@ moves the whole layer by changing its offset, which resamples nothing.
   mask moves with its layer. Shift keeps the drag horizontal or vertical.
 - Releasing applies the move as one undo step, and the selection moves with the
   pixels. Move stays the tool, and the selection bar keeps its context.
-- **Leave Copy** (`MoveLeaveCopy`), in Move's Tool Options and on the selection
-  bar while Move is active, keeps the original in place and places a copy. Alt
+- **Leave Copy** (`MoveLeaveCopy`), in Move's Tool Options and in the selection
+  bar's More while Move is active, keeps the original in place and places a copy. Alt
   held as the drag starts does the opposite of the toggle.
 - Cancelling the contact, or losing window focus, leaves the pixels where they
   were. A press that moves no whole pixel changes nothing.

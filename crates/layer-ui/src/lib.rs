@@ -918,7 +918,8 @@ impl CommandId {
             Self::TransformBilinear => "blur",
             Self::TransformBicubic => "sharpen",
             Self::TransformWarp | Self::WarpGridThree | Self::WarpGridFour | Self::WarpGridFive
-            | Self::WarpSplitVertical | Self::WarpSplitHorizontal | Self::WarpSplitCross | Self::WarpSelectPoints | Self::WarpResetGrid => "warp",
+            | Self::WarpSplitVertical | Self::WarpSplitHorizontal | Self::WarpSplitCross | Self::WarpResetGrid => "warp",
+            Self::WarpSelectPoints => "edit-points",
             Self::KeyboardShortcuts => "keyboard",
             Self::About => "info",
             Self::Website => "website",
