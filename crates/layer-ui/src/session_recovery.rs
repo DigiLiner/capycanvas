@@ -627,7 +627,7 @@ mod tests {
             source.apply_canvas_geometry(&CanvasGeometry::crop(CanvasRect { origin, size }), Vec::new()).unwrap();
             source.frame(1, 1).unwrap();
             let shift = origin.map(i64::from);
-            for mut session in [restore(&encode(&source), true), source] {
+            for mut session in [Box::new(restore(&encode(&source), true)), Box::new(source)] {
                 navigate_rebuilding(&mut session, [[1000; 2], size], shift);
             }
         }
@@ -641,7 +641,7 @@ mod tests {
         source.layer_edit(layer_core::Edit::Batch(edits)).unwrap(); source.frame(1, 1).unwrap();
         assert_ne!(source.engine.document().target_extent(target), [1000; 2], "the paint domain grows by whole tiles");
         assert_eq!(source.engine.document().working.view_origin, [0, 0]);
-        for mut session in [restore(&encode(&source), true), source] {
+        for mut session in [Box::new(restore(&encode(&source), true)), Box::new(source)] {
             navigate_rebuilding(&mut session, [[1000; 2]; 2], [0, 0]);
         }
     }
