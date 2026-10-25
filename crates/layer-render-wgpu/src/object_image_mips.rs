@@ -1,5 +1,5 @@
 use crate::{display_mips, GpuRasterError, PipelineDevice, WgpuRasterizer, PAGE_SIZE};
-use layer_core::{authored::PortableId, color::{RgbSpace,source::SourceImage}};
+use layer_core::{authored::PortableId, color::{RgbSpace,source::SourceImage},raster::TileError};
 use std::sync::{Arc,Weak,atomic::{AtomicBool,Ordering}};
 
 #[derive(Clone)]
@@ -219,9 +219,9 @@ pub(crate) struct PreparedRasterTile {
     pub blob:Arc<layer_core::raster::TileBlob>,
     pub space:RgbSpace,
     pub destination:RgbSpace,
-    pub pixels:Result<crate::scene::sources::PreparedSourcePixels,String>,
+    pub pixels:Result<crate::scene::sources::PreparedSourcePixels,TileError>,
 }
-pub fn prepare_raster_tile(blob:&Arc<layer_core::raster::TileBlob>,space:RgbSpace,cache:&layer_core::raster::DecodedTileCache)->Result<crate::scene::sources::PreparedSourcePixels,String> {
+pub fn prepare_raster_tile(blob:&Arc<layer_core::raster::TileBlob>,space:RgbSpace,cache:&layer_core::raster::DecodedTileCache)->Result<crate::scene::sources::PreparedSourcePixels,TileError> {
     use layer_core::color::source::SourceChannels;
     crate::scene::sources::validate_raster(blob,space).map_err(|error|error.to_string())?;
     let native=cache.decode(blob)?;
@@ -229,7 +229,7 @@ pub fn prepare_raster_tile(blob:&Arc<layer_core::raster::TileBlob>,space:RgbSpac
     let channels=if blob.descriptor.channels==1 {SourceChannels::Gray} else {SourceChannels::GrayAlpha};
     let depth=blob.descriptor.depth();
     let row=PAGE_SIZE as usize*4*depth.bytes();
-    let mut expanded=vec![0;row*PAGE_SIZE as usize];
+    let mut expanded=layer_core::memory::DecodedBytes::zeroed(row*PAGE_SIZE as usize)?;
     for (input,output) in native.chunks_exact(PAGE_SIZE as usize*channels.count()*depth.bytes()).zip(expanded.chunks_exact_mut(row)) {
         crate::scene::sources::expand_source_row(input,output,channels,depth);
     }
@@ -254,14 +254,14 @@ pub(crate) enum PreparedImageWork {
     Raster(PreparedRasterTile),
     Coordinates {destination:CoordinateDestination,pixels:CoordinateResult},
 }
-pub fn prepare_image_tile(source:&SourceImage,coordinate:[u32;2],destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoder:Option<&layer_color::WorkingDecoder>)->Result<crate::scene::sources::PreparedSourcePixels,String> {
+pub fn prepare_image_tile(source:&SourceImage,coordinate:[u32;2],destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoder:Option<&layer_color::WorkingDecoder>)->Result<crate::scene::sources::PreparedSourcePixels,TileError> {
     use crate::scene::sources::PreparedSourcePixels;
     if matches!(source.interpretation.profile,layer_core::color::ColorProfile::Builtin(_)) && source.interpretation.channels!=layer_core::color::source::SourceChannels::Cmyk {
         let tile=source.tiles.get(&coordinate).ok_or("Missing immutable image tile")?;
         let native=cache.decode(tile)?;
         if source.interpretation.channels==layer_core::color::source::SourceChannels::Rgba {return Ok(PreparedSourcePixels::NativeSamples(native));}
         let row=PAGE_SIZE as usize*4*source.interpretation.depth.bytes();
-        let mut expanded=vec![0;row*PAGE_SIZE as usize];
+        let mut expanded=layer_core::memory::DecodedBytes::zeroed(row*PAGE_SIZE as usize)?;
         for (input,output) in native.chunks_exact(PAGE_SIZE as usize*source.interpretation.pixel_bytes()).zip(expanded.chunks_exact_mut(row)) {
             crate::scene::sources::expand_source_row(input,output,source.interpretation.channels,source.interpretation.depth);
         }
@@ -272,19 +272,24 @@ pub fn prepare_image_tile(source:&SourceImage,coordinate:[u32;2],destination:Rgb
         owned=layer_color::WorkingDecoder::new(&source.interpretation,destination,Default::default())?;
         &owned
     };
+    let _scratch=layer_core::memory::images().reserve((PAGE_SIZE*PAGE_SIZE) as usize*16)?;
     let mut pixels=vec![[0.;4];(PAGE_SIZE*PAGE_SIZE) as usize];
     decoder.decode_tile_cached(source,coordinate,&mut pixels,cache)?;
-    let bytes=pixels.into_iter().flat_map(|[r,g,b,a]|[r*a,g*a,b*a,a]).flat_map(f32::to_ne_bytes).collect();
+    let mut bytes=layer_core::memory::DecodedBytes::zeroed(pixels.len()*16)?;
+    for (output,[r,g,b,a]) in bytes.as_chunks_mut::<16>().0.iter_mut().zip(pixels) {
+        for (word,value) in output.as_chunks_mut::<4>().0.iter_mut().zip([r*a,g*a,b*a,a]) {word.copy_from_slice(&value.to_ne_bytes());}
+    }
     Ok(PreparedSourcePixels::PremultipliedWorkingPixels(Arc::new(bytes)))
 }
 pub(crate) struct PreparedMipTile {
     pub id:PortableId,
     pub source:Arc<SourceImage>,
     pub coordinate:[u32;2],
-    pub pixels:Result<crate::scene::sources::PreparedSourcePixels,String>,
+    pub pixels:Result<crate::scene::sources::PreparedSourcePixels,TileError>,
 }
 pub(crate) fn retain_image_decode(prepared:&PreparedMipTile,space:RgbSpace,failures:&mut Vec<crate::moving_projection::FailedImageTile>)->bool {
     if let Err(error)=&prepared.pixels {
+        let TileError::Invalid(error)=error else {return false;};
         let weak=Arc::downgrade(&prepared.source);
         failures.retain(|(id,source,coordinate,context,_)|source.strong_count()>0
             && !(*id==prepared.id && source.ptr_eq(&weak) && *coordinate==prepared.coordinate && *context==space));
@@ -312,6 +317,46 @@ impl DecodeKey {
         }
     }
 }
+#[derive(Default)]
+pub(crate) struct DecodePressure {entries:Vec<(DecodeKey,RgbSpace,u64)>,paused:Option<(DecodeKey,u64)>}
+impl DecodePressure {
+    fn retain(&mut self,generation:u64) {
+        self.entries.retain(|(key,_,epoch)|*epoch==generation && match key {
+            DecodeKey::Image(_,source,_)=>source.strong_count()!=0,
+            DecodeKey::Raster(source,_,_)=>source.strong_count()!=0,
+        });
+    }
+    fn remember(&mut self,key:DecodeKey,space:RgbSpace,generation:u64) {
+        self.retain(generation);
+        if !self.entries.iter().any(|(stored,context,_)|stored.matches(&key) && *context==space) {self.entries.push((key,space,generation));}
+    }
+    fn blocked(&mut self,key:DecodeKey,space:RgbSpace,generation:u64)->bool {
+        self.retain(generation);
+        let blocked=self.entries.iter().any(|(stored,context,_)|stored.matches(&key) && *context==space);
+        self.paused=blocked.then_some((key,generation));blocked
+    }
+    pub fn image(&mut self,id:PortableId,source:&Arc<SourceImage>,coordinate:[u32;2],space:RgbSpace,generation:u64)->bool {
+        self.blocked(DecodeKey::Image(id,Arc::downgrade(source),coordinate),space,generation)
+    }
+    pub fn raster(&mut self,source:&Arc<layer_core::raster::TileBlob>,from:RgbSpace,to:RgbSpace,generation:u64)->bool {
+        self.blocked(DecodeKey::Raster(Arc::downgrade(source),from,to),to,generation)
+    }
+    pub fn image_failed(&mut self,tile:&PreparedMipTile,space:RgbSpace,generation:u64,snapshot:bool)->Result<(),layer_core::memory::MemoryError> {
+        if snapshot {return Err(layer_core::memory::MemoryError);}
+        self.remember(DecodeKey::Image(tile.id,Arc::downgrade(&tile.source),tile.coordinate),space,generation);Ok(())
+    }
+    pub fn raster_failed(&mut self,tile:&PreparedRasterTile,generation:u64,snapshot:bool)->Result<(),layer_core::memory::MemoryError> {
+        if snapshot {return Err(layer_core::memory::MemoryError);}
+        self.remember(DecodeKey::Raster(Arc::downgrade(&tile.blob),tile.space,tile.destination),tile.destination,generation);Ok(())
+    }
+    pub fn blocks_background(&self,generation:u64,outstanding:bool)->bool {
+        !outstanding && self.paused.as_ref().is_some_and(|(key,epoch)|*epoch==generation && match key {
+            DecodeKey::Image(_,source,_)=>source.strong_count()!=0,
+            DecodeKey::Raster(source,_,_)=>source.strong_count()!=0,
+        })
+    }
+}
+
 pub(crate) struct MipDecodeQueue {
     #[cfg(not(target_arch="wasm32"))]
     requests:std::sync::mpsc::SyncSender<MipDecodeRequest>,
@@ -326,8 +371,8 @@ pub(crate) struct MipDecodeQueue {
     capacity:usize,
 }
 #[cfg(not(target_arch="wasm32"))]
-fn contained<T>(work:impl FnOnce()->Result<T,String>)->Result<T,String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|payload| Err(crate::panic_message(&*payload)))
+fn contained<T,E:From<String>>(work:impl FnOnce()->Result<T,E>)->Result<T,E> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|payload| Err(crate::panic_message(&*payload).into()))
 }
 #[cfg(not(target_arch="wasm32"))]
 fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoders:&mut std::collections::VecDeque<(Weak<SourceImage>,layer_color::WorkingDecoder)>)->PreparedImageWork {
@@ -443,6 +488,55 @@ mod tests {
     use super::*;
     use crate::test_support::{page_texture,upload_page};
     #[test]
+    fn pressure_pauses_decode_without_poisoning_sources_and_release_retries() {
+        let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
+        let id=PortableId::random();let budget=layer_core::memory::Budget::new(1);
+        let held=budget.reserve(1).unwrap();let generation=budget.generation();
+        let error=budget.reserve(1).err().unwrap();
+        let prepared=PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:Err(error.into())};
+        let mut failures=Vec::new();let mut pressure=DecodePressure::default();
+        assert!(!retain_image_decode(&prepared,RgbSpace::Srgb,&mut failures));
+        assert!(failures.is_empty());
+        pressure.image_failed(&prepared,RgbSpace::Srgb,generation,false).unwrap();
+        assert!(!pressure.blocks_background(generation,false),"an unsolicited obsolete result must not pause current work");
+        assert!(pressure.image(id,&source,[0;2],RgbSpace::Srgb,generation));
+        assert!(pressure.blocks_background(generation,false));
+        assert!(!pressure.blocks_background(generation,true),"already accepted jobs must finish before pausing");
+        drop(held);let released=budget.generation();assert_ne!(generation,released);
+        assert!(!pressure.blocks_background(released,false));
+        assert!(!pressure.image(id,&source,[0;2],RgbSpace::Srgb,released));
+        let cache=layer_core::raster::DecodedTileCache::new(0);
+        let retry=PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:prepare_image_tile(&source,[0;2],RgbSpace::Srgb,&cache,None)};
+        assert!(retain_image_decode(&retry,RgbSpace::Srgb,&mut failures));assert!(retry.pixels.is_ok());
+        let invalid=PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:Err("Corrupt tile".into())};
+        assert!(!retain_image_decode(&invalid,RgbSpace::Srgb,&mut failures));
+        assert!(!retain_image_decode(&prepared,RgbSpace::Srgb,&mut failures));
+        assert_eq!(image_decode_failure(&failures,id,&source,[0;2],RgbSpace::Srgb),Some("Corrupt tile"));
+    }
+    #[test]
+    fn pressure_is_scoped_to_raster_owner_context_and_snapshots_stop() {
+        let blob=Arc::new(layer_core::raster::TileBlob::encode(layer_core::color::PixelDescriptor::COVERAGE8,&vec![0;65536]).unwrap());
+        let raster=PreparedRasterTile {blob:blob.clone(),space:RgbSpace::Srgb,destination:RgbSpace::Srgb,pixels:Err(layer_core::memory::MemoryError.into())};
+        let mut pressure=DecodePressure::default();
+        assert!(pressure.raster_failed(&raster,7,true).is_err());assert!(pressure.entries.is_empty());
+        pressure.raster_failed(&raster,7,false).unwrap();
+        assert!(pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::Srgb,7));
+        assert!(!pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::DisplayP3,7));
+        assert!(!pressure.blocks_background(7,false),"a different explicit context must remain runnable");
+        let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
+        let image=PreparedMipTile {id:PortableId::random(),source,coordinate:[0;2],pixels:Err(layer_core::memory::MemoryError.into())};
+        assert!(pressure.image_failed(&image,RgbSpace::Srgb,7,true).is_err());
+        pressure.image_failed(&image,RgbSpace::Srgb,7,false).unwrap();
+        assert!(pressure.image(image.id,&image.source,[0;2],RgbSpace::Srgb,7));
+        assert!(!pressure.image(image.id,&image.source,[0;2],RgbSpace::DisplayP3,7));
+        assert!(!pressure.blocks_background(7,false));
+        assert!(pressure.image(image.id,&image.source,[0;2],RgbSpace::Srgb,7));
+        drop(image);
+        assert!(!pressure.blocks_background(7,false),"another retained failed source must not prolong a closed owner's pause");
+        drop(raster);drop(blob);
+        assert!(!pressure.blocks_background(7,false),"closed sources must not pause unrelated work");
+    }
+    #[test]
     fn obsolete_image_decode_failure_is_visible_only_to_its_requested_source_and_context() {
         let a=layer_core::color::source::rgba8_source([1;2],|_,_|[1,2,3,255]);
         let b=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
@@ -450,7 +544,7 @@ mod tests {
         let weak=Arc::downgrade(&a);let mut failures=Vec::new();
         let stale=PreparedMipTile {id:aid,source:a.clone(),coordinate:[0;2],pixels:Err("retired A decode".into())};
         assert!(!retain_image_decode(&stale,RgbSpace::Srgb,&mut failures));
-        let current=PreparedMipTile {id:bid,source:b.clone(),coordinate:[0;2],pixels:Ok(crate::scene::sources::PreparedSourcePixels::NativeSamples(Arc::new(vec![9,8,7,255])))};
+        let current=PreparedMipTile {id:bid,source:b.clone(),coordinate:[0;2],pixels:Ok(crate::scene::sources::PreparedSourcePixels::NativeSamples(Arc::new(layer_core::memory::DecodedBytes::copy_from(&[9,8,7,255]).unwrap())))};
         assert!(retain_image_decode(&current,RgbSpace::Srgb,&mut failures));
         assert!(image_decode_failure(&failures,bid,&b,[0;2],RgbSpace::Srgb).is_none());
         assert!(image_decode_failure(&failures,aid,&b,[0;2],RgbSpace::Srgb).is_none());

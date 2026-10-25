@@ -14,6 +14,7 @@ impl fmt::Display for DecodeError {
 impl std::error::Error for DecodeError {}
 impl From<String> for DecodeError { fn from(message: String) -> Self { Self::Invalid(message) } }
 impl From<&str> for DecodeError { fn from(message: &str) -> Self { Self::Invalid(message.into()) } }
+impl From<crate::memory::MemoryError> for DecodeError { fn from(error: crate::memory::MemoryError) -> Self { Self::Unsupported(error.to_string()) } }
 impl From<DecodeError> for String { fn from(error: DecodeError) -> Self { error.to_string() } }
 pub type DecodeResult<T> = Result<T, DecodeError>;
 

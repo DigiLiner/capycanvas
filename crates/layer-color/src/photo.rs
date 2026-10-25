@@ -175,11 +175,18 @@ pub fn read_photo_detailed_with_cancel(
     limits: DecodeLimits,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<DecodedPhoto, String> {
+    layer_core::memory::with_input(|| {
     check_cancel(cancelled)?;
     let _work=layer_core::input_work::DECODERS.enter(cancelled)?;
+    let memory=layer_core::memory::images();memory.collect()?;
+    let mut limits=limits;let share=memory.maximum()/8;
+    limits.codec_bytes=limits.codec_bytes.min(share);limits.source_bytes=limits.source_bytes.min(memory.maximum()/4);
+    let _codec=memory.reserve(limits.codec_bytes*2)?;
     let photo = read_photo_impl(input, limits, cancelled)?;
     check_cancel(cancelled)?;
+    for bytes in photo.metadata.blocks().into_iter().flatten() {memory.track(bytes.storage())?;}
     Ok(photo)
+    })
 }
 fn read_photo_impl(
     mut input: impl BufRead + Seek,

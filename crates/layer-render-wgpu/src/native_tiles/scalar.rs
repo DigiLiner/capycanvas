@@ -50,7 +50,7 @@ pub(crate) fn restore_upload(
     request: &NativeScalarRestore<'_>,
     encoder: &mut crate::submission::CommandEncoder,
 ) -> Result<u64, GpuRasterError> {
-    let bytes = request.blob.decode().map_err(GpuRasterError::Color)?;
+    let bytes = request.blob.decode().map_err(|error|GpuRasterError::Color(error.to_string()))?;
     let step = usize::from(request.blob.descriptor.bits_per_channel / 8);
     let reciprocal = reciprocal(if step == 1 { SampleDepth::U8 } else { SampleDepth::U16 });
     let buffer = r.device.create_buffer(&wgpu::BufferDescriptor {

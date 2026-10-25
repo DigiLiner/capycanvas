@@ -444,7 +444,7 @@ impl RasterCapture {
                         entry.tile.publish(TileBlob::encode(
                             entry.descriptor,
                             &bytes[begin..begin + entry.size as usize],
-                        ))?;
+                        ).map_err(String::from))?;
                     }
                     Ok(())
                 };

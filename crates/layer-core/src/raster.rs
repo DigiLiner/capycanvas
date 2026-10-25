@@ -181,6 +181,15 @@ fn unshuffle_samples(descriptor: PixelDescriptor, bytes: &[u8]) -> Vec<u8> {
     }
 }
 
+#[derive(Debug)]
+pub enum TileError {Invalid(String),Memory(crate::memory::MemoryError)}
+impl TileError {pub fn is_memory(&self)->bool {matches!(self,Self::Memory(_))}}
+impl std::fmt::Display for TileError {fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {match self {Self::Invalid(message)=>f.write_str(message),Self::Memory(error)=>error.fmt(f)}}}
+impl std::error::Error for TileError {}
+impl From<String> for TileError {fn from(error:String)->Self {Self::Invalid(error)}}
+impl From<&str> for TileError {fn from(error:&str)->Self {Self::Invalid(error.into())}}
+impl From<crate::memory::MemoryError> for TileError {fn from(error:crate::memory::MemoryError)->Self {Self::Memory(error)}}
+impl From<TileError> for String {fn from(error:TileError)->Self {error.to_string()}}
 impl TileBlob {
     pub fn owner_identity(&self) -> u64 { self.owner_identity }
     pub fn encoded_fingerprint(&self) -> Option<[u8; 32]> { self.encoded_fingerprint }
@@ -193,18 +202,19 @@ impl TileBlob {
     pub fn max_compressed_len(descriptor: PixelDescriptor) -> Option<usize> {
         descriptor.byte_len([TILE_SIZE; 2]).map(lz4_flex::block::get_maximum_output_size)
     }
-    pub fn encode(descriptor: PixelDescriptor, bytes: &[u8]) -> Result<Self, String> {
+    pub fn encode(descriptor: PixelDescriptor, bytes: &[u8]) -> Result<Self, TileError> {
         Self::encode_with_id(crate::authored::PortableId::random(), descriptor, bytes)
     }
-    pub fn from_filtered_deflate(resource_id: crate::authored::PortableId, descriptor: PixelDescriptor, stored: &[u8]) -> Result<Self, String> {
+    pub fn from_filtered_deflate(resource_id: crate::authored::PortableId, descriptor: PixelDescriptor, stored: &[u8]) -> Result<Self, TileError> {
         let size = descriptor.byte_len([TILE_SIZE; 2]).ok_or("Unsupported raster pixels")?;
+        let _memory=crate::memory::images().reserve(size*2)?;
         let mut planes = crate::package::archive::inflate(stored, size, true)?;
         for row in planes.as_chunks_mut::<{ TILE_SIZE as usize }>().0 {
             for x in 1..row.len() { row[x] = row[x].wrapping_add(row[x - 1]); }
         }
         Self::encode_with_id(resource_id, descriptor, &unshuffle_samples(descriptor, &planes))
     }
-    fn encode_with_id(resource_id: crate::authored::PortableId, descriptor: PixelDescriptor, bytes: &[u8]) -> Result<Self, String> {
+    fn encode_with_id(resource_id: crate::authored::PortableId, descriptor: PixelDescriptor, bytes: &[u8]) -> Result<Self, TileError> {
         let expected = descriptor
             .byte_len([TILE_SIZE; 2])
             .ok_or("Unsupported raster pixels")?;
@@ -212,12 +222,16 @@ impl TileBlob {
             return Err("Invalid raster tile byte count".into());
         }
         descriptor.validate_samples(bytes)?;
+        let maximum=Self::max_compressed_len(descriptor).ok_or("Unsupported raster pixels")?;
+        let memory=crate::memory::images().reserve(maximum*2+if descriptor.bits_per_channel>8 {expected}else {0}+256)?;
         // Multibyte source channels benefit from byte planes: smooth high
         // bytes no longer alternate with noisy low bytes. This is a reversible
         // permutation, not a precision change.
         let shuffled = (descriptor.bits_per_channel > 8).then(|| shuffle_samples(descriptor, bytes));
         let compressed = compression::compress(shuffled.as_deref().unwrap_or(bytes))?;
         let encoded_fingerprint = Some(Self::descriptor_digest(descriptor, &compressed));
+        let compressed:Arc<[u8]>=compressed.into();drop(shuffled);
+        let compressed=memory.retain(compressed)?;
         Ok(Self {
             resource_id,
             owner_identity: next_tile_owner(),
@@ -225,7 +239,7 @@ impl TileBlob {
             digest: OnceLock::new(),
             expected_digest: None,
             descriptor,
-            compressed: Arc::new(Arc::<[u8]>::from(compressed).into()),
+            compressed: Arc::new(compressed.into()),
         })
     }
     fn descriptor_digest(descriptor: PixelDescriptor, bytes: &[u8]) -> [u8; 32] {
@@ -237,19 +251,20 @@ impl TileBlob {
         hash.finalize().into()
     }
     pub fn compressed_len(&self) -> usize { self.compressed.len() }
-    pub fn compressed(&self) -> Result<Arc<[u8]>, String> { self.compressed.read() }
+    pub fn compressed(&self) -> Result<Arc<[u8]>, TileError> { self.compressed.read() }
     /// Poll asynchronous backing without synchronously reading native files.
     pub fn compressed_ready(&self) -> Result<bool, String> { self.compressed.ready() }
     pub fn resident_bytes(&self) -> usize { self.compressed.resident_bytes() }
-    fn decode_samples(descriptor: PixelDescriptor, compressed: &[u8]) -> Result<Vec<u8>, String> {
+    fn decode_samples(descriptor: PixelDescriptor, compressed: &[u8]) -> Result<crate::memory::DecodedBytes, TileError> {
         let size = descriptor.byte_len([TILE_SIZE; 2]).ok_or("Unsupported raster pixels")?;
+        let memory=crate::memory::images().reserve(size*2)?;
         let mut bytes = compression::decompress(compressed, size)?;
         if descriptor.bits_per_channel > 8 { bytes = unshuffle_samples(descriptor, &bytes); }
         descriptor.validate_samples(&bytes)?;
-        Ok(bytes)
+        Ok(crate::memory::DecodedBytes::from_reserved(bytes,memory)?)
     }
-    pub fn decode(&self) -> Result<Vec<u8>, String> {
-        let bytes = Self::decode_samples(self.descriptor, &self.compressed()?)?;
+    pub fn decode(&self) -> Result<crate::memory::DecodedBytes, TileError> {
+        let bytes = Self::decode_samples(self.descriptor, &self.compressed.read()?)?;
         if let Some(expected) = self.expected_digest {
             let actual = Self::descriptor_digest(self.descriptor, &bytes);
             if actual != expected { return Err("Raster tile integrity check failed".into()); }
@@ -270,8 +285,9 @@ impl TileBlob {
         resource_id: crate::authored::PortableId,
         descriptor: PixelDescriptor,
         compressed: Arc<[u8]>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, TileError> {
         if compressed.len() > MAX_COMPRESSED_TILE_BYTES { return Err("Oversized compressed raster tile".into()); }
+        crate::memory::images().track(&compressed)?;
         Self::decode_samples(descriptor, &compressed)?;
         let encoded_fingerprint=Some(Self::descriptor_digest(descriptor,&compressed));
         Ok(Self { resource_id, owner_identity: next_tile_owner(), descriptor,
@@ -281,7 +297,7 @@ impl TileBlob {
         descriptor: PixelDescriptor,
         digest: [u8; 32],
         bytes: Arc<[u8]>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, TileError> {
         Self::from_compressed_with_id(crate::authored::PortableId::random(), descriptor, digest, bytes)
     }
     pub fn from_compressed_with_id(
@@ -289,10 +305,11 @@ impl TileBlob {
         descriptor: PixelDescriptor,
         digest: [u8; 32],
         bytes: Arc<[u8]>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, TileError> {
         if bytes.len() > MAX_COMPRESSED_TILE_BYTES {
             return Err("Oversized compressed raster tile".into());
         }
+        crate::memory::images().track(&bytes)?;
         let result = Self {
             resource_id,
             descriptor,
@@ -311,7 +328,7 @@ impl TileBlob {
         resource_id: crate::authored::PortableId,
         descriptor: PixelDescriptor,
         bytes: Arc<[u8]>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, TileError> {
         Self::from_verified_resource_with_encoded_fingerprint(resource_id,descriptor,bytes,None)
     }
     pub fn from_verified_resource_with_encoded_fingerprint(
@@ -319,10 +336,11 @@ impl TileBlob {
         descriptor: PixelDescriptor,
         bytes: Arc<[u8]>,
         encoded_fingerprint: Option<[u8;32]>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, TileError> {
         if bytes.is_empty() || bytes.len() > MAX_COMPRESSED_TILE_BYTES || descriptor.byte_len([TILE_SIZE; 2]).is_none() {
             return Err("Invalid raster worker blob".into());
         }
+        crate::memory::images().track(&bytes)?;
         Ok(Self { resource_id, owner_identity: next_tile_owner(), descriptor,
             encoded_fingerprint, digest: OnceLock::new(), expected_digest: None, compressed: Arc::new(bytes.into()) })
     }

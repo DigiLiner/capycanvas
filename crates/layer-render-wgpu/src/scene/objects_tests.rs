@@ -455,7 +455,7 @@ fn live_object_read_defers_without_inline_decode_then_returns_canonical_pixels()
     let mut object = ImageObject::new(image([512; 2], [255, 0, 0, 255]));
     object.affine = Affine64([1. / 7., 0., 0., 1. / 7., 0., 0.]);
     let (doc, owner, _) = document([128; 2], vec![object]);
-    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut r = crate::test_support::private_sample_renderer(doc.composition().color);
     r.document_extent = [128; 2];
     let mut scene = Scene::new(&r).unwrap();
     let (target, _) = create_color_target(&r.device, [64; 2], "prepared reference read");
@@ -509,7 +509,7 @@ fn cold_object_reads_advance_every_finished_tile_and_the_idle_budget_per_attempt
 }
 
 fn cold_query_renderer(doc: &layer_core::Document) -> WgpuRasterizer {
-    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut r = crate::test_support::private_sample_renderer(doc.composition().color);
     r.document_extent = doc.composition().size;
     r.artwork_frame = Some(Arc::new(crate::artwork::Frame::new(packet(doc.scene(), r.document_extent), Default::default())));
     r

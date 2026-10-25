@@ -259,17 +259,17 @@ struct Pack {segments:BTreeMap<u64,Vec<Arc<[u8]>>>,length:u64}
 impl ByteSource for Pack {
     fn byte_len(&self)->u64 {self.length}
     fn poll(&self,offset:u64,length:usize)->Result<RangeState,String> {
-        let mut output=Vec::with_capacity(length);let mut cursor=offset;
-        while output.len()<length {
+        let mut output=layer_core::memory::DecodedBytes::zeroed(length)?;let mut written=0;let mut cursor=offset;
+        while written<length {
             let (&start,blocks)=self.segments.range(..=cursor).next_back().ok_or("Missing session resource range")?;
             let relative=usize::try_from(cursor-start).map_err(|_|"Session offset exceeds admission")?;
             let block=blocks.get(relative/BLOCK).ok_or("Incomplete session resource range")?;
             let position=relative%BLOCK;
-            let count=(length-output.len()).min(block.len().checked_sub(position).ok_or("Session resource range overflow")?);
+            let count=(length-written).min(block.len().checked_sub(position).ok_or("Session resource range overflow")?);
             if count==0{return Err("Incomplete session resource range".into());}
-            output.extend_from_slice(&block[position..position+count]);cursor+=count as u64;
+            output[written..written+count].copy_from_slice(&block[position..position+count]);written+=count;cursor+=count as u64;
         }
-        Ok(RangeState::Ready(ByteRange::new(output.into(),0..length).map_err(str::to_string)?))
+        Ok(RangeState::Ready(ByteRange::new(output.into_shared()?,0..length).map_err(str::to_string)?))
     }
 }
 #[wasm_bindgen]
@@ -283,7 +283,8 @@ pub async fn raster_worker_restart_open(checkpoint:&str,buffers:js_sys::Array)->
         let bytes=buffers.get(index as u32).dyn_into::<js_sys::Uint8Array>().map_err(|_|js("Missing session resource block"))?;
         total=total.checked_add(bytes.length() as usize).filter(|n|*n<=1024*1024*1024).ok_or_else(||js("Session resources exceed admission"))?;
         if bytes.length() as usize>BLOCK{return Err(js("Oversized session resource block"));}
-        if blocks.insert(id,Arc::<[u8]>::from(bytes.to_vec())).is_some(){return Err(js("Duplicate session resource block"));}
+        let mut owned=layer_core::memory::with_input(||layer_core::memory::DecodedBytes::zeroed(bytes.length() as usize)).map_err(js)?;bytes.copy_to(&mut owned);
+        if blocks.insert(id,owned.into_shared().map_err(js)?).is_some(){return Err(js("Duplicate session resource block"));}
         buffers.set(index as u32,JsValue::UNDEFINED);documents::yield_browser().await?;
     }
     let metadata:serde_json::Value=serde_json::from_str(&checkpoint.metadata).map_err(js)?;

@@ -107,7 +107,7 @@ impl WgpuRasterizer {
     /// Hosts can prewarm immutable samples in bounded batches before first
     /// presentation. Rendering and snapshot workers reuse the same cache.
     pub fn prepare_source_sample(&self, tile: &Arc<layer_core::raster::TileBlob>) -> Result<(), GpuRasterError> {
-        self.device.source_samples.decode(tile).map(|_| ()).map_err(GpuRasterError::Color)
+        self.device.source_samples.decode(tile).map(|_| ()).map_err(|error|GpuRasterError::Color(error.to_string()))
     }
     pub fn snapshot_gpu(&self) -> SnapshotGpu {
         SnapshotGpu {

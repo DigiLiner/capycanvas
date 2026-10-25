@@ -1392,7 +1392,6 @@ dependencies = [
  "rust_h265",
  "serde",
  "serde_json",
- "sysinfo",
  "tiff",
 ]
 
@@ -1408,6 +1407,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "sysinfo",
  "uuid",
  "zip",
 ]

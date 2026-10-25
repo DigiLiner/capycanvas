@@ -496,7 +496,7 @@ fn boundary_retained_deflate_tile_transfer()->(PreparedTransfer,PortableId,Vec<u
     let extensions=Arc::make_mut(&mut art.extensions);extensions.resources.insert(id,opaque);
     let record=boundary_id(193);extensions.records.insert(record,json!({"id":record,"type":"future.tile-note/1","ancillary":true,"copy_safe":true,"data":{"payload":resources::reference(id)}}));
     let prepared=PreparedTransfer::capture(&original,&AtomicBool::new(false)).unwrap();
-    (prepared,id,samples)
+    (prepared,id,samples.to_vec())
 }
 
 #[test]

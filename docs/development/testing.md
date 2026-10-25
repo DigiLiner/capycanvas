@@ -12,6 +12,10 @@ platform builds, packaging, script suites and software-adapter correctness tests
 ([release validation](releasing.md#release-validation)). Run the checks for every
 area your change touches; hosted validation does not replace hardware journeys.
 
+Native fixtures wait for draw readiness and assert transient UI states before
+blocking screenshots. A screenshot can include GPU readback and GTK processing;
+its elapsed time is separate from the fixture's requested input delay.
+
 Native-tile writeback tests request both four and eight storage buffers per
 stage and require the same portable RGBA and gray-alpha batch sizes. The Web
 `--native-writeback` journey records actual browser-device limits and encoder

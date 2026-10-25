@@ -560,15 +560,14 @@ impl App {
         self.check_gpu()?;
         if self.host.session.engine().backend().0.is_none() { return Ok(false); }
         self.frame_cost.fill(0);
-        if let Some(surface) = &mut self.surface {
-            if let Some(target) = surface.pending_target.take() {
-                let clock = self.profiling.then(std::time::Instant::now);
-                if let Err(target) = self.host.session.engine().backend().0.as_ref().unwrap().queue().try_present(target) {
-                    surface.pending_target = Some(target);
-                    return Ok(true);
-                }
-                self.frame_cost[3] = clock.map_or(0, |clock| clock.elapsed().as_nanos() as i64);
+        if let Some(surface) = &mut self.surface
+            && let Some(target) = surface.pending_target.take() {
+            let clock = self.profiling.then(std::time::Instant::now);
+            if let Err(target) = self.host.session.engine().backend().0.as_ref().unwrap().queue().try_present(target) {
+                surface.pending_target = Some(target);
+                return Ok(true);
             }
+            self.frame_cost[3] = clock.map_or(0, |clock| clock.elapsed().as_nanos() as i64);
         }
         if (!self.host.dirty && self.host.startup.complete) || self.surface.is_none() {
             return Ok(false);

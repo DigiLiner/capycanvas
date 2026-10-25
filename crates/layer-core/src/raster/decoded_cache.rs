@@ -21,7 +21,7 @@ pub struct DecodedTileCacheStats {
 
 struct Entry {
     tile: Weak<TileBlob>,
-    samples: Arc<Vec<u8>>,
+    samples: Arc<crate::memory::DecodedBytes>,
     used: u64,
 }
 #[derive(Default)]
@@ -33,7 +33,27 @@ struct State {
 pub struct DecodedTileCache {
     state: Mutex<State>,
 }
+static SHARED:std::sync::OnceLock<Arc<DecodedTileCache>>=std::sync::OnceLock::new();
 impl DecodedTileCache {
+    pub fn shared()->Arc<Self> {
+        SHARED.get_or_init(||Arc::new(Self::new(512*1024*1024))).clone()
+    }
+    pub(crate) fn collect_shared()->Result<(),String> {
+        let Some(cache)=SHARED.get() else {return Ok(());};
+        let mut state=cache.state.lock().map_err(|_|"Source sample cache failed")?;
+        let mut retired=0;let count=state.entries.len();
+        state.entries.retain(|_,entry| {
+            if entry.tile.strong_count()!=0 {true}else{retired+=entry.samples.capacity();false}
+        });
+        state.stats.resident_bytes-=retired;state.stats.evictions+=(count-state.entries.len()) as u64;Ok(())
+    }
+    pub(crate) fn evict_shared() {
+        let Some(cache)=SHARED.get() else {return;};
+        if let Ok(mut state)=cache.state.try_lock() {
+            state.stats.evictions+=state.entries.len() as u64;
+            state.entries.clear();state.stats.resident_bytes=0;
+        }
+    }
     pub fn new(limit_bytes: usize) -> Self {
         Self {
             state: Mutex::new(State {
@@ -54,13 +74,14 @@ impl DecodedTileCache {
         }
     }
 
-    pub fn decode(&self, tile: &Arc<TileBlob>) -> Result<Arc<Vec<u8>>, String> {
+    pub fn decode(&self, tile: &Arc<TileBlob>) -> Result<Arc<crate::memory::DecodedBytes>, super::TileError> {
         let key = tile.owner_identity();
         {
             let mut state = self
                 .state
                 .lock()
                 .map_err(|_| "Source sample cache failed")?;
+            state.stats.limit_bytes=state.stats.limit_bytes.min(crate::memory::images().maximum()/8);
             state.clock = state.clock.saturating_add(1);
             let used = state.clock;
             if let Some(entry) = state.entries.get_mut(&key) {
@@ -70,6 +91,10 @@ impl DecodedTileCache {
                 return Ok(samples);
             }
             state.stats.misses += 1;
+            let bytes=tile.descriptor.byte_len([super::TILE_SIZE;2]).ok_or("Invalid source tile representation")?;
+            if bytes<=state.stats.limit_bytes {
+                while state.stats.resident_bytes>state.stats.limit_bytes-bytes {Self::evict(&mut state);}
+            }
         }
 
         // Never hold the cache lock across decompression or integrity checking.
@@ -90,15 +115,7 @@ impl DecodedTileCache {
         while state.stats.resident_bytes > state.stats.limit_bytes - bytes {
             // Expired sources retire first; otherwise evict the least recently
             // requested tile. Active readers retain their immutable samples.
-            let oldest = *state
-                .entries
-                .iter()
-                .min_by_key(|(_, entry)| (entry.tile.strong_count() != 0, entry.used))
-                .unwrap()
-                .0;
-            let entry = state.entries.remove(&oldest).unwrap();
-            state.stats.resident_bytes -= entry.samples.capacity();
-            state.stats.evictions += 1;
+            Self::evict(&mut state);
         }
         state.clock = state.clock.saturating_add(1);
         let used = state.clock;
@@ -114,6 +131,11 @@ impl DecodedTileCache {
         state.stats.peak_bytes = state.stats.peak_bytes.max(state.stats.resident_bytes);
         Ok(samples)
     }
+    fn evict(state:&mut State) {
+        let oldest=*state.entries.iter().min_by_key(|(_,entry)|(entry.tile.strong_count()!=0,entry.used)).unwrap().0;
+        let entry=state.entries.remove(&oldest).unwrap();
+        state.stats.resident_bytes-=entry.samples.capacity();state.stats.evictions+=1;
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +145,16 @@ mod tests {
 
     fn tile(value: u8) -> Arc<TileBlob> {
         Arc::new(TileBlob::encode(PixelDescriptor::COVERAGE8, &vec![value; 65536]).unwrap())
+    }
+
+    #[test]
+    fn shared_readers_reuse_samples_and_pending_uploads_outlive_source_retirement() {
+        let a=DecodedTileCache::shared();let b=DecodedTileCache::shared();let source=tile(37);
+        let first=a.decode(&source).unwrap();let second=b.decode(&source).unwrap();
+        assert!(Arc::ptr_eq(&first,&second));let pending=Arc::downgrade(&first);
+        drop(source);crate::memory::images().collect().unwrap();
+        assert!(first.iter().all(|byte|*byte==37));drop(first);assert!(pending.upgrade().is_some());
+        drop(second);assert!(pending.upgrade().is_none());
     }
 
     #[test]

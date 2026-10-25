@@ -9,8 +9,12 @@ enum Read {
     Cold,
     Loading,
     Ready(Arc<[u8]>),
+    Pressure(u64),
     Failed(String),
 }
+enum ReadError {Memory(layer_core::memory::MemoryError),Storage(JsValue)}
+impl From<layer_core::memory::MemoryError> for ReadError {fn from(error:layer_core::memory::MemoryError)->Self {Self::Memory(error)}}
+impl From<JsValue> for ReadError {fn from(error:JsValue)->Self {Self::Storage(error)}}
 struct BrowserChunk {
     key: String,
     len: usize,
@@ -31,36 +35,41 @@ impl TileChunk for BrowserChunk {
         let mut state = self.state.lock().unwrap();
         if matches!(*state, Read::Ready(_)) {
             *state = Read::Cold;
+            drop(layer_core::memory::OwnerRetirement);
         }
     }
-    fn poll(&self) -> Result<Option<Arc<[u8]>>, String> {
+    fn poll(&self) -> Result<Option<Arc<[u8]>>, layer_core::raster::TileError> {
         let mut state = self.state.lock().map_err(|_| "Drawing cache lock failed")?;
         match &*state {
             Read::Ready(bytes) => return Ok(Some(bytes.clone())),
-            Read::Failed(error) => return Err(error.clone()),
+            Read::Failed(error) => return Err(error.clone().into()),
+            Read::Pressure(epoch) if *epoch==layer_core::memory::generation()=>return Err(layer_core::memory::MemoryError.into()),
             Read::Loading => return Ok(None),
-            Read::Cold => (),
+            Read::Cold | Read::Pressure(_) => (),
         }
         *state = Read::Loading;
         let (key, len, state) = (self.key.clone(), self.len, self.state.clone());
         spawn_local(async move {
             let result = async {
+                let mut owned=layer_core::memory::DecodedBytes::zeroed(len)?;
                 let value = JsFuture::from(raster_worker::call(
                     "tab-read",
                     &key,
                     &js_sys::Array::new(),
                 )?)
                 .await?;
-                let bytes = js_sys::Uint8Array::new(&value).to_vec();
-                if bytes.len() != len {
-                    return Err(js("Incomplete parked drawing chunk"));
+                let bytes = js_sys::Uint8Array::new(&value);
+                if bytes.length() as usize != len {
+                    return Err(ReadError::Storage(js("Incomplete parked drawing chunk")));
                 }
-                Ok(bytes)
+                bytes.copy_to(&mut owned);
+                Ok(owned.into_shared()?)
             }
             .await;
             *state.lock().unwrap() = match result {
-                Ok(bytes) => Read::Ready(bytes.into()),
-                Err(error) => Read::Failed(format!("Cannot read parked drawing: {error:?}")),
+                Ok(bytes) => Read::Ready(bytes),
+                Err(ReadError::Memory(_))=>Read::Pressure(layer_core::memory::generation()),
+                Err(ReadError::Storage(error)) => Read::Failed(format!("Cannot read parked drawing: {error:?}")),
             };
         });
         Ok(None)

@@ -56,9 +56,7 @@ impl From<wgpu::Device> for PipelineDevice {
             blend_pipelines: Default::default(),
             working_space: Default::default(),
             depth: Default::default(),
-            source_samples: std::sync::Arc::new(layer_core::raster::DecodedTileCache::new(
-                512 * 1024 * 1024,
-            )),
+            source_samples: layer_core::raster::DecodedTileCache::shared(),
         }
     }
 }

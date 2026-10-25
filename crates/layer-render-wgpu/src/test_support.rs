@@ -1,6 +1,12 @@
 use super::*;
 use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
 
+pub(crate) fn private_sample_renderer(color: layer_core::color::DocumentColor) -> WgpuRasterizer {
+    let mut renderer = WgpuRasterizer::new_native_headless(color).unwrap();
+    renderer.device.source_samples = Arc::new(layer_core::raster::DecodedTileCache::new(512 * 1024 * 1024));
+    renderer
+}
+
 pub(crate) fn add_paint(artwork: &mut layer_core::authored::Artwork, name: impl Into<Arc<str>>, domain: [u32; 2]) -> (OccurrenceHandle, SourceTarget) {
     use layer_core::authored::*;
     let source = artwork.paint.insert(PortableId::random(), PaintSource { color_mode: Default::default(),
@@ -25,7 +31,7 @@ pub(crate) fn corrupt_tile(blob: layer_core::raster::TileBlob) -> layer_core::ra
     struct Chunk(Arc<[u8]>);
     impl TileChunk for Chunk {
         fn len(&self) -> usize { self.0.len() }
-        fn poll(&self) -> Result<Option<Arc<[u8]>>, String> { Ok(Some(self.0.clone())) }
+        fn poll(&self) -> Result<Option<Arc<[u8]>>, layer_core::raster::TileError> { Ok(Some(self.0.clone())) }
         fn resident_bytes(&self) -> usize { self.0.len() }
         fn evict(&self) {}
     }
@@ -45,7 +51,7 @@ pub(crate) fn corrupt_tile(blob: layer_core::raster::TileBlob) -> layer_core::ra
 
     let editor=layer_core::Editor::new(layer_core::Document::from_artwork(artwork).unwrap());
     let mut spill=prepare_external_spill(&editor.retained_tiles()).unwrap().unwrap();spill.bytes[0]^=1;
-    let bytes=Arc::from(spill.bytes.clone());spill.commit(Arc::new(Chunk(bytes))).unwrap();tile
+    let bytes=Arc::from(spill.bytes.to_vec());spill.commit(Arc::new(Chunk(bytes))).unwrap();tile
 }
 
 /// Stores `selection` in a mask through the renderer's mask Coverage

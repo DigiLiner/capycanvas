@@ -73,10 +73,10 @@ pub use object_image_mips::{prepare_image_tile, prepare_raster_tile};
 pub use object_sampling::prepare_nearest_coordinates;
 #[cfg(target_arch = "wasm32")]
 pub type BrowserImageDecoder = std::rc::Rc<dyn Fn(Arc<layer_core::color::source::SourceImage>, [u32; 2], layer_core::color::RgbSpace)
-    -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PreparedImagePixels, String>>>>>;
+    -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PreparedImagePixels, layer_core::raster::TileError>>>>>;
 #[cfg(target_arch="wasm32")]
 pub type BrowserRasterDecoder = std::rc::Rc<dyn Fn(Arc<layer_core::raster::TileBlob>, layer_core::color::RgbSpace, layer_core::color::RgbSpace)
-    -> std::pin::Pin<Box<dyn std::future::Future<Output=Result<PreparedImagePixels,String>>>>>;
+    -> std::pin::Pin<Box<dyn std::future::Future<Output=Result<PreparedImagePixels,layer_core::raster::TileError>>>>>;
 #[cfg(target_arch="wasm32")]
 pub type BrowserNearestCoordinateDecoder = std::rc::Rc<dyn Fn([f64;6],[u32;2],u32,u32)
     -> std::pin::Pin<Box<dyn std::future::Future<Output=Result<Arc<Vec<u8>>,String>>>>>;
@@ -945,6 +945,7 @@ pub struct WgpuRasterizer {
     moving_images_waiting: bool,
     moving_decode: Option<(layer_core::color::RgbSpace, object_image_mips::MipDecodeQueue)>,
     failed_image_tiles: Vec<moving_projection::FailedImageTile>,
+    decode_pressure:object_image_mips::DecodePressure,
     failed_raster_tiles: Vec<(std::sync::Weak<layer_core::raster::TileBlob>,layer_core::color::RgbSpace,layer_core::color::RgbSpace,String)>,
     #[cfg(target_arch = "wasm32")]
     browser_image_decoder: Option<BrowserImageDecoder>,
@@ -1347,6 +1348,7 @@ impl WgpuRasterizer {
             moving_images_waiting: false,
             moving_decode: None,
             failed_image_tiles: Vec::new(),
+            decode_pressure:Default::default(),
             failed_raster_tiles: Vec::new(),
             #[cfg(target_arch = "wasm32")]
             browser_image_decoder: None,
@@ -3317,13 +3319,18 @@ impl WgpuRasterizer {
             },
             object_image_mips::PreparedImageWork::Raster(prepared) => {
                 if prepared.destination!=self.device.working_space() {return Ok(None);}
+                if let Err(layer_core::raster::TileError::Memory(_))=&prepared.pixels {
+                    self.decode_pressure.raster_failed(&prepared,layer_core::memory::generation(),self.snapshot_worker)
+                        .map_err(|error|GpuRasterError::Color(error.to_string()))?;
+                    return Ok(None);
+                }
                 let pixels=match prepared.pixels {
                     Ok(pixels)=>pixels,
                     Err(error)=> {
                         let weak=Arc::downgrade(&prepared.blob);
                         self.failed_raster_tiles.retain(|(blob,space,destination,_)|blob.strong_count()>0
                             && !(blob.ptr_eq(&weak) && *space==prepared.space && *destination==prepared.destination));
-                        self.failed_raster_tiles.push((weak,prepared.space,prepared.destination,error));
+                        self.failed_raster_tiles.push((weak,prepared.space,prepared.destination,error.to_string()));
                         return Ok(None);
                     },
                 };
@@ -3331,8 +3338,13 @@ impl WgpuRasterizer {
                 return Ok(None);
             },
         };
+        if let Err(layer_core::raster::TileError::Memory(_))=&prepared.pixels {
+            self.decode_pressure.image_failed(&prepared,self.device.working_space(),layer_core::memory::generation(),self.snapshot_worker)
+                .map_err(|error|GpuRasterError::Color(error.to_string()))?;
+            return Ok(None);
+        }
         if !object_image_mips::retain_image_decode(&prepared,self.device.working_space(),&mut self.failed_image_tiles) {return Ok(None);}
-        let pixels=prepared.pixels.map_err(GpuRasterError::Color)?;
+        let pixels=prepared.pixels.map_err(|error|GpuRasterError::Color(error.to_string()))?;
         let tile = scene::Scene::decode_prepared(self, encoder, &prepared.source, prepared.coordinate, pixels)?;
         Ok(Some(PreparedImageUpload {id:prepared.id, source:prepared.source, coordinate:prepared.coordinate, tile}))
     }
@@ -3376,6 +3388,7 @@ impl WgpuRasterizer {
             #[cfg(target_arch = "wasm32")]
             { self.browser_image_result = Default::default(); self.browser_image_wake = Default::default(); }
         }
+        if self.decode_pressure.image(id,&source,coordinate,space,layer_core::memory::generation()) {return Ok(false);}
         let requested = self.moving_decode.get_or_insert_with(|| (space, object_image_mips::MipDecodeQueue::new(&self.device))).1.request(id, source, coordinate);
         #[cfg(target_arch = "wasm32")]
         self.dispatch_browser_image_decode()?;
@@ -3395,6 +3408,7 @@ impl WgpuRasterizer {
             #[cfg(target_arch="wasm32")]
             { self.browser_image_result = Default::default(); self.browser_image_wake = Default::default(); }
         }
+        if self.decode_pressure.raster(&blob,source,space,layer_core::memory::generation()) {return Ok(false);}
         let requested = self.moving_decode.get_or_insert_with(|| (space, object_image_mips::MipDecodeQueue::new(&self.device))).1.request_raster(blob, source, space);
         #[cfg(target_arch="wasm32")]
         self.dispatch_browser_image_decode()?;
@@ -3636,6 +3650,9 @@ impl CanvasRenderer for WgpuRasterizer {
         self.moving_pixels = pixels;
     }
     fn has_pending_work(&self) -> bool {
+        if self.decode_pressure.blocks_background(layer_core::memory::generation(),self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())) {
+            return self.settling.is_some() || self.paper_shade_work_pending();
+        }
         self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() || self.settling.is_some() || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting()))
             || self.navigator.pending()
             || self.moving_images_pending()

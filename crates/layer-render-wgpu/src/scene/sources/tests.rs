@@ -33,7 +33,7 @@ fn raster_cache_keys_share_generated_contents_and_keep_loaded_owner_identity() {
 
 #[test]
 fn equal_generated_rasters_reuse_gpu_pixels_without_another_sample_decode() {
-    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut r = crate::test_support::private_sample_renderer(Default::default());
     let mut scene = Scene::new(&r).unwrap();
     let descriptor = r.document_color().paint_descriptor();
     let bytes = [64, 128, 192, 255].repeat((PAGE_SIZE * PAGE_SIZE) as usize);
@@ -397,15 +397,15 @@ fn source_mip_reservations_wait_for_retired_slots_and_release_discarded_charges(
 
 #[test]
 fn prepared_source_samples_upload_without_renderer_decompression_and_share_cached_pixels() {
-    let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut r=crate::test_support::private_sample_renderer(Default::default());
     let source=layer_core::color::source::rgba8_source([PAGE_SIZE;2],|_,_|[64,128,192,128]);
-    let bytes=Arc::new([64,128,192,128].repeat((PAGE_SIZE*PAGE_SIZE) as usize));
+    let bytes=Arc::new(layer_core::memory::DecodedBytes::copy_from(&[64,128,192,128].repeat((PAGE_SIZE*PAGE_SIZE) as usize)).unwrap());
     let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
     let tile=Scene::decode_prepared(&mut r,&mut encoder,&source,[0;2],PreparedSourcePixels::NativeSamples(bytes)).unwrap();
     r.uploads.finish(&encoder);encoder.submit(&r.queue);
     assert_eq!(r.device.source_samples.stats().misses,0);
     let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-    let hit=Scene::decode_prepared(&mut r,&mut encoder,&source,[0;2],PreparedSourcePixels::NativeSamples(Arc::new(Vec::new()))).unwrap();
+    let hit=Scene::decode_prepared(&mut r,&mut encoder,&source,[0;2],PreparedSourcePixels::NativeSamples(Arc::new(layer_core::memory::DecodedBytes::zeroed(0).unwrap()))).unwrap();
     assert_eq!(tile.view,hit.view);
     assert_eq!(r.source_cache_work(),[1,1]);
     let alpha=128./255.;
@@ -418,14 +418,14 @@ fn prepared_source_samples_upload_without_renderer_decompression_and_share_cache
 
 #[test]
 fn prepared_icc_working_pixels_upload_exactly_without_renderer_color_transform() {
-    let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut r=crate::test_support::private_sample_renderer(Default::default());
     let mut source=(*scan_source(1,0)).clone();
     source.interpretation.profile=ColorProfile::Icc(layer_color::profile_bytes(&ColorProfile::Builtin(RgbSpace::ProPhoto)).unwrap().into());
     let source=Arc::new(source);let expected=[0.25f32,0.125,0.0625,0.5];
     let mut bytes=Vec::with_capacity(FLOAT_TILE_BYTES as usize);
     for _ in 0..PAGE_SIZE*PAGE_SIZE {for value in expected {bytes.extend_from_slice(&value.to_ne_bytes());}}
     let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-    let tile=Scene::decode_prepared(&mut r,&mut encoder,&source,[0;2],PreparedSourcePixels::PremultipliedWorkingPixels(Arc::new(bytes))).unwrap();
+    let tile=Scene::decode_prepared(&mut r,&mut encoder,&source,[0;2],PreparedSourcePixels::PremultipliedWorkingPixels(Arc::new(layer_core::memory::DecodedBytes::copy_from(&bytes).unwrap()))).unwrap();
     r.uploads.finish(&encoder);encoder.submit(&r.queue);
     assert_eq!(r.device.source_samples.stats().misses,0);
     assert!(r.source_tiles.borrow().decoders.is_empty());
@@ -434,7 +434,7 @@ fn prepared_icc_working_pixels_upload_exactly_without_renderer_color_transform()
 
 #[test]
 fn prepared_gray_alpha_samples_are_expanded_by_shared_worker_before_upload() {
-    let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut r=crate::test_support::private_sample_renderer(Default::default());
     let mut builder=SourceBuilder::new([PAGE_SIZE;2],SourceInterpretation {channels:SourceChannels::GrayAlpha,depth:SampleDepth::U8,profile:ColorProfile::Builtin(RgbSpace::Srgb),profile_assumed:false},1024*1024).unwrap();
     let row=[96,192].repeat(PAGE_SIZE as usize);for _ in 0..PAGE_SIZE {builder.push_row(&row).unwrap();}
     let source=Arc::new(builder.finish().unwrap());

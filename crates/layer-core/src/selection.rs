@@ -102,6 +102,8 @@ pub struct SelectionPixels {
     words_validated: Arc<OnceLock<()>>,
     #[serde(skip)]
     package_validated: Arc<OnceLock<()>>,
+    #[serde(skip)]
+    _retirement:crate::memory::OwnerRetirement,
 }
 impl PartialEq for SelectionPixels {
     fn eq(&self, other: &Self) -> bool {
@@ -122,15 +124,15 @@ impl PackageWindow {
 }
 fn visit_package_words(window:&PackageWindow,chunks:&[Resource<[u8]>],mut visit:impl FnMut(usize,u32)->Result<(),String>)->Result<(),String> {
     if window.chunks()!=chunks.len() {return Err("Invalid selection chunk index".into());}
+    if chunks.is_empty() {return Ok(());}
         let mut stored = window.rows.clone().flat_map(|y| (window.columns.start..window.columns.end).map(move |x| y * window.stride + x));
         let mut remaining = window.words();
-        let mut decoded = Vec::new();
-        decoded.try_reserve_exact(SELECTION_CHUNK_BYTES).map_err(|_|"Selection allocation failed")?;
-        decoded.resize(SELECTION_CHUNK_BYTES,0);
+        let mut decoded = crate::memory::DecodedBytes::zeroed(SELECTION_CHUNK_BYTES)?;
         for chunk in chunks {
             if chunk.len() > lz4_flex::block::get_maximum_output_size(SELECTION_CHUNK_BYTES) {
                 return Err("Oversized selection chunk".into());
             }
+            crate::memory::images().track(chunk.storage())?;
             let length = lz4_flex::block::decompress_into(chunk, &mut decoded).map_err(|e| e.to_string())?;
             if length != SELECTION_CHUNK_BYTES { return Err("Invalid selection chunk length".into()); }
             let used = remaining.min(SELECTION_CHUNK_BYTES / 4) * 4;
@@ -171,6 +173,7 @@ impl SelectionPixels {
             package_chunk_ids: Arc::default(),
             words_validated: Arc::default(),
             package_validated: Arc::default(),
+            _retirement:Default::default(),
         };
         value.validate()?;
         Ok(value)
@@ -188,6 +191,7 @@ impl SelectionPixels {
                 "Invalid selection coverage",
             ));
         }
+        crate::memory::images().track(words).map_err(|_|DocumentError::InvalidLayerOperation("Selection coverage exceeds the shared memory budget"))?;
         self.words_validated.get_or_init(|| ());
         Ok(())
     }
@@ -218,18 +222,22 @@ impl SelectionPixels {
     pub(crate) fn package_chunks(&self) -> Result<&[Resource<[u8]>], String> {
         if let Some(chunks) = self.package_chunks.get() { return Ok(chunks); }
         self.validate_package()?;
-        Ok(self.package_chunks.get_or_init(|| {
-            let ids = self.transfer_chunk_ids();
-            let window = PackageWindow::new(self.extent, self.bounds, self.byte_coverage);
-            let words: Vec<u32> = window.rows.clone().flat_map(|y| &self.words[y * window.stride + window.columns.start..y * window.stride + window.columns.end]).copied().collect();
-            words.chunks(SELECTION_CHUNK_BYTES / 4).enumerate().map(|(index, words)| {
-                let mut bytes = vec![0; SELECTION_CHUNK_BYTES];
-                for (word, dest) in words.iter().zip(bytes.as_chunks_mut::<4>().0) {
-                    dest.copy_from_slice(&word.to_le_bytes());
-                }
-                Resource::with_id(ids[index], lz4_flex::block::compress(&bytes).into())
-            }).collect::<Vec<_>>().into()
-        }))
+        let ids = self.transfer_chunk_ids();
+        let window = PackageWindow::new(self.extent, self.bounds, self.byte_coverage);
+        let mut chunks=Vec::new();chunks.try_reserve_exact(window.chunks()).map_err(|_|"Selection allocation failed")?;
+        if !ids.is_empty() {
+            let mut words=window.rows.clone().flat_map(|y| &self.words[y*window.stride+window.columns.start..y*window.stride+window.columns.end]).copied();
+            let mut bytes=crate::memory::DecodedBytes::zeroed(SELECTION_CHUNK_BYTES)?;
+            let maximum=lz4_flex::block::get_maximum_output_size(SELECTION_CHUNK_BYTES);
+            for id in ids {
+                bytes.fill(0);
+                for (dest,word) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(words.by_ref()) {dest.copy_from_slice(&word.to_le_bytes());}
+                let memory=crate::memory::images().reserve_payload(maximum*2)?;
+                let compressed=memory.retain(Arc::<[u8]>::from(lz4_flex::block::compress(&bytes)))?;
+                chunks.push(Resource::with_id(*id,compressed));
+            }
+        }
+        Ok(self.package_chunks.get_or_init(||chunks.into()))
     }
     pub(crate) fn from_package_chunks(
         extent: [u32; 2], bounds: [u32; 4], byte_coverage: bool, chunks: Vec<Resource<[u8]>>,
@@ -242,11 +250,13 @@ impl SelectionPixels {
         let window = PackageWindow::new(extent, bounds, byte_coverage);
         if window.chunks() != chunks.len() { return Err("Invalid selection chunk index".into()); }
         let count = usize::try_from(window.stride as u64 * u64::from(extent[1])).map_err(|_| "Oversized selection coverage")?;
+        let memory=crate::memory::images().reserve_payload(count.checked_mul(8).ok_or("Oversized selection coverage")?)?;
         let mut words = Vec::new();
         words.try_reserve_exact(count).map_err(|_| "Selection allocation failed")?;
         words.resize(count, 0);
         visit_package_words(&window,&chunks,|index,value| {words[index]=value;Ok(())})?;
-        let value = Self::with_coverage(extent, bounds, words.into(), byte_coverage).map_err(|e| e.to_string())?;
+        let words=memory.retain(Arc::<[u32]>::from(words))?;
+        let value = Self::with_coverage(extent, bounds, words, byte_coverage).map_err(|e| e.to_string())?;
         value.validate_package()?;
         value.package_chunks.set(chunks.into()).map_err(|_| "Selection chunk cache already initialized")?;
         Ok(value)
@@ -285,7 +295,9 @@ impl SelectionPixels {
             || chunks.as_ref().is_some_and(|chunks| chunks.len() != ids.len() || chunks.iter().zip(&ids).any(|(chunk, id)| chunk.id() != *id)) {
             return Err("Invalid verified selection descriptor".into());
         }
-        let value = Self { extent, bounds, words, byte_coverage, package_chunks: Arc::default(), package_chunk_ids: Arc::new(OnceLock::from(Arc::<[crate::authored::PortableId]>::from(ids))), words_validated: Arc::new(OnceLock::from(())), package_validated: Arc::default() };
+        crate::memory::images().track(&words)?;
+        if let Some(chunks)=&chunks {for chunk in chunks {crate::memory::images().track(chunk.storage())?;}}
+        let value = Self { extent, bounds, words, byte_coverage, package_chunks: Arc::default(), package_chunk_ids: Arc::new(OnceLock::from(Arc::<[crate::authored::PortableId]>::from(ids))), words_validated: Arc::new(OnceLock::from(())), package_validated: Arc::default(), _retirement:Default::default() };
         if let Some(chunks) = chunks {
             value.package_chunks.set(chunks.into()).map_err(|_| "Selection chunk cache already initialized")?;
             value.package_validated.get_or_init(|| ());
@@ -652,6 +664,34 @@ mod selection_tests {
                 max: Point { x: 16., y: 2. }
             }
         );
+    }
+    #[test]
+    fn selection_construction_and_validation_track_shared_word_owners_once() {
+        let words:Arc<[u32]>=Arc::from([0x4400]);
+        let pixels=SelectionPixels::new([8,1],[2,0,4,1],words.clone()).unwrap();
+        assert_eq!(Arc::weak_count(&words),1);
+        let duplicate=SelectionPixels::new([8,1],[2,0,4,1],words.clone()).unwrap();
+        assert!(Arc::ptr_eq(pixels.transfer_words(),duplicate.transfer_words()));
+        assert_eq!(Arc::weak_count(&words),1);
+        let restored:SelectionPixels=serde_json::from_slice(&serde_json::to_vec(&pixels).unwrap()).unwrap();
+        restored.validate().unwrap();assert_eq!(Arc::weak_count(restored.transfer_words()),1);
+        let received=SelectionPixels::from_verified_words([8,1],[2,0,4,1],false,words.clone(),pixels.transfer_chunk_ids().to_vec(),None).unwrap();
+        assert!(Arc::ptr_eq(received.transfer_words(),&words));assert_eq!(Arc::weak_count(&words),1);
+        let alias=words.clone();drop(words);drop(pixels);drop(duplicate);drop(received);
+        assert_eq!(&*alias,&[0x4400]);assert_eq!(Arc::weak_count(&alias),1);
+    }
+    #[test]
+    fn streamed_selection_package_chunks_track_storage_and_preserve_partial_rows() {
+        let extent=[260,300];let bounds=[4,2,256,299];let mut words=vec![0;65*300];
+        for y in 2..299 {for x in 1..64 {words[y*65+x]=0x01010101u32*((y*65+x)%255+1) as u32;}}
+        let pixels=SelectionPixels::bytes(extent,bounds,words).unwrap();
+        let chunks=pixels.package_chunks().unwrap();assert_eq!(chunks.len(),2);
+        assert!(chunks.iter().all(|chunk|Arc::weak_count(chunk.storage())==1));
+        let restored=SelectionPixels::from_package_chunks(extent,bounds,true,chunks.to_vec()).unwrap();
+        assert_eq!(restored,pixels);assert_eq!(Arc::weak_count(restored.transfer_words()),1);
+        assert!(chunks.iter().all(|chunk|Arc::weak_count(chunk.storage())==1));
+        let empty=SelectionPixels::from_package_chunks(extent,[0;4],true,vec![]).unwrap();
+        assert!(empty.words().iter().all(|word|*word==0));assert_eq!(Arc::weak_count(empty.transfer_words()),1);
     }
 }
 

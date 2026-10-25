@@ -344,6 +344,7 @@ pub fn open_parts_with_programs(metadata:&[u8],resource_pack:ImmutableBacking,li
     open_parts_checked(metadata,resource_pack,limits,cancel,programs).map_err(OpenFailure::message)
 }
 pub(crate) fn open_parts_checked(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool,programs:&super::TrustedPrograms)->Result<OpenSession,OpenFailure> {
+    crate::memory::with_input(|| {
     active(cancel)?;
     let value=super::parse_json(metadata,limits.metadata_bytes.min(usize::MAX as u64) as usize)?;
     validate_format(&value)?;
@@ -457,6 +458,7 @@ pub(crate) fn open_parts_checked(metadata:&[u8],resource_pack:ImmutableBacking,l
         if retained>crate::history_budget::BYTE_BUDGET {return Err("Session history exceeds the Undo/Redo memory limit".into());}
     }
     Ok(OpenSession {editor,metadata:SessionMetadata {value:record.metadata,profiles}})
+    })
 }
 
 pub fn open(source:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool)->Result<OpenSession,String> {

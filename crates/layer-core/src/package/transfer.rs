@@ -64,16 +64,16 @@ impl TransferPayload {
         })
     }
 }
-pub struct PreparedTransfer {descriptor:TransferDescriptor,payloads:Vec<TransferPayload>,pub(crate) trusted_programs:super::TrustedPrograms,payload_trust:Vec<bool>,validated:AtomicBool}
+pub struct PreparedTransfer {descriptor:TransferDescriptor,payloads:Vec<TransferPayload>,pub(crate) trusted_programs:super::TrustedPrograms,payload_trust:Vec<bool>,validated:AtomicBool,_retirement:crate::memory::OwnerRetirement}
 fn active(cancel:&AtomicBool)->Result<(),String>{if cancel.load(Ordering::Relaxed){Err("Transfer cancelled".into())}else{Ok(())}}
 fn verify_cache(decoded:&[u8],encoded:&[u8],encoding:ResourceEncoding)->Result<(),String> {
     match encoding {
         ResourceEncoding::Raw if encoded!=decoded=>return Err("Encoded cache disagrees with resource bytes".into()),
         ResourceEncoding::Lz4=>{
             if encoded.len()>lz4_flex::block::get_maximum_output_size(decoded.len()) {return Err("Oversized encoded resource cache".into());}
-            let mut output=Vec::new();output.try_reserve_exact(decoded.len()).map_err(|_|"Resource validation allocation failed")?;output.resize(decoded.len(),0);
+            let mut output=crate::memory::DecodedBytes::zeroed(decoded.len())?;
             let length=lz4_flex::block::decompress_into(encoded,&mut output).map_err(|_|"Invalid encoded resource cache")?;
-            if length!=decoded.len()||output!=decoded {return Err("Encoded cache disagrees with resource bytes".into());}
+            if length!=decoded.len()||output.as_slice()!=decoded {return Err("Encoded cache disagrees with resource bytes".into());}
         },
         ResourceEncoding::Raw=>(),
     }
@@ -115,6 +115,7 @@ impl PreparedTransfer {
         fn encoded(payloads:&mut Vec<TransferPayload>,bytes:Option<&EncodedBytes>)->Option<EncodedPayload>{bytes.map(|v|EncodedPayload{encoding:v.encoding,payload:push(payloads,TransferPayload::Bytes(v.bytes.clone()))})}
         for (id,entry) in &inventory.entries {
             active(cancel)?;
+            entry.payload.track_memory()?;
             let state=match &entry.payload {
                 Payload::Tile(tile)=>VerifiedResource::Tile{payload:push(&mut payloads,TransferPayload::Tile(tile.clone())),fingerprint:tile.encoded_fingerprint()},
                 Payload::Bytes(bytes) if entry.kind=="capy.lut3d/1"=>{let lut=luts.get(id).ok_or("Missing verified lookup owner")?;
@@ -122,7 +123,7 @@ impl PreparedTransfer {
                 Payload::Bytes(bytes)=>VerifiedResource::Bytes{payload:push(&mut payloads,TransferPayload::Bytes(bytes.storage().clone())),encoded:encoded(&mut payloads,bytes.encoded_if_ready())},
                 Payload::Code(code)=>VerifiedResource::Code{payload:push(&mut payloads,TransferPayload::Code(code.clone())),encoded:encoded(&mut payloads,code.encoded_if_ready())},
                 Payload::Encoded(bytes)=>VerifiedResource::Coverage{payload:(!bytes.is_empty()).then(||push(&mut payloads,TransferPayload::Bytes(bytes.storage().clone())))},
-                Payload::Vector(chunk)=>VerifiedResource::Vector{payload:push(&mut payloads,TransferPayload::Vector(chunk.clone(),super::vector_records::encode_chunk(chunk).into()))},
+                Payload::Vector(chunk)=>VerifiedResource::Vector{payload:push(&mut payloads,TransferPayload::Vector(chunk.clone(),resources::vector_bytes(chunk)?))},
                 Payload::Opaque(resource)=>VerifiedResource::Opaque{payload:push(&mut payloads,TransferPayload::Opaque(resource.clone()))},
             };
             let length=match &state {
@@ -159,7 +160,7 @@ impl PreparedTransfer {
         if !metadata.is_empty(){value["metadata"]=Value::Object(metadata);}
         let descriptor=TransferDescriptor {manifest:value,layout:TransferLayout::capture(art),checkpoint:capture.checkpoint,working_selection,lengths:payloads.iter().map(TransferPayload::len).collect(),resources:verification,selections,retained_resources,private_resources:BTreeMap::new()};
         manifest(&descriptor,ProjectLimits::default())?;
-        Ok(Self {descriptor,payloads,trusted_programs,payload_trust:Vec::new(),validated:AtomicBool::new(true)})
+        Ok(Self {descriptor,payloads,trusted_programs,payload_trust:Vec::new(),validated:AtomicBool::new(true),_retirement:Default::default()})
     }
     pub(crate) fn append_private_resource(&mut self,resource:Arc<OpaqueResource>)->Result<(),String>{
         if self.descriptor.private_resources.contains_key(&resource.id){return Err("Duplicate private transfer resource".into());}
@@ -218,15 +219,15 @@ impl PreparedTransfer {
         for (index,chunks) in chunks.into_iter().enumerate(){for chunk in chunks{receiver.push_chunk(index,&chunk)?;}}
         receiver.finish()
     }
-    fn bytes(&self,index:usize)->Result<Arc<[u8]>,String>{match self.payloads.get(index){Some(TransferPayload::Bytes(v)|TransferPayload::Vector(_,v))=>Ok(v.clone()),Some(TransferPayload::Tile(v))=>v.compressed(),Some(TransferPayload::Code(v))=>Ok(v.as_bytes().into()),_=>Err("Wrong transfer byte payload".into())}}
+    fn bytes(&self,index:usize)->Result<Arc<[u8]>,String>{match self.payloads.get(index){Some(TransferPayload::Bytes(v)|TransferPayload::Vector(_,v))=>Ok(v.clone()),Some(TransferPayload::Tile(v))=>Ok(v.compressed()?),Some(TransferPayload::Code(v))=>Ok(crate::memory::DecodedBytes::copy_from(v.as_bytes())?.into_shared()?),_=>Err("Wrong transfer byte payload".into())}}
     fn payload_trusted(&self,index:usize)->bool {self.validated.load(Ordering::Acquire)||self.payload_trust.get(index).copied().unwrap_or(false)}
     fn bounded_bytes(&self,payload:usize,limit:usize,cancel:&AtomicBool)->Result<Arc<[u8]>,String> {
         if self.payload_len(payload)?>limit as u64{return Err("Oversized retained resource".into());}
         let Some(TransferPayload::Opaque(resource))=self.payloads.get(payload) else{return self.bytes(payload);};
-        let length=resource.length as usize;let mut bytes=Vec::new();
-        bytes.try_reserve_exact(length).map_err(|_|"Retained resource allocation failed")?;
-        for offset in (0..length).step_by(MAX_RANGE_BYTES){bytes.extend_from_slice(&resource.read_chunk(offset as u64,(length-offset).min(MAX_RANGE_BYTES),cancel)?);}
-        Ok(bytes.into())
+        let length=usize::try_from(resource.length).map_err(|_|"Retained resource allocation overflow")?;
+        let mut bytes=crate::memory::DecodedBytes::zeroed(length)?;
+        for offset in (0..length).step_by(MAX_RANGE_BYTES){let length=(length-offset).min(MAX_RANGE_BYTES);bytes[offset..offset+length].copy_from_slice(&resource.read_chunk(offset as u64,length,cancel)?);}
+        Ok(bytes.into_shared()?)
     }
     fn verify_opaque_alias(&self,id:PortableId,expected:&Value,record:&Value,payload:usize,cancel:&AtomicBool)->Result<(),String> {
         let state=self.descriptor.resources.get(&id).ok_or("Missing canonical resource")?;
@@ -256,6 +257,7 @@ impl PreparedTransfer {
         match record["encoding"].as_str() {
             Some("capy.lz4-bytes/1")=>verify_cache(&canonical,&bytes,ResourceEncoding::Lz4)?,
             Some("capy.deflate-bytes/1")=>{
+                let _memory=crate::memory::images().reserve(canonical.len().checked_add(8193).ok_or("Retained encoding allocation overflow")?)?;
                 if super::archive::inflate(&bytes,canonical.len(),true)?!=canonical.as_ref(){return Err("Retained encoding disagrees with resource bytes".into());}
             },
             _=>verify_cache(&canonical,&bytes,ResourceEncoding::Raw)?,
@@ -325,7 +327,7 @@ impl PreparedTransfer {
                 if bytes.len() as u64!=decoded_length(record)?{return Err("Transfer resource length mismatch".into());}Ok(match self.encoded(encoded,&bytes,index)?{Some(encoded)=>Resource::with_id_and_encoded(*id,bytes,encoded),None=>Resource::with_id(*id,bytes)})};
             match state {
                 VerifiedResource::Bytes{payload,encoded}=>{let limit=match kind {"capy.icc/1"=>crate::color::source::MAX_PROFILE_BYTES,"capy.photo-metadata/1"=>crate::PhotoMetadata::MAX_BYTES,"capy.vector-items/1"=>super::vector_records::MAX_CHUNK_BYTES,_=>return Err("Transfer byte resource type mismatch".into())};let value=resource(*payload,encoded,limit)?;if value.len()>limit{return Err("Oversized verified byte resource".into());}decoded=decoded.saturating_add(value.len() as u64);reader.bytes.insert(*id,value);},
-                VerifiedResource::Code{payload,encoded}=>{if kind!="capy.wgsl/1"{return Err("Transfer shader type mismatch".into());}let code=match self.payloads.get(*payload){Some(TransferPayload::Code(code))=>{self.encoded(encoded,code.as_bytes(),*payload)?;code.clone()},_=>{let bytes=self.bytes(*payload)?;if bytes.len()>4*1024*1024{return Err("Oversized transfer shader".into());}let text:Arc<str>=std::str::from_utf8(&bytes).map_err(|_|"Invalid verified shader text")?.into();match self.encoded(encoded,&bytes,*payload)?{Some(encoded)=>Resource::with_id_and_encoded(*id,text,encoded),None=>Resource::with_id(*id,text)}}};if code.len()>4*1024*1024{return Err("Oversized transfer shader".into());}
+                VerifiedResource::Code{payload,encoded}=>{if kind!="capy.wgsl/1"{return Err("Transfer shader type mismatch".into());}let code=match self.payloads.get(*payload){Some(TransferPayload::Code(code))=>{self.encoded(encoded,code.as_bytes(),*payload)?;code.clone()},_=>{let bytes=self.bytes(*payload)?;if bytes.len()>4*1024*1024{return Err("Oversized transfer shader".into());}let memory=crate::memory::images().reserve_payload(bytes.len())?;let text:Arc<str>=std::str::from_utf8(&bytes).map_err(|_|"Invalid verified shader text")?.into();let text=memory.retain(text)?;match self.encoded(encoded,&bytes,*payload)?{Some(encoded)=>Resource::with_id_and_encoded(*id,text,encoded),None=>Resource::with_id(*id,text)}}};if code.len()>4*1024*1024{return Err("Oversized transfer shader".into());}
                     if code.len() as u64!=decoded_length(record)?{return Err("Transfer shader length mismatch".into());}decoded=decoded.saturating_add(code.len() as u64);reader.texts.insert(*id,code);},
                 VerifiedResource::Lut{payload,encoded,digest,spaces}=>{if kind!="capy.lut3d/1"{return Err("Transfer lookup type mismatch".into());}let data=&record["data"];let size=super::values::u32_value(&data["size"]).map_err(|e|e.to_string())?;let domain: [[f32;3];2]=serde_json::from_value(data["domain"].clone()).map_err(|e|e.to_string())?;let bytes=resource(*payload,encoded,(Lut3d::MAX_SIZE as usize).pow(3)*12)?;decoded=decoded.saturating_add(bytes.len() as u64);reader.bytes.insert(*id,bytes.clone());
                     let lut=if self.payload_trusted(*payload) {Lut3d::from_verified_resource(size,domain,Arc::from(""),*digest,bytes,*spaces).map_err(str::to_string)?}
@@ -386,7 +388,7 @@ impl PreparedTransfer {
     }
 
 }
-enum PayloadBuffer {Bytes(Arc<[MaybeUninit<u8>]>),Words(Arc<[MaybeUninit<u32>]>),Ready(TransferPayload) }
+enum PayloadBuffer {Bytes(Arc<[MaybeUninit<u8>]>,crate::memory::Reservation<'static>),Words(Arc<[MaybeUninit<u32>]>,crate::memory::Reservation<'static>),Ready(TransferPayload) }
 pub struct TransferReceiver {descriptor:TransferDescriptor,buffers:Vec<PayloadBuffer>,positions:Vec<u64>,payload_trust:Vec<bool>}
 impl TransferReceiver {
     pub fn new(descriptor:TransferDescriptor,limits:ProjectLimits)->Result<Self,String>{
@@ -396,6 +398,8 @@ impl TransferReceiver {
         Self::new_with_reuse(descriptor,limits,Some(previous))
     }
     fn new_with_reuse(descriptor:TransferDescriptor,limits:ProjectLimits,previous:Option<&PreparedTransfer>)->Result<Self,String>{
+    crate::memory::with_input(|| {
+        crate::memory::images().collect()?;
         let parsed=manifest(&descriptor,limits)?;
         if !parsed.resources.keys().eq(descriptor.resources.keys()) || parsed.document!=descriptor.checkpoint.document {return Err("Transfer identity inventory mismatch".into());}
         let mut bytes=BTreeSet::new();let mut words=BTreeSet::new();
@@ -410,7 +414,7 @@ impl TransferReceiver {
             ||bytes.union(&words).any(|index|*index>=descriptor.lengths.len()) {return Err("Unindexed or conflicting transfer payloads".into());}
         let mut reuse=BTreeMap::new();
         if let Some(previous)=previous {
-            let candidate=PreparedTransfer {descriptor:descriptor.clone(),payloads:Vec::new(),trusted_programs:Default::default(),payload_trust:Vec::new(),validated:AtomicBool::new(false)};
+            let candidate=PreparedTransfer {descriptor:descriptor.clone(),payloads:Vec::new(),trusted_programs:Default::default(),payload_trust:Vec::new(),validated:AtomicBool::new(false),_retirement:Default::default()};
             let keys=candidate.payload_keys()?;let old=previous.payload_keys()?;let mut bindings=BTreeMap::new();
             for (key,index) in keys {
                 let before=old.get(&key).copied();
@@ -428,30 +432,32 @@ impl TransferReceiver {
         let buffers=descriptor.lengths.iter().enumerate().map(|(i,length)|{
             if let Some((payload,_))=reuse.remove(&i) {return Ok(PayloadBuffer::Ready(payload));}
             let length=usize::try_from(*length).map_err(|_|"Transfer allocation overflow")?;
-            if words.contains(&i){if length%4!=0{return Err("Misaligned selection words".into());}Ok(PayloadBuffer::Words(Arc::<[u32]>::new_uninit_slice(length/4)))}
-            else{Ok(PayloadBuffer::Bytes(Arc::<[u8]>::new_uninit_slice(length)))}
+            let memory=crate::memory::images().reserve_payload(length)?;
+            if words.contains(&i){if length%4!=0{return Err("Misaligned selection words".into());}Ok(PayloadBuffer::Words(Arc::<[u32]>::new_uninit_slice(length/4),memory))}
+            else{Ok(PayloadBuffer::Bytes(Arc::<[u8]>::new_uninit_slice(length),memory))}
         }).collect::<Result<Vec<_>,String>>()?;
         let positions=buffers.iter().enumerate().map(|(i,buffer)|if matches!(buffer,PayloadBuffer::Ready(_)){descriptor.lengths[i]}else{0}).collect();Ok(Self{descriptor,buffers,positions,payload_trust})
-    }
+        })
+}
     pub fn missing_payloads(&self)->Vec<usize>{self.positions.iter().zip(&self.descriptor.lengths).enumerate().filter_map(|(i,(position,length))|(position!=length).then_some(i)).collect()}
     pub fn push_chunk(&mut self,index:usize,bytes:&[u8])->Result<(),String>{
         let position=*self.positions.get(index).ok_or("Missing transfer payload")?;
         if bytes.len()>MAX_RANGE_BYTES||position.checked_add(bytes.len() as u64).is_none_or(|n|n>self.descriptor.lengths[index]){return Err("Transfer chunk exceeds admission".into());}
         match &mut self.buffers[index] {
             PayloadBuffer::Ready(_)=>return Err("Transfer payload was already reused".into()),
-            PayloadBuffer::Bytes(buffer)=>{let start=position as usize;for (out,input) in Arc::get_mut(buffer).unwrap()[start..start+bytes.len()].iter_mut().zip(bytes){out.write(*input);}},
-            PayloadBuffer::Words(buffer)=>{if !position.is_multiple_of(4)||!bytes.len().is_multiple_of(4){return Err("Misaligned selection transfer chunk".into());}let start=position as usize/4;for (out,input) in Arc::get_mut(buffer).unwrap()[start..start+bytes.len()/4].iter_mut().zip(bytes.as_chunks::<4>().0){out.write(u32::from_le_bytes(*input));}},
+            PayloadBuffer::Bytes(buffer,_)=>{let start=position as usize;for (out,input) in Arc::get_mut(buffer).unwrap()[start..start+bytes.len()].iter_mut().zip(bytes){out.write(*input);}},
+            PayloadBuffer::Words(buffer,_)=>{if !position.is_multiple_of(4)||!bytes.len().is_multiple_of(4){return Err("Misaligned selection transfer chunk".into());}let start=position as usize/4;for (out,input) in Arc::get_mut(buffer).unwrap()[start..start+bytes.len()/4].iter_mut().zip(bytes.as_chunks::<4>().0){out.write(u32::from_le_bytes(*input));}},
         }
         self.positions[index]+=bytes.len() as u64;Ok(())
     }
     pub fn finish(self)->Result<PreparedTransfer,String>{
         if self.positions!=self.descriptor.lengths{return Err("Incomplete transfer payloads".into());}
         let payloads=self.buffers.into_iter().map(|buffer|match buffer {
-            PayloadBuffer::Ready(payload)=>payload,
-            PayloadBuffer::Bytes(bytes)=>TransferPayload::Bytes(unsafe{bytes.assume_init()}),
-            PayloadBuffer::Words(words)=>TransferPayload::Words(unsafe{words.assume_init()}),
-        }).collect();
-        Ok(PreparedTransfer{descriptor:self.descriptor,payloads,trusted_programs:Default::default(),payload_trust:self.payload_trust,validated:AtomicBool::new(false)})
+            PayloadBuffer::Ready(payload)=>Ok(payload),
+            PayloadBuffer::Bytes(bytes,memory)=>Ok(TransferPayload::Bytes(memory.retain(unsafe{bytes.assume_init()})?)),
+            PayloadBuffer::Words(words,memory)=>Ok(TransferPayload::Words(memory.retain(unsafe{words.assume_init()})?)),
+        }).collect::<Result<_,String>>()?;
+        Ok(PreparedTransfer{descriptor:self.descriptor,payloads,trusted_programs:Default::default(),payload_trust:self.payload_trust,validated:AtomicBool::new(false),_retirement:Default::default()})
     }
 }
 
@@ -517,7 +523,7 @@ mod tests {
         struct Chunk { bytes:Arc<[u8]>, ready:Arc<AtomicBool>, reads:Arc<AtomicUsize> }
         impl TileChunk for Chunk {
             fn len(&self)->usize {self.bytes.len()}
-            fn poll(&self)->Result<Option<Arc<[u8]>>,String> {
+            fn poll(&self)->Result<Option<Arc<[u8]>>,crate::raster::TileError> {
                 self.reads.fetch_add(1,Ordering::Relaxed);
                 Ok(self.ready.load(Ordering::Relaxed).then(||self.bytes.clone()))
             }
@@ -537,7 +543,7 @@ mod tests {
         let spill=prepare_external_spill(&retained).unwrap().unwrap();
         let ready=Arc::new(AtomicBool::new(false));
         let reads=Arc::new(AtomicUsize::new(0));
-        let chunk=Arc::new(Chunk {bytes:spill.bytes.clone().into(),ready:ready.clone(),reads:reads.clone()});
+        let chunk=Arc::new(Chunk {bytes:spill.bytes.to_vec().into(),ready:ready.clone(),reads:reads.clone()});
         let weak_chunk=Arc::downgrade(&chunk);
         spill.commit(chunk.clone()).unwrap();
         let prepared=PreparedTransfer::capture(&original,&cancel).unwrap();

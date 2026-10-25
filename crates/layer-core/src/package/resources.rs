@@ -9,38 +9,69 @@ pub fn reference(id: PortableId) -> Value { json!({"ref":id}) }
 pub fn reference_id(value: &Value) -> DecodeResult<PortableId> {
     values::string(values::required(values::object(value, &["ref"])?, "ref")?)?.parse().map_err(DecodeError::from)
 }
-fn encode_vector(chunk: &Resource<VectorChunk>) -> &EncodedBytes {
-    chunk.encoded(|data| { let raw: Arc<[u8]> = super::vector_records::encode_chunk(data).into(); compress(&raw, || raw.clone()) })
+fn cached_encoding<T:?Sized>(resource:&Resource<T>,encode:impl FnOnce()->Result<EncodedBytes,String>)->Result<&EncodedBytes,String> {
+    if let Some(encoded)=resource.encoded_if_ready() {crate::memory::images().track(&encoded.bytes)?;return Ok(encoded);}
+    let encoded=encode()?;
+    let encoded=resource.encoded(|_|encoded);
+    crate::memory::images().track(&encoded.bytes)?;
+    Ok(encoded)
 }
-fn compress(bytes: &[u8], raw: impl FnOnce() -> Arc<[u8]>) -> EncodedBytes {
-    let compressed = lz4_flex::block::compress(bytes);
-    if compressed.len() < bytes.len() { EncodedBytes { encoding: ResourceEncoding::Lz4, bytes: compressed.into() } }
-    else { EncodedBytes { encoding: ResourceEncoding::Raw, bytes: raw() } }
+fn encode_vector(chunk: &Resource<VectorChunk>) -> Result<&EncodedBytes,String> {
+    cached_encoding(chunk,|| {let raw=vector_bytes(chunk)?;compress(&raw,||Ok(raw.clone()))})
+}
+pub(crate) fn vector_bytes(chunk:&VectorChunk)->Result<Arc<[u8]>,String> {
+    let memory=crate::memory::images().reserve(chunk.encoded_len().unwrap_or(0))?;
+    let bytes=super::vector_records::encode_chunk(chunk);
+    Ok(crate::memory::DecodedBytes::from_reserved(bytes,memory)?.into_shared()?)
+}
+fn compress(bytes: &[u8], raw: impl FnOnce() -> Result<Arc<[u8]>,String>) -> Result<EncodedBytes,String> {
+    let maximum=lz4_flex::block::get_maximum_output_size(bytes.len());
+    let memory=crate::memory::images().reserve(maximum)?;
+    let mut compressed=Vec::new();compressed.try_reserve_exact(maximum).map_err(|_|"Resource compression allocation failed")?;compressed.resize(maximum,0);
+    let length=lz4_flex::block::compress_into(bytes,&mut compressed).map_err(|e|e.to_string())?;
+    compressed.truncate(length);
+    let (encoding,bytes)=if length<bytes.len() {
+        (ResourceEncoding::Lz4,crate::memory::DecodedBytes::from_reserved(compressed,memory)?.into_shared()?)
+    } else {drop(compressed);drop(memory);(ResourceEncoding::Raw,raw()?)};
+    crate::memory::images().track(&bytes)?;
+    Ok(EncodedBytes {encoding,bytes})
 }
 
 #[derive(Clone, Debug)]
 pub enum Payload { Tile(Arc<TileBlob>), Bytes(Resource<[u8]>), Code(Resource<str>), Encoded(Resource<[u8]>), Vector(Resource<VectorChunk>), Opaque(Arc<crate::authored::OpaqueResource>) }
 impl Payload {
+    pub(crate) fn track_memory(&self)->Result<(),String> {
+        let memory=crate::memory::images();
+        let encoded=match self {
+            Self::Bytes(bytes)|Self::Encoded(bytes)=>{memory.track(bytes.storage())?;bytes.encoded_if_ready()},
+            Self::Code(code)=>{memory.track(code.storage())?;code.encoded_if_ready()},
+            Self::Vector(chunk)=>chunk.encoded_if_ready(),
+            Self::Tile(_)|Self::Opaque(_)=>None,
+        };
+        if let Some(encoded)=encoded {memory.track(&encoded.bytes)?;}
+        Ok(())
+    }
     pub fn id(&self) -> PortableId { match self { Self::Tile(tile) => tile.resource_id(), Self::Bytes(bytes) | Self::Encoded(bytes) => bytes.id(), Self::Code(code) => code.id(), Self::Vector(chunk) => chunk.id(), Self::Opaque(resource) => resource.id } }
     pub fn same_owner(&self, other: &Self) -> bool { match (self, other) {
         (Self::Tile(a),Self::Tile(b)) => Arc::ptr_eq(&a.compressed,&b.compressed), (Self::Bytes(a),Self::Bytes(b)) | (Self::Encoded(a),Self::Encoded(b)) => a.same_owner(b),
         (Self::Code(a),Self::Code(b)) => a.same_owner(b), (Self::Vector(a),Self::Vector(b)) => a.same_owner(b), (Self::Opaque(a),Self::Opaque(b)) => Arc::ptr_eq(a,b), _ => false,
     } }
     fn prepared(&self, cancelled:&AtomicBool) -> Result<(ResourceEncoding,EncodedIntegrity),String> {
+        self.track_memory()?;
         match self {
             Self::Opaque(_)=>Err("Range resources use bounded reads".into()),
             Self::Tile(tile)=>Ok((ResourceEncoding::Raw,tile.compressed.integrity(cancelled)?)),
             Self::Encoded(bytes)=>Ok((ResourceEncoding::Raw,bytes.encoded_integrity(cancelled,||Ok(bytes.storage().clone()))?)),
             Self::Bytes(bytes)=>{
-                let encoded=bytes.encoded(|data|compress(data,||bytes.storage().clone()));
+                let encoded=cached_encoding(bytes,||compress(bytes,||Ok(bytes.storage().clone())))?;
                 Ok((encoded.encoding,bytes.encoded_integrity(cancelled,||Ok(encoded.bytes.clone()))?))
             },
             Self::Code(code)=>{
-                let encoded=code.encoded(|data|compress(data.as_bytes(),||Arc::from(data.as_bytes())));
+                let encoded=cached_encoding(code,||compress(code.as_bytes(),||Ok(crate::memory::DecodedBytes::copy_from(code.as_bytes())?.into_shared()?)))?;
                 Ok((encoded.encoding,code.encoded_integrity(cancelled,||Ok(encoded.bytes.clone()))?))
             },
             Self::Vector(chunk)=>{
-                let encoded=encode_vector(chunk);
+                let encoded=encode_vector(chunk)?;
                 Ok((encoded.encoding,chunk.encoded_integrity(cancelled,||Ok(encoded.bytes.clone()))?))
             },
         }
@@ -54,13 +85,13 @@ impl Payload {
             Self::Vector(chunk)=>chunk.encoded_digest(cancelled,||Ok(self.encoded()?.bytes)),
         }
     }
-    pub fn encoded(&self) -> Result<EncodedBytes, String> { Ok(match self {
+    pub fn encoded(&self) -> Result<EncodedBytes, String> { self.track_memory()?;Ok(match self {
         Self::Opaque(_) => return Err("Range resources use bounded reads".into()),
         Self::Tile(tile) => EncodedBytes { encoding:ResourceEncoding::Raw, bytes:tile.compressed()? },
         Self::Encoded(bytes) => EncodedBytes { encoding:ResourceEncoding::Raw, bytes:bytes.storage().clone() },
-        Self::Bytes(bytes) => bytes.encoded(|data| compress(data, || bytes.storage().clone())).clone(),
-        Self::Code(code) => code.encoded(|data| compress(data.as_bytes(), || Arc::from(data.as_bytes()))).clone(),
-        Self::Vector(chunk) => encode_vector(chunk).clone(),
+        Self::Bytes(bytes) => cached_encoding(bytes,||compress(bytes,||Ok(bytes.storage().clone())))?.clone(),
+        Self::Code(code) => cached_encoding(code,||compress(code.as_bytes(),||Ok(crate::memory::DecodedBytes::copy_from(code.as_bytes())?.into_shared()?)))?.clone(),
+        Self::Vector(chunk) => encode_vector(chunk)?.clone(),
     }) }
 }
 #[derive(Clone, Debug)]
@@ -349,18 +380,18 @@ impl<'a> ResourceReader<'a> {
         let range = record.range.ok_or_else(|| DecodeError::Unsupported("Unknown resource location".into()))?;
         if record.bytes > limit as u64 { return Err(DecodeError::Unsupported("Resource exceeds encoded size bound".into())); }
         if range.length != record.bytes {return Err("Resource range length disagrees with descriptor".into());}
-        let mut bytes = Vec::new(); bytes.try_reserve_exact(record.bytes as usize).map_err(|_| DecodeError::Unsupported("Resource allocation failed".into()))?;
-        while bytes.len() < record.bytes as usize {
+        let mut bytes=crate::memory::DecodedBytes::zeroed(record.bytes as usize)?;let mut position=0;
+        while position < bytes.len() {
             if self.cancelled.load(Ordering::Relaxed) { return Err("Package operation cancelled".into()); }
-            let length = (record.bytes as usize - bytes.len()).min(MAX_RANGE_BYTES);
-            match self.backing.poll(range.offset.checked_add(bytes.len() as u64).ok_or("Resource offset overflow")?, length)? {
-                RangeState::Pending => return Err("Package bytes are pending".into()),
-                RangeState::Ready(chunk) => bytes.extend_from_slice(&chunk),
+            let length = (bytes.len() - position).min(MAX_RANGE_BYTES);
+            match self.backing.poll(range.offset.checked_add(position as u64).ok_or("Resource offset overflow")?, length).map_err(DecodeError::Unsupported)? {
+                RangeState::Pending => return Err(DecodeError::Unsupported("Package bytes are pending".into())),
+                RangeState::Ready(chunk) => {bytes[position..position+length].copy_from_slice(&chunk);position+=length;},
             }
         }
         let integrity=EncodedIntegrity::calculate(&bytes,self.cancelled)?;
         if integrity.crc32 != record.crc32 { return Err(self.backing.fail("Resource checksum failed".into()).into()); }
-        Ok((bytes.into(),integrity))
+        Ok((bytes.into_shared()?,integrity))
     }
     pub fn bytes(&mut self, reference: &Value, kind: &str, limit: usize) -> DecodeResult<Resource<[u8]>> {
         let (id,record) = self.record(reference,kind)?;
@@ -379,12 +410,16 @@ impl<'a> ResourceReader<'a> {
         let (stored,integrity) = self.stored(id, lz4_flex::block::get_maximum_output_size(limit))?;
         let result = match wrapper {
             Some(0) => {
-                let mut bytes = vec![0;expected as usize];
+                let mut bytes=crate::memory::DecodedBytes::zeroed(expected as usize)?;
                 let written = lz4_flex::block::decompress_into(&stored,&mut bytes).map_err(|_| self.backing.fail("Invalid compressed resource".into()))?;
                 if written != bytes.len() { return Err(self.backing.fail("Incomplete compressed resource".into()).into()); }
-                Resource::with_id_and_encoded(id,bytes.into(),EncodedBytes { encoding:ResourceEncoding::Lz4,bytes:stored })
+                Resource::with_id_and_encoded(id,bytes.into_shared()?,EncodedBytes { encoding:ResourceEncoding::Lz4,bytes:stored })
             }
-            Some(_) => Resource::with_id(id,super::archive::inflate(&stored,expected as usize,true).map_err(|e|self.backing.fail(e))?.into()),
+            Some(_) => {
+                let memory=crate::memory::images().reserve((expected as usize).saturating_mul(2).saturating_add(8192))?;
+                let bytes=super::archive::inflate(&stored,expected as usize,true).map_err(|e|self.backing.fail(e))?;
+                Resource::with_id(id,crate::memory::DecodedBytes::from_reserved(bytes,memory)?.into_shared()?)
+            },
             None => Resource::with_id_and_encoded(id,stored.clone(),EncodedBytes { encoding:ResourceEncoding::Raw,bytes:stored }),
         };
         if result.encoded_if_ready().is_some() { result.set_encoded_integrity(integrity)?; }
@@ -478,18 +513,24 @@ impl<'a> ResourceReader<'a> {
         self.charge(retained)?;
         let (bytes,integrity)=self.stored(id,lz4_flex::block::get_maximum_output_size(size))?;
         let tile=if filtered {
-            let tile=Arc::new(TileBlob::from_filtered_deflate(id,descriptor,&bytes).map_err(|e|self.backing.fail(e))?);
+            let tile=Arc::new(TileBlob::from_filtered_deflate(id,descriptor,&bytes).map_err(|e|self.tile_error(e))?);
             let resident=tile.compressed_len() as u64;
             self.charge(resident.max(retained))?;
             self.decoded+=resident.saturating_sub(retained);
             tile
         } else {
-            let tile=Arc::new(TileBlob::from_package(id,descriptor,bytes).map_err(|e|self.backing.fail(e))?);
+            let tile=Arc::new(TileBlob::from_package(id,descriptor,bytes).map_err(|e|self.tile_error(e))?);
             tile.compressed.set_integrity(integrity)?;
             tile
         };
         self.decoded+=retained; self.remember_alias(id);
         self.tiles.insert(id,tile.clone()); Ok(tile)
+    }
+    fn tile_error(&self,error:crate::raster::TileError)->DecodeError {
+        match error {
+            crate::raster::TileError::Memory(error)=>error.into(),
+            crate::raster::TileError::Invalid(error)=>self.backing.fail(error).into(),
+        }
     }
 }
 
@@ -517,7 +558,9 @@ impl super::effect_records::ResourceReader for ResourceReader<'_> {
             self.texts.insert(id,code.clone()); return Ok(code);
         }
         let bytes=self.bytes(value,"capy.wgsl/1",4*1024*1024)?;
+        let memory=crate::memory::images().reserve_payload(bytes.len())?;
         let text:Arc<str>=std::str::from_utf8(&bytes).map_err(|_|"Invalid UTF-8 shader resource")?.into();
+        let text=memory.retain(text)?;
         let code: Resource<str>=match bytes.encoded_if_ready() {Some(encoded)=>Resource::with_id_and_encoded(id,text,encoded.clone()),None=>Resource::with_id(id,text)};
         if let Some(integrity)=bytes.encoded_integrity_if_ready() {code.set_encoded_integrity(integrity)?;}
         self.texts.insert(id,code.clone()); self.bytes.remove(&id); Ok(code)

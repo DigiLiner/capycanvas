@@ -13,6 +13,32 @@ fn loaded(prepared:&PreparedResources, bytes:Arc<[u8]>) -> (Manifest,ImmutableBa
     (Manifest {document:PortableId::random(),root:PortableId::random(),objects:BTreeMap::new(),resources,outputs:Vec::new(),default_output:None,metadata:None,support:Support::Editable},ImmutableBacking::new(Arc::new(bytes)).unwrap())
 }
 #[test]
+fn encoding_quota_failure_keeps_the_cache_retryable_and_aliases_reuse_success() {
+    let bytes=Resource::<[u8]>::from(vec![91;4096]);
+    let exhausted=crate::memory::Budget::new(0);
+    assert!(cached_encoding(&bytes,|| {
+        let _memory=exhausted.reserve(1)?;
+        Ok(EncodedBytes {encoding:ResourceEncoding::Raw,bytes:bytes.storage().clone()})
+    }).is_err());
+    assert!(bytes.encoded_if_ready().is_none());
+    let first=cached_encoding(&bytes,||compress(&bytes,||Ok(bytes.storage().clone()))).unwrap().bytes.clone();
+    let alias=bytes.clone();
+    let reused=cached_encoding(&alias,||Err("The existing encoding must be reused".into())).unwrap();
+    assert!(Arc::ptr_eq(&first,&reused.bytes));
+    assert_eq!(lz4_flex::block::decompress(&reused.bytes,bytes.len()).unwrap(),bytes.as_ref());
+}
+#[test]
+fn incompressible_shader_encoding_retains_one_shared_raw_cache() {
+    let code=Resource::<str>::from("x");
+    let payload=Payload::Code(code.clone());
+    let encoded=payload.encoded().unwrap();
+    assert_eq!(encoded.encoding,ResourceEncoding::Raw);
+    assert_eq!(encoded.bytes.as_ref(),code.as_bytes());
+    let alias=Payload::Code(code.clone());
+    assert!(Arc::ptr_eq(&encoded.bytes,&alias.encoded().unwrap().bytes));
+    assert!(Arc::ptr_eq(&encoded.bytes,&code.encoded_if_ready().unwrap().bytes));
+}
+#[test]
 fn heavy_payloads_compress_losslessly_and_reuse_encoding_across_captures_and_open() {
     let cancelled=AtomicBool::new(false);
     let bytes=Resource::<[u8]>::from(b"exact camera metadata \0\xff".repeat(16384));
@@ -158,7 +184,7 @@ fn aliased_tiles_share_spill_state_and_release_the_last_owner() {
     struct Chunk {bytes:Arc<[u8]>,ready:AtomicBool}
     impl TileChunk for Chunk {
         fn len(&self)->usize {self.bytes.len()}
-        fn poll(&self)->Result<Option<Arc<[u8]>>,String> {Ok(self.ready.load(Ordering::Relaxed).then(||self.bytes.clone()))}
+        fn poll(&self)->Result<Option<Arc<[u8]>>,crate::raster::TileError> {Ok(self.ready.load(Ordering::Relaxed).then(||self.bytes.clone()))}
         fn resident_bytes(&self)->usize {if self.ready.load(Ordering::Relaxed){self.bytes.len()}else{0}}
         fn evict(&self) {self.ready.store(false,Ordering::Relaxed);}
     }
@@ -172,7 +198,7 @@ fn aliased_tiles_share_spill_state_and_release_the_last_owner() {
     assert_eq!(retained.resident_bytes(),first.compressed_len());
     let spill=prepare_external_spill(&retained).unwrap().unwrap();
     assert_eq!(spill.bytes.len(),first.compressed_len(),"one shared owner writes one spill payload");
-    let chunk=Arc::new(Chunk {bytes:spill.bytes.clone().into(),ready:AtomicBool::new(false)});
+    let chunk=Arc::new(Chunk {bytes:spill.bytes.to_vec().into(),ready:AtomicBool::new(false)});
     let weak_chunk=Arc::downgrade(&chunk);let weak_storage=Arc::downgrade(&first.compressed);
     spill.commit(chunk.clone()).unwrap();
     assert_eq!(retained.resident_bytes(),0);
@@ -327,7 +353,7 @@ fn cached_alias_preparation_does_not_read_cold_tiles_but_writing_still_checks_ba
     struct Chunk {bytes:Arc<[u8]>,ready:AtomicBool,reads:AtomicUsize}
     impl TileChunk for Chunk {
         fn len(&self)->usize {self.bytes.len()}
-        fn poll(&self)->Result<Option<Arc<[u8]>>,String> {
+        fn poll(&self)->Result<Option<Arc<[u8]>>,crate::raster::TileError> {
             self.reads.fetch_add(1,Ordering::Relaxed);Ok(self.ready.load(Ordering::Relaxed).then(||self.bytes.clone()))
         }
         fn resident_bytes(&self)->usize {if self.ready.load(Ordering::Relaxed){self.bytes.len()}else{0}}
@@ -337,7 +363,7 @@ fn cached_alias_preparation_does_not_read_cold_tiles_but_writing_still_checks_ba
     let mut inventory=ResourceInventory::default();inventory.tile(first.clone()).unwrap();inventory.tile(second.clone()).unwrap();
     let prepared=inventory.prepare(&cancelled).unwrap();let expected_crc=prepared.crc;
     let retained=RetainedTiles {sources:vec![first,second],..Default::default()};let spill=prepare_external_spill(&retained).unwrap().unwrap();
-    let chunk=Arc::new(Chunk {bytes:spill.bytes.clone().into(),ready:AtomicBool::new(false),reads:AtomicUsize::new(0)});spill.commit(chunk.clone()).unwrap();
+    let chunk=Arc::new(Chunk {bytes:spill.bytes.to_vec().into(),ready:AtomicBool::new(false),reads:AtomicUsize::new(0)});spill.commit(chunk.clone()).unwrap();
     let again=inventory.prepare(&cancelled).unwrap();assert_eq!(again.length,prepared.length);assert_eq!(again.crc,expected_crc);
     assert_eq!(chunk.reads.load(Ordering::Relaxed),0,"cached CRC and SHA plus shared owner equality need no backing read");
     assert!(again.reader(&cancelled).read(&mut [0;1]).is_err());assert_eq!(chunk.reads.load(Ordering::Relaxed),1);

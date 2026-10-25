@@ -19,7 +19,8 @@ impl ByteSource for Source {
             let buffer=source.reader.read_as_array_buffer(&slice).map_err(|error|format!("{error:?}"))?;
             let bytes=js_sys::Uint8Array::new(&buffer);
             if bytes.length() as usize!=length {return Err("Incomplete package range".into());}
-            Ok(RangeState::Ready(ByteRange::new(Arc::from(bytes.to_vec()),0..length).map_err(str::to_owned)?))
+            let mut owned=layer_core::memory::DecodedBytes::zeroed(length)?;bytes.copy_to(&mut owned);
+            Ok(RangeState::Ready(ByteRange::new(owned.into_shared()?,0..length).map_err(str::to_owned)?))
         })
     }
 }

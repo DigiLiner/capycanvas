@@ -123,9 +123,16 @@ fn native_paper_picker_relief_and_scale() {
     click(&texture_button(&dialog, "apply"));
     until(|| !dialog.is_mapped(), "Use Texture closes Choose Texture");
     assert_eq!(texture(&w), layer_core::paper::built_in_paper("rough").unwrap().texture);
+    let binding = {
+        let session = ui_session(&w);
+        let document = session.engine().document();
+        let layer = layer_core::paper::paper_occurrence(document.scene(), None).unwrap();
+        layer_core::paper::PaperBinding { surface: std::sync::Arc::new(document.paper_surface(layer).unwrap()), target_offset: [0; 2] }
+    };
+    until(|| ui_session(&w).engine().backend().paper_overlay_ready(&binding), "chosen paper relief reaches the canvas");
     pump(250);
-    save_snapshot(&w, 50, || path("paper-relief-rough"));
     assert!(ui_session(&w).engine().backend().has_paper_overlay(), "the relief shows after a choice");
+    save_snapshot(&w, 50, || path("paper-relief-rough"));
     pump(1800);
     assert!(!ui_session(&w).engine().backend().has_paper_overlay(), "and then hides");
 

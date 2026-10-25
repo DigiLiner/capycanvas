@@ -54,15 +54,15 @@ impl IntegrityCache {
         })
     }
 }
-struct Owner<T: ?Sized> { value: Arc<T>, encoded: OnceLock<EncodedBytes>, integrity: IntegrityCache }
+struct Owner<T: ?Sized> { value: Arc<T>, encoded: OnceLock<EncodedBytes>, integrity: IntegrityCache, _retirement:crate::memory::OwnerRetirement }
 pub struct Resource<T: ?Sized> { id: PortableId, owner: Arc<Owner<T>> }
 impl<T: ?Sized> Resource<T> {
     pub fn new(value: Arc<T>) -> Self { Self::with_id(PortableId::random(), value) }
     pub fn with_id(id: PortableId, value: Arc<T>) -> Self {
-        Self { id, owner: Arc::new(Owner { value, encoded: OnceLock::new(), integrity: IntegrityCache::default() }) }
+        Self { id, owner: Arc::new(Owner { value, encoded: OnceLock::new(), integrity: IntegrityCache::default(), _retirement:Default::default() }) }
     }
     pub fn with_id_and_encoded(id: PortableId, value: Arc<T>, encoded: EncodedBytes) -> Self {
-        Self { id, owner: Arc::new(Owner { value, encoded: OnceLock::from(encoded), integrity: IntegrityCache::default() }) }
+        Self { id, owner: Arc::new(Owner { value, encoded: OnceLock::from(encoded), integrity: IntegrityCache::default(), _retirement:Default::default() }) }
     }
     pub fn id(&self) -> PortableId { self.id }
     pub(crate) fn alias(&self, id:PortableId) -> Self { Self {id,owner:self.owner.clone()} }

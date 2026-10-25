@@ -349,7 +349,7 @@ fn bakes_run_their_filters_in_bounded_windows_with_the_same_pixels() {
                     .iter()
                     .flat_map(|id| {
                         let data = engine.document().scene().raster(*id).unwrap().wait_data().unwrap();
-                        data.tiles.values().map(|t| t.wait_backing().unwrap().decode().unwrap()).collect::<Vec<_>>()
+                        data.tiles.values().map(|t| t.wait_backing().unwrap().decode().unwrap().to_vec()).collect::<Vec<_>>()
                     })
                     .collect();
                 (pixels, after.image_window_submissions - before.image_window_submissions, after.image_window_peak_bytes)

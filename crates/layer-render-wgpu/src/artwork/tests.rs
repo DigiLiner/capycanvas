@@ -237,7 +237,7 @@ fn cold_object_thumbnails_and_retouch_reads_retry_until_exact_pixels_are_ready()
     object.affine=Affine64([1./7.,0.,0.,1./7.,0.,0.]);
     let (owner,edit)=doc.create_object_layer_edit("Reference",object,None,1).unwrap();doc.apply(edit).unwrap();
     for thumbnail in [false,true] {
-        let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();r.document_extent=extent;
+        let mut r=crate::test_support::private_sample_renderer(doc.composition().color);r.document_extent=extent;
         let packet=crate::test_support::packet(doc.scene(),extent);
         let frame=Arc::new(Frame::new(packet,r.frame_context(packet)));r.artwork_frame=Some(frame.clone());
         if !thumbnail {

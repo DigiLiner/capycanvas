@@ -1,6 +1,6 @@
 export function createRasterWorker(module,reportGpu=()=>{}) {
   const owners = new Map();
-  let next = 0, idleAnalysis, idleValidation, limits, jobs=0, payloadBytes=0;
+  let next = 0, idleAnalysis, idleValidation, limits, jobs=0, decoding=0, payloadBytes=0;
   const receipts=new Map(),results=new Map();
   const prepared=new Set(['encode','image-decode','nearest-coordinates','lookup']);
   const identity=()=>{if(next>=Number.MAX_SAFE_INTEGER)throw Error("Worker job identities exhausted");return ++next;};
@@ -15,14 +15,14 @@ export function createRasterWorker(module,reportGpu=()=>{}) {
     }
     return size;
   }
-  function admitJob(bytes) {
-    if(jobs>=limits.requests||bytes>limits.payloads-payloadBytes)throw Error('Raster workers are busy. Try again after the current operation finishes');
-    jobs++;payloadBytes+=bytes;
+  function admitJob(bytes,decoder) {
+    if(jobs>=limits.requests||decoder&&decoding>=limits.decoders||bytes>limits.payloads-payloadBytes)throw Error('Raster workers are busy. Try again after the current operation finishes');
+    jobs++;decoding+=Number(decoder);payloadBytes+=bytes;
     let live=true,dispose,timer;
     return {
       resize(next){if(!Number.isSafeInteger(next)||next<0||next>limits.payloads-(payloadBytes-bytes))throw Error('Worker payload exceeds aggregate admission');payloadBytes+=next-bytes;bytes=next;},
       hold(cleanup){dispose=cleanup;timer=setTimeout(()=>this.release(),limits.resultAge);},
-      release(){if(live){live=false;clearTimeout(timer);jobs--;payloadBytes-=bytes;dispose?.();dispose=undefined;}},
+      release(){if(live){live=false;clearTimeout(timer);jobs--;decoding-=Number(decoder);payloadBytes-=bytes;dispose?.();dispose=undefined;}},
       finish(success){if(!success||!dispose)this.release();},
     };
   }
@@ -59,7 +59,7 @@ export function createRasterWorker(module,reportGpu=()=>{}) {
       if (!job) return;
       pending.delete(data.id); clearTimeout(job.timer);state.retire=!!data.retire;
       if (data.color_feature_error) job.reject({color_feature_error:data.color_feature_error});
-      else if (data.error) job.reject(new Error(data.error)); else job.resolve(data.result);
+      else if (data.error) {const error=new Error(data.error);if(data.memory_error===true)error.memory_error=true;job.reject(error);} else job.resolve(data.result);
     };
     worker.onerror = event => { event.preventDefault(); fail(new Error(event.message || "Raster worker stopped")); };
     worker.onmessageerror = () => fail(new Error("Invalid raster worker response"));
@@ -206,16 +206,17 @@ export function createRasterWorker(module,reportGpu=()=>{}) {
       const pending=dispatch(request,cancelled).finally(()=>closing.delete(request.metadata));
       closing.set(request.metadata,pending);return pending;
     }
-    const job=admitJob(payloadSize(request.metadata,request.buffers));
+    const decoder=['read','restart-open'].includes(request.operation)||request.operation.startsWith('validate-')||request.operation==='paper-library'&&request.file!==undefined;
+    const job=admitJob(payloadSize(request.metadata,request.buffers),decoder);
     let success=false;
     try{const result=await dispatch(request,cancelled,job);success=true;return result;}finally{job.finish(success);}
   };
   run.configure=value=>{
-    const fields=['metadata','range','total','workers','requests','payloads','resultAge'];
+    const fields=['metadata','range','total','workers','requests','decoders','payloads','resultAge'];
     if(!value||!fields.every(key=>Number.isSafeInteger(value[key])&&value[key]>0)||value.workers<3)throw Error('Invalid worker input limits');
     if(limits&&fields.every(key=>limits[key]===value[key]))return;
     if(jobs||owners.size)throw Error('Worker input limits are already in use');
-    limits={metadata:value.metadata,range:value.range,total:value.total,workers:value.workers,requests:value.requests,payloads:value.payloads,resultAge:value.resultAge};
+    limits={metadata:value.metadata,range:value.range,total:value.total,workers:value.workers,requests:value.requests,decoders:value.decoders,payloads:value.payloads,resultAge:value.resultAge};
   };
   run.consume=(kind,metadata,key)=>{
     const receipt=receipts.get(key);

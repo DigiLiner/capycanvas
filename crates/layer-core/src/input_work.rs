@@ -1,6 +1,6 @@
 use std::sync::{Mutex,MutexGuard,Condvar,atomic::{AtomicBool,Ordering}};
 
-pub const MAX_ACTIVE_DECODERS:usize=4;
+pub const MAX_ACTIVE_DECODERS:usize=2;
 pub const MAX_BROWSER_WORKERS:usize=8;
 pub const MAX_BROWSER_REQUESTS:usize=32;
 pub const MAX_BROWSER_PAYLOAD_BYTES:usize=256*1024*1024;

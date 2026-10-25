@@ -37,12 +37,42 @@ its original bytes and any independently verified preview. See the
 [authored model](reference/authored-model.md) and
 [package contract](reference/capy-package.md).
 
-Photo, native-package and stored-paper decoders share four active execution slots
+Photo, native-package and stored-paper decoders share two active execution slots
 per process. Native file workers wait before decoding and check a caller's
 cancellation flag while waiting; stored-paper reads have no cancellation argument.
 Browser worker heaps have independent counters and also need controller admission.
 An execution slot ends when decoding stops. It does not reserve memory for the
 returned document, profile choices, clipboard, history or GPU resources.
+
+`layer-core::memory` separately accounts retained image payloads and instrumented
+decode/preparation scratch. Native capacity is half the initial available process
+headroom, capped at 4 GiB; an unavailable headroom query uses 256 MiB. Input work
+may occupy three quarters of that capacity, leaving the rest for live canvas
+preparation. A photo decoder also reserves twice its admitted codec allowance;
+each codec allowance is capped at one eighth of the pool. Source admission is
+capped at one quarter. The browser controller admits at most two concurrent
+input decoders across its workers; each Wasm instance has its own address-space
+ceiling rather than a measured process-memory budget.
+
+Reservations follow decoded buffers through row caches and pending uploads.
+Immutable byte, word and text Arcs register their actual allocation once, so
+document, clipboard and history aliases share one charge. The ledger's private
+Weak owner pins that allocation until the last strong alias disappears and
+collection releases it. Published payloads must remain immutable: do not use
+`Arc::make_mut`, consume their storage, or create raw-payload Weak aliases.
+Uninitialized transfer/readback buffers register only after complete validation
+and initialization. The disposable decoded sample cache is shared across native
+windows, bounded separately, and evicted before refusing work under pressure.
+Owner retirement advances the preparation retry generation after payload fields
+drop; the worker reclaims dead ledger entries before admitting the next allocation.
+The render owner reads that generation without scanning owners or querying memory.
+
+These limits cover instrumented payloads and scratch, including imported
+selections, profiles, lookup tables and previews. They are not an allocator or
+whole-process quota: codec internals, nested vector encoding scratch, object
+metadata, host copies, Wasm heap high-water marks and GPU/driver allocations
+need separate limits or process isolation. Small fixed built-in lookup tables
+remain available independently of input admission.
 
 `CanvasEngine`, in `layer-engine`, connects that model to drawing input. It
 interprets ordered pen samples, evaluates brush dynamics and produces work for a
