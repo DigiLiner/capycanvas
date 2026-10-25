@@ -91,6 +91,7 @@ tool-figures-ellipse = Elipse
 tool-figures-fill = Preencher
 tool-figures-line = Linha
 tool-figures-path = Caminho
+tool-select-paths = Selecionar caminhos
 tool-figures-outline = Contorno
 tool-figures-outline-and-fill = Contorno + preenchimento
 tool-figures-rectangle = Retângulo

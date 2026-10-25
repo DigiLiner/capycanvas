@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 /// Where the canvas notice sits, in workspace units: hosts centre the bubble's
 /// bottom edge on `x`, `y`, keep it within `max_width`, and give the actions
 /// their own row under the text when the text would be narrower than
-/// `min_text_width` beside them.
+/// `min_text_width` beside them. That is the whole `max_width`, so the text
+/// never wraps beside the actions: it shares their row only on one line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NoticePlacement {
     pub x: f32,
@@ -20,9 +21,8 @@ pub struct NoticePlacement {
 
 impl NoticePlacement {
     pub const MARGIN: f32 = 12.;
-    const MAX_WIDTH: f32 = 720.;
+    const MAX_WIDTH: f32 = 960.;
     const MIN_WIDTH: f32 = 320.;
-    const MIN_TEXT_WIDTH: f32 = 200.;
     const BAR_REACH: f32 = 72.;
 
     pub fn resolve(viewport: [f32; 2], work_area: Bounds, status: Bounds) -> Self {
@@ -35,7 +35,7 @@ impl NoticePlacement {
             (work_area.x + work_area.width * 0.5, floor - Self::MARGIN, room)
         };
         let max_width = room.clamp(0., Self::MAX_WIDTH);
-        Self { x, y, max_width, min_text_width: Self::MIN_TEXT_WIDTH.min(max_width), window, bar_floor: if window { viewport[1] } else { floor - Self::BAR_REACH } }
+        Self { x, y, max_width, min_text_width: max_width, window, bar_floor: if window { viewport[1] } else { floor - Self::BAR_REACH } }
     }
 
     /// The anchor above a canvas bar placed along the canvas bottom.
@@ -64,22 +64,22 @@ mod tests {
     fn notices_stay_inside_the_canvas_area_and_move_to_the_window_bottom_when_it_is_too_small() {
         let status = Bounds { x: 300., y: 836., width: 1000., height: 24. };
         let wide = NoticePlacement::resolve([1600., 900.], area(300., 1000.), status);
-        assert_eq!((wide.x, wide.y, wide.max_width, wide.window), (800., 824., 720., false));
+        assert_eq!((wide.x, wide.y, wide.max_width, wide.window), (800., 824., 960., false));
         let snug = NoticePlacement::resolve([900., 900.], area(250., 400.), Bounds::default());
         assert_eq!((snug.x, snug.y, snug.max_width, snug.window), (450., 848., 376., false), "the bubble keeps to the canvas area");
         let squeezed = NoticePlacement::resolve([1100., 900.], area(450., 150.), Bounds::default());
-        assert_eq!((squeezed.x, squeezed.y, squeezed.max_width, squeezed.window), (550., 888., 720., true), "a sliver of canvas sends the bubble to the window bottom");
+        assert_eq!((squeezed.x, squeezed.y, squeezed.max_width, squeezed.window), (550., 888., 960., true), "a sliver of canvas sends the bubble to the window bottom");
         let phone = NoticePlacement::resolve([400., 900.], area(0., 30.), Bounds::default());
         assert_eq!((phone.x, phone.max_width, phone.window), (200., 376., true));
         assert!(phone.min_text_width <= phone.max_width);
     }
 
     #[test]
-    fn actions_take_their_own_row_when_the_text_would_be_too_narrow_beside_them() {
-        let placement = NoticePlacement::resolve([1600., 900.], area(300., 1000.), Bounds::default());
-        assert!(placement.actions_beside(692., 300., 12.));
-        assert!(!placement.actions_beside(692., 500., 12.), "three German actions push the text under its minimum");
-        assert!(!placement.actions_beside(300., 120., 12.));
+    fn text_that_needs_a_second_line_puts_the_actions_on_their_own_row() {
+        for placement in [NoticePlacement::resolve([1600., 900.], area(300., 1000.), Bounds::default()), NoticePlacement::resolve([400., 900.], area(0., 30.), Bounds::default())] {
+            assert_eq!(placement.min_text_width, placement.max_width);
+            assert!(!placement.actions_beside(placement.max_width, 120., 2.), "text never wraps beside the actions");
+        }
     }
 
     #[test]

@@ -307,7 +307,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::SelectAll if self.engine.document().scene().vector_layer(layer).is_some_and(|object| object.paths().any(|(_, path)| path.pickable())) => idle,
             CommandId::Deselect if selected => idle,
             CommandId::ClearSelected if selected => idle && self.vector_paths_editable(),
-            CommandId::ScaleRotate | CommandId::TransformFlipHorizontal | CommandId::TransformFlipVertical
+            CommandId::ScaleRotate => idle && !self.engine.document().is_locked(layer),
+            CommandId::TransformFlipHorizontal | CommandId::TransformFlipVertical
             | CommandId::TransformRotateLeft | CommandId::TransformRotateRight | CommandId::ReversePath => idle && self.vector_paths_editable(),
             CommandId::JoinPaths | CommandId::ClosePath | CommandId::MakeCompoundPath | CommandId::ReleaseCompoundPath => idle && self.vector_paths_editable() && {
                 let paths = self.selected_path_facts().unwrap_or_default();
@@ -321,6 +322,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::SplitPath => idle && self.vector_paths_editable() && self.vector_points_split(),
             _ => return None,
         })
+    }
+    pub(super) fn vector_command_selected(&self, id: CommandId) -> bool {
+        id == CommandId::ScaleRotate && self.editing_vector_layer().is_some()
+            && matches!(self.layer_interaction.tool, LayerCanvasTool::Move | LayerCanvasTool::EditPoints)
     }
     pub(super) fn vector_disabled_reason(&self, id: CommandId) -> Option<Arc<str>> {
         let layer = self.editing_vector_layer()?;

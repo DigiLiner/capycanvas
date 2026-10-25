@@ -5,7 +5,7 @@ use layer_render::CanvasRenderer;
 use std::sync::Arc;
 
 pub(crate) fn modes(shape: FigureShape, paint: FigurePaint, localizer: &crate::localization::Localizer) -> Vec<ToolSetItem> {
-    let item = |label, icon, shape, paint, selected| ToolSetItem { enabled: true,
+    let item = |label, icon, shape, paint, selected| ToolSetItem { enabled: true, disabled_reason: None,
         label,
         icon,
         selected,

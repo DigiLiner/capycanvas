@@ -93,7 +93,7 @@ impl TileWidget {
                         button.set_tooltip_text(Some(&label));
                     }
                 } else {
-                    button.set_tooltip_text(Some(&tile.tooltip));
+                    button.set_tooltip_text(Some(tile.disabled_reason.as_deref().unwrap_or(&tile.tooltip)));
                 }
                 if let Some(image) = customization::tool_button_content(button)
                     .and_then(|child| {
@@ -468,7 +468,7 @@ impl Field {
                         && let Some(caption) = row.first_child().and_downcast::<gtk::Label>() { caption.set_label(label); }
                 }
                 for (button, item) in buttons.iter().zip(items) {
-                    button.set_tooltip_text(Some(&item.label));
+                    button.set_tooltip_text(Some(item.disabled_reason.as_deref().unwrap_or(&item.label)));
                     button.update_property(&[gtk::accessible::Property::Label(&item.label)]);
                     button.set_active(item.selected);
                 }
@@ -561,7 +561,7 @@ pub(crate) fn segment_buttons(
         } else {
             button.set_child(Some(&icon));
         }
-        button.set_tooltip_text(Some(&item.label));
+        button.set_tooltip_text(Some(item.disabled_reason.as_deref().unwrap_or(&item.label)));
         button.update_property(&[gtk::accessible::Property::Label(&item.label)]);
         button.set_group(buttons.first());
         let (action, send) = (item.action.clone(), send.clone());

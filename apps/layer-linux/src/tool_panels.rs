@@ -146,12 +146,12 @@ impl ToolSet {
         }
         for (button, item) in self.group_buttons.borrow().iter().zip(&view.groups) {
             selected(button, item.selected);
-            button.set_sensitive(item.enabled);
+            show_availability(button, item);
         }
         let theme_changed = self.theme.replace(Some(theme)) != Some(theme);
         for ((_, button, preview), item) in self.buttons.borrow().iter().zip(&view.subtools) {
             selected(button, item.selected);
-            button.set_sensitive(item.enabled);
+            show_availability(button, item);
             if (rebuild || theme_changed)
                 && let (Some(id), Some(preview)) = (item.preview, preview)
             {
@@ -161,6 +161,11 @@ impl ToolSet {
         drop(previous);
         *self.view.borrow_mut() = view.clone();
     }
+}
+fn show_availability(button: &gtk::Button, item: &ToolSetItem) {
+    button.set_sensitive(item.enabled);
+    button.set_tooltip_text(item.disabled_reason.as_deref());
+    if item.enabled && item.disabled_reason.is_some() { button.add_css_class("unavailable-tool"); } else { button.remove_css_class("unavailable-tool"); }
 }
 fn tool_label(item: &ToolSetItem) -> gtk::Box {
     let row = aligned_icon_label(&item.label, item.icon, if matches!(item.action, UiAction::ColorPicker { .. }) { 0.0 } else { 1.0 });

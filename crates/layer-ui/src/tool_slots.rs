@@ -440,14 +440,18 @@ impl UiState {
 impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn group_choices(&self, group: ToolControlGroup, anchor: Option<DrawerAnchor>) -> Vec<(ToolVariant, ToolSetItem)> {
         group.variants().into_iter().filter(|v| v.command().available_on(self.state.platform))
-            .map(|variant| (variant, ToolSetItem {
-                enabled: self.command(variant.command()).enabled && self.brush_usable(&self.variant_action(variant)),
+            .map(|variant| {
+                let command = self.command(variant.command());
+                let disabled_reason = if command.enabled { self.path_brush_refusal(&self.variant_action(variant)) } else { command.disabled_reason };
+                (variant, ToolSetItem {
+                enabled: command.enabled,
+                disabled_reason,
                 label: variant.label(self.localization()).into(),
                 icon: variant.icon_in(&self.state),
                 action: anchor.map_or_else(|| self.variant_action(variant), |anchor| UiAction::ChooseToolVariant { anchor, variant }),
                 selected: variant.is_active(&self.state),
                 preview: if let ToolVariant::BrushPreset { id } = variant { Some(id) } else { None },
-            })).collect()
+            })}).collect()
     }
 
     fn active_tool_group(&self) -> Option<(ToolControlGroup, Option<DrawerAnchor>)> {
@@ -526,6 +530,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             || self.layer_interaction.tool.selection_tool().is_some() && matches!(group, ToolControlGroup::Slot(_)) {
             view.subtools = std::mem::take(&mut view.groups);
         }
+        if group == ToolControlGroup::Selection { view.subtools.splice(0..0, self.vector_path_tools()); }
         view.subtools.splice(0..0, self.vector_eraser_modes());
         view
     }
@@ -573,8 +578,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 item.icon = Some(choice.icon.into());
                 item.selected = Some(remembered == variant);
                 item.enabled = choice.enabled;
-                if let Some(reason) = self.command_disabled_reason(variant.command()) {
-                    item.hint = reason;
+                if let Some(reason) = choice.disabled_reason {
+                    item.hint = reason.to_string();
                 }
                 item
             })

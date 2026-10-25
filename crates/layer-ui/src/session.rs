@@ -2473,7 +2473,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             return (enabled, self.object_command_selected(id).unwrap_or(false));
         }
         if let Some(enabled) = self.vector_command_enabled(id) {
-            return (enabled, false);
+            return (enabled, self.vector_command_selected(id));
         }
 
         let enabled = match id {
@@ -4202,6 +4202,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             changed |= DOCUMENT;
         }
         if choosing_tool { self.remember_tool_slots(); }
+        if choosing_tool && !self.temporary_tool() { self.explain_chosen_tool(); }
         if choosing_tool && self.close_halo() { changed |= BUBBLES; }
         if changing_slot_layout && changed & (LAYOUT | CUSTOMIZATION) != 0 {
             self.refresh_tools();
@@ -5747,7 +5748,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             view.subtools = [
                 (MessageId::TOOL_COLOR_PICKER, "color-picker", ColorPickerStyle::Glass),
                 (MessageId::COMMAND_EYEDROPPER, "eyedropper", ColorPickerStyle::Eyedropper),
-            ].into_iter().map(|(label, icon, style)| ToolSetItem { enabled: true,
+            ].into_iter().map(|(label, icon, style)| ToolSetItem { enabled: true, disabled_reason: None,
                 label: self.state.localization.text(label), icon, selected: self.state.color_picker.style == style,
                 action: UiAction::ColorPicker { action: ColorPickerAction::Style { style } }, preview: None,
             }).collect();
@@ -5896,7 +5897,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.transform_controls()
         } else if self.layer_interaction.tool == LayerCanvasTool::Paint {
             tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
-                .into_iter().filter(|control| control.id != "smoothing_strength" || self.smoothing_available()).collect()
+                .into_iter().filter(|control| (control.id != "smoothing_strength" || self.smoothing_available()) && self.applies_to_paths(control.id)).collect()
         } else if let LayerCanvasTool::Figure { shape, paint } = self.layer_interaction.tool {
             tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
                 .into_iter()

@@ -32,17 +32,20 @@ corners where the line turns sharply. Its width profile keeps pressure changes
 to the same half pixel with the fewest width points. Pressure updates that
 arrive after pen-up reshape that path within its undo step.
 
-Making or selecting a vector layer while a brush that cannot draw paths is
-active, or choosing the brush tool while a vector layer is selected, switches
-to the last pen that drew paths, G-Pen at first; a paint layer brings that
-brush back unless another was chosen meanwhile.
+Making or selecting a vector layer while painting with a brush that cannot
+draw paths switches to the last pen that drew paths, G-Pen at first; going back
+to a paint layer while still painting brings that brush back, unless a brush or
+tool was chosen meanwhile.
 On a vector layer the Tool panel dims brushes and brush groups that cannot draw
 paths, including a pen whose settings stop it: size jitter, grain, or hardness
-or flow below the pen's own. Spacing, angle and rotation jitter don't apply to
-paths.
+or flow below the pen's own. Their tooltips say why, and they stay choosable. Pens leave out Spacing, Tip angle and Rotation
+variation there, and the eraser shows only its size, because nothing else
+shapes paths.
 A refused stroke shows the canvas cursor's refusal before contact and a notice
-naming the layer, with **Use G-Pen** (the last pen that drew paths), **New Paint
-Layer** above it and **Rasterize Layer**. When a setting keeps a pen from
+naming the brush, such as "Pencil doesn't work on vector layers.", with **Use G-Pen** (the last pen that drew paths), **New Paint
+Layer** above it and **Rasterize Layer**. Choosing a brush, Sculpt tool or other
+tool that cannot act on the vector layer keeps the choice and shows the same
+notice at once, before any stroke; choosing one that can closes it. When a setting keeps a pen from
 drawing paths, the notice names the setting and offers to reset it instead.
 Tools that need pixels, such as Gradient, offer **New Paint Layer Below** and
 Rasterize Layer; the new layer sits directly under the vector layer and, when
@@ -195,7 +198,8 @@ around the click fills. Transparent paint removes the fill. A click
 anywhere else, or using source **Reference**, adds a paint layer directly below
 the vector layer, clipped to the same base when the vector layer is clipped,
 and fills it there from the chosen source: all visible artwork, the edited vector layer's
-lines, or the marked reference layers. Missing references are resolved before
+lines, or the marked reference layers. A notice says the fill went on a new
+paint layer and offers **Back to “Vector 1”**. Missing references are resolved before
 adding a paint layer. Fill keeps its tolerance, gap closing,
 expansion and smoothing; the new layer and the fill are two undo steps.
 **Lasso Fill** on a vector layer adds a filled closed path, with holes where
@@ -203,6 +207,11 @@ the outline crosses itself, and selects it. Gradient and Enclose Fill offer
 New Paint Layer Below.
 
 ## Moving paths
+
+**Scale/rotate** on a vector layer chooses Move, whether or not paths are
+selected, and shows as the active tool while Move or Edit Points is. Sketch,
+which has no Move button, reaches paths this way, and its Select drawer on a
+vector layer starts with **Select paths** (Move) and **Edit points**.
 
 With **Move** on a vector layer, whether or not pixels are selected:
 
@@ -225,8 +234,8 @@ With **Move** on a vector layer, whether or not pixels are selected:
 - **Select All** (Ctrl+A) on a vector layer with paths selects every path and
   switches to Move; on an empty vector layer it selects pixels as usual.
   **Deselect** and Escape clear the path selection, along with any pixel
-  selection. **Edit › Transform** (Ctrl+T) with paths selected switches to Move,
-  whose frame transforms them.
+  selection. **Edit › Transform** (Ctrl+T) switches to Move,
+  whose frame transforms the selected paths.
 - With paths selected, the Move tool options add Flip Horizontal, Flip
   Vertical, Rotate Left and Rotate Right, which turn the selection about its
   centre in one undo step, and **Scale outline widths**, on by default and
@@ -352,7 +361,12 @@ same path as fitting at pen-up.
 `paint_layers_under_a_clipped_vector_layer_stay_in_its_clip`,
 `fill_takes_the_innermost_path_around_the_click`,
 `soft_or_light_pens_name_hardness_or_flow_in_the_refusal_and_other_settings_still_draw`,
-`choosing_a_brush_tool_on_a_vector_layer_picks_the_path_pen_and_paint_layers_restore_it`,
+`choosing_a_tool_that_cannot_change_a_vector_layer_explains_at_once`,
+`choosing_pen_after_leaving_a_vector_layer_keeps_the_pen`,
+`filling_outside_paths_names_the_new_paint_layer_and_leads_back`,
+`sketch_reaches_paths_from_select_and_scale_rotate`,
+`pen_and_eraser_settings_on_vector_layers_show_only_what_shapes_paths`,
+`dimmed_tools_rows_tiles_and_title_bar_items_say_why`,
 `undo_while_drafting_a_path_removes_its_last_point_without_touching_history`,
 `path_commands_say_what_to_select_when_they_cannot_apply`,
 `reversing_flipping_or_turning_a_lone_dot_adds_no_undo_step`,
@@ -419,7 +433,12 @@ rotates the canvas. `native_vector_select_erase_mask_and_merge` selects all path
 with Ctrl+A, flips them, clears the selection with Escape, erases up to
 intersection from the eraser's drawer, hides part of a line by erasing the
 layer's mask, and merges the layer into paint through the notice with that part
-still hidden. Each checks presented pixels. Run them with `--tablet` once per theme through
+still hidden. `native_vector_sketch_paths_and_explanations` picks a line in Sketch
+through Scale/rotate and through Select paths in the Select drawer, answers the
+notice Sculpt shows at once, follows a fill outside the line back to the vector
+layer, and checks that Paint's Brush tile explains itself, that a dimmed pen's tooltip says
+why, that greyed Scale/rotate names the lock, and that each notice keeps the
+canvas bar's height and controls. Each checks presented pixels. Run them with `--tablet` once per theme through
 `CAPY_NATIVE_TEST_THEME` ([Linux](../development/linux.md)); each writes its
 captures to the run's `input` directory. On a tablet,
 `AndroidVectorLayerTest#gPenLinesDrawMoveAndUndoOnVectorLayers` draws, drags and

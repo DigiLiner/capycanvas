@@ -877,3 +877,147 @@ fn native_vector_save_reopen_and_resize() {
     assert_eq!(state(&d.w).settings.vector_eraser, VectorEraser::WholePaths, "the eraser mode survives a restart");
     d.finish();
 }
+
+fn use_preset(d: &mut Driver, preset: layer_ui::WorkspacePreset) {
+    let wanted = preset.layout(layer_ui::Platform::Gtk);
+    for _ in 0..4 {
+        d.w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(layer_ui::WorkspaceState { layout: wanted.clone(), ..Default::default() }) });
+        pump(800);
+        if state(&d.w).workspace.layout.header == wanted.header { break; }
+    }
+    assert_eq!(state(&d.w).workspace.layout.header, wanted.header, "the {preset:?} layout");
+    d.w.dispatch(UiAction::Invoke { command: CommandId::FitCanvas });
+    pump(300);
+}
+fn label_shown(d: &Driver, text: &str) -> bool {
+    widgets(d.w.window.upcast_ref()).any(|w| w.is_mapped() && w.width() > 0 && w.downcast_ref::<gtk::Label>().is_some_and(|l| l.text() == text))
+}
+fn notice_offers(d: &Driver, action: NoticeActionId) -> bool {
+    state(&d.w).notice.as_ref().is_some_and(|n| n.actions.iter().any(|a| a.id == action)) && d.w.notice.root.is_mapped()
+}
+fn live_capture(d: &mut Driver, name: &str) {
+    if std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").is_some() { d.input.perform(serde_json::json!([{"capture": name}])); }
+}
+fn scale_rotate_selected(d: &Driver) -> bool { ui_session(&d.w).command(CommandId::ScaleRotate).selected }
+fn tooltip_shown(d: &Driver) -> Option<String> {
+    widgets(d.w.window.upcast_ref()).find(|w| w.type_().name() == "GtkTooltipWindow" && w.is_mapped())
+        .map(|tip| widgets(&tip).filter_map(|w| w.downcast::<gtk::Label>().ok()).map(|l| l.text().to_string()).collect::<Vec<_>>().join(" "))
+}
+fn notice_shape_findings(d: &Driver, place: &str) -> Vec<String> {
+    let root: gtk::Widget = d.w.notice.root.clone().upcast();
+    let mut found = Vec::new();
+    let Some(text) = widgets(&root).find_map(|w| w.downcast::<gtk::Label>().ok().filter(|l| l.has_css_class("canvas-action-bar-label"))) else { return vec![format!("{place}: the notice has no caption")]; };
+    let lines = text.layout().line_count();
+    let beside = d.w.notice.root.orientation() == gtk::Orientation::Horizontal;
+    if beside && lines > 1 { found.push(format!("{place}: the text wraps to {lines} lines beside the actions")); }
+    if beside && root.height() != 36 { found.push(format!("{place}: a one-row notice is {} px tall, not the bar's 36", root.height())); }
+    let actions: Vec<gtk::Widget> = widgets(&root).filter(|w| w.widget_name() == "canvas-notice-action" && w.is_mapped()).collect();
+    let heights: Vec<i32> = actions.iter().map(|w| w.height()).collect();
+    if heights.iter().any(|h| *h != 26) { found.push(format!("{place}: action heights {heights:?} differ from the 26 px worded bar control")); }
+    if !beside && let (Some(row), Some(caption)) = (find_named(&root, "canvas-notice-actions"), text.compute_bounds(&root)) && let Some(bounds) = row.compute_bounds(&root) {
+        if bounds.y() < caption.y() + caption.height() - 1. { found.push(format!("{place}: stacked actions overlap the text")); }
+        if (root.width() as f32 - bounds.x() - bounds.width()).abs() > 1. { found.push(format!("{place}: stacked actions end {} px from the right edge", root.width() as f32 - bounds.x() - bounds.width())); }
+    }
+    found
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_vector_sketch_paths_and_explanations --tablet"]
+fn native_vector_sketch_paths_and_explanations() {
+    let mut d = Driver::new("art.capycanvas.VectorSketchPaths");
+    let theme = theme_name();
+    let mut findings = Vec::new();
+    pump(2000);
+    use_preset(&mut d, layer_ui::WorkspacePreset::Painter);
+    d.w.dispatch(UiAction::SetColor { rgba: [0.1, 0.1, 0.12, 1.] });
+    add_vector_layer(&mut d);
+    d.w.dispatch(UiAction::SetBrushSize { value: 14. });
+    pump(100);
+    super::vector_layers::pen_points(&mut d, &super::vector_layers::stroke([400., 300.], [900., 340.]));
+    until_paths(&d, "a line to pick", |paths| paths.len() == 1);
+
+    let unavailable = d.w.localization().text(layer_ui::MessageId::OBJECTS_VECTOR_UNAVAILABLE).to_string();
+    let rough = format!("brush-{}", DefaultBrushPreset::RoughGPen as u32);
+    let drawer = open_drawer(&mut d, ToolbarControl::Command { command: CommandId::DrawingBrush }, |d| find_named(d.w.window.upcast_ref(), &rough).is_some_and(|w| w.is_mapped()));
+    pump(300);
+    let row = d.named(&rough);
+    if !row.is_sensitive() || !row.has_css_class("unavailable-tool") || row.tooltip_text().as_deref() != Some(unavailable.as_str()) {
+        findings.push(format!("{theme}: dimmed Rough G-Pen: sensitive {}, dimmed {}, tooltip {:?}", row.is_sensitive(), row.has_css_class("unavailable-tool"), row.tooltip_text()));
+    }
+    let hover = d.point(&row);
+    d.input.perform(serde_json::json!([{"point": [hover[0] - 20., hover[1]]}, {"point": hover}]));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while tooltip_shown(&d).is_none() && Instant::now() < deadline { pump(50); }
+    if !tooltip_shown(&d).is_some_and(|text| text.contains(&unavailable)) { findings.push(format!("{theme}: hovering dimmed Rough G-Pen shows {:?}", tooltip_shown(&d))); }
+    live_capture(&mut d, &format!("sketch-dimmed-tooltip-{theme}"));
+    d.click_name(&rough);
+    wait_for("choosing the dimmed pen explains at once", || state(&d.w).brush.preset == DefaultBrushPreset::RoughGPen as u32 && notice_offers(&d, NoticeActionId::UseVectorPen));
+    findings.extend(notice_shape_findings(&d, &format!("{theme} dimmed Rough G-Pen")));
+    live_capture(&mut d, &format!("sketch-dimmed-chosen-{theme}"));
+    press_notice(&mut d, NoticeActionId::UseVectorPen);
+    wait_for("Use G-Pen from the dimmed pen's notice", || state(&d.w).brush.preset == DefaultBrushPreset::GPen as u32);
+    close_drawer(&mut d, &drawer);
+
+    d.click_name(&tool_opener(&d, ToolbarControl::Command { command: CommandId::ScaleRotate }));
+    wait_for("Scale/rotate picks paths", || canvas_tool(&d) == LayerCanvasTool::Move && scale_rotate_selected(&d));
+    super::vector_layers::pen_points(&mut d, &[[650., 320.], [650., 320.]]);
+    wait_for("a tap selects the line", || !selected_items(&d).is_empty());
+    capture(&d, &format!("sketch-scale-rotate-picks-{theme}.png"));
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Deselect });
+    pump(200);
+
+    let localization = d.w.localization();
+    let select_paths = localization.text(layer_ui::MessageId::TOOL_SELECT_PATHS).to_string();
+    let edit_points = CommandId::EditPoints.localized_label(localization.as_ref()).to_string();
+    let drawer = open_drawer(&mut d, ToolbarControl::Command { command: CommandId::Select }, |d| label_shown(d, &select_paths));
+    pump(300);
+    if !label_shown(&d, &edit_points) { findings.push(format!("{theme}: the Select drawer does not show {edit_points}")); }
+    capture(&d, &format!("sketch-select-drawer-paths-{theme}.png"));
+    d.click_label(&select_paths);
+    wait_for("Select paths picks the path tool", || canvas_tool(&d) == LayerCanvasTool::Move && scale_rotate_selected(&d));
+    close_drawer(&mut d, &drawer);
+    super::vector_layers::pen_points(&mut d, &[[650., 320.], [650., 320.]]);
+    wait_for("the path tool selects the line", || !selected_items(&d).is_empty());
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Deselect });
+    pump(200);
+
+    d.click_name(&tool_opener(&d, ToolbarControl::Command { command: CommandId::Sculpt }));
+    wait_for("Sculpt explains at once", || notice_offers(&d, NoticeActionId::UseVectorPen));
+    findings.extend(notice_findings(&d, &format!("{theme} Sculpt")));
+    findings.extend(notice_shape_findings(&d, &format!("{theme} Sculpt")));
+    live_capture(&mut d, &format!("sketch-sculpt-notice-{theme}"));
+    capture(&d, &format!("sketch-sculpt-explains-{theme}.png"));
+    press_notice(&mut d, NoticeActionId::UseVectorPen);
+    wait_for("Use G-Pen", || state(&d.w).brush.preset == DefaultBrushPreset::GPen as u32 && state(&d.w).notice.is_none());
+
+    tool(&d, LayerCanvasTool::Region { fill: true, source: RegionSource::Visible });
+    super::vector_layers::pen_points(&mut d, &[[200., 700.], [200., 700.]]);
+    wait_for("the fill names its new layer", || notice_offers(&d, NoticeActionId::BackToLayer) && !active_vector(&d));
+    findings.extend(notice_findings(&d, &format!("{theme} fill")));
+    findings.extend(notice_shape_findings(&d, &format!("{theme} fill")));
+    live_capture(&mut d, &format!("sketch-fill-notice-{theme}"));
+    capture(&d, &format!("sketch-fill-below-{theme}.png"));
+    press_notice(&mut d, NoticeActionId::BackToLayer);
+    wait_for("back on the vector layer", || active_vector(&d));
+    let vector = state(&d.w).layers.iter().find(|l| l.selected).unwrap().id;
+    d.w.dispatch(UiAction::Layer { action: LayerAction::Lock { id: vector, value: true } });
+    pump(300);
+    let locked = d.w.localization().text(layer_ui::MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string();
+    let header = d.named(&tool_opener(&d, ToolbarControl::Command { command: CommandId::ScaleRotate }));
+    let scale_rotate = header.clone().downcast::<gtk::Button>().ok().or_else(|| descendant::<gtk::Button>(&header)).unwrap();
+    if scale_rotate.tooltip_text().as_deref() != Some(locked.as_str()) { findings.push(format!("{theme}: greyed Scale/rotate says {:?}", scale_rotate.tooltip_text())); }
+    d.w.dispatch(UiAction::Layer { action: LayerAction::Lock { id: vector, value: false } });
+    pump(300);
+
+    use_preset(&mut d, layer_ui::WorkspacePreset::Illustrator);
+    d.click_name(&tool_opener(&d, ToolbarControl::Command { command: CommandId::Brush }));
+    wait_for("the Brush tile explains at once", || notice_offers(&d, NoticeActionId::UseVectorPen));
+    findings.extend(notice_findings(&d, &format!("{theme} Paint Brush")));
+    findings.extend(notice_shape_findings(&d, &format!("{theme} Paint Brush")));
+    live_capture(&mut d, &format!("paint-brush-notice-{theme}"));
+    capture(&d, &format!("paint-brush-explains-{theme}.png"));
+    d.click_name(&tool_opener(&d, ToolbarControl::Command { command: CommandId::Pen }));
+    wait_for("a pen that draws paths clears it", || state(&d.w).notice.is_none() && state(&d.w).brush.preset == DefaultBrushPreset::GPen as u32);
+    report(&findings);
+    d.finish();
+}

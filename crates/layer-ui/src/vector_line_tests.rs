@@ -874,7 +874,7 @@ fn new_vector_layers_switch_to_a_pen_and_paint_layers_switch_back() {
     assert_eq!(s.state.layer_properties.layer_type, s.localization().text(MessageId::RESOURCES_LAYER_TYPE_VECTOR).as_ref());
     assert_eq!(s.state.layer_properties.title, row.label);
     let usable = |s: &UiSession<Recorder>, preset: DefaultBrushPreset| s.state.tool_set.subtools.iter()
-        .find(|item| item.action == UiAction::SelectBrush { id: preset as u32 }).map(|item| item.enabled);
+        .find(|item| item.action == UiAction::SelectBrush { id: preset as u32 }).map(|item| item.disabled_reason.is_none());
     assert_eq!((usable(&s, DefaultBrushPreset::GPen), usable(&s, DefaultBrushPreset::Monoline), usable(&s, DefaultBrushPreset::RoughGPen)), (Some(true), Some(true), Some(false)));
     layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
     assert_eq!(s.state.brush.preset, DefaultBrushPreset::Pencil as u32, "a paint layer brings the painting brush back");
@@ -928,8 +928,8 @@ fn painting_brushes_on_vector_layers_offer_a_pen_a_paint_layer_or_rasterizing() 
         s.state.notice.clone().expect("a vector refusal")
     };
     let notice = refused(&mut s, 100);
-    let mut args = FluentArgs::new(); args.set("layer", s.engine.document().scene().occurrence(handle).unwrap().name.to_string());
-    assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_VECTOR_REFUSAL_BRUSH, &args));
+    assert_eq!(notice.text, "Pencil doesn’t work on vector layers.");
+    assert!(notice.actions[0].accent && notice.actions[1..].iter().all(|a| !a.accent), "the suggested way forward comes first");
     assert_eq!(notice.actions.iter().map(|a| (a.id, a.label.as_str(), a.enabled)).collect::<Vec<_>>(),
         [(NoticeActionId::UseVectorPen, "Use G-Pen", true), (NoticeActionId::NewPaintLayer, "New Paint Layer", true), (NoticeActionId::RasterizeLayer, "Rasterize Layer", true)]);
     s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::UseVectorPen) }).unwrap();
@@ -956,7 +956,7 @@ fn painting_brushes_on_vector_layers_offer_a_pen_a_paint_layer_or_rasterizing() 
 fn a_pen_setting_that_stops_paths_is_named_and_reset_from_the_refusal() {
     let (mut s, handle) = vector_session();
     s.dispatch(UiAction::SetToolSetting { id: "size_jitter".into(), value: 0.5 }).unwrap();
-    assert_eq!(s.state.tool_set.subtools.iter().find(|item| item.action == UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).map(|item| item.enabled), Some(false));
+    assert_eq!(s.state.tool_set.subtools.iter().find(|item| item.action == UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).map(|item| item.disabled_reason.is_some()), Some(true));
     let revision = s.engine.document().revision;
     draw_line(&mut s, 1, 10);
     assert_eq!(s.engine.document().revision, revision);
@@ -978,8 +978,7 @@ fn fill_tools_on_vector_layers_offer_a_paint_layer_below() {
     let start = surface_at(&s, [100., 100.]);
     press(&mut s, 100, &[start, Point { x: start.x + 80., y: start.y }]);
     let notice = s.state.notice.clone().expect("a vector refusal");
-    let mut args = FluentArgs::new(); args.set("layer", s.engine.document().scene().occurrence(handle).unwrap().name.to_string());
-    assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_VECTOR_REFUSAL_TOOL, &args));
+    assert_eq!(notice.text, "Gradient doesn’t work on vector layers.");
     assert_eq!(notice.actions.iter().map(|a| a.id).collect::<Vec<_>>(), [NoticeActionId::NewPaintLayerBelow, NoticeActionId::RasterizeLayer]);
     s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::NewPaintLayerBelow) }).unwrap();
     let paint = s.engine.document().working.occurrence.unwrap();
@@ -1054,8 +1053,7 @@ fn edit_transform_shows_the_move_frame_and_outline_widths_can_stay() {
     draw_line(&mut s, 1, 30);
     let width = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.style.strokes().next().unwrap().width;
     let before = width(&s);
-    assert!(!s.command(CommandId::ScaleRotate).enabled);
-    assert_eq!(s.command(CommandId::ScaleRotate).disabled_reason.as_deref(), Some(s.localization().text(MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER).as_ref()));
+    assert!(s.command(CommandId::ScaleRotate).enabled, "Scale/rotate picks paths before any are selected");
     invoke(&mut s, CommandId::SelectAll);
     s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Paint }).unwrap();
     assert!(s.command(CommandId::ScaleRotate).enabled);
@@ -1746,7 +1744,7 @@ fn soft_or_light_pens_name_hardness_or_flow_in_the_refusal_and_other_settings_st
     for (setting, value) in [("hardness", 0.5), ("flow", 0.6)] {
         let (mut s, handle) = vector_session();
         s.dispatch(UiAction::SetToolSetting { id: setting.into(), value }).unwrap();
-        assert_eq!(s.state.tool_set.subtools.iter().find(|item| item.action == UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).map(|item| item.enabled), Some(false), "{setting} dims G-Pen");
+        assert_eq!(s.state.tool_set.subtools.iter().find(|item| item.action == UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).map(|item| item.disabled_reason.is_some()), Some(true), "{setting} dims G-Pen");
         draw_line(&mut s, 1, 10);
         let notice = s.state.notice.clone().expect("a vector refusal");
         let label = s.state.tool_settings.iter().find(|control| control.id == setting).unwrap().label.clone();
@@ -1758,7 +1756,10 @@ fn soft_or_light_pens_name_hardness_or_flow_in_the_refusal_and_other_settings_st
         assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 1, "after Reset G-Pen draws a path");
     }
     let (mut s, handle) = vector_session();
+    let paint = s.engine.document().scene().children(None).iter().copied().find(|h| s.engine.document().scene().paint_source(*h).is_some()).unwrap();
+    layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
     s.dispatch(UiAction::SetToolSetting { id: "spacing".into(), value: 0.5 }).unwrap();
+    layer(&mut s, LayerAction::Select { id: occurrence_token(handle), mask: false });
     s.dispatch(UiAction::SetToolSetting { id: "hardness".into(), value: 1. }).unwrap();
     draw_line(&mut s, 1, 20);
     assert_eq!((s.engine.document().scene().vector_layer(handle).unwrap().path_count(), s.state.notice.as_ref()), (1, None), "wider spacing and harder edges still draw paths");
@@ -1838,27 +1839,156 @@ fn one_flatten_notice_names_hidden_layers_and_vector_layers() {
 }
 
 #[test]
-fn choosing_a_brush_tool_on_a_vector_layer_picks_the_path_pen_and_paint_layers_restore_it() {
+fn choosing_a_tool_that_cannot_change_a_vector_layer_explains_at_once() {
     let mut s = session(Platform::Gtk);
     s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
     let paint = s.engine.document().working.occurrence.unwrap();
     invoke(&mut s, CommandId::Move);
     layer(&mut s, LayerAction::NewVector);
-    let vector = s.engine.document().working.occurrence.unwrap();
     assert_eq!(s.state.brush.preset, DefaultBrushPreset::Pencil as u32, "the Move tool keeps the brush");
+    assert_eq!(s.state.notice, None, "making the layer explains nothing");
+    let actions = |s: &UiSession<Recorder>| s.state.notice.as_ref().map(|n| n.actions.iter().map(|a| a.id).collect::<Vec<_>>());
+    let brush = Some(vec![NoticeActionId::UseVectorPen, NoticeActionId::NewPaintLayer, NoticeActionId::RasterizeLayer]);
     layer(&mut s, LayerAction::Tool { tool: LayerCanvasTool::Paint });
-    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "the brush tool on a vector layer picks the path pen");
-    invoke(&mut s, CommandId::Move);
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::Pencil as u32, "the chosen brush stays");
+    assert_eq!(actions(&s), brush, "before any stroke");
+    invoke(&mut s, CommandId::Pen);
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32);
+    assert_eq!(s.state.notice, None, "a pen that draws paths clears the explanation");
+    for (command, expected) in [(CommandId::Brush, brush.clone()), (CommandId::Sculpt, brush.clone()), (CommandId::Pen, None), (CommandId::Brush, brush.clone()),
+        (CommandId::Gradient, Some(vec![NoticeActionId::NewPaintLayerBelow, NoticeActionId::RasterizeLayer])), (CommandId::Eraser, None),
+        (CommandId::Airbrush, brush.clone()), (CommandId::Fill, None), (CommandId::Brush, brush), (CommandId::Figure, None), (CommandId::Move, None), (CommandId::EditPoints, None)] {
+        invoke(&mut s, command);
+        assert_eq!(actions(&s), expected, "{command:?}");
+    }
     layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
     invoke(&mut s, CommandId::Brush);
-    assert_ne!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "a paint layer brings a painting brush back");
-    let painting = s.state.brush.preset;
+    assert_eq!(s.state.notice, None, "paint layers take every brush");
+}
+
+#[test]
+fn choosing_pen_after_leaving_a_vector_layer_keeps_the_pen() {
+    let mut s = session(Platform::Gtk);
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    let paint = s.engine.document().working.occurrence.unwrap();
+    invoke(&mut s, CommandId::NewVectorLayer);
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "a new vector layer picks a pen that draws paths");
     invoke(&mut s, CommandId::Move);
-    layer(&mut s, LayerAction::Select { id: occurrence_token(vector), mask: false });
-    invoke(&mut s, CommandId::Brush);
-    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "the Brush command on a vector layer picks the path pen");
     layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
-    assert_eq!(s.state.brush.preset, painting);
+    invoke(&mut s, CommandId::Pen);
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "Pen gives the pen, not the brush held before the vector layer");
+}
+
+#[test]
+fn filling_outside_paths_names_the_new_paint_layer_and_leads_back() {
+    let mut s = session(Platform::Gtk);
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    invoke(&mut s, CommandId::NewVectorLayer);
+    let vector = s.engine.document().working.occurrence.unwrap();
+    s.dispatch(UiAction::SetColor { rgba: [0.2, 0.6, 0.3, 1.] }).unwrap();
+    layer(&mut s, LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } });
+    let outside = surface_at(&s, [700., 600.]);
+    press(&mut s, 20, &[outside, outside]);
+    let filled = s.engine.document().working.occurrence.unwrap();
+    assert!(s.engine.document().scene().paint_source(filled).is_some());
+    let notice = s.state.notice.clone().expect("the fill says where it went");
+    let name = s.engine.document().scene().occurrence(vector).unwrap().name.to_string();
+    let mut args = FluentArgs::new(); args.set("layer", name.as_str());
+    assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_VECTOR_FILLED_BELOW, &args));
+    assert_eq!(notice.actions.iter().map(|a| (a.id, a.label.clone())).collect::<Vec<_>>(), [(NoticeActionId::BackToLayer, format!("Back to “{name}”"))]);
+    invoke(&mut s, CommandId::Pen);
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "Pen stays the pen on the new layer");
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::BackToLayer) }).unwrap();
+    assert_eq!(s.engine.document().working.occurrence, Some(vector));
+    let again = surface_at(&s, [650., 650.]);
+    layer(&mut s, LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } });
+    layer(&mut s, LayerAction::Select { id: occurrence_token(filled), mask: false });
+    press(&mut s, 40, &[again, again]);
+    assert_eq!(s.state.notice, None, "filling the paint layer adds no layer and says nothing");
+}
+
+#[test]
+fn sketch_reaches_paths_from_select_and_scale_rotate() {
+    let (mut s, handle) = vector_session();
+    let paint = s.engine.document().scene().children(None).iter().copied().find(|h| s.engine.document().scene().paint_source(*h).is_some()).unwrap();
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default() }) }).unwrap();
+    draw_line(&mut s, 1, 20);
+    assert!(s.command(CommandId::ScaleRotate).enabled, "Scale/rotate works before any path is selected");
+    invoke(&mut s, CommandId::Select);
+    let rows = |s: &UiSession<Recorder>| s.state.tool_panels.tools.subtools.iter().map(|item| (item.label.to_string(), item.action.clone())).collect::<Vec<_>>();
+    assert_eq!(rows(&s)[..2], [("Select paths".to_string(), UiAction::Invoke { command: CommandId::Move }), ("Edit points".to_string(), UiAction::Invoke { command: CommandId::EditPoints })]);
+    s.dispatch(rows(&s)[0].1.clone()).unwrap();
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move);
+    assert!(s.command(CommandId::ScaleRotate).selected, "Scale/rotate shows the path tool");
+    let path = s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.clone();
+    let on = surface_at(&s, path.geometry.subpaths()[0].segment(0).point(0.3));
+    press(&mut s, 100, &[on, on]);
+    assert!(s.selected_vector_items().is_some(), "a tap picks the path");
+    invoke(&mut s, CommandId::EditPoints);
+    assert!(s.command(CommandId::ScaleRotate).selected);
+    invoke(&mut s, CommandId::DrawingBrush);
+    assert!(!s.command(CommandId::ScaleRotate).selected);
+    invoke(&mut s, CommandId::Deselect);
+    invoke(&mut s, CommandId::ScaleRotate);
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move, "Scale/rotate picks paths");
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: true });
+    let locked = s.command(CommandId::ScaleRotate);
+    assert_eq!((locked.enabled, locked.disabled_reason.as_deref()), (false, Some(s.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).as_ref())));
+    layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
+    invoke(&mut s, CommandId::Select);
+    assert!(rows(&s).iter().all(|(_, action)| !matches!(action, UiAction::Invoke { command: CommandId::Move | CommandId::EditPoints })), "paint layers list only selection tools");
+}
+
+#[test]
+fn dimmed_tools_rows_tiles_and_title_bar_items_say_why() {
+    let (mut s, handle) = vector_session();
+    let row = |s: &UiSession<Recorder>, preset: DefaultBrushPreset| s.state.tool_set.subtools.iter()
+        .find(|item| item.action == UiAction::SelectBrush { id: preset as u32 }).map(|item| (item.enabled, item.disabled_reason.as_deref().map(str::to_string)));
+    let unavailable = s.localization().text(MessageId::OBJECTS_VECTOR_UNAVAILABLE).to_string();
+    assert_eq!(row(&s, DefaultBrushPreset::RoughGPen), Some((true, Some(unavailable.clone()))), "dimmed but still choosable");
+    assert_eq!(row(&s, DefaultBrushPreset::GPen), Some((true, None)));
+    let dimmed: Vec<_> = s.state.tool_set.groups.iter().filter(|group| group.disabled_reason.is_some()).collect();
+    assert!(!dimmed.is_empty() && dimmed.iter().all(|group| group.enabled && group.disabled_reason.as_deref() == Some(unavailable.as_str())), "dimmed brush groups say why and stay choosable");
+    let rough = s.state.tool_set.subtools.iter().find(|item| item.action == UiAction::SelectBrush { id: DefaultBrushPreset::RoughGPen as u32 }).unwrap().action.clone();
+    s.dispatch(rough).unwrap();
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::RoughGPen as u32, "choosing a dimmed pen selects it");
+    assert_eq!(s.state.notice.as_ref().map(|n| n.actions[0].id), Some(NoticeActionId::UseVectorPen), "and explains at once");
+    s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
+    s.dispatch(UiAction::SetToolSetting { id: "size_jitter".into(), value: 0.5 }).unwrap();
+    let mut args = FluentArgs::new(); args.set("setting", s.state.tool_settings.iter().find(|setting| setting.id == "size_jitter").unwrap().label.as_ref());
+    assert_eq!(row(&s, DefaultBrushPreset::GPen), Some((true, Some(s.localization().format(MessageId::OBJECTS_VECTOR_UNAVAILABLE_SETTING, &args)))), "a pen a setting stops names it");
+    s.dispatch(UiAction::ResetToolSetting { id: "size_jitter".into() }).unwrap();
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: true });
+    let locked = s.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string();
+    let scale_rotate = ToolbarControl::Command { command: CommandId::ScaleRotate };
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Illustrator.layout(Platform::Gtk), ..WorkspaceState::default() }) }).unwrap();
+    let tile = s.panel_view(Panel::Commands).unwrap().tiles.into_iter().find(|tile| tile.resolved_control == scale_rotate).unwrap();
+    assert_eq!((tile.enabled, tile.disabled_reason.as_deref()), (false, Some(locked.as_str())));
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default() }) }).unwrap();
+    let item = s.header_view().items.into_iter().find(|item| item.resolved_control == Some(scale_rotate)).unwrap();
+    assert_eq!((item.enabled, item.disabled_reason.as_deref()), (false, Some(locked.as_str())));
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: false });
+    let item = s.header_view().items.into_iter().find(|item| item.resolved_control == Some(scale_rotate)).unwrap();
+    assert_eq!((item.enabled, item.disabled_reason), (true, None), "enabled items keep their plain tooltip");
+}
+
+#[test]
+fn pen_and_eraser_settings_on_vector_layers_show_only_what_shapes_paths() {
+    let (mut s, handle) = vector_session();
+    let ids = |s: &UiSession<Recorder>| s.state.tool_settings.iter().map(|setting| setting.id).collect::<Vec<_>>();
+    let pen = ids(&s);
+    assert!(pen.contains(&"size") && pen.contains(&"size_jitter") && pen.contains(&"hardness"), "{pen:?}");
+    assert!(!pen.iter().any(|id| matches!(*id, "spacing" | "angle" | "rotation_jitter")), "{pen:?}");
+    invoke(&mut s, CommandId::Eraser);
+    assert_eq!(ids(&s), ["size"]);
+    layer(&mut s, LayerAction::AddMask { id: occurrence_token(handle), replace: false });
+    layer(&mut s, LayerAction::Select { id: occurrence_token(handle), mask: true });
+    assert!(ids(&s).contains(&"spacing"), "a vector layer's mask takes the whole eraser");
+    layer(&mut s, LayerAction::Select { id: occurrence_token(handle), mask: false });
+    invoke(&mut s, CommandId::Pen);
+    let paint = s.engine.document().scene().children(None).iter().copied().find(|h| s.engine.document().scene().paint_source(*h).is_some()).unwrap();
+    layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
+    assert!(ids(&s).contains(&"spacing"), "paint layers keep every pen setting");
 }
 
 #[test]

@@ -91,6 +91,7 @@ tool-figures-ellipse = 楕円
 tool-figures-fill = 塗りつぶし
 tool-figures-line = 直線
 tool-figures-path = パス
+tool-select-paths = パスを選択
 tool-figures-outline = 輪郭
 tool-figures-outline-and-fill = 輪郭＋塗りつぶし
 tool-figures-rectangle = 長方形

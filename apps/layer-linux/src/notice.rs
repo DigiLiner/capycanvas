@@ -12,8 +12,7 @@ use std::{
 };
 
 const TIMEOUT: Duration = Duration::from_secs(4);
-const GAP: i32 = 12;
-const PADDING: f32 = 24.;
+const GAP: i32 = layer_ui::TILE_GAP as i32;
 
 pub struct NoticeBubble {
     pub root: gtk::Box,
@@ -29,13 +28,19 @@ impl NoticeBubble {
     pub fn new() -> Rc<Self> {
         let root = gtk::Box::new(gtk::Orientation::Horizontal, GAP);
         root.set_widget_name("canvas-notice");
-        root.add_css_class("workspace-notice");
+        root.add_css_class("dock-panel");
+        root.add_css_class("canvas-action-bar");
         root.add_css_class("canvas-notice");
         root.set_visible(false);
         let text = gtk::Label::new(None);
+        text.add_css_class("canvas-action-bar-label");
         text.set_wrap(true);
+        text.set_natural_wrap_mode(gtk::NaturalWrapMode::None);
         text.set_xalign(0.);
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        text.set_hexpand(true);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, GAP);
+        actions.set_halign(gtk::Align::End);
+        actions.set_valign(gtk::Align::Center);
         actions.set_widget_name("canvas-notice-actions");
         actions.set_visible(false);
         root.append(&text);
@@ -57,7 +62,8 @@ impl NoticeBubble {
         for action in actions {
             let button = gtk::Button::with_label(&action.label);
             button.set_widget_name("canvas-notice-action");
-            button.add_css_class("flat");
+            button.add_css_class(if action.accent { "suggested-action" } else { "flat" });
+            button.add_css_class("text-tile");
             button.set_focus_on_click(false);
             button.set_sensitive(action.enabled);
             button.set_tooltip_text(action.reason.as_deref());
@@ -77,6 +83,7 @@ impl NoticeBubble {
             self.actions.append(&button);
         }
         self.actions.set_visible(!actions.is_empty());
+        if actions.is_empty() { self.root.add_css_class("text-only"); } else { self.root.remove_css_class("text-only"); }
         *self.published.borrow_mut() = actions.to_vec();
     }
 
@@ -118,12 +125,13 @@ impl NoticeBubble {
     /// Lay the actions beside the text or on their own row for `placement`.
     pub fn place(&self, placement: NoticePlacement) {
         let natural = |widget: &gtk::Widget| widget.measure(gtk::Orientation::Horizontal, -1).1 as f32;
-        let content = placement.max_width - PADDING;
-        let actions = if self.actions.is_visible() { natural(self.actions.upcast_ref()) } else { 0. };
+        let content = placement.max_width;
+        let actions = if self.actions.get_visible() { natural(self.actions.upcast_ref()) } else { 0. };
         let beside = actions == 0. || natural(self.text.upcast_ref()) + GAP as f32 + actions <= content
             || placement.actions_beside(content, actions, GAP as f32);
         let orientation = if beside { gtk::Orientation::Horizontal } else { gtk::Orientation::Vertical };
         if self.root.orientation() != orientation { self.root.set_orientation(orientation); }
+        if beside { self.root.remove_css_class("stacked"); } else { self.root.add_css_class("stacked"); }
         if self.placement.replace(placement) != placement { self.root.queue_resize(); }
     }
 

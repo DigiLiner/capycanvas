@@ -1562,6 +1562,8 @@ pub struct TileView {
     pub enabled: bool,
     pub tooltip: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<std::sync::Arc<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub component: Option<crate::ToolbarComponentView>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -1673,6 +1675,7 @@ pub(crate) fn panel_view(state: &UiState, panel: Panel, copy: &PanelCopy) -> Res
                 id: tile.id,
                 component: state.toolbar_component(tile.control),
                 tooltip,
+                disabled_reason: (!enabled).then(|| crate::header::control_disabled_reason(state, resolved_control)).flatten(),
                 choice,
                 enabled,
             })

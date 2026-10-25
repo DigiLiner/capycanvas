@@ -631,6 +631,8 @@ pub struct HeaderItemView {
     pub id: u32,
     pub label: String,
     pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<std::sync::Arc<str>>,
     pub selected: bool,
     pub icon: &'static str,
 }
@@ -690,6 +692,7 @@ impl<R: layer_render::CanvasRenderer> UiSession<R> {
                     has_variants,resolved_control,
                     id: entry.id,
                     label,
+                    disabled_reason: (!enabled).then(|| resolved_control.and_then(|control| control_disabled_reason(state, control))).flatten(),
                     enabled,
                     selected,
                     icon,
@@ -984,6 +987,10 @@ pub fn tool_icon(state: &UiState, control: ToolbarControl) -> &'static str {
 }
 
 /// The same selected/enabled policy is used by toolbar and window-bar tools.
+pub(crate) fn control_disabled_reason(state: &UiState, control: ToolbarControl) -> Option<std::sync::Arc<str>> {
+    let ToolbarControl::Command { command } = control else { return None; };
+    state.commands.iter().find(|c| c.id == command).and_then(|c| c.disabled_reason.clone())
+}
 pub fn tool_state(state: &UiState, control: ToolbarControl) -> (bool, bool) {
     match control {
         ToolbarControl::ColorPicker => (

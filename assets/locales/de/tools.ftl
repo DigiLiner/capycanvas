@@ -91,6 +91,7 @@ tool-figures-ellipse = Ellipse
 tool-figures-fill = Füllung
 tool-figures-line = Linie
 tool-figures-path = Pfad
+tool-select-paths = Pfade auswählen
 tool-figures-outline = Umriss
 tool-figures-outline-and-fill = Umriss + Füllung
 tool-figures-rectangle = Rechteck

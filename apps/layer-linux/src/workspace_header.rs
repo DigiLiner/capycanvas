@@ -512,7 +512,7 @@ impl Header {
                 grip.update_property(&[gtk::accessible::Property::Label(&caption)]);
             }
             if let Some(button) = &item.button {
-                button.set_tooltip_text(Some(&label));
+                button.set_tooltip_text(Some(projected.and_then(|view| view.disabled_reason.as_deref()).unwrap_or(&label)));
                 let (enabled, active) = projected.map(|view| (view.enabled, view.selected))
                     .unwrap_or_else(|| match item.entry.item {
                         HeaderItem::Tool { control } => tool_state(state, control),

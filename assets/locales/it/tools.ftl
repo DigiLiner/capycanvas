@@ -91,6 +91,7 @@ tool-figures-ellipse = Ellisse
 tool-figures-fill = Riempimento
 tool-figures-line = Linea
 tool-figures-path = Tracciato
+tool-select-paths = Seleziona tracciati
 tool-figures-outline = Contorno
 tool-figures-outline-and-fill = Contorno + riempimento
 tool-figures-rectangle = Rettangolo

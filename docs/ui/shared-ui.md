@@ -370,7 +370,15 @@ Each command also publishes `disabled_reason`: the text
 is always present, so a retained-model diff changes one field rather than
 replacing the command object. The reason stays steady with `enabled` during a
 contact. Hosts show it as the tooltip, hover text or tap response of a disabled
-control.
+control. Tool rows (`ToolSetItem`), toolbar tiles (`TileView`) and title-bar
+items (`HeaderItemView`) carry the same `disabled_reason` while they are
+disabled, so a dimmed tool says why in a few words. A tool row can also be
+`enabled` with a `disabled_reason`: it cannot act on the edited layer but stays
+choosable, and hosts draw it dimmed. On a vector layer a brush that cannot draw
+paths says "Works on paint layers, not vector layers", and a pen that one of its
+settings stops names that setting; choosing either shows the refusal notice at
+once. GTK shows the reason as the tooltip and dims a choosable row's contents as
+it dims a disabled flat button, keeping its selection highlight.
 
 Canvas gestures that would change nothing say why through `UiState.notice`,
 published under `regions::HOST`:
@@ -382,7 +390,11 @@ published under `regions::HOST`:
   blending behavior, once per mask-editing session;
 - Wand and Fill sampling reference layers when none is marked. The notice offers
   **Use *layer* as Reference**, which marks the nearest visible paint or photo
-  layer below the active layer.
+  layer below the active layer;
+- choosing a brush or tool that cannot act on the edited vector or image layer,
+  before any stroke ([vector layers](vector-layers.md#drawing));
+- Fill outside a vector layer's paths, which fills a new paint layer below and
+  offers **Back to *layer***.
 
 The core writes the text and the action's label, and keeps the action. Every
 notice has a new `id`, so a repeated refusal shows again.
@@ -397,8 +409,14 @@ restarting its original deadline or showing a notice that already expired.
 `ResolvedLayout::notice` places it centred at the bottom of the canvas area and no
 wider than that area, or at the window's bottom when the canvas area is too small
 to hold it; a canvas action bar reaching below `bar_floor` lifts it above the bar.
-Its actions stay beside the text while the text keeps `min_text_width`, and take
-their own row otherwise. Hosts hide it after about 4 s (answering
+It is at most 960 pixels wide. Its actions stay beside the text while the text
+keeps `min_text_width`, which equals `max_width`, so they share a row only with
+text on one line; otherwise they take their own row under it and the text never
+wraps beside them. On GTK the bubble is drawn like the canvas action bar: the
+same surface, 36 pixels tall in one row, a caption 12 pixels in, and its actions
+as the bar's worded controls, right-aligned under the text when stacked. The
+first action is the core's suggested way forward (`accent`), drawn as the bar's
+accent button, like a mode bar's exit; the others are flat. Hosts hide it after about 4 s (answering
 `accept: false`) or at the next canvas contact. Notices overlay the canvas and
 never resize its viewport or GPU surface. `host_error` is kept for file and
 renderer errors.

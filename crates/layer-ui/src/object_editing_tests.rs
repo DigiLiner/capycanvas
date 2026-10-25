@@ -823,6 +823,16 @@ fn pixel_clear_and_cut_on_image_content_raise_the_image_refusal() {
 }
 
 #[test]
+fn choosing_a_brush_on_an_image_layer_explains_at_once() {
+    let (mut s, _, _) = fixture();
+    invoke(&mut s, CommandId::Pencil);
+    assert_eq!(s.state.notice.as_ref().map(|n| n.actions.iter().map(|a| a.id).collect::<Vec<_>>()),
+        Some(vec![NoticeActionId::AddMask, NoticeActionId::NewPaintLayer, NoticeActionId::RasterizeLayer]));
+    invoke(&mut s, CommandId::Move);
+    assert_eq!(s.state.notice, None, "a tool that works on images clears it");
+}
+
+#[test]
 fn fill_clear_layer_and_frequency_separation_on_images_raise_the_image_refusal() {
     let (mut s, _, _) = fixture();
     invoke(&mut s, CommandId::BlendPerceptual);

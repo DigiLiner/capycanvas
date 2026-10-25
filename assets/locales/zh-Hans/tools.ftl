@@ -91,6 +91,7 @@ tool-figures-ellipse = 椭圆
 tool-figures-fill = 填充
 tool-figures-line = 直线
 tool-figures-path = 路径
+tool-select-paths = 选择路径
 tool-figures-outline = 轮廓
 tool-figures-outline-and-fill = 轮廓＋填充
 tool-figures-rectangle = 矩形

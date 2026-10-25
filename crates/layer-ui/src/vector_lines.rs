@@ -44,31 +44,72 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.vector_lines.pen.into_iter().chain(tools::group_presets(ToolGroup::Pen)).chain(tools::brush_ids())
             .find(|id| tools::tool(*id) != Tool::Eraser && self.draws_paths(*id))
     }
-    pub(super) fn brush_usable(&self, action: &UiAction) -> bool {
-        if self.editing_vector_layer().is_none() { return true; }
-        match *action {
+    pub(super) fn path_brush_refusal(&self, action: &UiAction) -> Option<Arc<str>> {
+        self.editing_vector_layer()?;
+        let usable = match *action {
             UiAction::SelectBrush { id } => self.draws_paths(id),
             UiAction::SelectToolGroup { group } | UiAction::SelectBrushSet { group } => tools::group_presets(group).any(|id| self.draws_paths(id)),
             _ => true,
-        }
+        };
+        if usable { return None; }
+        let l = self.localization();
+        let blocker = match *action {
+            UiAction::SelectBrush { id } => tools::preset(id).ok().and_then(|preset| {
+                let setting = self.tools.path_blocker(preset)?;
+                crate::tool_settings::controls(&self.tools.brush(preset), l).into_iter().find(|control| control.id == setting).map(|control| control.label)
+            }),
+            _ => None,
+        };
+        Some(match blocker {
+            Some(setting) => {
+                let mut args = FluentArgs::new(); args.set("setting", setting.as_ref());
+                l.format(MessageId::OBJECTS_VECTOR_UNAVAILABLE_SETTING, &args).into()
+            }
+            None => l.text(MessageId::OBJECTS_VECTOR_UNAVAILABLE),
+        })
     }
     pub(super) fn mark_path_brushes(&self, mut view: ToolSetView) -> ToolSetView {
-        for item in view.groups.iter_mut().chain(&mut view.subtools) { item.enabled &= self.brush_usable(&item.action); }
+        for item in view.groups.iter_mut().chain(&mut view.subtools) {
+            if let Some(reason) = self.path_brush_refusal(&item.action) { item.disabled_reason = Some(reason); }
+        }
         view
     }
     pub(super) fn vector_eraser_modes(&self) -> Vec<ToolSetItem> {
         if self.vector_erasing_layer(false).is_none() { return Vec::new(); }
         [CommandId::EraseTouchedPart, CommandId::EraseWholePaths, CommandId::EraseToIntersection].into_iter().map(|command| ToolSetItem {
-            enabled: true, label: command.localized_label(self.localization()), icon: command.icon().unwrap_or("eraser"),
+            enabled: true, disabled_reason: None, label: command.localized_label(self.localization()), icon: command.icon().unwrap_or("eraser"),
             action: UiAction::Invoke { command }, selected: super::vector_eraser(command) == Some(self.state.settings.vector_eraser), preview: None,
         }).collect()
+    }
+    pub(super) fn vector_path_tools(&self) -> Vec<ToolSetItem> {
+        if self.editing_vector_layer().is_none() { return Vec::new(); }
+        let l = self.localization();
+        [(CommandId::Move, LayerCanvasTool::Move, l.text(MessageId::TOOL_SELECT_PATHS)),
+            (CommandId::EditPoints, LayerCanvasTool::EditPoints, CommandId::EditPoints.localized_label(l))]
+            .into_iter().map(|(command, tool, label)| {
+                let state = self.command(command);
+                ToolSetItem { enabled: state.enabled, disabled_reason: state.disabled_reason, label, icon: command.icon().unwrap_or("move"),
+                action: UiAction::Invoke { command }, selected: self.layer_interaction.tool == tool, preview: None,
+            }}).collect()
+    }
+    pub(super) fn applies_to_paths(&self, setting: &str) -> bool {
+        if self.editing_vector_layer().is_none() || self.layer_interaction.tool != LayerCanvasTool::Paint { return true; }
+        if self.state.brush.tool == Tool::Eraser || self.state.colors.transparent() { return setting == "size"; }
+        !self.engine.configured_brush().draws_vector_lines() || !matches!(setting, "spacing" | "angle" | "rotation_jitter")
     }
     pub(super) fn remember_vector_pen(&mut self, id: u32) {
         if tools::tool(id) != Tool::Eraser && self.engine.configured_brush().draws_vector_lines() { self.vector_lines.pen = Some(id); }
     }
+    pub(super) fn forget_brush_restore(&mut self) {
+        self.vector_lines.restore = None;
+    }
     pub(super) fn follow_layer_brush(&mut self) -> bool {
         let vector = self.editing_vector_layer().is_some();
-        if self.layer_interaction.tool != LayerCanvasTool::Paint || std::mem::replace(&mut self.vector_lines.on_vector, vector) == vector { return false; }
+        if std::mem::replace(&mut self.vector_lines.on_vector, vector) == vector { return false; }
+        if self.layer_interaction.tool != LayerCanvasTool::Paint {
+            self.forget_brush_restore();
+            return false;
+        }
         let current = self.state.brush.preset;
         if !vector {
             if let Some((brush, pen)) = self.vector_lines.restore.take() && pen == current { return self.select_brush(brush).is_ok(); }

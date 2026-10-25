@@ -130,7 +130,9 @@ as Paint and Photo, with the same
 Brushes, Sculpting and Tools are ordinary panels: Brushes starts 160 logical
 pixels wide, shrinks to 104, and uses rows at least 44 pixels tall (48 dp on
 Android). **Select** remembers the last selection tool and opens a two-panel
-drawer of the selection tools; see [selection tools](selection-tools.md).
+drawer of the selection tools, which on a vector layer starts with Select paths
+and Edit points; see [selection tools](selection-tools.md) and
+[vector layers](vector-layers.md#moving-paths).
 **Filters** opens **Filter Type → Filters → Properties**. Choosing a filter
 inserts it above the selected layer, or replaces the selected filter while
 keeping its identity, mask and clipping. Cancel deletes the selected filter and

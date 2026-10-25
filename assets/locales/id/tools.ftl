@@ -180,6 +180,7 @@ tool-figures-fill = Isi
 
 tool-figures-line = Garis
 tool-figures-path = Jalur
+tool-select-paths = Pilih jalur
 
 tool-figures-outline = Garis luar
 

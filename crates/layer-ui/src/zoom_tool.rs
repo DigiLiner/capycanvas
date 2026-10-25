@@ -50,7 +50,7 @@ impl ZoomToolSettings {
         let choice = |id, label, entries: &[(MessageId, ZoomToolAction, bool, &'static str)]| ToolOption::Choice {
             id, label: localizer.text(label), segmented: true, labeled: true, columns: None, beside: None,
             items: entries.iter().map(|&(label, action, selected, icon)| ToolSetItem {
-                enabled: true, label: localizer.text(label), icon, selected,
+                enabled: true, disabled_reason: None, label: localizer.text(label), icon, selected,
                 action: UiAction::ZoomTool { action }, preview: None,
             }).collect(),
         };

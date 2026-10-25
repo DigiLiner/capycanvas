@@ -55,7 +55,8 @@ Copy Pixels explicitly captures appearance before layer properties.
 
 Brushes, fills, pixel cuts, retouch and Frequency Separation require Raster
 content. The existing notice offers Add/Edit Mask, New Paint Layer or Rasterize
-Layer and does not replay a refused stroke. Distort, Warp, Perspective, Bicubic
+Layer and does not replay a refused stroke. Choosing a brush or a tool that
+draws while an Object layer is edited shows that notice at once. Distort, Warp, Perspective, Bicubic
 and Lanczos require rasterization; Object transforms use Nearest or Linear.
 
 ## Ownership and verification
@@ -66,8 +67,9 @@ Layer selection is the only object selection. See the
 [authored model](../reference/authored-model.md#object-layers-and-image-objects)
 and [package contract](../reference/capy-package.md).
 
-Shared `object_editing_tests`, `image_object_edit_tests`, conversion and clipboard
-tests cover insertion, selection, transforms, masks, cancellation and undo.
+Shared `object_editing_tests` (including
+`choosing_a_brush_on_an_image_layer_explains_at_once`), `image_object_edit_tests`,
+conversion and clipboard tests cover insertion, selection, transforms, masks, cancellation and undo.
 Native journeys are GTK's `native_image_object_rows_picking_and_transforms` and
 conversion/clipboard tests, Web's `--image-rows`, Android's
 `AndroidInteractionTest#imageRowsTouchPickingMenusAndRefusalActions`, Apple's

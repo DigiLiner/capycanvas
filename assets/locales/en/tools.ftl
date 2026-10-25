@@ -91,6 +91,7 @@ tool-figures-ellipse = Ellipse
 tool-figures-fill = Fill
 tool-figures-line = Line
 tool-figures-path = Path
+tool-select-paths = Select paths
 tool-figures-outline = Outline
 tool-figures-outline-and-fill = Outline + fill
 tool-figures-rectangle = Rectangle

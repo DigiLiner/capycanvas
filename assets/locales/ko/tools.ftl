@@ -91,6 +91,7 @@ tool-figures-ellipse = 타원
 tool-figures-fill = 채우기
 tool-figures-line = 직선
 tool-figures-path = 패스
+tool-select-paths = 패스 선택
 tool-figures-outline = 윤곽
 tool-figures-outline-and-fill = 윤곽 + 채우기
 tool-figures-rectangle = 사각형

@@ -200,6 +200,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if !self.engine.backend().region_fits(doc.composition().size) { return Err(self.localization().text(MessageId::DOCUMENTS_TOO_LARGE_MEMORY).to_string()); }
         self.new_paint_layer_under()?;
         self.request_region_at(point, None, Some(source));
+        self.notify_filled_below(layer);
         Ok(())
     }
     fn region_source(&mut self, source: RegionSource, from: Option<layer_render::RegionSource>, source_target: Option<SourceTarget>) -> Option<layer_render::RegionSource> {

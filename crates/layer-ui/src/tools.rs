@@ -379,6 +379,8 @@ pub(crate) fn icon(id: u32) -> &'static str {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ToolSetItem {
     pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<Arc<str>>,
     pub label: Arc<str>,
     pub icon: &'static str,
     pub action: UiAction,
@@ -435,7 +437,7 @@ pub(crate) fn view(brush: &BrushState, canvas_tool: LayerCanvasTool, localizer: 
                 (CommandId::SelectionReference, RegionSource::Reference),
             ]
             .into_iter()
-            .map(|(command, item_source)| ToolSetItem { enabled: true,
+            .map(|(command, item_source)| ToolSetItem { enabled: true, disabled_reason: None,
                 label: command.localized_label(localizer),
                 icon: command.icon().unwrap(),
                 action: UiAction::Layer {
@@ -460,7 +462,7 @@ pub(crate) fn view(brush: &BrushState, canvas_tool: LayerCanvasTool, localizer: 
             LayerCanvasTool::Crop => (MessageId::TOOL_MODE_CROP, "crop"),
             _ => return ToolSetView::default(),
         };
-        let item = ToolSetItem { enabled: true,
+        let item = ToolSetItem { enabled: true, disabled_reason: None,
             label: localizer.text(label),
             icon,
             selected: true,
@@ -479,7 +481,7 @@ pub(crate) fn view(brush: &BrushState, canvas_tool: LayerCanvasTool, localizer: 
         groups: ToolGroup::ALL
             .into_iter()
             .filter(|g| g.holds(brush.tool))
-            .map(|g| ToolSetItem { enabled: true,
+            .map(|g| ToolSetItem { enabled: true, disabled_reason: None,
                 label: g.localized_label(localizer),
                 icon: g.icon(),
                 action: UiAction::SelectToolGroup { group: g },
@@ -490,7 +492,7 @@ pub(crate) fn view(brush: &BrushState, canvas_tool: LayerCanvasTool, localizer: 
         subtools: PRESETS
             .iter()
             .filter(|p| p.2 == active)
-            .map(|&(preset, label, _)| ToolSetItem { enabled: true,
+            .map(|&(preset, label, _)| ToolSetItem { enabled: true, disabled_reason: None,
                 label: localizer.text(label),
                 icon: icon(preset as u32),
                 action: UiAction::SelectBrush { id: preset as u32 },

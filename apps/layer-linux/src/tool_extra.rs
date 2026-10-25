@@ -102,7 +102,7 @@ impl ExtraField {
         if let Some(bar) = self.root.last_child().and_downcast::<gtk::Box>() { bar.update_property(&[gtk::accessible::Property::Label(label)]); }
         self.updating.set(true);
         for (button, item) in self.buttons.iter().zip(items) {
-            button.set_tooltip_text(Some(&item.label));
+            button.set_tooltip_text(Some(item.disabled_reason.as_deref().unwrap_or(&item.label)));
             button.update_property(&[gtk::accessible::Property::Label(&item.label)]);
             button.set_sensitive(item.enabled);
             button.set_active(item.selected);
