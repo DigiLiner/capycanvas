@@ -263,6 +263,25 @@ fn menu_open(d: &Driver) -> bool {
     d.w.popovers.borrow().iter().filter_map(|p| p.upgrade()).any(|p| p.is_visible() && p.has_css_class("panel-context-menu"))
 }
 
+fn toggle_bubble_sliders(d: &mut Driver, device: &str, id: u32) {
+    let before = find_id(d, id).unwrap().options.show_sliders;
+    let at = center(d, id);
+    d.input.perform(serde_json::json!([contact(device, "down", at), { "wait_ms": 900 }, contact(device, "up", at)]));
+    pump(200);
+    let menu = d.w.popovers.borrow().iter().filter_map(|popover| popover.upgrade())
+        .find(|popover| popover.is_visible() && popover.has_css_class("panel-context-menu")).unwrap();
+    let label = ui_session(&d.w).localization().text(MessageId::WORKSPACE_SHOW_SLIDERS_MENU);
+    let item = descendants::<gtk::CheckButton>(menu.upcast_ref()).into_iter().find(|item| item.label().as_deref() == Some(label.as_ref())).unwrap();
+    assert_eq!(item.is_active(), before);
+    let at = d.point(item.upcast_ref());
+    tap(d, device, at);
+    assert_eq!(find_id(d, id).unwrap().options.show_sliders, !before);
+    assert_eq!(item.is_active(), !before);
+    assert!(menu_open(d), "changing Show Sliders keeps the menu open");
+    d.input.key(0xff1b);
+    pump(200);
+}
+
 fn touches(d: &mut Driver, a: [f32; 2], b: [f32; 2], step: [f32; 2], spread: f32) {
     let touch = |phase: &str, slot: u32, point: [f32; 2]| serde_json::json!({ "touch": phase, "slot": slot, "point": point });
     let mut events = vec![touch("down", 0, a), touch("down", 1, b)];
@@ -681,6 +700,26 @@ fn native_bubble_chooser_sliders() {
                 let path = if ring.fill > 0.5 { [0.8, 0.5, 0.2] } else { [0.2, 0.5, 0.8] };
                 stroke(&mut d, device, &path.map(arc));
                 assert_ne!(value(&d), before, "{name}: the shown slider changes its setting");
+                toggle_bubble_sliders(&mut d, device, id);
+                assert!(find_id(&d, id).unwrap().rings.is_empty(), "{name}: unchecking Show Sliders hides the halo");
+                d.w.dispatch(UiAction::Invoke { command: CommandId::Lasso });
+                let at = center(&d, id);
+                tap(&mut d, device, at);
+                let clicked = find_id(&d, id).unwrap();
+                assert!(clicked.selected && clicked.rings.is_empty(), "{name}: clicking respects Show Sliders");
+                let at = center(&d, id);
+                tap(&mut d, device, at);
+                let pick = find_id(&d, id).unwrap().chooser.into_iter().find(|item| item.kind == ChooserKind::Brush && item.enabled).unwrap();
+                let at = item_point(&d, id, &pick);
+                tap(&mut d, device, at);
+                assert!(find_id(&d, id).unwrap().rings.is_empty(), "{name}: choosing a brush respects Show Sliders");
+                d.w.dispatch(UiAction::Bubble { action: BubbleAction::PutBack { id } });
+                let spot = canvas_spot(&d, 0.45, 0.5);
+                let id = take(&mut d, grab, spot);
+                assert!(!find_id(&d, id).unwrap().options.show_sliders && find_id(&d, id).unwrap().rings.is_empty(), "{name}: dragging out remembers Show Sliders");
+                capture(&mut d, &format!("{name}-hidden-settings"));
+                toggle_bubble_sliders(&mut d, device, id);
+                assert!(!find_id(&d, id).unwrap().rings.is_empty(), "{name}: checking Show Sliders opens the halo");
             }
         }
     }

@@ -139,6 +139,18 @@ fn take_control(s: &mut UiSession<Recorder>, control: ToolbarControl, at: [f32; 
     take(s, BubbleGrab::Tile { panel, tile }, at)
 }
 
+fn take_source(s: &mut UiSession<Recorder>, source: BubbleSource) -> u32 {
+    match source {
+        BubbleSource::Medium { group } => take(s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group } }, FAR),
+        BubbleSource::Control { control } => take_control(s, control, FAR),
+    }
+}
+
+fn show_sliders(s: &UiSession<Recorder>, id: u32) -> ContextMenuItem {
+    s.context_menu(ContextTarget::Bubble { id }).unwrap().sections.into_iter().flatten()
+        .find(|item| matches!(item.action, Some(UiAction::Bubble { action: BubbleAction::Option { option: BubbleOption::ShowSliders, .. } }))).unwrap()
+}
+
 fn take_ring(s: &mut UiSession<Recorder>, at: [f32; 2]) -> u32 {
     let id = take_control(s, ToolbarControl::Color, at);
     let options = BubbleOptions { recent: true, palette: true, pair: true, ..view(s, id).options };
@@ -736,10 +748,7 @@ fn clicking_a_tool_bubble_selects_and_opens_its_sliders_on_every_platform() {
             let mut s = session(platform);
             s.set_viewport(VIEW, [1200, 900]).unwrap();
             s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
-            let id = match source {
-                BubbleSource::Medium { group } => take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group } }, FAR),
-                BubbleSource::Control { control } => take_control(&mut s, control, FAR),
-            };
+            let id = take_source(&mut s, source);
             invoke(&mut s, CommandId::Lasso);
             assert!(!view(&s, id).selected);
             let change = act(&mut s, BubbleAction::Tap { id, position: [0.; 2] }).unwrap();
@@ -896,10 +905,7 @@ fn chooser_picks_open_the_selected_tool_halo_on_every_platform() {
                 let mut s = session(platform);
                 s.set_viewport(VIEW, [1200, 900]).unwrap();
                 s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
-                let id = match source {
-                    BubbleSource::Medium { group } => take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group } }, FAR),
-                    BubbleSource::Control { control } => take_control(&mut s, control, FAR),
-                };
+                let id = take_source(&mut s, source);
                 open_ring(&mut s, id);
                 let pick = view(&s, id).chooser.into_iter().find(|item| matches!(item.kind, ChooserKind::Brush | ChooserKind::Tool) && item.selected == same_tool)
                     .unwrap_or_else(|| panic!("{platform:?}/{source:?}/{same_tool}: chooser needs a matching tool"));
@@ -929,6 +935,99 @@ fn chooser_picks_open_the_selected_tool_halo_on_every_platform() {
             }
         }
     }
+}
+
+#[test]
+fn every_tool_group_and_medium_bubble_offers_show_sliders_checked_by_default() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        let sources = tools::brush_ids().map(|id| BubbleSource::Control { control: ToolbarControl::Brush { id } })
+            .chain(ToolGroup::ALL.into_iter().map(|group| BubbleSource::Medium { group }))
+            .chain(ToolSlotId::ALL.into_iter().map(|slot| BubbleSource::Control { control: ToolbarControl::ToolSlot { slot } }))
+            .chain([BubbleSource::Control { control: ToolbarControl::ColorPicker }]);
+        for source in sources {
+            let id = s.state.workspace.layout.allocate().unwrap();
+            s.state.workspace.layout.bubbles.bubbles.push(ToolBubble::new(id, source, FAR, VIEW));
+            assert_eq!(show_sliders(&s, id).selected, Some(true), "{platform:?}/{source:?}");
+            s.state.workspace.layout.bubbles.bubbles.pop();
+        }
+    }
+}
+
+#[test]
+fn show_sliders_controls_clicks_choices_and_drag_out_with_workspace_history_on_every_platform() {
+    for platform in Platform::ALL {
+        for source in [
+            BubbleSource::Medium { group: ToolGroup::Pastel },
+            BubbleSource::Control { control: ToolbarControl::Brush { id: DefaultBrushPreset::PointyPencil as u32 } },
+            BubbleSource::Control { control: ToolbarControl::ToolSlot { slot: ToolSlotId::Drawing } },
+            BubbleSource::Control { control: ToolbarControl::Command { command: CommandId::DrawingBrush } },
+        ] {
+            let mut s = session(platform);
+            s.set_viewport(VIEW, [1200, 900]).unwrap();
+            s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
+            let id = take_source(&mut s, source);
+            let option = show_sliders(&s, id);
+            assert_eq!(option.selected, Some(true));
+            assert_eq!(serde_json::to_value(&option).unwrap()["keep_open"], true);
+            s.dispatch(option.action.unwrap()).unwrap();
+            assert!(view(&s, id).rings.is_empty());
+            assert_eq!(show_sliders(&s, id).selected, Some(false));
+            invoke(&mut s, CommandId::UndoWorkspace);
+            assert_eq!(show_sliders(&s, id).selected, Some(true));
+            invoke(&mut s, CommandId::RedoWorkspace);
+            assert_eq!(show_sliders(&s, id).selected, Some(false));
+            let other = take(&mut s, brush(DefaultBrushPreset::GPen), [850., 500.]);
+            assert_eq!(show_sliders(&s, other).selected, Some(true));
+            act(&mut s, BubbleAction::PutBack { id: other }).unwrap();
+            invoke(&mut s, CommandId::Lasso);
+            tap(&mut s, id);
+            assert!(view(&s, id).selected && view(&s, id).rings.is_empty());
+            if source.kind() != BubbleKind::Brush {
+                tap(&mut s, id);
+                let pick = view(&s, id).chooser.into_iter().find(|item| matches!(item.kind, ChooserKind::Brush | ChooserKind::Tool) && item.enabled).unwrap();
+                choose(&mut s, id, ContactPhase::Down, pick.center);
+                choose(&mut s, id, ContactPhase::Up, pick.center);
+                assert!(view(&s, id).selected && view(&s, id).chooser.is_empty() && view(&s, id).rings.is_empty());
+            }
+            let active = serde_json::from_str(&serde_json::to_string(&s.state.workspace).unwrap()).unwrap();
+            s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(active) }).unwrap();
+            assert_eq!(show_sliders(&s, id).selected, Some(false));
+            act(&mut s, BubbleAction::PutBack { id }).unwrap();
+            let parked = serde_json::from_str(&serde_json::to_string(&s.state.workspace).unwrap()).unwrap();
+            s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(parked) }).unwrap();
+            let id = take_source(&mut s, source);
+            assert!(view(&s, id).selected && view(&s, id).rings.is_empty());
+            tap(&mut s, id);
+            assert!(view(&s, id).rings.is_empty());
+            s.dispatch(show_sliders(&s, id).action.unwrap()).unwrap();
+            assert_eq!(show_sliders(&s, id).selected, Some(true));
+            assert!(!view(&s, id).rings.is_empty() && view(&s, id).chooser.is_empty());
+            act(&mut s, BubbleAction::PutBack { id }).unwrap();
+            let id = take_source(&mut s, source);
+            assert!(!view(&s, id).rings.is_empty());
+        }
+    }
+}
+
+#[test]
+fn the_color_picker_show_sliders_option_updates_its_geometry_and_survives_put_back() {
+    let mut s = desk();
+    let id = take_control(&mut s, ToolbarControl::ColorPicker, FAR);
+    assert_eq!(show_sliders(&s, id).selected, Some(true));
+    let point = view(&s, id).rings[0].arc.point(0.4);
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: point }).unwrap();
+    assert!(view(&s, id).stamp.is_some());
+    s.dispatch(show_sliders(&s, id).action.unwrap()).unwrap();
+    assert_eq!(view(&s, id).diameter, TOOL_BUBBLE);
+    assert!(view(&s, id).rings.is_empty() && view(&s, id).stamp.is_none());
+    act(&mut s, BubbleAction::PutBack { id }).unwrap();
+    let id = take_control(&mut s, ToolbarControl::ColorPicker, FAR);
+    assert_eq!(show_sliders(&s, id).selected, Some(false));
+    assert!(view(&s, id).rings.is_empty());
+    s.dispatch(show_sliders(&s, id).action.unwrap()).unwrap();
+    assert_eq!(view(&s, id).diameter, halo_disc(CONTROL_RINGS.len()));
+    assert_eq!(view(&s, id).rings.len(), CONTROL_RINGS.len());
 }
 
 #[test]

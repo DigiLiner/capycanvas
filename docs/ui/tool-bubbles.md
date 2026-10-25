@@ -27,7 +27,7 @@ use the same views, hit testing and actions.
 | A tool group in the title bar or a toolbar (Brush, Eraser, Sculpt, a tool slot…) | Group dial, 56 px | The tool's current icon and the title bar's drawer mark |
 | A brush row in Brushes or a tool drawer | Brush, 56 px | The brush icon over its own stroke |
 | A medium (Pencil, Oil…) in Brushes or a drawer | Medium, 56 px | The medium icon and one dot per brush along the lower edge; the current brush's dot is darker |
-| The color picker | Brush controls, 134 px | A 56 px circle with the color picker icon, Strength on a left arc and Size on a right arc, both always shown; **Swap sliders** in its hold menu swaps them |
+| The color picker | Brush controls, 134 px | A 56 px circle with the color picker icon, Strength on a left arc and Size on a right arc, both shown by default; **Swap sliders** in its hold menu swaps them |
 | Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; each is a full 56 px circle out to the capsule's end, which answers taps and shows its hover and pressed highlight, and a side is dimmed when there is nothing to undo or redo |
 | Color | Color ring, 136, 216 or 344 px (pinch: 128–352) | The Color panel's wheel on a glass plate, with beads around it |
 | Layers | Layers card, opened or folded to a 56 px squircle | The current layer's thumbnail with the layer count |
@@ -51,7 +51,7 @@ moves the existing bubble.
   back to, the bubble shrinks and fades. `BubbleAction::PutBackAll` empties the
   desk in one step.
 - **Coming out:** a brush, medium or group dial comes out selected, with its
-  settings halo open when its brush has settings, and Layers opens into its
+  settings halo open when **Show Sliders** is checked and its brush has settings, and Layers opens into its
   card as soon as it leaves the toolbar or title bar. Pulling out a bubble closes
   the open tool drawer; a tile pulled from a column drawer closes that drawer too.
   The drag keeps its contact as the drawer disappears. Moving a bubble already on the canvas leaves it as it was.
@@ -101,10 +101,17 @@ everything rests.
 
 ## Taps, halos and the chooser
 
-- **Brush:** the first tap selects the brush and opens its settings halo; the
-  next tap closes it. If the brush is already selected, a tap toggles its halo.
-- **Group dial and medium:** select with halo, then chooser, then close. A tool
-  without settings goes straight from select to the chooser.
+- **Show Sliders:** each tool, group, medium and Brush controls bubble has this
+  option checked by default in its hold menu. It controls opening sliders when
+  dragging the source out, picking a tool from its chooser or clicking its face.
+  Unchecking it closes its sliders; checking it shows them when the tool is
+  selected. The workspace remembers the choice for that source, including after
+  putting it back and taking it out again. Other tools keep their own choices.
+- **Brush:** the first tap selects the brush and, with **Show Sliders** checked,
+  opens its settings halo; the next tap closes it. If the brush is already
+  selected, a tap toggles its halo. With the option unchecked, taps only select.
+- **Group dial and medium:** select with halo, then chooser, then close. With
+  **Show Sliders** unchecked or no settings, select, then chooser, then close.
 - **Halo:** the selected brush's settings sit on arcs around the bubble, within
   134 px for one to three settings and 204 px for four to six (2+2, 3+2, 3+3).
   Each arc is a 4 px track on a 28 px matte band that covers only the arc, with
@@ -130,7 +137,8 @@ everything rests.
   brushes curve beside it as pills with their strokes, just past the name; when that side lacks
   room they open on the other side without the name's offset. Tapping a medium fans its brushes, even a single one; a press can slide through a medium
   onto one of its brushes. Picking a brush or tool closes the chooser and opens
-  its settings halo when it has sliders; letting go on nothing keeps the chooser.
+  its settings halo when **Show Sliders** is checked and it has sliders; letting
+  go on nothing keeps the chooser.
   A medium bubble fans its own brushes. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
   Their layout uses the saved bubble position, so wall displacement cannot
@@ -485,7 +493,9 @@ panels are absent from the dock.
 
 - Chooser picks: `bash tools/performance/workspace-motion.sh gtk --native-test=native_bubble_chooser_sliders`
   selects group and medium bubbles with one click, picks their brushes, then
-  adjusts their newly shown sliders with mouse and touch in both themes.
+  adjusts their newly shown sliders, toggles **Show Sliders** in the hold menu
+  and checks it after putting back and dragging out again, with mouse and touch
+  in both themes.
 - Shared: `cargo test --locked -p layer-ui bubble`, which covers geometry,
   pushing, tear-off and put back, tap states, halos, the chooser and its slides,
   beads, the card, stroke fading, menus, history and workspace round trips

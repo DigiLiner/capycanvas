@@ -117,6 +117,7 @@ impl BubbleSource {
 #[serde(default, deny_unknown_fields)]
 pub struct BubbleOptions {
     pub size: f32,
+    pub show_sliders: bool,
     pub recent: bool,
     pub palette: bool,
     pub pair: bool,
@@ -126,7 +127,7 @@ pub struct BubbleOptions {
 }
 impl Default for BubbleOptions {
     fn default() -> Self {
-        Self { size: COLOR_RING_SIZES[1], recent: false, palette: false, pair: false, full: false, fold: true, swap: false }
+        Self { size: COLOR_RING_SIZES[1], show_sliders: true, recent: false, palette: false, pair: false, full: false, fold: true, swap: false }
     }
 }
 impl BubbleOptions {
@@ -193,7 +194,7 @@ impl ToolBubble {
     }
     pub fn diameter(&self, narrow: bool) -> f32 {
         match self.source.kind() {
-            BubbleKind::Controls => halo_disc(CONTROL_RINGS.len()),
+            BubbleKind::Controls if self.options.show_sliders => halo_disc(CONTROL_RINGS.len()),
             BubbleKind::History => HISTORY_BUBBLE[0],
             BubbleKind::Color if narrow => self.options.size.min(COLOR_RING_SIZES[0]),
             BubbleKind::Color => self.options.size,
@@ -896,6 +897,7 @@ pub enum BubbleAction {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BubbleOption {
+    ShowSliders,
     Recent,
     Palette,
     Pair,
@@ -908,6 +910,7 @@ pub enum BubbleOption {
 impl BubbleOption {
     pub(crate) fn apply(self, mut options: BubbleOptions) -> BubbleOptions {
         match self {
+            Self::ShowSliders => options.show_sliders = !options.show_sliders,
             Self::Recent => options.recent = !options.recent,
             Self::Palette => options.palette = !options.palette,
             Self::Pair => options.pair = !options.pair,
