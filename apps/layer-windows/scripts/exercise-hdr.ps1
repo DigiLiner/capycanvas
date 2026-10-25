@@ -51,6 +51,7 @@ public static class CapyHdrPicker {
  [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h,uint m,UIntPtr w,IntPtr l,uint f,uint t,out UIntPtr r);
  [DllImport("user32.dll",SetLastError=true)] public static extern bool PostMessage(IntPtr h,uint m,UIntPtr w,IntPtr l);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
+ [DllImport("user32.dll")] public static extern uint GetDoubleClickTime();
  public struct Rect { public int Left,Top,Right,Bottom; }
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect r);
  public static void Type(IntPtr h,string text) {
@@ -276,11 +277,17 @@ function Select-Choice([string]$Id,[string]$Name){
 function Idle {Wait-Until {$m=Model;$m -and !$m.windows_document -and !$m.state.document_file.busy -and !@($m.state.requests).Count} 'HDR/document operation did not finish' 60}
 function Sdr { ProofPanel;if(!(Find 'proof-panel-exposure')){Invoke 'proof-panel-mode-sdr'};$null=Control 'proof-panel-exposure';$null=Control 'proof-panel-contrast' }
 function ProofPanel {
- if(!@((Model).layout.groups|Where-Object active -eq 'proof').Count){
-  Invoke 'panel-tab-proof'
-  Wait-Until {@((Model).layout.groups|Where-Object active -eq 'proof').Count} 'Proof tab did not become active'
- }
- $null=Control 'proof-panel-mode'
+ if(Find 'proof-panel-mode' -Visible){return}
+ $entry=@{id=$null}
+ Wait-Until {
+  if(Find 'proof-panel-mode' -Visible){return $true}
+  foreach($id in @('panel-tab-proof','drawer-tab-proof','column-icon-proof')){
+   if(Find $id -Visible){$entry.id=$id;return $true}
+  }
+  $false
+ } 'Retained Proof panel entry did not become visible'
+ if($entry.id){Invoke $entry.id}
+ Wait-Until {Find 'proof-panel-mode' -Visible} 'Retained Proof panel did not become visible'
 }
 function Setup {
  Command 'document_properties' 'File'
@@ -719,7 +726,7 @@ try {
  if(!$proofEntry){throw 'Windows has no shared Proof panel menu'}
  if($proofEntry.selected){
   [CapyRowPointer]::Key([uint32]$review.Id,0x1B)
-  Invoke 'panel-tab-proof'
+  ProofPanel
  } else {
   $proofMenuItem=Control $proofEntry.label -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)
   $previousDpi=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))
@@ -729,6 +736,7 @@ try {
    [CapyRowPointer]::Down('mouse',[int]($box.X+$box.Width/2),[int]($box.Y+$box.Height/2));[CapyRowPointer]::Up()
   } finally {[CapyRowPointer]::Dispose();[CapyRowPointer]::SetThreadDpiAwarenessContext($previousDpi)|Out-Null}
  }
+ ProofPanel
  $null=Control 'proof-panel-exposure'
  $field=Control 'proof-panel-exposure';$fieldId=$field.GetRuntimeId() -join ':'
  [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
@@ -810,9 +818,13 @@ try {
   [CapyRowPointer]::Down('mouse',$x,$y);[CapyRowPointer]::Up()
   Wait-Until {[Math]::Abs((Model).windows_proof_form.rendition.balance) -gt .01} 'Proof first press did not move pad'
   $pressed=(Model).windows_proof_form.rendition|ConvertTo-Json -Compress
-  [CapyRowPointer]::Down('mouse',$x,$y);[CapyRowPointer]::Up()
+  Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Proof reference press did not undo once'
+  $expiry=[Diagnostics.Stopwatch]::StartNew();$doubleClickTime=[CapyHdrPicker]::GetDoubleClickTime()
+  Wait-Until {$expiry.Elapsed.TotalMilliseconds -gt $doubleClickTime} 'Native double-click interval did not expire'
+  $doublePressMs=[CapyRowPointer]::DoubleClick($x,$y)
+  @{injection_ms=$doublePressMs;point=@($x,$y)}|ConvertTo-Json|Set-Content (Join-Path $run 'proof-double-press.json')
   Wait-Until {[Math]::Abs((Model).windows_proof_form.rendition.balance) -lt .0001 -and [Math]::Abs((Model).windows_proof_form.rendition.contrast-1) -lt .0001} 'Proof double press did not reset pad'
-  Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $pressed} 'Proof pad reset did not undo once'
+  Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $pressed} 'Proof pad reset Undo did not restore the exact first press'
   Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Proof first press did not undo once'
  }finally{[CapyRowPointer]::Dispose()}
  @{shift_ten='passed';held_repeat_single_undo='passed';escape_rollback='passed';focus_rollback='passed';double_press_reset='passed'}|ConvertTo-Json|Set-Content (Join-Path $run 'proof-dial-keys.json')

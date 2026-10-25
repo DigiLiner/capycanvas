@@ -1036,6 +1036,10 @@ grip handoff and exact Delete/Undo and reorder history. With no device or theme
 argument it covers mouse, pen and touch in both themes. Use
 `exercise-workspace-pickup.ps1 -ZenOnly` for hidden-control exclusion, retained
 layout and restoration in both themes.
+For short pointer contacts, capture bounds before Down and inspect UI Automation
+after Up; a slow lookup during contact can start a hold. Await a fresh native
+gesture generation and recognized cancellation before checking that a displaced
+release inside an action button did nothing.
 
 `exercise-documents.ps1 -Journey color-workflows` isolates automatic comparisons,
 Properties Appearance and conversion into a separate unsaved drawing. Repeat
@@ -1047,10 +1051,12 @@ functional behavior; HDR output and presentation timing require hardware.
 The HDR geometry helper matches the reviewed executable and Rust DLL: native
 Windows PowerShell and .NET Framework on ARM64, a compiled x64 helper on x64.
 Both check the loaded CLR architecture before calling the current Rust geometry export.
-The VM selections `manager:default`, `localization:profiles-dark` and
-`localization:profiles-light` cover the workspace manager in both themes and
-profile-library search in English and Japanese without the unrelated document
-import/export matrix.
+Use `manager:default` for the full dark manager journey and
+`manager:workflow-light` for the light name, search and toolbar-description checks.
+The full `manager:both` selection can use `--timeout-minutes 60` on the software
+adapter. `localization:profiles-dark` and `localization:profiles-light` cover
+profile-library search in English and Japanese without the document import/export
+matrix.
 
 Secondary-button motion must leave palette colors and row order unchanged; locked rows and
 disabled grips must release ownership and allow fresh native selection.

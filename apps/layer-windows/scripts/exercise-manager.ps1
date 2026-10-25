@@ -1,6 +1,7 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','both')][string]$Theme='both')
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','both','workflow-light')][string]$Theme='dark',[switch]$WorkflowOnly)
 $ErrorActionPreference='Stop'
-if($Theme -eq 'both'){foreach($choice in @('dark','light')){& $PSCommandPath -Executable $Executable -Theme $choice};return}
+if($Theme -eq 'workflow-light'){$Theme='light';$WorkflowOnly=$true}
+if($Theme -eq 'both'){foreach($choice in @('dark','light')){& $PSCommandPath -Executable $Executable -Theme $choice -WorkflowOnly:$WorkflowOnly};return}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true
 if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
@@ -69,7 +70,8 @@ try {
     $original=(Model).windows_workspace.id
     $originalName=(Model).windows_workspace.name
     if($original -ne 'builtin:workspace:illustrator'){throw 'Fresh installations must open Paint'}
-    $saved=Layout
+    $saved=Layout;$size=(Model).state.brush.diameter;$painter='builtin:workspace:painter'
+    if(!$WorkflowOnly){
     Capture 'illustrator'
     Invoke 'panel-tab-stats'
     Wait-Until {(Layout) -ne $saved} 'Fixture layout did not change'
@@ -157,6 +159,7 @@ try {
     Wait-Until {$anchor=Find 'workspace-manager-move-up';!$anchor -or $anchor.Current.IsOffscreen} 'Included workspace menu did not close'
     Choose 'Cancel';Closed
     if((HeaderChoice $original).Current.Name -ne $originalName){throw 'Included workspace name changed'}
+    }
     Menu 'Manage Workspaces…'
     Invoke 'workspace-manager-create'
     Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'New Workspace prompt did not open'
@@ -171,6 +174,8 @@ try {
     foreach($id in @($painter,$original,'builtin:workspace:photographer')){
         if((HeaderChoice $id).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off){throw 'Custom workspace must leave all header choices off'}
     }
+    $painting=(Model).windows_workspace.id
+    if(!$WorkflowOnly){
     (Control 'tool-setting-size-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).SetValue(.28)
     Wait-Until {(Model).state.brush.diameter -ne $size} 'Second workspace tool edit did not apply'
     $otherSize=(Model).state.brush.diameter
@@ -181,6 +186,7 @@ try {
     Choose 'Switch to Workspace';Closed
     if((Model).windows_workspace.name -ne $originalName -or (Model).state.brush.diameter -ne $otherSize){throw 'Switching workspaces changed the shared brush settings'}
     $size=$otherSize
+    }
     $searchWorkspaces=@()
     foreach($index in 1..4){
         Menu 'Manage Workspaces…';Invoke 'workspace-manager-create'
@@ -205,6 +211,7 @@ try {
         Choose 'Delete';Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row $workspace.name)} 'Search fixture workspace did not delete'
     }
     Choose 'Cancel';Closed
+    if(!$WorkflowOnly){
     Menu 'Manage Workspaces…'
     Invoke ('workspace-manager-options-'+$painting);Invoke 'workspace-manager-rename'
     Wait-Until {(Manager).prompt.title -eq 'Rename'} 'Rename prompt did not open'
@@ -223,6 +230,7 @@ try {
     Choose 'Delete'
     Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row 'Inking')} 'Delete did not remove the workspace'
     Choose 'Cancel';Closed
+    }
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
     (Control 'Quick Access Toolbars' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
     Invoke 'Manage Toolbars…' -Name
@@ -252,6 +260,11 @@ try {
     Wait-Until {$null -ne (Manager).prompt} 'Saved toolbar Delete did not open'
     Choose (Manager).prompt.confirm;Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row 'Workflow toolbar')} 'Saved toolbar did not delete'
     Choose 'Cancel';Closed
+    if($WorkflowOnly){
+        Close
+        [pscustomobject]@{theme=$Theme;workflow_only=$true;immediate_name_gating='passed';larger_workspace_search='passed';saved_toolbar_description_edit_cancel_and_reopen='passed';zero_exit='passed';evidence=$run}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')
+        return
+    }
     $beforeReset=Layout
     Menu 'Reset All Brushes…';Capture 'reset-brushes'
     Choose 'Cancel';Closed

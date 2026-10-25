@@ -301,11 +301,19 @@ try {
         if($partial.source_swipe -le 0 -or $partial.source_grip_opacity -le 0 -or $partial.source_grip_opacity -ge .6){throw 'Partial swipe did not fade the retained grip'}
         Wait-Until {$null -ne (Find "layer-$created-swipe-delete" -Visible)} 'Left swipe did not reveal Delete'
         Record-Swipe 'delete-opened'
-        $at=Point "layer-row-$created"
+        $action=(Control "layer-$created-swipe-delete" -Arranged).Current.BoundingRectangle
+        $inset=2*[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+        $at=@{x=[int]($action.X+$action.Width*.5);y=[int][Math]::Ceiling($action.Top+$inset)}
+        $finish=@{x=$at.x;y=[int][Math]::Floor($action.Bottom-$inset)}
+        if(!$action.Contains([Windows.Point]::new($at.x,$at.y)) -or !$action.Contains([Windows.Point]::new($finish.x,$finish.y))){throw 'Displaced strip contact must start and finish inside Delete'}
+        $generation=(Gesture).generation
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
-        Move-To @{x=$at.x;y=$at.y+24};$displaced=Gesture;[CapyRowPointer]::Up()
-        Wait-Until {(Gesture).phase -eq 'idle'} 'Displaced row retained its contact'
-        if($displaced.phase -eq 'dragging' -or (Rows) -ne $before){throw 'Displaced row admitted a reorder'}
+        Move-To $finish;[CapyRowPointer]::Up()
+        $displaced=@{state=$null}
+        Wait-Until {$displaced.state=Gesture;$displaced.state.generation -gt $generation -and $displaced.state.phase -eq 'idle'} 'Displaced row retained its contact'
+        $swipeStages.Add(@{stage='displaced-terminal';gesture=$displaced.state;start=$at;finish=$finish;action_bounds=$action})
+        if($displaced.state.last_cancel.generation -le $generation -or $displaced.state.last_cancel.reason -ne 'native_scroll'){throw 'Native movement did not admit the displaced strip scrolling prerequisite'}
+        if($displaced.state.initial_swipe -le 0 -or $displaced.state.pickup -or $displaced.state.menu_open -or (Rows) -ne $before){throw 'Displaced strip contact activated an action, menu or reorder'}
         Record-Swipe 'after-vertical-motion'
         if(!(Find "layer-$created-swipe-delete" -Visible)){
             $at=Point "layer-$created-name"
