@@ -19,7 +19,7 @@ pub struct FilterPreviewCache {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct FilterPreviewStatus {
-    /// Opaque presentation generation, including document and GPU replacement.
+    /// Opaque presentation generation, including catalog and GPU replacement.
     pub key: String,
     pub epoch: u64,
     pub pending: bool,
@@ -33,26 +33,19 @@ pub struct FilterPreviewUpdate {
     pub status: FilterPreviewStatus,
     pub image: Option<FilterPreviewImage>,
 }
-#[derive(Clone, Copy, PartialEq)]
-struct Source {
-    epoch: u64,
-    revision: (u64, u64, u64),
-}
 struct Pending {
     id: u64,
     filters: Vec<Arc<str>>,
 }
 #[derive(Default)]
 pub(crate) struct Previews {
-    source: Option<Source>,
-    size: [u32; 2],
+    source: Option<u64>,
     generation: u64,
     serial: u64,
     requests: u64,
     pending: Option<Pending>,
     loaded: BTreeMap<Arc<str>, u64>,
     retry_at: u64,
-    paused: bool,
 }
 impl Previews {
     pub fn renderer_replaced(&mut self) {
@@ -88,7 +81,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         &mut self,
         now_ns: u64,
         filters: Vec<Arc<str>>,
-        size: [u32; 2],
         cache: FilterPreviewCache,
     ) -> Result<FilterPreviewUpdate, String> {
         if filters.len() > 256
@@ -99,40 +91,25 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let mut visible = Vec::new();
         for id in filters {
-            if self.effect_catalog.get(&id).is_some() && !visible.contains(&id) {
+            if self.effect_catalog.get(&id).is_some_and(|definition| !super::effects::bundled_preview(definition)) && !visible.contains(&id) {
                 visible.push(id);
             }
             if visible.len() == CACHE_ROWS {
                 break;
             }
         }
-        let source = Source {
-            epoch: self.state.document_file.epoch,
-            revision: self.filter_preview_revision(),
-        };
+        let source = self.filter_preview_revision();
         let idle = self.filter_previews_idle();
         let mut driver = std::mem::take(&mut self.filter_previews);
-        let requested_size = [size[0].clamp(80, 512), size[1].clamp(1, 128)];
-        let source_changed = driver.source != Some(source);
-        // Retain a sufficient backing size across drawer/panel projections.
-        let size = if source_changed {
-            requested_size
-        } else {
-            std::array::from_fn(|i| driver.size[i].max(requested_size[i]))
-        };
-        if source_changed || (!visible.is_empty() && driver.size != size) {
+        if driver.source != Some(source) {
             driver.invalidate(self.renderer_mut(), now_ns);
             driver.source = Some(source);
-            driver.size = size;
         }
         if !idle {
-            if !driver.paused {
-                driver.invalidate(self.renderer_mut(), now_ns);
-            }
+            driver.cancel(self.renderer_mut());
             driver.retry_at = now_ns.saturating_add(IDLE_NS);
         }
-        driver.paused = !idle;
-        let key = format!("{}:{}", source.epoch, driver.generation);
+        let key = driver.generation.to_string();
         if cache.key.as_deref() != Some(&key) {
             driver.loaded.clear();
         } else {
@@ -167,9 +144,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                     Ok(atlas)
                         if atlas.image.request_id == pending.id
                             && atlas.filters == pending.filters
-                            && atlas.image.width == driver.size[0]
-                            && atlas.image.height
-                                == driver.size[1] * atlas.filters.len() as u32
+                            && [atlas.image.width, atlas.image.height / atlas.filters.len().max(1) as u32] == layer_render::FILTER_PREVIEW_SIZE
+                            && atlas.image.height % atlas.filters.len().max(1) as u32 == 0
                             && atlas.image.stride == atlas.image.width * 4
                             && atlas.image.bytes.len()
                                 == (atlas.image.stride * atlas.image.height) as usize =>
@@ -201,7 +177,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     else { immediate.into_iter().take(8).cloned().collect() };
                 if !missing.is_empty() {
                     driver.serial = driver.serial.wrapping_add(1);
-                    match self.request_filter_previews(driver.serial, missing.clone(), driver.size)
+                    match self.request_filter_previews(driver.serial, missing.clone())
                     {
                         Ok(true) => {
                             driver.requests += 1;
@@ -231,7 +207,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         };
         let status = FilterPreviewStatus {
             key,
-            epoch: source.epoch,
+            epoch: self.state.document_file.epoch,
             pending: driver.pending.is_some(),
             wait_ms,
             retained: driver.loaded.keys().cloned().collect(),
@@ -249,23 +225,14 @@ impl<R: CanvasRenderer> UiSession<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::test_support::Recorder;
+    use crate::session::test_support::{Recorder, custom_filter, package_json};
     use layer_core::Document;
     use layer_render::{BackendError, ReadbackImage};
 
+    #[derive(Default)]
     struct View {
         key: Option<String>,
         rows: Vec<Arc<str>>,
-        size: [u32; 2],
-    }
-    impl Default for View {
-        fn default() -> Self {
-            Self {
-                key: None,
-                rows: Vec::new(),
-                size: [96, 40],
-            }
-        }
     }
     impl View {
         fn poll(
@@ -278,7 +245,6 @@ mod tests {
                 .poll_filter_previews(
                     ms * 1_000_000,
                     ids.iter().map(|id| Arc::from(*id)).collect(),
-                    self.size,
                     FilterPreviewCache {
                         key: self.key.clone(),
                         rows: self.rows.clone(),
@@ -305,13 +271,21 @@ mod tests {
         )
         .unwrap();
         session.frame(0, 0).unwrap();
+        let filters = LIVE.iter().map(|id| custom_filter(id)).collect();
+        let package = package_json(session.effect_catalog.categories().to_vec(), filters);
+        session.load_effect_package(&package, |_| panic!("inline package"), layer_core::EffectInstallMode::Merge).unwrap();
+        session.frame(1, 1).unwrap();
+        let request = session.renderer_mut().validation.take().unwrap();
+        session.renderer_mut().validation_result = Some(layer_render::EffectValidationResult { request_id: request.request_id, result: Ok(()) });
+        session.frame(2, 2).unwrap();
         assert!(session.filter_previews_idle());
         session
     }
+    const LIVE: [&str; 12] = ["curves", "levels", "brightness_contrast", "threshold", "exposure", "vignette", "invert", "desaturate", "hue_saturation", "photo_filter", "shadows_highlights", "clarity"];
     fn finish(s: &mut UiSession<Recorder>) {
         let r = s.renderer_mut();
         let request = r.filter_preview.as_ref().unwrap();
-        let [width, height] = request.size;
+        let [width, height] = layer_render::FILTER_PREVIEW_SIZE;
         let height = height * request.filters.len() as u32;
         r.filter_preview_ready = Some(Ok(FilterPreviewImage {
             image: ReadbackImage {
@@ -332,8 +306,8 @@ mod tests {
     fn language_refresh_preserves_pending_previews_and_completed_images() {
         let mut s = session();
         let mut v = View::default();
-        v.poll(&mut s, 0, &["curves", "levels"]);
-        let pending = v.poll(&mut s, 200, &["curves", "levels"]);
+        v.poll(&mut s, 0, &["test:curves", "test:levels"]);
+        let pending = v.poll(&mut s, 200, &["test:curves", "test:levels"]);
         assert!(pending.status.pending);
         let source = s.filter_preview_revision();
         let key = pending.status.key;
@@ -341,18 +315,18 @@ mod tests {
         let request_id = s.renderer_mut().filter_preview.as_ref().unwrap().request_id;
         assert!(s.set_localization(crate::Localizer::shared(crate::UiLanguage::Japanese)));
         assert_eq!(s.filter_preview_revision(), source);
-        let pending = v.poll(&mut s, 208, &["curves", "levels"]);
+        let pending = v.poll(&mut s, 208, &["test:curves", "test:levels"]);
         assert_eq!(pending.status.key, key);
         assert!(pending.status.pending);
         assert_eq!(s.renderer_mut().filter_preview_requests, requests);
         assert_eq!(s.renderer_mut().filter_preview.as_ref().unwrap().request_id, request_id);
         assert_eq!(s.renderer_mut().filter_preview_cancels, 0);
         finish(&mut s);
-        let completed = v.poll(&mut s, 216, &["curves", "levels"]);
+        let completed = v.poll(&mut s, 216, &["test:curves", "test:levels"]);
         assert!(completed.image.is_some());
         let retained = completed.status.retained;
         assert!(s.set_localization(crate::Localizer::shared(crate::UiLanguage::Korean)));
-        let warm = v.poll(&mut s, 224, &["curves", "levels"]);
+        let warm = v.poll(&mut s, 224, &["test:curves", "test:levels"]);
         assert_eq!(warm.status.key, key);
         assert_eq!(warm.status.retained, retained);
         assert!(!warm.status.pending);
@@ -366,92 +340,108 @@ mod tests {
         let mut s = session();
         let mut v = View::default();
         assert!(
-            !v.poll(&mut s, 0, &["curves", "curves", "levels"])
+            !v.poll(&mut s, 0, &["test:curves", "test:curves", "test:levels"])
                 .status
                 .pending
         );
         assert_eq!(s.renderer_mut().filter_preview_requests, 0);
-        assert!(v.poll(&mut s, 200, &["curves", "levels"]).status.pending);
-        let pending = v.poll(&mut s, 208, &["curves", "levels"]);
+        assert!(v.poll(&mut s, 200, &["test:curves", "test:levels"]).status.pending);
+        let pending = v.poll(&mut s, 208, &["test:curves", "test:levels"]);
         assert_eq!(pending.status.wait_ms, 0);
         assert_eq!(s.renderer_mut().filter_preview_takes, 1);
         finish(&mut s);
-        assert!(v.poll(&mut s, 216, &["curves", "levels"]).image.is_some());
+        assert!(v.poll(&mut s, 216, &["test:curves", "test:levels"]).image.is_some());
         v.poll(&mut s, 500, &[]);
-        let reopened = v.poll(&mut s, 700, &["levels"]);
+        let reopened = v.poll(&mut s, 700, &["test:levels"]);
         assert_eq!(reopened.status.requests, 1);
         assert!(!reopened.status.pending);
         assert!(reopened.status.wait_ms >= 200);
-        v.size = [80, 20];
-        assert_eq!(
-            v.poll(&mut s, 900, &["curves"]).status.requests,
-            1,
-            "smaller projections reuse rows"
-        );
-        v.size = [200, 40];
-        assert!(v.poll(&mut s, 1000, &["curves"]).status.retained.is_empty());
-        v.poll(&mut s, 1200, &["curves"]);
-        assert_eq!(s.renderer_mut().filter_preview.as_ref().unwrap().size, [200, 40]);
+        assert_eq!(v.poll(&mut s, 900, &["test:curves"]).status.requests, 1, "Other projections reuse rows");
     }
     #[test]
-    fn drawing_cancels_without_taking_or_advancing_the_old_request() {
+    fn bundled_rows_never_request_previews() {
         let mut s = session();
         let mut v = View::default();
-        v.poll(&mut s, 0, &["curves"]);
-        v.poll(&mut s, 200, &["curves"]);
+        let bundled: Vec<_> = s.state.adjustments.iter().filter(|choice| choice.bundled_preview).map(|choice| choice.id.clone()).collect();
+        assert_eq!(bundled.len(), layer_core::bundled_effect_catalog().filters().len());
+        assert!(s.state.adjustments.iter().filter(|choice| !choice.bundled_preview).all(|choice| choice.id.starts_with("test:")));
+        let ids: Vec<&str> = bundled.iter().map(AsRef::as_ref).collect();
+        v.poll(&mut s, 0, &ids);
+        let update = v.poll(&mut s, 200, &ids);
+        assert!(!update.status.pending);
+        assert!(update.status.retained.is_empty());
+        assert_eq!(s.renderer_mut().filter_preview_requests, 0);
+    }
+    #[test]
+    fn drawing_pauses_pending_work_and_keeps_delivered_rows() {
+        let mut s = session();
+        let mut v = View::default();
+        v.poll(&mut s, 0, &["test:curves"]);
+        v.poll(&mut s, 200, &["test:curves"]);
         finish(&mut s);
         s.input_pending = true;
-        let paused = v.poll(&mut s, 208, &["curves"]);
+        let paused = v.poll(&mut s, 208, &["test:curves"]);
         assert!(!paused.status.pending);
         assert_eq!(paused.status.wait_ms, 50);
         assert!(paused.image.is_none());
         assert_eq!(s.renderer_mut().filter_preview_takes, 0);
         assert_eq!(s.renderer_mut().filter_preview_cancels, 1);
-        v.poll(&mut s, 500, &["curves"]);
+        v.poll(&mut s, 500, &["test:curves"]);
         assert_eq!(s.renderer_mut().filter_preview_requests, 1);
         s.input_pending = false;
-        v.poll(&mut s, 600, &["curves"]);
+        v.poll(&mut s, 600, &["test:curves"]);
         assert_eq!(s.renderer_mut().filter_preview_requests, 1);
-        v.poll(&mut s, 700, &["curves"]);
+        v.poll(&mut s, 700, &["test:curves"]);
+        assert_eq!(s.renderer_mut().filter_preview_requests, 2);
+        finish(&mut s);
+        assert!(v.poll(&mut s, 708, &["test:curves"]).image.is_some());
+        let key = v.key.clone().unwrap();
+        s.input_pending = true;
+        let painting = v.poll(&mut s, 716, &["test:curves"]);
+        assert_eq!(painting.status.key, key);
+        assert_eq!(painting.status.retained, [Arc::from("test:curves")]);
+        s.input_pending = false;
+        assert_eq!(v.poll(&mut s, 1000, &["test:curves"]).status.key, key);
         assert_eq!(s.renderer_mut().filter_preview_requests, 2);
     }
     #[test]
-    fn hiding_and_replacement_retire_pending_work_even_at_equal_revisions() {
+    fn hiding_and_renderer_replacement_retire_work_but_documents_keep_rows() {
         let mut s = session();
         let mut v = View::default();
-        v.poll(&mut s, 0, &["curves"]);
-        v.poll(&mut s, 200, &["curves"]);
+        v.poll(&mut s, 0, &["test:curves"]);
+        v.poll(&mut s, 200, &["test:curves"]);
         let original = v.key.clone();
         v.poll(&mut s, 208, &[]);
         assert_eq!(s.renderer_mut().filter_preview_cancels, 1);
-        v.poll(&mut s, 408, &["curves"]);
+        v.poll(&mut s, 408, &["test:curves"]);
         finish(&mut s);
         s.state.document_file.epoch += 1;
-        let replaced = v.poll(&mut s, 416, &["curves"]);
-        assert!(replaced.image.is_none());
-        assert_ne!(v.key, original);
-        assert_eq!(s.renderer_mut().filter_preview_cancels, 2);
-        v.poll(&mut s, 616, &["curves"]);
+        crate::session::test_support::layer(&mut s, crate::LayerAction::New { group: false, clipped: false });
+        s.frame(1, 1).unwrap();
+        let kept = v.poll(&mut s, 416, &["test:curves"]);
+        assert!(kept.image.is_some(), "Other documents and edits preview the same scene");
+        assert_eq!(v.key, original);
+        assert_eq!(s.renderer_mut().filter_preview_cancels, 1);
         let before_gpu = v.key.clone();
         s.replace_renderer(Recorder::default()).unwrap();
         s.frame(700_000_000, 700_000_000).unwrap();
-        assert!(v.poll(&mut s, 700, &["curves"]).image.is_none());
+        assert!(v.poll(&mut s, 700, &["test:curves"]).image.is_none());
         assert_ne!(v.key, before_gpu);
-        assert!(v.poll(&mut s, 900, &["curves"]).status.pending);
+        assert!(v.poll(&mut s, 900, &["test:curves"]).status.pending);
     }
     #[test]
     fn changing_visible_categories_retires_work_and_stale_atlases_back_off() {
         let mut s = session();
         let mut v = View::default();
-        v.poll(&mut s, 0, &["curves"]);
-        v.poll(&mut s, 200, &["curves"]);
+        v.poll(&mut s, 0, &["test:curves"]);
+        v.poll(&mut s, 200, &["test:curves"]);
         finish(&mut s);
-        let changed = v.poll(&mut s, 208, &["levels"]);
+        let changed = v.poll(&mut s, 208, &["test:levels"]);
         assert!(changed.image.is_none());
         assert!(!changed.status.pending);
         assert_eq!(s.renderer_mut().filter_preview_cancels, 1);
         assert_eq!(s.renderer_mut().filter_preview_takes, 0);
-        v.poll(&mut s, 408, &["levels"]);
+        v.poll(&mut s, 408, &["test:levels"]);
         finish(&mut s);
         s.renderer_mut()
             .filter_preview_ready
@@ -461,53 +451,53 @@ mod tests {
             .unwrap()
             .image
             .request_id = 1;
-        let stale = v.poll(&mut s, 416, &["levels"]);
+        let stale = v.poll(&mut s, 416, &["test:levels"]);
         assert!(stale.image.is_none());
         assert!(stale.status.error.is_some());
         assert_eq!(stale.status.wait_ms, 1000);
         assert!(stale.status.retained.is_empty());
-        assert!(!v.poll(&mut s, 1000, &["levels"]).status.pending);
-        assert!(v.poll(&mut s, 1416, &["levels"]).status.pending);
+        assert!(!v.poll(&mut s, 1000, &["test:levels"]).status.pending);
+        assert!(v.poll(&mut s, 1416, &["test:levels"]).status.pending);
     }
     #[test]
     fn optional_failures_back_off_and_missing_host_images_can_be_retried() {
         let mut s = session();
         let mut v = View::default();
         s.renderer_mut().reject_filter_previews = true;
-        v.poll(&mut s, 0, &["curves"]);
-        let failure = v.poll(&mut s, 200, &["curves"]);
+        v.poll(&mut s, 0, &["test:curves"]);
+        let failure = v.poll(&mut s, 200, &["test:curves"]);
         assert!(failure.status.error.is_some());
         assert_eq!(failure.status.wait_ms, 1000);
         s.renderer_mut().reject_filter_previews = false;
-        assert!(!v.poll(&mut s, 1199, &["curves"]).status.pending);
-        assert!(v.poll(&mut s, 1200, &["curves"]).status.pending);
+        assert!(!v.poll(&mut s, 1199, &["test:curves"]).status.pending);
+        assert!(v.poll(&mut s, 1200, &["test:curves"]).status.pending);
         finish(&mut s);
-        v.poll(&mut s, 1208, &["curves"]);
+        v.poll(&mut s, 1208, &["test:curves"]);
         v.rows.clear(); // Native conversion failed or its retained image was lost.
-        assert!(!v.poll(&mut s, 1400, &["curves"]).status.pending);
-        assert!(v.poll(&mut s, 2400, &["curves"]).status.pending);
+        assert!(!v.poll(&mut s, 1400, &["test:curves"]).status.pending);
+        assert!(v.poll(&mut s, 2400, &["test:curves"]).status.pending);
         s.renderer_mut().filter_preview_ready = Some(Err(BackendError("readback failed")));
-        assert!(v.poll(&mut s, 2408, &["curves"]).status.error.is_some());
-        assert!(!v.poll(&mut s, 2500, &["curves"]).status.pending);
-        assert!(v.poll(&mut s, 3408, &["curves"]).status.pending);
+        assert!(v.poll(&mut s, 2408, &["test:curves"]).status.error.is_some());
+        assert!(!v.poll(&mut s, 2500, &["test:curves"]).status.pending);
+        assert!(v.poll(&mut s, 3408, &["test:curves"]).status.pending);
     }
     #[test]
     fn ordinary_rows_publish_before_filters_that_need_full_source_analysis() {
         let mut s = session();
         let mut v = View::default();
-        let ids = ["shadows_highlights", "curves", "levels", "clarity"];
+        let ids = ["test:shadows_highlights", "test:curves", "test:levels", "test:clarity"];
         v.poll(&mut s, 0, &ids);
         v.poll(&mut s, 200, &ids);
         let requested = |s: &mut UiSession<Recorder>| s.renderer_mut().filter_preview.as_ref().unwrap().filters
             .iter().map(|f| f.program.id.to_string()).collect::<Vec<_>>();
-        assert_eq!(requested(&mut s), ["curves", "levels"]);
+        assert_eq!(requested(&mut s), ["test:curves", "test:levels"]);
         finish(&mut s);
         let update = v.poll(&mut s, 208, &ids);
-        assert_eq!(update.image.unwrap().filters.iter().map(AsRef::as_ref).collect::<Vec<&str>>(), ["curves", "levels"]);
-        assert_eq!(requested(&mut s), ["shadows_highlights"]);
+        assert_eq!(update.image.unwrap().filters.iter().map(AsRef::as_ref).collect::<Vec<&str>>(), ["test:curves", "test:levels"]);
+        assert_eq!(requested(&mut s), ["test:shadows_highlights"]);
         finish(&mut s);
         v.poll(&mut s, 216, &ids);
-        assert_eq!(requested(&mut s), ["clarity"]);
+        assert_eq!(requested(&mut s), ["test:clarity"]);
     }
 
     #[test]
@@ -515,13 +505,13 @@ mod tests {
         let mut s = session();
         let mut v = View::default();
         s.renderer_mut().preparing_filter_previews = true;
-        v.poll(&mut s, 0, &["curves"]);
-        let preparing = v.poll(&mut s, 200, &["curves"]);
+        v.poll(&mut s, 0, &["test:curves"]);
+        let preparing = v.poll(&mut s, 200, &["test:curves"]);
         assert!(!preparing.status.pending);
         assert_eq!(preparing.status.wait_ms, 16);
-        assert_eq!(v.poll(&mut s, 210, &["curves"]).status.wait_ms, 6);
+        assert_eq!(v.poll(&mut s, 210, &["test:curves"]).status.wait_ms, 6);
         s.renderer_mut().preparing_filter_previews = false;
-        assert!(v.poll(&mut s, 216, &["curves"]).status.pending);
+        assert!(v.poll(&mut s, 216, &["test:curves"]).status.pending);
     }
 
     #[test]
@@ -532,7 +522,7 @@ mod tests {
             .effect_catalog
             .filters()
             .iter()
-            .filter(|f| f.program.analysis().is_none())
+            .filter(|f| f.program.analysis().is_none() && !super::super::effects::bundled_preview(f))
             .take(10)
             .map(|f| f.program.id.to_string())
             .collect();

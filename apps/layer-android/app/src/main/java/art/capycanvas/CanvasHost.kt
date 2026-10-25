@@ -364,7 +364,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     private var handle = 0L
     internal val filterPreviewCache = FilterPreviewCache(this)
     internal val layerThumbnails = LayerThumbnails(this)
-    internal val brushPreviews = object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(4 * 1024 * 1024) {
+    internal val bundledPreviews = object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
     }
     private var choreographer: Choreographer? = null

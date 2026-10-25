@@ -1864,11 +1864,12 @@ class AndroidHostTest {
         assertEquals(48, choices.size)
         assertEquals("The picker lists both fill generators", listOf("solid_color","gradient_fill"), choices.filter { it in listOf("solid_color","gradient_fill") })
         action(obj("type" to "select_panel_tab", "group" to group("adjustments").getLong("id"), "panel" to "adjustments"))
-        compose.waitUntil(20_000) { host.filterPreviewCache.images[choices.first()] != null }
-        compose.onNodeWithTag("filter-preview-${choices.first()}", useUnmergedTree=true).assertHeightIsEqualTo(40.dp)
-        val preview = host.filterPreviewCache.images.getValue(choices.first()).image.toPixelMap()
-        assertTrue("GPU preview has opaque artwork", (0 until preview.width).any { preview[it,preview.height/2].alpha>.5f })
-        assertEquals("Silhouette has transparent corners", 0f, preview[0,0].alpha, .01f)
+        compose.waitUntil(20_000) { host.bundledPreviews.get("${choices.first()}.webp") != null }
+        val strip = compose.onNodeWithTag("filter-preview-${choices.first()}", useUnmergedTree=true).getUnclippedBoundsInRoot()
+        assertEquals("Filter previews keep the tiles' 6:1 shape", 6f, (strip.right - strip.left).value / (strip.bottom - strip.top).value, .1f)
+        val preview = host.bundledPreviews.get("${choices.first()}.webp")!!.toPixelMap()
+        assertTrue("Bundled preview shows the tiles", (0 until preview.width).any { preview[it,preview.height/2].alpha>.5f })
+        assertEquals("Built-in rows request no GPU previews", 0L, host.filterPreviewCache.request)
         capture("adjustments-picker")
         action(obj("type" to "filter_picker", "action" to obj("op" to "category", "category" to "distort")))
         compose.onNodeWithTag("filter-search-toggle").performClick()
@@ -1876,7 +1877,7 @@ class AndroidHostTest {
         val filterSearch = compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("filter-search")))
         filterSearch.performTextInput("glass")
         waitState { it.array("adjustments").objects().map { c -> c.getString("id") }==listOf("glass","rainy_glass") }
-        compose.waitUntil(20_000) { host.filterPreviewCache.images["rainy_glass"] != null }
+        compose.waitUntil(20_000) { host.bundledPreviews.get("rainy_glass.webp") != null }
         filterSearch.assertTextContains("glass").performImeAction()
         SystemClock.sleep(300)
         filterSearch.assertTextContains("glass")
@@ -3983,17 +3984,17 @@ class AndroidHostTest {
         for (theme in listOf("light", "dark")) {
             action(obj("type" to "set_theme", "theme" to theme))
             action(obj("type" to "select_brush", "id" to 1))
-            compose.waitUntil(10_000) { host.brushPreviews.get("1-$theme.png") != null }
-            val preview = host.brushPreviews.get("1-$theme.png")
+            compose.waitUntil(10_000) { host.bundledPreviews.get("1-$theme.webp") != null }
+            val preview = host.bundledPreviews.get("1-$theme.webp")
             compose.onNodeWithTag("brush-preview-1", useUnmergedTree = true).assertHeightIsEqualTo(40.dp)
             action(obj("type" to "select_brush", "id" to 42))
             waitState { it.getJSONObject("brush").getInt("preset") == 42 }
             action(obj("type" to "select_brush", "id" to 1))
             waitState { it.getJSONObject("brush").getInt("preset") == 1 }
-            assertSame(preview, host.brushPreviews.get("1-$theme.png"))
+            assertSame(preview, host.bundledPreviews.get("1-$theme.webp"))
             compose.onNodeWithTag("brush-preview-1", useUnmergedTree = true).assertHeightIsEqualTo(40.dp)
         }
-        assertNotSame(host.brushPreviews.get("1-light.png"), host.brushPreviews.get("1-dark.png"))
+        assertNotSame(host.bundledPreviews.get("1-light.webp"), host.bundledPreviews.get("1-dark.webp"))
     }
 
     @Test fun compactPanelSpacingAndAlignmentAcrossContexts() {

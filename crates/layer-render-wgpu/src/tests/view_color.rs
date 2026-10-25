@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_support::complete;
-use layer_core::{Document, SceneScope, authored::{Artwork, OccurrenceHandle, PaintSource, SourceTarget}};
+use layer_core::{Document, authored::{Artwork, OccurrenceHandle, PaintSource, SourceTarget}};
 use layer_core::color::{ColorProfile, DocumentColor, SampleDepth, RgbSpace, rgb, source::*};
 use layer_render::ThumbnailTarget;
 
@@ -364,34 +364,6 @@ fn native_export_thumbnails_and_raw_samples_keep_their_declared_color_coordinate
                         bytes(preview.map(|v| v * alpha + 1. * (1. - alpha)), 1.),
                         "retained photo thumbnail",
                     );
-                    if codes[3] == 65535 {
-                        r.request_filter_previews(layer_render::FilterPreviewRequest {
-                            request_id: 9,
-                            source: layer_render::FilterPreviewSource::LayerStack(owner(&layer)),
-                            size: [200, 40],
-                            view: view(),
-                            snapshot: layer.snapshot_with_context(r.evaluation_context()),
-                            scope: SceneScope::All,
-                            filters: vec![Arc::new(layer_core::EffectInstance::new(
-                                fixture("exposure").program(),
-                            ))],
-                        })
-                        .unwrap();
-                        let image = (0..100)
-                            .find_map(|_| {
-                                complete(&r);
-                                r.take_filter_previews()
-                            })
-                            .expect("filter image completes")
-                            .unwrap()
-                            .image;
-                        let mut opaque = 0;
-                        for pixel in image.bytes.chunks_exact(4).filter(|p| p[3] == 255) {
-                            close(pixel, bytes(preview, 1.), "zero exposure filter preview");
-                            opaque += 1;
-                        }
-                        assert!(opaque > 500);
-                    }
                     for area in [ColorSampleArea::Point, ColorSampleArea::Average5] {
                         assert!(
                             r.request_color_sample(ColorSampleRequest {

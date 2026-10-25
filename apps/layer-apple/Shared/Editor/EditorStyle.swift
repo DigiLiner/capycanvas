@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 #if canImport(AppKit)
 import AppKit
 #else
@@ -108,6 +109,30 @@ struct SharedIcon: View {
         guard let data = NSDataAsset(name: "shared-icon-paints")?.data else { return [:] }
         return (try? JSONDecoder().decode([String: [Layer]].self, from: data)) ?? [:]
     }()
+}
+struct BundledPreview: View {
+    let name: String
+    @State private var image: CGImage?
+    var body: some View {
+        ZStack {
+            if let image = Self.images.object(forKey: name as NSString) ?? image { Image(decorative: image, scale: 1).resizable() }
+        }.task(id: name) {
+            let name = name
+            image = await Task.detached(priority: .userInitiated) { SliderStampImage(image: Self.decode(name)) }.value.image
+        }
+    }
+    nonisolated(unsafe) private static let images: NSCache<NSString, CGImage> = {
+        let cache = NSCache<NSString, CGImage>()
+        cache.totalCostLimit = 8 << 20
+        return cache
+    }()
+    nonisolated private static func decode(_ name: String) -> CGImage? {
+        if let image = images.object(forKey: name as NSString) { return image }
+        guard let data = NSDataAsset(name: name)?.data, let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { return nil }
+        images.setObject(image, forKey: name as NSString, cost: image.bytesPerRow * image.height)
+        return image
+    }
 }
 struct IconTile: View {
     let icon: String

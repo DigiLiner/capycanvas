@@ -366,8 +366,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             data->previews=CreateFilterPreviewCache(data->query);
         }
         data->model=snapshot;data->state=object(snapshot,L"state");data->colorPreview=object(snapshot,L"color_preview");
-        RefreshFilterPreviewContext(data->previews,object(data->state,L"document_file").GetNamedValue(L"epoch").Stringify(),
-            array(snapshot,L"windows_filter_source").Stringify());
+        RefreshFilterPreviewContext(data->previews,object(data->state,L"document_file").GetNamedValue(L"epoch").Stringify());
         // Adoption and layout restoration discard transient host measurements.
         // Reconcile the new model even when retained controls have identical sizes.
         lastMeasurements=L"";

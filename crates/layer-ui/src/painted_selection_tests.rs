@@ -185,9 +185,7 @@ mod painted_selection_checks {
         let (prepared, _) = prepare(&s).unwrap();
         s.eyedropper.queue(layer_render::ColorSampleSource::Composite, [10, 10]);
         s.eyedropper.poll(s.engine.backend_mut(), RgbSpace::Srgb).unwrap();
-        for ms in [0, 200] {
-            s.poll_filter_previews(ms * 1_000_000, vec!["curves".into()], [96, 40], Default::default()).unwrap();
-        }
+        assert!(s.request_filter_previews(1, vec!["curves".into()]).unwrap());
         assert!(s.eyedropper.busy() && s.renderer_mut().filter_preview.is_some());
         s.renderer_mut().prepared_color = Some(color);
         s.commit_document_color_transition(prepared).unwrap();

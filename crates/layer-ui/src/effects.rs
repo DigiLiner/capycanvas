@@ -12,7 +12,7 @@ pub(crate) use paper::layer_paper;
 pub use curves::{CurveAxis,CurveAxisView,CurveControls,CurveCoordinateControl,CurveDomain};
 pub(super) use curves::PropertyEditorState;
 use crate::paper_library::PaperRequest;
-use layer_core::{Edit, EffectInstance, EffectParameterKind, EffectValue, ResourceLabel, authored::{ EffectApplication, EffectBaseline, EffectHandle, Occurrence, OccurrenceContent, OccurrenceHandle, RecordChange, SceneScope, SelectionHandle, SourceTarget}};
+use layer_core::{Edit, EffectInstance, EffectParameterKind, EffectValue, ResourceLabel, authored::{ EffectApplication, EffectBaseline, EffectHandle, Occurrence, OccurrenceContent, OccurrenceHandle, RecordChange, SelectionHandle, SourceTarget}};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -102,7 +102,7 @@ impl<B: CanvasRenderer> UiSession<B> {
     }
     /// Optional preview work yields to delivered input and unfinished edits.
     /// Apply this to completion service as well as admission: taking a preview
-    /// can submit the next source-probe chunk.
+    /// can submit its rendering.
     pub fn filter_previews_idle(&self) -> bool {
         !self.rendering_suspended
             && !self.input_pending
@@ -115,13 +115,8 @@ impl<B: CanvasRenderer> UiSession<B> {
     pub fn background_readback_idle(&self) -> bool {
         self.filter_previews_idle() && !self.wants_continuous_frames()
     }
-    pub fn filter_preview_revision(&self) -> (u64, u64, u64) {
-        let doc = self.engine.document();
-        (
-            doc.revision,
-            doc.working.occurrence.map_or(0, occurrence_token),
-            self.state.filter_catalog_revision ^ (u64::from(self.filter_drawer_open()) << 63),
-        )
+    pub fn filter_preview_revision(&self) -> u64 {
+        self.state.filter_catalog_revision
     }
 
     /// Hosts request only rows on screen, after painting and pending edits end.
@@ -129,32 +124,12 @@ impl<B: CanvasRenderer> UiSession<B> {
         &mut self,
         request_id: u64,
         filters: Vec<Arc<str>>,
-        size: [u32; 2],
     ) -> Result<bool, String> {
         if !self.filter_previews_idle() {
             return Ok(false);
         }
-        let doc = self.engine.document();
-        let scene = doc.scene();
-        let Some(current) = doc.working.occurrence else { return Ok(false); };
-        let replacing = self.filter_drawer_open() && scene.effect(current).is_some_and(|e|e.program.kind==layer_core::EffectKind::Adjustment);
-        let source = if replacing {
-            layer_render::FilterPreviewSource::EffectInput(current)
-        } else if self.filter_drawer_open() && scene.eligible_target(current)
-            && scene.occurrence(current).is_some_and(|o|o.attachment==layer_core::Attachment::Clip) {
-            layer_render::FilterPreviewSource::OwnerContent(current)
-        } else {
-            layer_render::FilterPreviewSource::LayerStack(doc.clipping_stack_top(current)
-                .ok_or_else(|| self.state.localization.text(MessageId::RESOURCES_ERROR_SELECT_LAYER).to_string())?)
-        };
-        let scope = SceneScope::All;
         let request = layer_render::FilterPreviewRequest {
             request_id,
-            source,
-            size,
-            view: self.engine.view(),
-            snapshot: doc.snapshot(),
-            scope,
             filters: filters
                 .into_iter()
                 .take(8)
@@ -339,7 +314,11 @@ pub struct AdjustmentChoice {
     pub category_icon: &'static str,
     /// Capability, independent of whether a particular layer has frozen time.
     pub animated: bool,
+    pub bundled_preview: bool,
     pub tooltip: String,
+}
+pub(crate) fn bundled_preview(definition: &layer_core::EffectDefinition) -> bool {
+    layer_core::bundled_effect_catalog().get(definition.id()) == Some(definition)
 }
 pub(super) fn catalog(
     catalog: &layer_core::EffectCatalog,
@@ -382,6 +361,7 @@ pub(super) fn catalog(
             category_label: resource_label(&catalog.categories().iter()
                 .find(|c| c.id == id.category).unwrap().label, l),
             animated: id.program.time,
+            bundled_preview: bundled_preview(id),
             tooltip: if id.program.time {
                 { let mut args = fluent_bundle::FluentArgs::new();
                 args.set("name", resource_label(id.label(), l).to_string());

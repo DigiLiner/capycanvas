@@ -4,7 +4,6 @@ struct AdjustmentPanel: View {
     @ObservedObject var store: EditorStore
     var splitPicker = false
     @State private var projection = UUID().uuidString
-    @Environment(\.displayScale) private var scale
     @Environment(\.scenePhase) private var phase
     @FocusState private var searching: Bool
     private var picker: JSON { store.state["filter_picker"] }
@@ -51,8 +50,8 @@ struct AdjustmentPanel: View {
                                 .modifier(PanelBodyMeasurement(panel: "adjustments", part: "row-unit", kind: .unit))
                                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(projection)) } action: { rect in
                                     let token = projection + ":" + choice["id"].string
-                                    if rect.intersects(CGRect(origin: .zero, size: viewport.size)) {
-                                        store.filterPreviews.show(token: token, id: choice["id"].string, width: max(0, rect.width - 12), scale: scale)
+                                    if !choice["bundled_preview"].bool && rect.intersects(CGRect(origin: .zero, size: viewport.size)) {
+                                        store.filterPreviews.show(token: token, id: choice["id"].string)
                                     } else { store.filterPreviews.hide(token) }
                                 }
                                 .onDisappear { store.filterPreviews.hide(projection + ":" + choice["id"].string) }
@@ -81,23 +80,27 @@ private struct AdjustmentRow: View {
     let choice: JSON
     var body: some View {
         Button { store.dispatch(choice["action"]) } label: {
-            VStack(spacing: 0) {
-                if let image = previews.images[choice["id"].string] {
-                    Image(decorative: image, scale: 1).resizable().frame(height: 40)
-                        .accessibilityIdentifier("filter-preview-" + choice["id"].string)
-                } else { Color.clear.frame(height: 40) }
+            VStack(spacing: 4) {
+                Group {
+                    if choice["bundled_preview"].bool {
+                        BundledPreview(name: "filter-" + choice["id"].string)
+                    } else if let image = previews.images[choice["id"].string] {
+                        Image(decorative: image, scale: 1).resizable()
+                    } else { Color.clear }
+                }.aspectRatio(6, contentMode: .fit).frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("filter-preview-" + choice["id"].string)
                 HStack(spacing: 6) {
-                    Spacer(minLength: 0)
-                    if choice["animated"].bool { SharedIcon(name: "animation", size: 12).opacity(0.55) }
                     SharedIcon(name: choice["icon"].string)
-                    Text(choice["label"].string).lineLimit(1)
+                    if choice["animated"].bool { SharedIcon(name: "animation", size: 12).opacity(0.55) }
+                    Text(choice["label"].string).fontWeight(.bold).lineLimit(1).truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }.frame(height: 18)
             }.padding(.horizontal, 6).padding(.vertical, 3).contentShape(Rectangle())
         }.buttonStyle(EditorControlButtonStyle(selected: store.state["filter_picker"]["selected"].string == choice["id"].string))
             .help(choice["tooltip"].string)
             .accessibilityAddTraits(store.state["filter_picker"]["selected"].string == choice["id"].string ? .isSelected : [])
             .accessibilityIdentifier("adjustment-" + choice["id"].string)
-            .accessibilityValue(store.catalog["native_copy"]["color"][previews.images[choice["id"].string] == nil ? "preview_pending" : "preview_ready"].string)
+            .accessibilityValue(store.catalog["native_copy"]["color"][choice["bundled_preview"].bool || previews.images[choice["id"].string] != nil ? "preview_ready" : "preview_pending"].string)
     }
 }
 

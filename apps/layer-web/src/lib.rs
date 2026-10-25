@@ -166,8 +166,6 @@ impl WebApp {
         &mut self,
         filters: JsValue,
         cache: JsValue,
-        width: u32,
-        height: u32,
         now_ms: f64,
     ) -> Result<JsValue, JsValue> {
         let filters = if self.gpu_ready() {
@@ -176,8 +174,7 @@ impl WebApp {
         self.prepare_ui_previews()?;
         let cache = serde_wasm_bindgen::from_value(cache).map_err(js)?;
         let update = self.session.poll_filter_previews(
-            (now_ms.max(0.) * 1_000_000.) as u64, filters, [width, height],
-            cache,
+            (now_ms.max(0.) * 1_000_000.) as u64, filters, cache,
         ).map_err(js)?;
         let result = serialize(&update.status)?;
         if let Some(atlas) = update.image {

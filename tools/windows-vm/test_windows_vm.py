@@ -124,6 +124,7 @@ class FixtureRunnerTests(unittest.TestCase):
                   "apps/layer-windows/scripts/build.ps1": "build",
                   "apps/layer-windows/scripts/stage-assets.ps1": "staging",
                   "apps/layer-web/icons/layer-select-symbolic.svg": "icon",
+                  "apps/layer-web/filter-previews/curves.png": "preview",
                   "assets/locales/en/commands.ftl": "catalog",
                   "apps/layer-windows/scripts/exercise-layers.ps1": "fixture"}
         changed = {**source, "apps/layer-windows/scripts/exercise-layers.ps1": "fixed",

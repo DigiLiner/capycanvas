@@ -697,8 +697,7 @@ image-filter outputs and checkpoints
 (`scene_images`), retained graph branches, the folded constant backdrop, and the backdrop
 and result a Pass Through group fades between hold the document's composite
 values. Their caches include the blend space
-(`ImageStages`, `artwork::Frame`, the filter-preview source key and the
-retouch reference cache's key). An image
+(`ImageStages`, `artwork::Frame` and the retouch reference cache's key). An image
 filter's input window is captured once per pixel in the filter's declared space:
 decoded for a filter that reads linear values, as the composite holds it for one
 that follows the document's Blending. Adjacent filters share an image only when
@@ -712,7 +711,7 @@ the upper one reads the composite as it is.
 | Export and snapshot rows, Copy and Copy Merged, histogram, color conversion previews | `Scene::capture_region` in [`snapshot.rs`](../../crates/layer-render-wgpu/src/snapshot.rs) | decoded per tile |
 | Eyedropper, Wand and Fill on the composite or the reference layers, tonal selection, whole-image readback | [`artwork.rs`](../../crates/layer-render-wgpu/src/artwork.rs) captures | decoded |
 | Clone Stamp, Healing and Spot Healing: the reference layers below the target | reference cache in [`retouch_sources.rs`](../../crates/layer-render-wgpu/src/retouch_sources.rs), captured through `artwork.rs` | composed in the document space, cached decoded; `retouch_source` in [`retouch_sample.wgsl`](../../crates/layer-render-wgpu/src/retouch_sample.wgsl) lays the target over them in the blend space |
-| Filter previews | `capture_filter_source` in [`filter_previews.rs`](../../crates/layer-render-wgpu/src/filter_previews.rs) | decoded; encoded once more for filters that follow the document's Blending, whose previews decode their result |
+| Filter previews | the preview tiles in [`filter_preview_tiles.rs`](../../crates/layer-render-wgpu/src/filter_preview_tiles.rs) | decoded; encoded once more for filters that follow the preview scene's Blending, whose previews decode their result |
 | Merges | [`scene/bake.rs`](../../crates/layer-render-wgpu/src/scene/bake.rs) | composed in the document space, stored decoded |
 | Image filter input windows | `capture_tile` in [`scene_images.rs`](../../crates/layer-render-wgpu/src/scene_images.rs) | decoded, or composite values for filters that follow the document's Blending |
 | Layered display during drags | [`scene/scale/compose.wgsl`](../../crates/layer-render-wgpu/src/scene/scale/compose.wgsl) | composite values; blends with the document's blend code |
@@ -788,9 +787,6 @@ result enters ordinary blending or common-base clipping once. An unattached
 adjustment receives the lower stack through Pass Through groups up to the nearest
 isolated scope. Only an unattached completed spatial result can checkpoint a stack
 prefix; a local result belongs to its owner.
-Filter-picker previews and their analysis candidates use this same input scope
-when replacing an attached adjustment. Owner opacity, blending and outer clipping
-apply after that input, just as they do on the canvas.
 
 Cache dependencies use occurrence handles and local chain inputs. Moving an
 unrelated row retains valid spatial stages; a downstream parameter edit keeps
@@ -1106,21 +1102,33 @@ Filter-picker previews use the same coordinate contract. Native one-to-one
 image reads use fragment positions directly, avoiding a
 window-size-dependent interpolation error from reconstructed UV coordinates.
 
-Filter previews visit source tiles in order of their best possible sample score,
-starting at the center and including the probe's corner-sampling halo. A complete
-painted crop ends the search once no remaining tile can improve it; isolated ink
-still requires the full search before falling back. One chunk is in flight at a
-time. Batches grow from one to at most sixteen tiles using measured encoding and
-GPU completion time, with two-millisecond encoding and GPU budgets. Devices without
-encoder timestamps use asynchronous completion latency with a sixteen-millisecond
-budget. Each poll yields to the host before submitting another chunk. Accepted
-requests stay pending while their shaders prepare, including across render-thread
-transport. Admission retries after sixteen milliseconds without
-repeating the idle delay.
-Rows without full-source analysis publish first; analysis-dependent rows run
-individually afterward. Preview rows share a source crop expanded by their required
-support. A document edit cancels an unfinished scan after its
-in-flight completion; no result may combine source revisions. Global samplers
+Filter previews never read the document. Every row shows its filter on one fixed
+scene: twelve by two matte ceramic tiles baked into
+[`filter_preview_tiles.rgba`](../../assets/filters/filter_preview_tiles.rgba), a
+768 × 128 preview document whose outer corners are already rounded, so filters
+treat the corners as transparent edges instead of hosts clipping their result.
+Built-in filters ship that result as 480 × 80 lossy WebP files in
+[`apps/layer-web/filter-previews`](../../apps/layer-web/filter-previews). Every host
+shows them at the row's full width and the strip's 6:1 shape, decoding off the UI
+thread, so opening the drawer runs no GPU work. `AdjustmentChoice::bundled_preview` marks rows whose definition matches the
+built-in catalog. Installed and custom filters render live on the same tiles:
+the renderer uploads them once in its working space, and the atlas draw
+box-filters each result down to the same 480 × 80 row. Filters that analyze
+their input build one private guide from the tiles and reuse it until the drawer
+hides. Document edits and document changes keep delivered rows; painting only
+pauses unfinished work. Accepted requests stay pending while their shaders
+prepare, including across render-thread transport. Admission retries after
+sixteen milliseconds without repeating the idle delay. Rows without full-source
+analysis publish first; analysis-dependent rows run individually afterward.
+
+The tiles come from a generator in
+[`filter_preview_tiles_tests.rs`](../../crates/layer-render-wgpu/src/filter_preview_tiles_tests.rs).
+After changing it, or a built-in filter's shader or preview parameters, rerun
+`cargo test -p layer-render-wgpu write_filter_preview_tiles -- --ignored` and then
+`cargo test -p layer-render-wgpu --features bake write_bundled_filter_previews -- --ignored`.
+`filter_preview_tiles_match_their_bake` and `bundled_filter_previews_match_their_bakes`
+fail while the files and their generators disagree; the second compares 4 × 4
+pixel averages, which tolerate the encoder's half-resolution colour. Global samplers
 retain their full declared input. Live display composition uses bounded windows
 and reduced sources; native-resolution filter dependencies execute through the
 same region executor and publish into that display cache. Native filter images

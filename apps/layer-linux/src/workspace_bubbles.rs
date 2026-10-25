@@ -36,7 +36,7 @@ enum Contact {
 struct Item {
     root: gtk::Box,
     icon: gtk::Image,
-    preview: RefCell<Option<gdk::Texture>>,
+    preview: RefCell<Option<gdk::Paintable>>,
     name: gtk::Label,
     tag: gtk::Label,
 }
@@ -176,7 +176,7 @@ mod imp {
         pub(super) view: RefCell<Option<BubbleView>>,
         pub(super) face: RefCell<Option<gtk::Box>>,
         pub(super) icon: RefCell<Option<gtk::Image>>,
-        pub(super) preview: RefCell<Option<gdk::Texture>>,
+        pub(super) preview: RefCell<Option<gdk::Paintable>>,
         pub(super) buttons: RefCell<Vec<gtk::Image>>,
         pub(super) halves: RefCell<Vec<gtk::Box>>,
         pub(super) hovered: Cell<Option<BubbleHit>>,
@@ -372,9 +372,9 @@ mod imp {
                 for half in self.halves.borrow().iter() {
                     obj.snapshot_child(half, snapshot);
                 }
-                if let Some(texture) = self.preview.borrow().as_ref() {
+                if let Some(preview) = self.preview.borrow().as_ref() {
                     snapshot.push_opacity(0.78);
-                    snapshot.append_texture(texture, &graphene::Rect::new(c[0] - 16., c[1] + 7., 32., 8.));
+                    crate::previews::append(snapshot, preview, &graphene::Rect::new(c[0] - 16., c[1] + 7., 32., 8.));
                     snapshot.pop();
                 }
                 if let Some(count) = self.count.borrow().as_ref() {
@@ -428,9 +428,9 @@ mod imp {
                 let at = [c[0] + chooser.center[0], c[1] + chooser.center[1]];
                 grow(at, scale, alpha);
                 round(item.root.upcast_ref());
-                if let Some(texture) = item.preview.borrow().as_ref().filter(|_| chooser.kind == ChooserKind::Brush) {
+                if let Some(preview) = item.preview.borrow().as_ref().filter(|_| chooser.kind == ChooserKind::Brush) {
                     let [w, h] = BRUSH_PILL;
-                    snapshot.append_texture(texture, &graphene::Rect::new(at[0] - w * 0.34, at[1] - h * 0.5 + 6., w * 0.68, 14.));
+                    crate::previews::append(snapshot, preview, &graphene::Rect::new(at[0] - w * 0.34, at[1] - h * 0.5 + 6., w * 0.68, 14.));
                 }
                 done();
             };
@@ -698,7 +698,9 @@ impl Item {
         let brush = item.kind == ChooserKind::Brush;
         self.icon.set_visible(!brush || item.preview.is_none());
         crate::icons::set(&self.icon, Some(&format!("layer-{}-symbolic", item.icon)));
-        *self.preview.borrow_mut() = item.preview.filter(|_| brush).map(|id| crate::previews::texture(id, theme));
+        let preview = item.preview.filter(|_| brush).map(|id| crate::previews::texture(id, theme));
+        if let (Some(preview), Some(bubble)) = (&preview, self.root.parent()) { crate::previews::redraw_when_loaded(preview, &bubble); }
+        *self.preview.borrow_mut() = preview;
         self.name.set_visible(brush);
         self.name.set_label(&item.label);
         self.tag.set_label(&item.label);
@@ -922,7 +924,9 @@ impl Bubble {
                 }
                 if let Some(id) = view.preview {
                     icon.set_margin_bottom(12);
-                    *imp.preview.borrow_mut() = Some(crate::previews::texture(id, theme));
+                    let preview = crate::previews::texture(id, theme);
+                    crate::previews::redraw_when_loaded(&preview, &bubble);
+                    *imp.preview.borrow_mut() = Some(preview);
                 }
                 *imp.icon.borrow_mut() = Some(icon);
                 overlay.set_child(Some(&column));
@@ -1925,7 +1929,9 @@ impl Bubbles {
                 bubble.queue_draw();
             }
             if retheme && let Some(id) = view.preview.filter(|_| bubble.imp().preview.borrow().is_some()) {
-                *bubble.imp().preview.borrow_mut() = Some(crate::previews::texture(id, state.theme));
+                let preview = crate::previews::texture(id, state.theme);
+                crate::previews::redraw_when_loaded(&preview, &bubble);
+                *bubble.imp().preview.borrow_mut() = Some(preview);
             }
             bubble.imp().display.set(Some((w.paint_view_color(), w.picker_headroom())));
             if let (Some(thumbnail), Some(layer)) = (bubble.imp().thumbnail.borrow().as_ref(), view.layer) {

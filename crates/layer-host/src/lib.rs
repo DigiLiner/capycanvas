@@ -144,7 +144,6 @@ impl NativeHost {
     pub fn poll_filter_previews(
         &mut self,
         filters: Vec<std::sync::Arc<str>>,
-        size: [u32; 2],
         cache: layer_ui::FilterPreviewCache,
     ) -> Result<layer_ui::FilterPreviewUpdate, String> {
         self.prepare_ui_previews()?;
@@ -152,7 +151,6 @@ impl NativeHost {
         self.session.poll_filter_previews(
             self.preview_clock.elapsed().as_nanos().min(u64::MAX as u128) as u64,
             if ready { filters } else { Vec::new() },
-            size,
             cache,
         )
     }
@@ -751,7 +749,6 @@ impl NativeHost {
             CommandReason { command: layer_ui::CommandId },
             FilterPreviews {
                 filters: Vec<std::sync::Arc<str>>,
-                size: [u32; 2],
                 #[serde(default)]
                 cache: layer_ui::FilterPreviewCache,
             },
@@ -928,10 +925,9 @@ impl NativeHost {
             Query::CommandReason { command } => json!(self.session.command_disabled_reason(command)),
             Query::FilterPreviews {
                 filters,
-                size,
                 cache,
             } => {
-                let update = self.poll_filter_previews(filters, size, cache)?;
+                let update = self.poll_filter_previews(filters, cache)?;
                 self.filter_preview_image = update.image;
                 json!(update.status)
             }
@@ -2153,7 +2149,7 @@ mod tests {
         let mut app = NativeHost::new(layer_ui::Platform::Android).unwrap();
         let response = app
             .query(json!({"type":"filter_previews",
-            "filters":["curves"], "size":[240,40]}))
+            "filters":["curves"]}))
             .unwrap();
         assert_eq!(response["pending"], false);
         assert_eq!(response["requests"], 0);

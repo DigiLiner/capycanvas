@@ -9,7 +9,7 @@ import {filterPreviewView} from './filter-previews.js';
 import {gradientEditor} from './gradient.js';
 import {chooseTexture,paperThumbnail} from './paper-picker.js';
 // Views of the shared Rust effect/property schema; no filter-specific UI logic.
-export function createEffectPanels({app,wake,catalog,state,panels,element,button,icon,dispatch,numberField,contentChanged,splitPicker=false,message,openMenu}) {
+export function createEffectPanels({app,wake,catalog,state,panels,element,button,icon,dispatch,numberField,contentChanged,splitPicker=false,message,openMenu,asset}) {
   const copy=liveCopy(app,"catalog").native_copy.color,common=liveCopy(app,"bootstrap_view").common;
   const send=action=>dispatch({type:"effect",action});
   const adjustments=element("div","filter-picker");adjustments.dataset.control="adjustments";
@@ -63,14 +63,16 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
       if(!splitPicker&&section!==choice.category){const heading=element("h3","filter-category");heading.dataset.category=choice.category;heading.append(icon(choice.category_icon),element("span","",choice.category_label));children.push(heading);section=choice.category;}
       let row=rows.get(choice.id);
       if(!row){
-        const node=button("",()=>dispatch(choice.action),"filter-row"),canvas=element("canvas"),label=element("span"),text=element("span","",choice.label);
+        const node=button("",()=>dispatch(choice.action),"filter-row"),label=element("span"),text=element("span","",choice.label);
+        const canvas=choice.bundled_preview?null:element("canvas"),preview=canvas??element("img");
         // Already-rasterized GPU previews: display tiny bitmap rows, without
         // allocating another accelerated drawing context for every list item.
-        canvas.getContext("2d",{willReadFrequently:true});
-        node.dataset.effect=choice.id;node.title=choice.tooltip;canvas.setAttribute("aria-hidden","true");canvas.draggable=false;
-        label.append(icon(choice.icon),text);
-        if(choice.animated){const mark=icon("animation");mark.classList.add("filter-animation");mark.setAttribute("aria-hidden","true");label.prepend(mark);}
-        node.append(canvas,label);row={node,canvas,label:text,key:null};rows.set(choice.id,row);
+        if(canvas)canvas.getContext("2d",{willReadFrequently:true});else{preview.src=asset(`filter-previews/${choice.id}.webp`);preview.alt="";}
+        node.dataset.effect=choice.id;node.title=choice.tooltip;preview.setAttribute("aria-hidden","true");preview.draggable=false;
+        label.append(icon(choice.icon));
+        if(choice.animated){const mark=icon("animation");mark.classList.add("filter-animation");mark.setAttribute("aria-hidden","true");label.append(mark);}
+        label.append(text);
+        node.append(preview,label);row={node,canvas,label:text,key:null};rows.set(choice.id,row);
       }
       row.node.setAttribute("aria-pressed",String(picker.selected===choice.id));children.push(row.node);
     }
@@ -78,12 +80,12 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
   }
   const disposePreviews=filterPreviewView(app,wake,()=>{
     if(!adjustments.isConnected||!adjustments.clientHeight)return null;
-    const width=Math.min(512,Math.max(80,Math.round(Math.max(1,list.clientWidth-12)*devicePixelRatio))),height=Math.min(128,Math.round(40*devicePixelRatio));
     const viewport=panels.get("adjustments").getBoundingClientRect(),filters=[];
-    for(const choice of state().adjustments){const rect=rows.get(choice.id)?.node.getBoundingClientRect();if(rect?.height&&rect.bottom>Math.max(0,viewport.top)&&rect.top<Math.min(innerHeight,viewport.bottom))filters.push(choice.id);}
-    return {filters,width,height};
+    for(const choice of state().adjustments){if(choice.bundled_preview)continue;const rect=rows.get(choice.id)?.node.getBoundingClientRect();if(rect?.height&&rect.bottom>Math.max(0,viewport.top)&&rect.top<Math.min(innerHeight,viewport.bottom))filters.push(choice.id);}
+    return {filters};
   },(images,key)=>{
     for(const [id,row] of rows){
+      if(!row.canvas)continue;
       const pixels=images.get(id);
       if(!pixels){if(row.key!==null){row.canvas.width=0;row.key=null;}continue;}
       if(row.key===key)continue;

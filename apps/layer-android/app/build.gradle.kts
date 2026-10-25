@@ -73,7 +73,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    sourceSets["main"].assets.srcDirs("../../layer-web/icons", "../../layer-web/brush-previews")
+    sourceSets["main"].assets.srcDirs("../../layer-web/icons", "../../layer-web/brush-previews", "../../layer-web/filter-previews")
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/capy/assets").get().asFile)
     sourceSets["main"].res.srcDir(layout.buildDirectory.dir("generated/capy/res").get().asFile)
     testOptions { animationsDisabled = true }

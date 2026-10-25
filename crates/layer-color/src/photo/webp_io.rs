@@ -58,6 +58,22 @@ pub fn write_webp_rows(
     encoder.encode(&pixels, extent[0], extent[1], color).map_err(err)
 }
 
+pub fn webp_extent(bytes: &[u8]) -> Result<[u32; 2], String> {
+    let (width, height) = image_webp::WebPDecoder::new(std::io::Cursor::new(bytes)).map_err(err)?.dimensions();
+    Ok([width, height])
+}
+
+pub fn decode_rgba8_webp(bytes: &[u8]) -> Result<([u32; 2], Vec<u8>), String> {
+    let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(bytes)).map_err(err)?;
+    let (width, height) = decoder.dimensions();
+    let mut pixels = vec![0; decoder.output_buffer_size().ok_or(MEMORY_ERROR)?];
+    decoder.read_image(&mut pixels).map_err(err)?;
+    if !decoder.has_alpha() {
+        pixels = pixels.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect();
+    }
+    Ok(([width, height], pixels))
+}
+
 pub(super) fn read(
     input: impl BufRead + Seek,
     limits: DecodeLimits,

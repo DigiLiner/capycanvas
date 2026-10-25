@@ -117,7 +117,7 @@ export async function checkPointwiseEffects({call,evaluate,settle,motion=true,wi
           await send({type:'filter_picker',action:{op:'category',category:null}});
           for(const [id,query] of [['shadows_highlights','Shadows'],['clarity','Clarity'],['dehaze','Dehaze']]) {
             await send({type:'filter_picker',action:{op:'search',query}});
-            await wait(`(()=>{const c=[...document.querySelectorAll('[data-effect="${id}"] canvas')].find(c=>c.getBoundingClientRect().height>0);return c?.width>0&&c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i,a)=>i%4===0&&Math.max(a[i],a[i+1],a[i+2])-Math.min(a[i],a[i+1],a[i+2])>20)})()`);
+            await wait(`(()=>{const pixels=(i=>{if(!i?.complete||!i.naturalWidth)return false;const c=new OffscreenCanvas(i.naturalWidth,i.naturalHeight),d=c.getContext('2d');d.drawImage(i,0,0);return d.getImageData(0,0,c.width,c.height).data;})([...document.querySelectorAll('[data-effect="${id}"] img')].find(i=>i.getBoundingClientRect().height>0));return !!pixels&&pixels.some((v,i,a)=>i%4===0&&Math.max(a[i],a[i+1],a[i+2])-Math.min(a[i],a[i+1],a[i+2])>20)})()`);
             await capture(`catalog-${id}-${width}-${theme}`);
           }
           await send({type:'customize',action:{type:'set_panel_visible',panel:'adjustments',visible:false}});await unchanged();

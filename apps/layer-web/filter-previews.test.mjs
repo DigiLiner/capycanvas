@@ -46,25 +46,18 @@ export async function checkFilterPreviews({call,evaluate,settle}) {
   assert.notDeepEqual(imported,blank,'The imported checker changes document pixels');
   await evaluate(`(()=>{
     const app=layerApp.app,original=app.poll_filter_previews,step=app.compile_startup_step;
-    const pipeline=GPUDevice.prototype.createRenderPipelineAsync;
-    window.previewCheck={pipelineCalls:0,optionalAdmissions:0,restore(){app.poll_filter_previews=original;app.compile_startup_step=step;GPUDevice.prototype.createRenderPipelineAsync=pipeline;}};
+    window.previewCheck={optionalAdmissions:0,restore(){app.poll_filter_previews=original;app.compile_startup_step=step;}};
     app.compile_startup_step=function(optional){
       if(optional)previewCheck.optionalAdmissions++;
       return step.call(this,optional);
-    };
-    GPUDevice.prototype.createRenderPipelineAsync=function(descriptor){
-      if(descriptor.label==='pointwise effect chain')previewCheck.pipelineCalls++;
-      return pipeline.call(this,descriptor);
     };
     document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:987,pointerType:'pen'}));
     app.poll_filter_previews=function(...args){
       const result=original.apply(this,args);
       previewCheck.status=result;previewCheck.ids=args[0];return result;
     };
-    previewCheck.pixels=id=>{
-      const c=[...document.querySelectorAll('[data-effect="'+id+'"] canvas')].find(c=>c.getBoundingClientRect().height>0);
-      return c?.width>0&&c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4===3&&v>0);
-    };
+    previewCheck.image=id=>[...document.querySelectorAll('[data-effect="'+id+'"] img')].find(i=>i.getBoundingClientRect().height>0);
+    previewCheck.pixels=id=>{const pixels=(i=>{if(!i?.complete||!i.naturalWidth)return false;const c=new OffscreenCanvas(i.naturalWidth,i.naturalHeight),d=c.getContext('2d');d.drawImage(i,0,0);return d.getImageData(0,0,c.width,c.height).data;})(previewCheck.image(id));return !!pixels&&pixels.some((v,i)=>i%4===3&&v>0);};
     layerApp.dispatch({type:'filter_picker',action:{op:'category',category:null}});
   })()`);
   const show=async()=>{
@@ -77,27 +70,23 @@ export async function checkFilterPreviews({call,evaluate,settle}) {
     await wait('layerApp.app.shader_work_pending(true)');
     await new Promise(resolve=>setTimeout(resolve,350));
     assert.equal(await evaluate('previewCheck.optionalAdmissions'),0,'Held contact defers optional compiler admission');
-    const requiredPipelines=await evaluate('previewCheck.pipelineCalls');
     await timed('release_ms',()=>evaluate("document.body.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:987,pointerType:'pen'}));undefined"),
-      `previewCheck.status?.retained.includes('curves')&&!previewCheck.status.pending&&previewCheck.pixels('curves')`);
+      `previewCheck.status&&!previewCheck.status.pending&&previewCheck.pixels('curves')`);
     assert.ok(await evaluate('previewCheck.optionalAdmissions>0'),'Optional compiler admission resumes after release');
-    assert.ok(await evaluate('previewCheck.pipelineCalls')>requiredPipelines,'Queued preview pipelines resume after release');
-    await wait(`previewCheck.ids.every(id=>previewCheck.status.retained.includes(id))&&!previewCheck.status.pending`);
-    const first=await status();assert.equal(first.error??null,null);
+    assert.deepEqual(await evaluate('previewCheck.ids'),[],'Built-in rows show bundled previews and request none');
+    const first=await status();assert.equal(first.error??null,null);assert.equal(first.requests,0);
     for(const theme of ['light','dark']){
       await evaluate(`(()=>{
         layerApp.dispatch({type:'set_theme',theme:${JSON.stringify(theme)}});
         const row=document.querySelector('[data-effect="curves"]');
-        previewCheck.row=row;previewCheck.canvas=row.querySelector('canvas');previewCheck.label=row.textContent;
-        previewCheck.pixelsBefore=Array.from(previewCheck.canvas.getContext('2d').getImageData(0,0,previewCheck.canvas.width,previewCheck.canvas.height).data);
+        previewCheck.row=row;previewCheck.preview=row.querySelector('img');previewCheck.label=row.textContent;
         const saved=JSON.stringify({...layerApp.state().settings,language:{Explicit:'ja'}});
         layerApp.dispatch({type:'restore_saved_settings',saved});
       })()`);
       await wait(`!layerApp.app.language_pending()&&document.documentElement.lang==='ja'`);
       assert.ok(await evaluate(`(()=>{
         const row=document.querySelector('[data-effect="curves"]');
-        const pixels=Array.from(previewCheck.canvas.getContext('2d').getImageData(0,0,previewCheck.canvas.width,previewCheck.canvas.height).data);
-        return row===previewCheck.row&&row.querySelector('canvas')===previewCheck.canvas&&row.textContent!==previewCheck.label&&pixels.every((v,i)=>v===previewCheck.pixelsBefore[i]);
+        return row===previewCheck.row&&row.querySelector('img')===previewCheck.preview&&row.textContent!==previewCheck.label&&previewCheck.pixels('curves');
       })()`),'Language publication retains filter rows, canvases and preview pixels');
       const localized=await status();assert.equal(localized.key,first.key);assert.equal(localized.requests,first.requests,'Language publication reuses the preview atlas');
       await capture(`web-preview-language-${theme}`);
@@ -107,20 +96,21 @@ export async function checkFilterPreviews({call,evaluate,settle}) {
     await evaluate(`document.querySelector('.dock-tab[data-panel=properties]').click()`);await settle();
     await wait(`previewCheck.ids.length===0&&!previewCheck.status.pending`);
     await show();
-    await wait(`previewCheck.ids.includes('curves')&&previewCheck.pixels('curves')`);
+    await wait(`previewCheck.pixels('curves')`);
     const reopened=await status();
     assert.equal(reopened.key,first.key);assert.equal(reopened.requests,first.requests,"Reopening reuses the atlas");
-    await timed('source_edit_ms',()=>evaluate(`layerApp.dispatch({type:'set_layer_opacity',opacity:.63})`),
-      `previewCheck.status.key!==${JSON.stringify(first.key)}&&previewCheck.status.retained.includes('curves')&&!previewCheck.status.pending&&previewCheck.pixels('curves')`);
-    const edited=await status();assert.ok(edited.requests>first.requests);assert.equal(edited.error??null,null);
+    await evaluate(`layerApp.dispatch({type:'set_layer_opacity',opacity:.63})`);await settle();
+    await wait(`!previewCheck.status.pending&&previewCheck.pixels('curves')`);
+    const edited=await status();assert.equal(edited.key,first.key,'Document edits keep the preview rows');
+    assert.equal(edited.requests,first.requests,'Previews show a fixed scene, so document edits never re-render them');assert.equal(edited.error??null,null);
     await timed('category_ms',()=>evaluate(`layerApp.dispatch({type:'filter_picker',action:{op:'category',category:'color'}})`),
-      `previewCheck.ids.includes('hue_saturation')&&previewCheck.status.retained.includes('hue_saturation')&&previewCheck.pixels('hue_saturation')&&!previewCheck.status.pending`);
+      `previewCheck.pixels('hue_saturation')&&!previewCheck.status.pending`);
     const category=await status();assert.ok(category.retained.length<=64);assert.equal(category.error??null,null);
     const beforeRestart=await histogram();
     await capture('web-preview-before-restart');
     const restartStarted=performance.now();await evaluate(`layerApp.restartGpu()`);
     await wait('layerApp.app.brush_ready()&&layerApp.startupTimes.complete!==null');
-    await wait(`previewCheck.status.key!==${JSON.stringify(category.key)}&&previewCheck.status.retained.includes('hue_saturation')&&previewCheck.pixels('hue_saturation')&&!previewCheck.status.pending`);
+    await wait(`previewCheck.status.key!==${JSON.stringify(category.key)}&&previewCheck.pixels('hue_saturation')&&!previewCheck.status.pending`);
     timing.restart_ms=performance.now()-restartStarted;
     const restarted=await status();assert.equal(restarted.error??null,null);
     const afterRestart=await histogram();
@@ -128,6 +118,6 @@ export async function checkFilterPreviews({call,evaluate,settle}) {
     assert.deepEqual(afterRestart,beforeRestart,'GPU replacement preserves imported artwork');
     await writeFile(`${directory}/web-preview-lifecycle.json`,JSON.stringify({first,reopened,edited,category,restarted,timing},null,2));
     console.log(`Filter preview timings: ${JSON.stringify(timing)}`);
-    console.log('PASS: GPU preview pixels, hide/reopen cache reuse, source/category changes and GPU replacement');
+    console.log('PASS: bundled preview rows, hide/reopen reuse, document edits, category changes and GPU replacement');
   } finally { await evaluate(`document.body.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:987,pointerType:'pen'}));previewCheck.restore();delete window.previewCheck`); }
 }

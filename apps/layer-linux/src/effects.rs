@@ -40,7 +40,7 @@ pub struct EffectPanels {
     picker_categories: RefCell<Vec<layer_ui::FilterCategoryChoice>>,
     picker_updating: Cell<bool>,
     picker_visible: RefCell<Vec<std::sync::Arc<str>>>,
-    picker_rows: RefCell<HashMap<std::sync::Arc<str>, (gtk::Button, gtk::Picture)>>,
+    picker_rows: RefCell<HashMap<std::sync::Arc<str>, (gtk::Button, gtk::Picture, bool)>>,
     preview_key: RefCell<Option<String>>,
     preview_color: Cell<Option<crate::display_color::ViewColor>>,
     preview_loaded: RefCell<HashMap<std::sync::Arc<str>, gtk::gdk::Texture>>,
@@ -171,7 +171,7 @@ impl EffectPanels {
         let scroller = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
-            .child(&picker_body)
+            .child(&gtk::Viewport::builder().vscroll_policy(gtk::ScrollablePolicy::Natural).child(&picker_body).build())
             .build());
         scroller.add_css_class("filter-picker-scroll");
         adjustments.append(&header);
@@ -483,7 +483,7 @@ impl EffectPanels {
                 model.splice(0, model.n_items(), &state.filter_categories.iter().map(|choice| choice.label.as_ref()).collect::<Vec<_>>());
             }
             for choice in &state.adjustments {
-                if let Some((button, _)) = self.picker_rows.borrow().get(&choice.id) {
+                if let Some((button, _, _)) = self.picker_rows.borrow().get(&choice.id) {
                     if let Some(label) = button.child().and_then(|body| body.last_child()).and_then(|caption| caption.last_child()).and_downcast::<gtk::Label>() { label.set_label(&choice.label); label.set_tooltip_text(Some(&choice.label)); }
                     button.set_tooltip_text(Some(&choice.tooltip));
                     button.update_property(&[gtk::accessible::Property::Label(&choice.label)]);
@@ -497,7 +497,7 @@ impl EffectPanels {
             if choice.id == picker.category { button.add_css_class("selected-tool"); }
             else { button.remove_css_class("selected-tool"); }
         }
-        for (id, (button, _)) in self.picker_rows.borrow().iter() {
+        for (id, (button, _, _)) in self.picker_rows.borrow().iter() {
             if picker.selected.as_ref() == Some(id) { button.add_css_class("selected-tool"); }
             else { button.remove_css_class("selected-tool"); }
         }
@@ -548,27 +548,25 @@ impl EffectPanels {
                 category = Some(choice.category.clone());
             }
             let row = rows.entry(choice.id.clone()).or_insert_with(|| {
-                let body: crate::tool_panels::PreviewRow = glib::Object::new();
+                let body = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 let picture = gtk::Picture::builder()
                     .can_shrink(true)
-                    .height_request(40)
-                    .content_fit(gtk::ContentFit::Fill)
+                    .content_fit(gtk::ContentFit::Contain)
                     .build();
-                let label = gtk::Label::new(Some(&choice.label));
-                label.set_xalign(1.);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                let caption = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-                caption.set_halign(gtk::Align::End);
+                if choice.bundled_preview {
+                    picture.set_paintable(Some(&crate::previews::filter_texture(&choice.id)));
+                } else {
+                    picture.set_paintable(Some(&empty_preview()));
+                }
+                let caption = crate::tool_panels::aligned_icon_label(&choice.label, &choice.icon, 1.);
                 if choice.animated {
                     let icon = crate::icons::image("layer-animation-symbolic");
                     icon.set_pixel_size(12);
                     icon.add_css_class("dim-label");
-                    caption.append(&icon);
+                    caption.insert_child_after(&icon, caption.first_child().as_ref());
                 }
-                caption.append(&crate::icons::image(&format!("layer-{}-symbolic", choice.icon)));
-                caption.append(&label);
-                picture.set_parent(&body);
-                caption.set_parent(&body);
+                body.append(&picture);
+                body.append(&caption);
                 let button = gtk::Button::builder()
                     .child(&body)
                     .tooltip_text(&choice.tooltip)
@@ -582,7 +580,7 @@ impl EffectPanels {
                     w,
                     move |_| w.dispatch(action.clone())
                 ));
-                (button, picture)
+                (button, picture, choice.bundled_preview)
             });
             if let Some(label) = row.0.child().and_then(|body| body.last_child()).and_then(|caption| caption.last_child()).and_downcast::<gtk::Label>() { label.set_label(&choice.label); label.set_tooltip_text(Some(&choice.label)); }
             row.0.set_tooltip_text(Some(&choice.tooltip));
@@ -617,7 +615,7 @@ impl EffectPanels {
                     .borrow()
                     .iter()
                     .filter_map(|id| {
-                        let (_, picture) = rows.get(id)?;
+                        let (_, picture, false) = rows.get(id)? else { return None };
                         let rect = picture.compute_bounds(&view.picker_scroller)?;
                         (rect.y() + rect.height() > 0.
                             && rect.y() < view.picker_scroller.height() as f32)
@@ -626,18 +624,13 @@ impl EffectPanels {
                     .collect::<Vec<_>>()
             })
             .collect();
-        let size = on_screen.iter().fold([80, 40], |size, (_, picture)| {
-            let scale = picture.scale_factor() as u32;
-            [size[0].max((picture.width().max(1) as u32 * scale).clamp(80, 512)),
-                size[1].max((40 * scale).min(128))]
-        });
-        let filters = on_screen.iter().map(|(id, _)| id.clone()).collect();
+        let filters = on_screen.into_iter().map(|(id, _)| id).collect();
         let cache = layer_ui::FilterPreviewCache {
             key: self.preview_key.borrow().clone(),
             rows: self.preview_loaded.borrow().keys().cloned().collect(),
         };
         let Ok(update) = gpu.session.poll_filter_previews(
-            glib::monotonic_time().max(0) as u64 * 1000, filters, size, cache,
+            glib::monotonic_time().max(0) as u64 * 1000, filters, cache,
         ) else { return; };
         self.preview_request.set(update.status.requests);
         if self.preview_key.borrow().as_ref() != Some(&update.status.key) {
@@ -662,10 +655,10 @@ impl EffectPanels {
         // Hidden retained pictures must release evicted rows too; otherwise
         // the native widgets would defeat the common cache bound.
         for view in std::iter::once(self).chain(extra.iter().map(|v| v.as_ref())) {
-            for (id, (_, picture)) in view.picker_rows.borrow().iter() {
+            for (id, (_, picture, _)) in view.picker_rows.borrow().iter().filter(|(_, (_, _, bundled))| !bundled) {
                 let texture = loaded.get(id);
-                if picture.paintable().as_ref() != texture.map(|t| t.upcast_ref()) {
-                    picture.set_paintable(texture);
+                if picture.paintable().and_downcast::<gtk::gdk::Texture>().as_ref() != texture {
+                    picture.set_paintable(Some(&texture.map_or_else(empty_preview, |t| t.clone().upcast())));
                 }
             }
         }
@@ -1145,6 +1138,10 @@ impl EffectPanels {
             self.stats_plot.queue_draw();
         }
     }
+}
+fn empty_preview() -> gtk::gdk::Paintable {
+    let [width, height] = layer_render::FILTER_PREVIEW_SIZE;
+    gtk::gdk::Paintable::new_empty(width as i32, height as i32)
 }
 fn same_property_kind(a: &PropertyKind, b: &PropertyKind) -> bool {
     match (a, b) {

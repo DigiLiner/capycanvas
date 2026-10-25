@@ -10103,7 +10103,7 @@ mod tests {
         assert_eq!(s.effect_catalog.get("test:unsharp_mask").unwrap().label(),&layer_core::ResourceLabel::from("Runtime sharpness"));
         assert_eq!(current.value("amount"), Some(&EffectValue::Number(175.)));
         assert_ne!(s.state.layer_properties.controls[0].label, "Runtime radius");
-        assert_eq!(s.filter_preview_revision().2, 1);
+        assert_eq!(s.filter_preview_revision(), 1);
         s.frame(4, 4).unwrap();
         // Device-side compilation failure must not publish any metadata or layers.
         let mut changed:serde_json::Value=serde_json::from_str(&json).unwrap();

@@ -25,6 +25,7 @@ __declspec(dllimport) CapyString capy_preview_metadata(CapyPreview);
 __declspec(dllimport) size_t capy_preview_length(CapyPreview);
 __declspec(dllimport) bool capy_preview_copy(CapyPreview, size_t offset, uint8_t* output, size_t length);
 __declspec(dllimport) void capy_preview_free(CapyPreview);
+__declspec(dllimport) CapyPreview capy_decode_webp(const uint8_t* data, size_t length, uint32_t* width, uint32_t* height);
 typedef struct CapyPointer {
     uint64_t id, timestamp_ns, sequence, view_revision;
     float x, y, pressure, tilt_x, tilt_y, twist, distance;

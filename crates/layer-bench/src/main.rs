@@ -457,6 +457,23 @@ impl Canvas {
     }
 
     fn write_png(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
+        let ([width, height], rgba) = self.settled_rgba()?;
+        let file = BufWriter::new(File::create(path)?);
+        let mut encoder = png::Encoder::new(file, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder.write_header()?;
+        writer.write_image_data(&rgba)?;
+        Ok(())
+    }
+
+    fn write_webp(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
+        let ([width, height], rgba) = self.settled_rgba()?;
+        Ok(fs::write(path, layer_render_wgpu::bundled_preview_webp(width, height, &rgba)?)?)
+    }
+
+    fn settled_rgba(&mut self) -> Result<([u32; 2], Vec<u8>), Box<dyn Error>> {
         let deadline = Instant::now() + Duration::from_secs(30);
         while self.engine.has_pending_input() || self.engine.has_pending_document_edits() {
             if Instant::now() >= deadline {
@@ -468,19 +485,12 @@ impl Canvas {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
-        let [width, height] = self.engine.backend().document_extent();
+        let extent = self.engine.backend().document_extent();
         let rgba = self.engine
             .backend_mut()
             .readback_srgb_rgba8()
             .map_err(|e| e.to_string())?;
-        let file = BufWriter::new(File::create(path)?);
-        let mut encoder = png::Encoder::new(file, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_compression(png::Compression::Fast);
-        let mut writer = encoder.write_header()?;
-        writer.write_image_data(&rgba)?;
-        Ok(())
+        Ok((extent, rgba))
     }
 
     fn next_event(&mut self, sample: Sample, phase: PenPhase) -> PenEvent {

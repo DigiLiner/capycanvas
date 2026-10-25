@@ -91,7 +91,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       const key=json([v.icon,v.preview,v.variants,v.dots,state().theme,thumbnailOwner,v.layers]);
       if(r.faceKey!==key) {
         r.faceKey=key;r.face.replaceChildren();
-        if(v.preview!=null){const img=element('img','bubble-brush-preview');img.src=asset(`brush-previews/${v.preview}-${state().theme}.png`);img.alt='';img.draggable=false;r.face.append(img);}
+        if(v.preview!=null){const img=element('img','bubble-brush-preview');img.src=asset(`brush-previews/${v.preview}-${state().theme}.webp`);img.alt='';img.draggable=false;r.face.append(img);}
         r.face.append(icon(v.icon));
         if(v.variants)r.face.append(customization.variationMarker());
         for(const[center,i]of packet.dots.map((center,i)=>[center,i])){const dot=element('i',`bubble-dot${v.dots[i]?' selected':''}`);place(dot,center.map(x=>x+v.face[0]/2),[3.5,3.5]);r.face.append(dot);}
@@ -140,7 +140,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       if(!slot||slot.key!==key) {
         retire(r,slot?.node);slot?.tag?.remove();const node=button('',()=>{const current=r.view.chooser[i];if(current){send({type:'choose',id:v.id,phase:'down',position:current.center});send({type:'choose',id:v.id,phase:'up',position:current.center});}},'bubble-choice bubble-surface');
         node.classList.toggle('bubble-brush',item.kind==='brush');node.setAttribute('aria-label',item.label);node.title=item.label;
-        if(item.preview!=null){const img=element('img');img.src=asset(`brush-previews/${item.preview}-${state().theme}.png`);img.alt='';img.draggable=false;node.append(img,element('span','',item.label));}else node.append(icon(item.icon));
+        if(item.preview!=null){const img=element('img');img.src=asset(`brush-previews/${item.preview}-${state().theme}.webp`);img.alt='';img.draggable=false;node.append(img,element('span','',item.label));}else node.append(icon(item.icon));
         r.chooser.append(node);slot={node,key};r.items.set(i,slot);transition(r,node,node,true,180,.6,fresh++*(item.kind==='brush'?16:14));
       }
       slot.node.disabled=!item.enabled;slot.node.classList.toggle('bubble-disabled',!item.enabled);slot.node.classList.toggle('bubble-selected',item.selected);

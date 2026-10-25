@@ -2,7 +2,7 @@
 #include "UiControls.h"
 
 inline winrt::Microsoft::UI::Xaml::Media::ImageSource BrushPreview(int id,winrt::hstring const& theme){
-    return winrt::Microsoft::UI::Xaml::Media::Imaging::BitmapImage(CapyUi::asset(L"brush-previews/"+std::to_wstring(id)+L"-"+std::wstring(theme.c_str())+L".png"));
+    return CapyUi::bundledImage(L"brush-previews/"+std::to_wstring(id)+L"-"+std::wstring(theme.c_str())+L".webp");
 }
 
 winrt::Microsoft::UI::Xaml::FrameworkElement ToolSetPanel(

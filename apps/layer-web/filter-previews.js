@@ -10,9 +10,8 @@ export function filterPreviewView(app,wake,geometry,present){
       cancelWake();let wait=200;
       try{
         const visible=document.hidden?[]:[...views].map(v=>v.geometry()).filter(Boolean);
-        const width=Math.max(80,...visible.map(v=>v.width)),height=Math.max(1,...visible.map(v=>v.height));
         const ids=[...new Set(visible.flatMap(v=>v.filters))];
-        const status=app.poll_filter_previews(ids,{key,rows:[...images.keys()]},width,height,performance.now());
+        const status=app.poll_filter_previews(ids,{key,rows:[...images.keys()]},performance.now());
         if(key!==status.key){images.clear();key=status.key;}
         const retained=new Set(status.retained);
         for(const id of images.keys())if(!retained.has(id))images.delete(id);

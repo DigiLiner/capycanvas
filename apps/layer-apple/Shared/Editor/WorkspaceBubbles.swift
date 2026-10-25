@@ -175,7 +175,7 @@ private struct BubbleParts: View {
                         .opacity(view["enabled"].bool ? 1 : 0.45)
                 }
                 if !view["preview"].isNull {
-                    Image("preview-\(view["preview"].uint)-\(store.state["theme"].string)").resizable()
+                    BundledPreview(name: "preview-\(view["preview"].uint)-\(store.state["theme"].string)")
                         .frame(width: 32, height: 8).opacity(0.78).offset(y: 11)
                 }
             }
@@ -202,7 +202,7 @@ private struct BubbleParts: View {
                     Text(choice["label"].string).lineLimit(1).padding(.horizontal, 8).padding(.bottom, 5)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).opacity(0.8 * enabled)
                     if !choice["preview"].isNull {
-                        Image("preview-\(choice["preview"].uint)-\(store.state["theme"].string)").resizable()
+                        BundledPreview(name: "preview-\(choice["preview"].uint)-\(store.state["theme"].string)")
                             .frame(width: size.width * 0.68, height: 14).offset(y: -11)
                     } else { SharedIcon(name: choice["icon"].string, size: 18).offset(y: -8).opacity(enabled) }
                 } else { SharedIcon(name: choice["icon"].string, size: 18).opacity(enabled) }

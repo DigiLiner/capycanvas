@@ -20,25 +20,23 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
     StackPanel rows;
     ScrollView list;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
-    struct PreviewRow {hstring id;Button button{nullptr};Image image{nullptr};TextBlock text{nullptr},heading{nullptr};};
+    struct PreviewRow {hstring id;Button button{nullptr};Image image{nullptr};TextBlock text{nullptr},heading{nullptr};bool bundled=false;};
     std::vector<PreviewRow> previews;
     ~FiltersView(){if(timer)timer.Stop();RemoveFilterPreviewView(data->previews,reinterpret_cast<uint64_t>(this));}
     void preview(){
         if(!root.IsLoaded()||!root.XamlRoot()||!root.XamlRoot().IsHostVisible()||list.ActualHeight()<=0){RemoveFilterPreviewView(data->previews,reinterpret_cast<uint64_t>(this));return;}
-        double density=root.XamlRoot().RasterizationScale();
-        int width=std::clamp(int(std::round((list.ActualWidth()-12)*density)),80,512);
-        int height=std::clamp(int(std::round(40*density)),1,128);
         auto file=object(data->state,L"document_file");
         auto context=file.GetNamedValue(L"epoch").Stringify();
         std::vector<hstring> visible;
         for(auto const& row:previews){
+            if(row.bundled)continue;
             auto rect=row.button.TransformToVisual(list).TransformBounds({0,0,float(row.button.ActualWidth()),float(row.button.ActualHeight())});
             if(rect.Y+rect.Height>0&&rect.Y<list.ActualHeight())visible.push_back(row.id);
             auto source=FilterPreviewSource(data->previews,context,row.id);
             if(row.image.Source()!=source)row.image.Source(source);
             AutomationProperties::SetItemStatus(row.image,source?data->caption(L"header",L"ready"):data->caption(L"layers",L"pending"));
         }
-        RefreshFilterPreviews(data->previews,reinterpret_cast<uint64_t>(this),context,width,height,visible);
+        RefreshFilterPreviews(data->previews,reinterpret_cast<uint64_t>(this),context,visible);
     }
     hstring catalogKey,listKey;
     std::optional<hstring> searchDraft;
@@ -123,18 +121,29 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
                 auto pick=button(data,str(choice,L"label"),[data=data,action=object(choice,L"action")]{data->dispatch(action);});
                 pick.HorizontalAlignment(HorizontalAlignment::Stretch);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
                 pick.Padding({6,3,6,3});
-                StackPanel content;Image preview;preview.Height(40);preview.Stretch(Stretch::Fill);preview.IsHitTestVisible(false);
+                StackPanel content;content.Spacing(4);Image preview;preview.Stretch(Stretch::Uniform);preview.IsHitTestVisible(false);
+                preview.HorizontalAlignment(HorizontalAlignment::Stretch);
+                preview.SizeChanged([](winrt::Windows::Foundation::IInspectable const& sender,SizeChangedEventArgs const& size){
+                    auto image=sender.as<Image>();auto height=size.NewSize().Width/6;if(!(std::abs(image.Height()-height)<.5))image.Height(height);
+                });
+                bool bundled=flag(choice,L"bundled_preview");
+                if(bundled){
+                    AutomationProperties::SetItemStatus(preview,data->caption(L"layers",L"pending"));
+                    preview.Source(CapyUi::bundledImage(L"filter-previews/"+std::wstring(str(choice,L"id").c_str())+L".webp",
+                        [data=data,image=winrt::make_weak(preview)]{if(auto shown=image.get())AutomationProperties::SetItemStatus(shown,data->caption(L"header",L"ready"));}));
+                }
                 AutomationProperties::SetName(preview,str(choice,L"label"));
                 AutomationProperties::SetAutomationId(preview,L"filter-preview-"+str(choice,L"id"));
                 content.Children().Append(preview);
-                Grid caption;caption.HorizontalAlignment(HorizontalAlignment::Right);ColumnDefinition mark;mark.Width({1,GridUnitType::Auto});caption.ColumnDefinitions().Append(mark);
+                Grid caption;caption.ColumnSpacing(6);ColumnDefinition mark;mark.Width({1,GridUnitType::Auto});caption.ColumnDefinitions().Append(mark);
                 ColumnDefinition name;name.Width({1,GridUnitType::Star});caption.ColumnDefinitions().Append(name);
-                StackPanel marks;marks.Orientation(Orientation::Horizontal);marks.Spacing(4);marks.Margin({0,0,4,0});
+                StackPanel marks;marks.Orientation(Orientation::Horizontal);marks.Spacing(6);
+                marks.Children().Append(icon(str(choice,L"icon",L"adjustments"),data->theme()));
                 if(flag(choice,L"animated")){auto animation=icon(L"animation",data->theme(),12);animation.Opacity(.55);marks.Children().Append(animation);}
-                marks.Children().Append(icon(str(choice,L"icon",L"adjustments"),data->theme()));caption.Children().Append(marks);
-                auto text=label(data,str(choice,L"label"));text.LineStackingStrategy(LineStackingStrategy::BlockLineHeight);text.LineHeight(18);text.TextTrimming(TextTrimming::CharacterEllipsis);text.TextAlignment(TextAlignment::Right);
+                caption.Children().Append(marks);
+                auto text=label(data,str(choice,L"label"),true);text.LineStackingStrategy(LineStackingStrategy::BlockLineHeight);text.LineHeight(18);text.TextTrimming(TextTrimming::CharacterEllipsis);text.TextAlignment(TextAlignment::Right);
                 Grid::SetColumn(text,1);caption.Children().Append(text);content.Children().Append(caption);pick.Content(content);
-                previews.push_back({str(choice,L"id"),pick,preview,text,headingText});
+                previews.push_back({str(choice,L"id"),pick,preview,text,headingText,bundled});
                 AutomationProperties::SetAutomationId(pick,L"filter-"+str(choice,L"id"));
                 CapyUi::tooltip(pick,str(choice,L"tooltip"));rows.Children().Append(pick);
             }

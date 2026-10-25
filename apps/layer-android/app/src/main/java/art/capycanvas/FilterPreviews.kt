@@ -18,7 +18,7 @@ internal data class FilterPreviewTile(val key: String, val image: ImageBitmap)
 /** One native image cache/clock per editor, shared by docked and drawer views.
  * Rust owns admission, revisions, batching, cancellation and cache retention. */
 internal class FilterPreviewCache(private val host: CanvasHost) {
-    private val views = mutableMapOf<Any, Pair<List<String>, List<Int>>>()
+    private val views = mutableMapOf<Any, List<String>>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var job: Job? = null
     private var enabled = false
@@ -30,8 +30,8 @@ internal class FilterPreviewCache(private val host: CanvasHost) {
         private set
     val images = mutableStateMapOf<String, FilterPreviewTile>()
 
-    fun update(view: Any, ids: List<String>, size: List<Int>) {
-        views[view] = ids to size
+    fun update(view: Any, ids: List<String>) {
+        views[view] = ids
         schedule()
     }
     fun remove(view: Any) { views.remove(view); schedule() }
@@ -45,14 +45,11 @@ internal class FilterPreviewCache(private val host: CanvasHost) {
             try {
                 do {
                     val visible = if (enabled) views.values.toList() else emptyList()
-                    val ids = visible.flatMap { it.first }.distinct()
-                    val size = listOf(visible.maxOfOrNull { it.second[0] } ?: 80,
-                        visible.maxOfOrNull { it.second[1] } ?: 40)
+                    val ids = visible.flatten().distinct()
                     val generation = delivery
                     val response = suspendCancellableCoroutine<FilterPreviewReply?> { continuation ->
                         host.filterPreviews(obj("type" to "filter_previews", "filters" to JSONArray(ids),
-                            "cache" to obj("key" to key, "rows" to JSONArray(images.keys.toList())),
-                            "size" to JSONArray(size))) { if (continuation.isActive) continuation.resume(it) }
+                            "cache" to obj("key" to key, "rows" to JSONArray(images.keys.toList())))) { if (continuation.isActive) continuation.resume(it) }
                     }
                     var waitMs = 1000L
                     if (response != null && generation == delivery && current(response.status)) {

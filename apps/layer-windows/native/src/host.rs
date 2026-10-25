@@ -1041,7 +1041,6 @@ struct WindowsMetadata {
     windows_workspace: Option<serde_json::Value>,
     windows_settings_close: Option<crate::settings::CloseStatus>,
     windows_scopes: u64,
-    windows_filter_source: [String; 2],
     windows_request_copy: serde_json::Map<String, serde_json::Value>,
 }
 /// # Safety
@@ -1059,7 +1058,6 @@ pub unsafe extern "C" fn capy_snapshot(host: u64, info: *mut CapySnapshotInfo) -
         let localization = if host.localization_generation != Some(generation) {
             Some(crate::settings::localization_presentation(&mut host.native)?)
         } else { None };
-        let (_, occurrence, catalog) = host.native.session.filter_preview_revision();
         let metadata = WindowsMetadata {
             localization,
             windows_gpu_generation: host.gpu_generation,
@@ -1092,7 +1090,6 @@ pub unsafe extern "C" fn capy_snapshot(host: u64, info: *mut CapySnapshotInfo) -
             windows_workspace: host.workspaces.as_ref().map(|owner|owner.with(|service|serde_json::to_value(service.status(&host.native)).map_err(err))).transpose()?,
             windows_settings_close: host.services.as_ref().map(|s| s.close_status().clone()),
             windows_scopes: host.scopes.revision(host.native.session.state()),
-            windows_filter_source: [occurrence.to_string(), catalog.to_string()],
             windows_request_copy: {
                 let localization = host.native.session.localization();
                 host.native.session.state().requests.iter().filter_map(|request| match &request.kind {

@@ -271,7 +271,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-panel .gradient-editor > box > button { min-width: 24px; padding: 0; }
 .dock-panel dropdown > button, .dock-panel menubutton > button { min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); }
 .dock-panel .brush-choice { padding: 3px 6px; }
-.brush-choice label { font-size: 1em; }
+.brush-choice label, .filter-row label { font-size: 1em; }
 .tool-groups flowboxchild { padding: 0; margin: 0; }
 .dock-panel .tool-group { padding: 0 6px; }
 .selection-modes button { min-width: 0; padding: 0; }
@@ -339,7 +339,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .filter-picker-header entry > text { padding: 0; min-height: 0; }
 .filter-picker-header entry > image { min-height: 16px; min-width: 16px; padding: 0; margin: 0; -gtk-icon-size: 16px; }
 .filter-picker-body { margin: 0 var(--panel-inset) var(--panel-inset); }
-.filter-picker .filter-row { padding: 3px 6px; min-width: 0; min-height: 0; font-weight: normal; }
+.filter-picker .filter-row { padding: 3px 6px; min-width: 0; min-height: 0; }
 .filter-category { margin: 8px; font-weight: bold; opacity: .55; }
 .effect-properties { margin: var(--panel-inset); }
 .properties-header > label { font-size: .9em; }

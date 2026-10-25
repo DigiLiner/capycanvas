@@ -618,7 +618,10 @@ time does not establish a frame rate. Offscreen GPU numbers from
 `cargo run --locked --release -p layer-bench -- --scenario <name>`
 ([benchmark workloads](gpu-raster-benchmarks.md)) help compare revisions on one
 machine but never replace a measurement on the tier's device. Regenerate bundled
-brush previews with `cargo run --locked --release -p layer-bench -- --brush-previews [dir]`.
+brush previews with `cargo run --locked --release -p layer-bench -- --brush-previews [dir]`
+and bundled filter previews with
+`cargo test --locked -p layer-render-wgpu --features bake write_bundled_filter_previews -- --ignored`.
+Both write lossy WebP through `layer_render_wgpu::bundled_preview_webp`.
 Blenders, Liquify, the retouching tools and the Eraser preview on greyscale scenes
 that fill the swatch: a shaded stroke-shaped tube for most blenders, a halftone
 for Liquify, and source and brush rings for Clone and Healing.

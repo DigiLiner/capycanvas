@@ -124,18 +124,16 @@ fn scene_value(v: Vertex) -> vec4<f32> {
     if settings.options.x==12. {return scene_space(scene_image(v))*settings.options.y;}
     let op = u32(settings.options.x);
     if op == 0u { return settings.color; }
-    if op == 9u {
-        let p=v.uv;
-        let bands=.5+.5*cos(vec3<f32>(0.,2.,4.)+p.x*8.);
-        let light=.25+.65*p.y;
-        let detail=select(.8,1.,(u32(p.x*48.)+u32(p.y*12.))%2u==0u);
-        return vec4<f32>(bands*light*detail,1.);
-    }
     if op == 10u {
-        let p=settings.color.xy+v.uv*settings.color.zw;
-        let ink=scene_sample(front,p/vec2<f32>(textureDimensions(front)));
-        let mask=scene_read(back,v).a;
-        return hdr_map_sdr(ink,settings.operation_linear,settings.operation_offset)*mask;
+        let spread=max(settings.color.zw/settings.rect.zw-1.,vec2<f32>(0.))/3.;
+        var ink=vec4<f32>(0.);
+        for (var j=-1;j<=1;j++) {
+            for (var i=-1;i<=1;i++) {
+                let p=settings.color.xy+v.uv*settings.color.zw+vec2<f32>(f32(i),f32(j))*spread;
+                ink+=scene_sample(front,p/vec2<f32>(textureDimensions(front)));
+            }
+        }
+        return hdr_map_sdr(ink/9.,settings.operation_linear,settings.operation_offset);
     }
     let raw = scene_read(front,v);
     if op == 6u || op == 11u || op == 18u {

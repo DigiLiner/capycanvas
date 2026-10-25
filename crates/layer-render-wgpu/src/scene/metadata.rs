@@ -94,21 +94,6 @@ impl Metadata {
     }
 }
 
-#[derive(PartialEq)]
-pub(super) struct PreviewMetadata {
-    metadata: Metadata,
-    raster: Option<u64>,
-    mask_raster: Option<u64>,
-}
-impl PreviewMetadata {
-    pub(super) fn new(scene: layer_core::SceneView<'_>, handle: OccurrenceHandle) -> Self {
-        Self {
-            metadata: Metadata::new(scene, handle), raster: scene.paint_source(handle).map(|paint| paint.raster.identity()),
-            mask_raster: scene.mask(handle).map(|(_, source)| source.raster.identity()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,15 +140,12 @@ mod tests {
         let source = Arc::downgrade(artwork.paint.get(paint).unwrap().base.as_ref().unwrap().image.storage());
         let raster = Arc::downgrade(&artwork.paint.get(paint).unwrap().raster.wait_data().unwrap());
         let key = Metadata::new(SceneView::new(&artwork, &index), handle);
-        let preview = PreviewMetadata::new(SceneView::new(&artwork, &index), handle);
         assert!(key == Metadata::new(SceneView::new(&artwork, &index), handle));
-        assert!(preview == PreviewMetadata::new(SceneView::new(&artwork, &index), handle));
         assert_eq!(source.strong_count(), 1);
         let original = artwork.paint.get(paint).unwrap().base.as_ref().unwrap().image.storage();
         let replacement = Arc::new((**original).clone());
         artwork.paint.get_mut(paint).unwrap().base.as_mut().unwrap().image = layer_core::authored::Image::new(replacement);
         assert!(key != Metadata::new(SceneView::new(&artwork, &index), handle), "new source interpretation invalidates pixels");
-        assert!(preview != PreviewMetadata::new(SceneView::new(&artwork, &index), handle));
         assert_eq!(source.strong_count(), 0);
         artwork.paint.get_mut(paint).unwrap().raster = Default::default();
         assert_eq!(

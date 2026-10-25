@@ -56,12 +56,15 @@ write_json(manifest / "Contents.json", {
     "data": [{"filename": "layers.json", "idiom": "universal", "universal-type-identifier": "public.json"}],
     "info": {"version": 1, "author": "xcode"},
 })
-for source in sorted((ROOT / "apps/layer-web/brush-previews").glob("*.png")):
-    dest = CATALOG / f"preview-{source.stem}.imageset"
-    dest.mkdir(exist_ok=True)
-    shutil.copy2(source, dest / source.name)
-    write_json(dest / "Contents.json", {"images": [{"filename": source.name, "idiom": "universal"}],
-        "info": {"version": 1, "author": "xcode"}})
+for prefix, folder in (("preview", "brush-previews"), ("filter", "filter-previews")):
+    for stale in CATALOG.glob(f"{prefix}-*.imageset"):
+        shutil.rmtree(stale)
+    for source in sorted((ROOT / "apps/layer-web" / folder).glob("*.webp")):
+        dest = CATALOG / f"{prefix}-{source.stem}.dataset"
+        dest.mkdir(exist_ok=True)
+        shutil.copy2(source, dest / source.name)
+        write_json(dest / "Contents.json", {"data": [{"filename": source.name, "idiom": "universal", "universal-type-identifier": "org.webmproject.webp"}],
+            "info": {"version": 1, "author": "xcode"}})
 app_icon = CATALOG / "AppIcon.appiconset"
 app_icon.mkdir(exist_ok=True)
 shutil.copy2(APP / "iOS/AppIcon.png", app_icon / "AppIcon.png")

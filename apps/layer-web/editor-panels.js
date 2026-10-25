@@ -63,7 +63,7 @@ export function createEditorPanels({ selectionUi, app, rasterWorker:fieldWorker,
       }
       for (const {node,image,kind,index} of rows) {
         const item=view[kind][index];node.disabled=item.enabled===false;node.dataset.toolChoice=item.label;node.setAttribute("aria-label",item.label);node.title=app.action_tooltip(item.label,item.action);
-        if(image){const source=asset(`brush-previews/${item.preview}-${state().theme}.png`);if(image.getAttribute('src')!==source)image.src=source;}
+        if(image){const source=asset(`brush-previews/${item.preview}-${state().theme}.webp`);if(image.getAttribute('src')!==source)image.src=source;}
         const pressed=String(item.selected);if(node.getAttribute("aria-pressed")!==pressed)node.setAttribute("aria-pressed",pressed);
       }
     };

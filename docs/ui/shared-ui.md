@@ -403,10 +403,12 @@ their own row otherwise. Hosts hide it after about 4 s (answering
 never resize its viewport or GPU surface. `host_error` is kept for file and
 renderer errors.
 
-Brush previews are cached transparent PNGs from the actual GPU presets, with
-destination paint seeded for blender/eraser/liquify examples. GTK bundles the
-same dark/light assets served by the web client. `gpu-bench --brush-previews`
-regenerates them; no live brush jobs or canvas readbacks run when opening the picker.
+Brush previews are transparent lossy WebP files from the actual GPU presets, with
+destination paint seeded for blender/eraser/liquify examples. Every host ships
+the same dark/light files and decodes them off the UI thread.
+`gpu-bench --brush-previews` regenerates them; no live brush jobs or canvas
+readbacks run when opening the picker. Built-in filter rows likewise show bundled
+WebP files; see [filter previews](../internals/rendering.md).
 
 Brush picker labels, preset identities, and size choices have one Rust source.
 Picker colors are display-encoded sRGB; Rust converts them to linear brush

@@ -640,14 +640,14 @@ try {
     $original=Preview-Hash 'curves';if(!$original){throw 'No initial preview pixels'}
     $rowIdentity=(Control 'filter-curves').GetRuntimeId() -join ':'
     Capture 'initial-previews'
+    $revision=(Model).state.document_file.revision
     Invoke 'Test stroke' -Name
-    Wait-Until {(Model).state.document_file.modified} 'Stroke not acknowledged'
-    Wait-Until {$changed=Preview-Hash 'curves';$changed -and $changed -ne $original} 'Preview did not sample edited paint' 15
+    Wait-Until {(Model).state.document_file.revision -gt $revision -and ((Model).state.commands|Where-Object id -eq 'export_document').enabled} 'Stroke did not commit'
+    if((Preview-Hash 'curves') -ne $original){throw 'Document edit changed the bundled preview'}
     if(((Control 'filter-curves').GetRuntimeId() -join ':') -ne $rowIdentity){throw 'Document edit replaced the filter row'}
     Capture 'paint-previews'
     Invoke 'Undo' -Name
     Wait-Until {!(Model).state.document_file.modified} 'Undo did not restore checkpoint'
-    Wait-Until {(Preview-Hash 'curves') -eq $original} 'Undo did not restore preview pixels' 15
     Choose 'filter-category' 'Color'
     Wait-Until {(Model).state.filter_picker.category -eq 'color'} 'Category did not reach shared picker'
     Wait-Until {(Find 'filter-preview-hue_saturation').Current.ItemStatus -eq 'Ready'} 'New category preview not ready' 15

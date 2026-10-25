@@ -31,7 +31,7 @@ pub fn generate(directory: &Path) -> Result<(), Box<dyn Error>> {
                     stroke(&mut canvas, -3.0)?;
                 }
             }
-            canvas.write_png(&directory.join(format!("{}-{theme}.png", choice.id)))?;
+            canvas.write_webp(&directory.join(format!("{}-{theme}.webp", choice.id)))?;
             eprintln!("swatch: {} ({theme})", choice.label);
         }
     }

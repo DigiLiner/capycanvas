@@ -14,10 +14,12 @@ foreach($theme in @('dark','light')) {
         }
     }
 }
-$previews=Join-Path $Destination 'brush-previews'
-[IO.Directory]::CreateDirectory($previews) | Out-Null
-Get-ChildItem -LiteralPath (Join-Path $web 'brush-previews') -Filter '*.png' -File |
-    Copy-Item -Destination $previews -Force
+foreach($folder in 'brush-previews','filter-previews'){
+    $previews=Join-Path $Destination $folder
+    [IO.Directory]::CreateDirectory($previews) | Out-Null
+    Get-ChildItem -LiteralPath (Join-Path $web $folder) -Filter '*.webp' -File |
+        Copy-Item -Destination $previews -Force
+}
 
 # These three monochrome controls rotate and change ink on hover. Keep their
 # shared SVG geometry as native vectors, so rotation never resamples a bitmap.

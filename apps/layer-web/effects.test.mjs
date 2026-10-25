@@ -156,16 +156,16 @@ export async function checkAdjustments({call,evaluate,settle}) {
   await evaluate(`new Promise((resolve,reject)=>{
     const deadline=performance.now()+20000;
     const ready=()=>{
-      const canvas=document.querySelector('.filter-row canvas');
-      if(canvas?.getContext('2d').getImageData(0,0,200,40).data.some((v,i)=>i%4===3&&v>0))resolve(true);
-      else if(performance.now()>deadline)reject(Error('GPU filter preview timed out'));
+      const pixels=(i=>{if(!i?.complete||!i.naturalWidth)return false;const c=new OffscreenCanvas(i.naturalWidth,i.naturalHeight),d=c.getContext('2d');d.drawImage(i,0,0);return d.getImageData(0,0,c.width,c.height).data;})(document.querySelector('.filter-row img'));
+      if(pixels&&pixels.some((v,i)=>i%4===3&&v>0))resolve(true);
+      else if(performance.now()>deadline)reject(Error('Bundled filter preview timed out'));
       else setTimeout(ready,100);
     };ready();
   })`);
   await capture("01-adjustments");
   assert.ok(await evaluate("document.querySelector('.filter-row').getBoundingClientRect().width>160"));
-  assert.equal(await evaluate("document.querySelector('.filter-row canvas').getBoundingClientRect().height"),40);
-  assert.ok(await evaluate("document.querySelector('.filter-row canvas').getContext('2d').getImageData(0,0,200,40).data.some((v,i)=>i%4===3&&v>0)"),"GPU preview pixels reach the visible row");
+  assert.equal(await evaluate("document.querySelector('.filter-row img').getBoundingClientRect().height"),40);
+  assert.equal(await evaluate("document.querySelector('.filter-row img').naturalWidth"),480,"Bundled preview rows reach the visible row");
   await send({type:"filter_picker",action:{op:"category",category:"distort"}});
   await send({type:"filter_picker",action:{op:"toggle_search"}});
   await evaluate("(()=>{const input=document.querySelector('.filter-picker-header input');input.value='glass';input.dispatchEvent(new Event('input',{bubbles:true}));})()");

@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "BitmapUpload.h"
 #include "FilterPreviews.h"
 #include "LayerThumbnails.h"
 #include "PointerGesture.h"
@@ -91,10 +92,15 @@ inline void place(FrameworkElement const& element,J const& rect){
     Canvas::SetLeft(element,num(rect,L"x"));Canvas::SetTop(element,num(rect,L"y"));
     element.Width(num(rect,L"width"));element.Height(num(rect,L"height"));
 }
-inline Windows::Foundation::Uri asset(std::wstring const& relative){
+inline std::filesystem::path assetPath(std::wstring const& relative){
     wchar_t executable[32768];auto length=GetModuleFileNameW(nullptr,executable,32768);
-    auto path=std::filesystem::path(std::wstring(executable,length)).parent_path()/L"Assets"/relative;
-    return Windows::Foundation::Uri(L"file:///"+path.generic_wstring());
+    return std::filesystem::path(std::wstring(executable,length)).parent_path()/L"Assets"/relative;
+}
+inline Windows::Foundation::Uri asset(std::wstring const& relative){
+    return Windows::Foundation::Uri(L"file:///"+assetPath(relative).generic_wstring());
+}
+inline Microsoft::UI::Xaml::Media::ImageSource bundledImage(std::wstring const& relative,std::function<void()> ready={}){
+    return BitmapUpload::Bundled(assetPath(relative),std::move(ready));
 }
 struct MouseScrollbars {
     struct Entry { weak_ref<DependencyObject> node; std::function<void(bool)> show; };

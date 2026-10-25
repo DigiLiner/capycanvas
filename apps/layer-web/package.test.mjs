@@ -158,7 +158,8 @@ function runtimeFixture(t, changes = {}) {
     "style.css": 'body { color: black; mask: url("icons/pen.svg"); }',
     "icons/pen.svg": "<svg/>",
     "icons.svg": '<svg><svg data-asset="pen"/></svg>',
-    "brush-previews/1-dark.png": Buffer.from([137, 80, 78, 71]),
+    "brush-previews/1-dark.webp": Buffer.from([82, 73, 70, 70]),
+    "filter-previews/curves.webp": Buffer.from([82, 73, 70, 70, 1]),
     ...changes,
   })) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
@@ -177,7 +178,7 @@ test("every runtime filename hashes its final bytes and all dependency reference
   }
   assertResolved(dir, names);
   const app = readFileSync(join(dir, names["app.js"]), "utf8");
-  for (const path of ["icons/pen.svg", "icons.svg", "brush-previews/1-dark.png"])
+  for (const path of ["icons/pen.svg", "icons.svg", "brush-previews/1-dark.webp", "filter-previews/curves.webp"])
     assert.ok(app.includes(JSON.stringify(names[path])));
   assert.ok(readFileSync(join(dir, names["style.css"]), "utf8").includes(`url("${names["icons/pen.svg"]}")`));
   assert.ok(readFileSync(join(dir, names["pkg/layer_web.js"]), "utf8").includes(names["pkg/layer_web_bg.wasm"].slice(4)));

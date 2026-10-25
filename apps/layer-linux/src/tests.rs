@@ -1902,7 +1902,7 @@ fn native_tool_drawers() {
             assert!(!origin.iter().any(|class| button.has_css_class(class)), "tile {id}");
         }
     }
-    // Two live filter projections share one GPU producer and the same textures.
+    // Two live filter projections share the same bundled textures.
     w.dispatch(UiAction::SelectPanelTab {
         group: 8,
         panel: Panel::Adjustments,
@@ -1960,7 +1960,7 @@ fn native_tool_drawers() {
             "moving the scrollbar preserves content padding"
         );
     }
-    assert!(w.effects.preview_requests() > 0);
+    assert_eq!(w.effects.preview_requests(), 0, "built-in rows show bundled previews without GPU work");
     click(&filter_button);
     pump(500);
     click(&filter_button);
@@ -3932,7 +3932,7 @@ fn native_adjustment_panels_review() {
     while picture.paintable().is_none() {
         assert!(
             Instant::now() < preview_deadline,
-            "visible filter rows receive asynchronous GPU previews"
+            "visible filter rows show their previews"
         );
         pump(30);
     }

@@ -17,16 +17,6 @@ fn filters() -> (UiSession<Recorder>, u32) {
     (s, id)
 }
 #[test]
-fn adding_an_adjustment_above_a_fill_previews_the_fill() {
-    let (mut s, _) = filters();
-    s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
-    s.frame(0, 0).unwrap();
-    assert!(s.request_filter_previews(1, vec!["exposure".into()], [120, 40]).unwrap());
-    let request = s.engine.backend().filter_preview.as_ref().unwrap();
-    assert_eq!(request.source, layer_render::FilterPreviewSource::LayerStack(occurrence_handle(2).unwrap()));
-    assert_eq!(request.snapshot.view().order().len(), 2);
-}
-#[test]
 fn filter_drawer_replaces_the_selected_layer_after_reopening_and_cancel_is_undoable() {
     let (mut s, opener) = filters();
     assert_eq!(s.state.customization.drawer.as_ref().unwrap().columns,
@@ -513,8 +503,6 @@ fn new_adjustments_from_an_existing_owner_stay_above_its_relationships() {
         if clipped {layer(&mut s,LayerAction::New{group:false,clipped:true});}
         let top=s.engine.document().scene().children(None)[0];
         layer(&mut s,LayerAction::Select{id:occurrence_token(base),mask:false});let before=s.engine.document().clone();
-        s.frame(0,0).unwrap();assert!(s.request_filter_previews(1,vec!["curves".into()],[120,40]).unwrap());
-        assert_eq!(s.engine.backend().filter_preview.as_ref().unwrap().source,layer_render::FilterPreviewSource::LayerStack(top));s.renderer_mut().cancel_filter_previews();
         insert_effect(&mut s,"curves");let doc=s.engine.document();let added=doc.working.occurrence.unwrap();
         assert_eq!(&doc.scene().children(None)[..2],&[added,top]);assert_eq!(doc.scene().occurrence(added).unwrap().attachment,layer_core::Attachment::None);
         assert_eq!(doc.scene().effect_owner(blur),Some(base));
@@ -539,8 +527,6 @@ fn fill_insertion_preserves_existing_effect_owners_and_common_base() {
         invoke(&mut s,CommandId::Undo);assert_live_artwork_eq(s.engine.document(),&before);
     }
     layer(&mut s,LayerAction::Select{id:occurrence_token(owner),mask:false});let before=s.engine.document().clone();
-    s.frame(0,0).unwrap();assert!(s.request_filter_previews(1,vec!["exposure".into()],[120,40]).unwrap());
-    assert_eq!(s.engine.backend().filter_preview.as_ref().unwrap().source,layer_render::FilterPreviewSource::OwnerContent(owner));
     insert_effect(&mut s,"exposure");let added=s.engine.document().working.occurrence.unwrap();
     assert_eq!(s.engine.document().scene().attached_effects(owner),[added,blur,curves]);
     invoke(&mut s,CommandId::Undo);assert_live_artwork_eq(s.engine.document(),&before);

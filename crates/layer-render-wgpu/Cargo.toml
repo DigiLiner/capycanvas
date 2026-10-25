@@ -8,20 +8,23 @@ license.workspace = true
 [features]
 software-adapter-tests = ["layer-core/software-adapter-tests"]
 test-support = []
+bake = ["dep:webpkit"]
 
 [dependencies]
 layer-core = { path = "../layer-core" }
 layer-color = { path = "../layer-color" }
 layer-render = { path = "../layer-render" }
 pollster = "0.4.0"
+webpkit = { version = "0.1.0", optional = true }
 wgpu.workspace = true
 naga = { version = "30.0.0", features = ["wgsl-in"] }
 web-time = "1.1.0"
-png = "0.17.16"
 crc32fast = "1.5"
 
 [dev-dependencies]
 naga = { version = "30.0.0", features = ["wgsl-in", "spv-out"] }
+png = "0.17.16"
+image-webp = "=0.2.4"
 layer-core = { path = "../layer-core", features = ["test-support"] }
 layer-engine = { path = "../layer-engine" }
 

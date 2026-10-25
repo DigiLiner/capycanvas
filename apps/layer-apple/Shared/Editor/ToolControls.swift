@@ -47,8 +47,8 @@ struct ToolSetControls: View {
                     } else {
                         VStack(spacing: 0) {
                             if !item["preview"].isNull {
-                                Image("preview-\(item["preview"].uint)-\(store.state["theme"].string)")
-                                    .resizable().frame(height: 40)
+                                BundledPreview(name: "preview-\(item["preview"].uint)-\(store.state["theme"].string)")
+                                    .frame(height: 40)
                                     .clipShape(RoundedRectangle(cornerRadius: 3))
                             }
                             HStack(spacing: 6) {

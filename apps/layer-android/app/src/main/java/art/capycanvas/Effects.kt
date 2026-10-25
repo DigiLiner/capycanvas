@@ -39,12 +39,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.math.roundToInt
 
 private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dispatch(obj("type" to "effect", "action" to action), moving)
 
@@ -69,8 +69,6 @@ private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dis
     val list = rememberLazyListState()
     val focus = remember { FocusRequester() }
     val cache = host.filterPreviewCache
-    var width by remember { mutableIntStateOf(0) }
-    val currentSize by rememberUpdatedState(listOf((width - 12*density).roundToInt().coerceIn(80,512), (40*density).roundToInt().coerceIn(1,128)))
     val search = picker.takeUnless { it.isNull("search") }?.getString("search")
     fun send(action: JSONObject) = host.dispatch(obj("type" to "filter_picker", "action" to action))
     LaunchedEffect(search != null) { if (search != null) focus.requestFocus() }
@@ -79,8 +77,8 @@ private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dis
     LaunchedEffect(host, previewView) {
         snapshotFlow {
             val visible = list.layoutInfo.visibleItemsInfo.map { it.key }.toSet()
-            currentChoices.map { it.getString("id") }.filter { it in visible } to currentSize
-        }.collect { (ids, size) -> cache.update(previewView, ids, size) }
+            currentChoices.filter { !it.getBoolean("bundled_preview") }.map { it.getString("id") }.filter { it in visible }
+        }.collect { ids -> cache.update(previewView, ids) }
     }
     Column(modifier.padding(panelMetrics().inset), verticalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {
         if(!splitPicker) Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { headerHeight = it.height / density }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {
@@ -99,7 +97,7 @@ private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dis
                 SharedIcon("search", picker.getString("search_label"))
             }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().mouseScrollbar(list).onSizeChanged { width = it.width }.testTag("filter-list"),
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().mouseScrollbar(list).testTag("filter-list"),
             state = list, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             var category: String? = null
             choices.forEach { choice ->
@@ -119,12 +117,14 @@ private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dis
                             .background(if(picker.optString("selected")==id) colors.active else Color.Transparent)
                             .clickable { host.dispatch(choice.getJSONObject("action")) }.padding(horizontal = 6.dp, vertical = 3.dp)) {
                             val image = cache.images[id]?.image
-                            if(image != null) Image(image, null, Modifier.fillMaxWidth().height(40.dp).testTag("filter-preview-$id"), contentScale = ContentScale.FillBounds)
-                            else Spacer(Modifier.fillMaxWidth().height(40.dp))
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                                if(choice.getBoolean("animated")) SharedIcon("animation", choice.getString("tooltip"), Modifier.padding(end = 4.dp).size(12.dp).alpha(.55f))
-                                SharedIcon(choice.getString("icon"), null, Modifier.padding(end = 6.dp).size(16.dp).testTag("filter-icon-$id"))
-                                Text(choice.getString("label"), maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.text)
+                            val strip = Modifier.fillMaxWidth().aspectRatio(6f)
+                            if(choice.getBoolean("bundled_preview")) BundledPreview(host, "$id.webp", "filter-preview-$id", ContentScale.Fit, strip)
+                            else if(image != null) Image(image, null, strip.testTag("filter-preview-$id"), contentScale = ContentScale.Fit)
+                            else Spacer(strip)
+                            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                SharedIcon(choice.getString("icon"), null, Modifier.testTag("filter-icon-$id"))
+                                if(choice.getBoolean("animated")) SharedIcon("animation", choice.getString("tooltip"), Modifier.size(12.dp).alpha(.55f))
+                                Text(choice.getString("label"), Modifier.weight(1f), textAlign = TextAlign.End, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.text)
                             }
                         }
                     }

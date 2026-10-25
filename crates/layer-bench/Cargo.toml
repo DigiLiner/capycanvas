@@ -9,7 +9,7 @@ license.workspace = true
 layer-core = { path = "../layer-core" }
 layer-engine = { path = "../layer-engine" }
 layer-render = { path = "../layer-render" }
-layer-render-wgpu = { path = "../layer-render-wgpu" }
+layer-render-wgpu = { path = "../layer-render-wgpu", features = ["bake"] }
 layer-ui = { path = "../layer-ui" }
 png = "0.17.16"
 

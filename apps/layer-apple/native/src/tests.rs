@@ -591,15 +591,36 @@ fn property_edits_and_gestures_preserve_exact_metal_history_on_both_platforms() 
     }
 }
 
+fn install_example_filter(app: &App) -> &'static str {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../examples/filters/tent-blur");
+    let manifest = std::fs::read_to_string(directory.join("manifest.json")).unwrap();
+    app.with(|apple| {
+        let change = apple.host.session.load_effect_package(
+            &manifest,
+            |name| std::fs::read_to_string(directory.join(name)).map(std::sync::Arc::from).map_err(|error| error.to_string()),
+            layer_core::EffectInstallMode::Add,
+        ).unwrap();
+        apple.host.dirty |= change.canvas_wake;
+    });
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while app.state()["filter_load"]["pending"] == true {
+        assert!(std::time::Instant::now() < end);
+        app.draw_frame();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    "example:tent_blur"
+}
+
 #[test]
-fn changing_filter_preview_source_does_not_fail_the_editor_and_can_retry() {
+fn document_edits_keep_filter_previews_and_their_retry_completes() {
     for platform in [0, 1] {
         let app = App::new(platform);
         app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_frame();
         app.stroke();
         app.draw_frame();
-        let query = json!({"type":"filter_previews", "filters":["curves"], "size":[96,40]});
+        let filter = install_example_filter(&app);
+        let query = json!({"type":"filter_previews", "filters":[filter]});
         let first = app.request(2, query.clone()).unwrap();
         assert_eq!(first["pending"], false, "New work waits for idle admission");
         std::thread::sleep(std::time::Duration::from_millis(210));
@@ -608,11 +629,8 @@ fn changing_filter_preview_source_does_not_fail_the_editor_and_can_retry() {
         app.action(json!({"type":"set_layer_opacity", "opacity":0.5}));
         app.draw_frame();
         let changed = app.request(2, query.clone()).unwrap();
-        assert_ne!(changed["key"], status["key"]);
-        assert_eq!(changed["pending"], false, "A source change retires its old request");
+        assert_eq!(changed["key"], status["key"], "Previews show a fixed scene, so edits keep their rows");
         assert!(changed["error"].is_null());
-        let atlas = unsafe { capy_apple_take_filter_previews(app.0) };
-        assert!((atlas==0), "Stale preview pixels must not be published");
         assert!((unsafe { capy_apple_error(app.0) }==0));
         let pixels = app.pixels();
         let revision = app.borrow().host.session.filter_preview_revision();
@@ -653,12 +671,13 @@ fn filter_preview_abi_keeps_owned_pixels_after_editor_teardown_without_document_
         app.draw_frame();
         app.stroke();
         app.draw_frame();
+        let filter = install_example_filter(&app);
         let before = app.pixels();
         let revision = app.borrow().host.session.filter_preview_revision();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
         let atlas = loop {
             app.request(2, json!({"type":"filter_previews",
-                "filters":["curves","gradient_map"],"size":[96,40]})).unwrap();
+                "filters":[filter,"curves"]})).unwrap();
             let atlas = unsafe { capy_apple_take_filter_previews(app.0) };
             assert!((unsafe { capy_apple_error(app.0) }==0));
             if !(atlas==0) {
@@ -687,11 +706,11 @@ fn filter_preview_abi_keeps_owned_pixels_after_editor_teardown_without_document_
                     info.stride,
                     info.count
                 ),
-                (1, 96, 80, 384, 30720)
+                (1, 480, 80, 1920, 153600)
             );
             let filters: Value =
                 serde_json::from_slice(handles::take_text(info.filters).to_bytes()).unwrap();
-            assert_eq!(filters, json!(["curves", "gradient_map"]));
+            assert_eq!(filters, json!(["example:tent_blur"]), "Bundled rows never enter the atlas");
             let pixels=copied_bytes(info.count,|offset,output,length|capy_filter_previews_copy(atlas,offset,output,length));
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] != 0));
             capy_filter_previews_free(atlas);

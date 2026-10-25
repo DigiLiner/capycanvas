@@ -46,8 +46,7 @@ final class NativeFilterPreviews: @unchecked Sendable {
 @MainActor final class FilterPreviews: ObservableObject {
     @Published private(set) var images: [String: CGImage] = [:]
     private weak var store: EditorStore?
-    private struct Visible { let id: String; let size: [Int] }
-    private var visible: [String: Visible] = [:]
+    private var visible: [String: String] = [:]
     private var key = ""
     private var task: Task<Void, Never>?
     private var generation: UInt64 = 0
@@ -60,8 +59,8 @@ final class NativeFilterPreviews: @unchecked Sendable {
         images.removeAll(); key = ""; refresh()
     }
     func setActive(_ value: Bool) { active = value; refresh() }
-    func show(token: String, id: String, width: CGFloat, scale: CGFloat) {
-        visible[token] = Visible(id: id, size: [min(512, max(80, Int(width * scale))), min(128, max(1, Int(40 * scale)))])
+    func show(token: String, id: String) {
+        visible[token] = id
         refresh()
     }
     func hide(_ token: String) { visible.removeValue(forKey: token); refresh() }
@@ -89,10 +88,8 @@ final class NativeFilterPreviews: @unchecked Sendable {
     private func poll() async -> Int {
         let generation = generation
         guard let store, let native = store.native else { return 200 }
-        let rows = active ? Array(visible.values) : []
-        let ids = Array(Set(rows.map(\.id))).sorted()
-        let size = [rows.map { $0.size[0] }.max() ?? 80, rows.map { $0.size[1] }.max() ?? 40]
-        let query = JSON(["type": "filter_previews", "filters": ids, "size": size,
+        let ids = active ? Array(Set(visible.values)).sorted() : []
+        let query = JSON(["type": "filter_previews", "filters": ids,
             "cache": ["key": key, "rows": Array(images.keys)]])
         // A hidden view publishes empty geometry once, without creating a new
         // native query for every subsequent drawing snapshot.

@@ -1487,6 +1487,7 @@ dependencies = [
  "crc32fast",
  "futures-channel",
  "futures-util",
+ "image-webp",
  "layer-color",
  "layer-core",
  "layer-engine",
@@ -1499,6 +1500,7 @@ dependencies = [
  "pollster",
  "wasm-bindgen-futures",
  "web-time",
+ "webpkit",
  "wgpu",
  "windows 0.62.2",
 ]
@@ -3169,6 +3171,12 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "webpkit"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a44c05a5c09ec3ec51597212cbcca62c2d8f4adf80d24794cacf597b13855c8f"
 
 [[package]]
 name = "weezl"

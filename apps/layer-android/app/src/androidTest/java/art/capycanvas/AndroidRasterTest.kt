@@ -2679,7 +2679,6 @@ class AndroidRasterTest {
         val expected = referencesMatch()
         val results = org.json.JSONArray()
         for ((theme, target) in listOf("light" to owner, "light" to blur, "dark" to owner, "dark" to blur)) {
-            val previous = host.filterPreviewCache.images["curves"]?.key
             action(obj("type" to "set_theme", "theme" to theme))
             layer(obj("op" to "select", "id" to target, "mask" to false))
             val header = host.snapshot!!.getJSONObject("header").getJSONObject("model").array("zones").values()
@@ -2689,14 +2688,8 @@ class AndroidRasterTest {
             action(obj("type" to "activate_header_item", "id" to header))
             action(obj("type" to "filter_picker", "action" to obj("op" to "category", "category" to null)))
             action(obj("type" to "filter_picker", "action" to obj("op" to "search", "query" to "Curves")))
-            val started = SystemClock.uptimeMillis()
-            compose.waitUntil(30_000) { host.filterPreviewCache.images["curves"]?.let { it.key != previous } == true }
-            val preview = host.filterPreviewCache.images.getValue("curves").image.toPixelMap()
-            val pixel = preview[preview.width / 2, preview.height / 2]
-            assertEquals("Attached replacement preview retains owner-local alpha", 128f / 255f, pixel.alpha, .02f)
-            assertTrue("Owner preview excludes the green clipping base", maxOf(pixel.red, pixel.blue) > pixel.green)
-            results.put(obj("theme" to theme, "target" to target, "preview_elapsed_ms" to SystemClock.uptimeMillis() - started,
-                "preview_alpha" to pixel.alpha, "visible_sample" to sample(sourceVisible)))
+            compose.waitUntil(30_000) { host.bundledPreviews.get("curves.webp") != null }
+            results.put(obj("theme" to theme, "target" to target, "visible_sample" to sample(sourceVisible)))
             instrumentation.uiAutomation.takeScreenshot()?.let { bitmap ->
                 try { File(activity.getExternalFilesDir(null), "attached-motion-blur-preview-$theme-$target.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) } }
                 finally { bitmap.recycle() }
@@ -2704,7 +2697,7 @@ class AndroidRasterTest {
             action(obj("type" to "activate_header_item", "id" to header))
         }
         layer(obj("op" to "select", "id" to owner, "mask" to false))
-        println("PASS attached previews in both themes and Reference statistics")
+        println("PASS attached filter drawer in both themes and Reference statistics")
         val ripple = native { handle ->
             Native.dispatch(handle, obj("type" to "effect", "action" to obj("op" to "insert", "effect" to "ripple")).toString())
             val id = state(handle).getJSONObject("layer_tools").getJSONObject("editing_layer").getLong("id")
@@ -2756,11 +2749,9 @@ class AndroidRasterTest {
         val started = SystemClock.uptimeMillis()
         action(obj("type" to "customize", "action" to obj("type" to "set_column_collapsed", "group" to group, "collapsed" to false)))
         action(obj("type" to "select_panel_tab", "group" to group, "panel" to "adjustments"))
-        compose.waitUntil(60_000) { host.filterPreviewCache.images["curves"] != null }
+        compose.waitUntil(60_000) { host.bundledPreviews.get("curves.webp") != null }
         val after = storage()
-        val image = host.filterPreviewCache.images.getValue("curves").image.toPixelMap()
-        assertTrue("The preview contains photo pixels", (0 until image.width).any { image[it, image.height / 2].alpha > .5f })
-        assertTrue("Pointwise previews retain bounded scratch", after - before < 96L * 1024 * 1024)
+        assertTrue("Bundled previews add no renderer storage", after - before < 96L * 1024 * 1024)
         assertNull(host.failure)
         val result = obj("before_bytes" to before, "after_bytes" to after,
             "elapsed_ms" to (SystemClock.uptimeMillis() - started), "process_pss_kib" to android.os.Debug.getPss())
@@ -2798,27 +2789,13 @@ class AndroidRasterTest {
         val output = File(activity.getExternalFilesDir(null), "filter-preview-drawing.json")
         for (visible in listOf(false, true, false, true, false, true)) {
             panel(visible)
-            if (visible) {
-                // Invalidate the source without changing its geometry, then
-                // start drawing while the large-photo probe is still pending.
-                action(obj("type" to "set_layer_opacity", "opacity" to if (runs.length() % 2 == 0) .99 else 1.0))
-                compose.waitUntil(10_000) { host.filterPreviewCache.pending }
-            }
-            val previous = host.filterPreviewCache.images["curves"]?.key
             val beforeRevision = native { state(it).getJSONObject("document_file").getLong("revision") }
             val result = motion(android.view.MotionEvent.TOOL_TYPE_STYLUS, 180, 4752.0 to 3168.0)
             result.put("filters_visible", visible)
             val afterRevision = native { state(it).getJSONObject("document_file").getLong("revision") }
             assertTrue("The timed stylus contact must paint, not dismiss UI", afterRevision > beforeRevision)
             result.put("before_revision", beforeRevision).put("after_revision", afterRevision)
-            if (visible) {
-                val released = SystemClock.uptimeMillis()
-                compose.waitUntil(60_000) {
-                    host.filterPreviewCache.images["curves"]?.let { it.key != previous } == true
-                }
-                result.put("preview_after_release_ms", SystemClock.uptimeMillis() - released)
-                assertNull(host.failure)
-            }
+            if (visible) assertNull(host.failure)
             runs.put(result)
             output.writeText(obj("runs" to runs).toString(2))
         }
@@ -2840,68 +2817,7 @@ class AndroidRasterTest {
                 assertTrue("Preview $field p95 must stay within $tolerance ms of the drawing control",
                     metric(run, field) <= controls.maxOf { metric(it, field) } + tolerance)
             }
-            assertTrue("Preview must resume promptly after drawing", run.getLong("preview_after_release_ms") < 20_000)
         }
-    }
-
-    @Test fun largePhotoFilterPreviewLifecycle() {
-        Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("filterPhoto") == "true")
-        open(File(activity.filesDir, "filter-memory-test.jpg"))
-        scenario.onActivity { host.documentChanged() }
-        compose.waitUntil(60_000) { host.snapshot?.optBoolean("shaders_ready") == true }
-        action(obj("type" to "filter_picker", "action" to obj("op" to "category", "category" to null)))
-        action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "adjustments", "visible" to true)))
-        val group = host.snapshot!!.getJSONObject("layout").array("groups").objects()
-            .first { "adjustments" in it.array("panels").values() }.getInt("id")
-        fun collapsed(value: Boolean) = action(obj("type" to "customize", "action" to obj("type" to "set_column_collapsed", "group" to group, "collapsed" to value)))
-        collapsed(false)
-        action(obj("type" to "select_panel_tab", "group" to group, "panel" to "adjustments"))
-        action(obj("type" to "customize", "action" to obj("type" to "close_expanded")))
-        fun pending() = compose.waitUntil(10_000) { host.filterPreviewCache.pending }
-        fun completed(previous: String? = null) {
-            compose.waitUntil(20_000) { host.filterPreviewCache.images["curves"]?.let { it.key != previous } == true }
-            assertNull(host.failure)
-        }
-        pending(); collapsed(true)
-        compose.waitUntil(5000) { !host.filterPreviewCache.pending }
-        val idleRequests = host.filterPreviewCache.request
-        SystemClock.sleep(300)
-        assertEquals("Hidden previews admit no new work", idleRequests, host.filterPreviewCache.request)
-        collapsed(false); completed()
-
-        var old = host.filterPreviewCache.images.getValue("curves").key
-        action(obj("type" to "set_layer_opacity", "opacity" to .98)); pending()
-        scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
-        SystemClock.sleep(300)
-        assertFalse("Background work stopped", host.filterPreviewCache.pending)
-        scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-        completed(old)
-
-        old = host.filterPreviewCache.images.getValue("curves").key
-        action(obj("type" to "set_layer_opacity", "opacity" to .97)); pending()
-        scenario.onActivity { host.restartCanvas() }
-        compose.waitUntil(60_000) { host.surfaceReady && host.snapshot?.optBoolean("shaders_ready") == true }
-        completed(old)
-
-        action(obj("type" to "set_layer_opacity", "opacity" to .96)); pending()
-        val replacement = File(files, "filter-replacement.png")
-        val bitmap = android.graphics.Bitmap.createBitmap(32, 32, android.graphics.Bitmap.Config.ARGB_8888)
-        bitmap.eraseColor(android.graphics.Color.GREEN)
-        replacement.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-        bitmap.recycle()
-        old = host.filterPreviewCache.images["curves"]?.key ?: ""
-        val previousEpoch = host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch")
-        open(replacement); scenario.onActivity { host.documentChanged() }
-        compose.waitUntil(10_000) { host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch") != previousEpoch }
-        completed(old)
-        val epoch = host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch")
-        val tile = host.filterPreviewCache.images.getValue("curves")
-        assertTrue("Only the replacement document is presented", tile.key.startsWith("$epoch:"))
-        val image = tile.image.toPixelMap()
-        assertTrue("Replacement pixels reached the native bitmap", (0 until image.width).any {
-            val p = image[it, image.height / 2]; p.green > p.red + .5f && p.green > p.blue + .5f
-        })
-        assertNull(host.failure)
     }
 
     @Test fun sixteenBitWideColorSurvivesSaveAndGpuReplacement() {

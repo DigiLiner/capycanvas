@@ -1016,7 +1016,6 @@ pub struct WgpuRasterizer {
     bake_analyses: Vec<effect_analysis::BakeTask>,
     #[cfg(target_arch = "wasm32")]
     analysis_backing_waiter: Option<effect_analysis::BackingWaiter>,
-    filter_source_epoch: u64,
     tiled_sources: std::collections::BTreeMap<SourceTarget, layer_core::authored::PaintBase>,
     preview_pages: Vec<LayerPage>,
     preview_coverage_pages: Vec<StrokeCoveragePage>,
@@ -1400,7 +1399,6 @@ impl WgpuRasterizer {
             bake_analyses: Vec::new(),
             #[cfg(target_arch = "wasm32")]
             analysis_backing_waiter: None,
-            filter_source_epoch: 0,
             display_pipelines: None,
             scale_display: None,
             display_backup: None,
@@ -4098,15 +4096,6 @@ impl WgpuRasterizer {
         }
         let context = self.frame_context(packet);
         let packet = FramePacket { scene: packet.scene.with_context(&context), ..packet };
-        if packet.reset_layers
-            || !packet.dabs.is_empty()
-            || packet
-                .dab_batches
-                .iter()
-                .any(|b| b.kind != DabBatchKind::Preview)
-        {
-            self.filter_source_epoch = self.filter_source_epoch.wrapping_add(1);
-        }
         let started = self.telemetry.enabled.then(web_time::Instant::now);
         let mut cpu_phases = [0.; 6];
         self.metrics.frame_cpu_ms = [0.; 6];
@@ -4908,12 +4897,6 @@ impl WgpuRasterizer {
                 tiles.extend(page_coordinates(bounds));
             }
             dirty = dirty.union(bounds);
-        }
-        if self.transform_damage.iter().any(|(_, b)| !b.is_empty()) || !self.document_damage.is_empty() {
-            self.filter_source_epoch = self.filter_source_epoch.wrapping_add(1);
-        }
-        if let Some(previews) = &mut self.filter_previews {
-            previews.note_frame(FramePacket { view: requested_view, ..packet }, self.filter_source_epoch);
         }
         if packet.composite_all || reset {
             dirty = PixelRect::full(packet.document_extent);
@@ -6539,3 +6522,9 @@ impl WgpuRasterizer {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod package_render_tests;
+
+#[cfg(feature = "bake")]
+pub fn bundled_preview_webp(width: u32, height: u32, rgba: &[u8]) -> webpkit::Result<Vec<u8>> {
+    let image = webpkit::ImageRef::new(webpkit::Dimensions::new(width, height)?, webpkit::PixelLayout::Rgba8, rgba)?;
+    webpkit::Encoder::lossy().quality(90).effort(webpkit::Effort::Best).encode_ref(image)
+}

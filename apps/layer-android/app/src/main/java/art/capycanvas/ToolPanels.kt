@@ -63,17 +63,19 @@ import kotlinx.coroutines.withContext
     }
 }
 
-@Composable internal fun BrushPreview(host: CanvasHost, id: Int, modifier: Modifier) {
+@Composable internal fun BrushPreview(host: CanvasHost, id: Int, modifier: Modifier) =
+    BundledPreview(host, "$id-${if (LocalPalette.current.dark) "dark" else "light"}.webp", "brush-preview-$id", ContentScale.FillBounds, modifier)
+
+@Composable internal fun BundledPreview(host: CanvasHost, name: String, tag: String, scale: ContentScale, modifier: Modifier) {
     val context = LocalContext.current
-    val name = "$id-${if (LocalPalette.current.dark) "dark" else "light"}.png"
-    var image by remember(host, name) { mutableStateOf(host.brushPreviews.get(name)) }
+    var image by remember(host, name) { mutableStateOf(host.bundledPreviews.get(name)) }
     LaunchedEffect(host, name) {
         if (image == null) image = withContext(Dispatchers.IO) {
-            host.brushPreviews.get(name) ?: context.assets.open(name).use { BitmapFactory.decodeStream(it).asImageBitmap() }
-                .also { host.brushPreviews.put(name, it) }
+            host.bundledPreviews.get(name) ?: context.assets.open(name).use { BitmapFactory.decodeStream(it).asImageBitmap() }
+                .also { host.bundledPreviews.put(name, it) }
         }
     }
-    Box(modifier) { image?.let { Image(it, null, Modifier.fillMaxSize().testTag("brush-preview-$id"), contentScale = ContentScale.FillBounds) } }
+    Box(modifier) { image?.let { Image(it, null, Modifier.fillMaxSize().testTag(tag), contentScale = scale) } }
 }
 
 @Composable private fun ToolChoice(host: CanvasHost, item: JSONObject, kind: String, modifier: Modifier, compact: Boolean = false) {

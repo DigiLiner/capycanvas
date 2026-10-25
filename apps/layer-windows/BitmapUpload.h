@@ -5,7 +5,13 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <filesystem>
+#include <functional>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <span>
+#include <vector>
 
 namespace CapyUi {
 struct BitmapUpload : std::enable_shared_from_this<BitmapUpload> {
@@ -75,34 +81,74 @@ struct BitmapUpload : std::enable_shared_from_this<BitmapUpload> {
             try{Fill(weak_from_this(),queue,job);}catch(...){Finish(job,false);}
         }
     }
+    static Bitmap Copy(Bitmap bitmap,std::span<uint8_t const> bytes,size_t offset,int width,int height,bool straightRgba){
+        auto input=bytes.data();auto length=bytes.size();
+        uint64_t rowBytes=uint64_t(width)*4,needed=rowBytes*uint64_t(height);
+        if(!input||width<=0||height<=0||offset>length||needed>length-offset)throw winrt::hresult_invalid_argument();
+        if(!bitmap||bitmap.PixelWidth()!=width||bitmap.PixelHeight()!=height)
+            bitmap=Bitmap(winrt::Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8,
+                width,height,winrt::Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied);
+        auto locked=bitmap.LockBuffer(winrt::Windows::Graphics::Imaging::BitmapBufferAccessMode::Write);
+        auto memory=locked.CreateReference();auto plane=locked.GetPlaneDescription(0);auto output=memory.data();
+        int64_t first=plane.StartIndex,last=first+int64_t(plane.Stride)*(height-1);
+        if(plane.Width<width||plane.Height<height||std::min(first,last)<0
+            ||uint64_t(std::max(first,last))+rowBytes>memory.Capacity()
+            ||uint64_t(plane.Stride<0?-int64_t(plane.Stride):plane.Stride)<rowBytes)
+            throw winrt::hresult_invalid_argument();
+        for(int y=0;y<height;++y){
+            auto in=input+offset+size_t(y)*size_t(rowBytes);auto out=output+first+int64_t(y)*plane.Stride;
+            if(!straightRgba)std::memcpy(out,in,size_t(rowBytes));
+            else for(int x=0;x<width;++x){
+                auto p=in+x*4;auto d=out+x*4;unsigned a=p[3];
+                d[0]=uint8_t((unsigned(p[2])*a+127)/255);d[1]=uint8_t((unsigned(p[1])*a+127)/255);
+                d[2]=uint8_t((unsigned(p[0])*a+127)/255);d[3]=uint8_t(a);
+            }
+        }
+        return bitmap;
+    }
+    struct BundledEntry {winrt::weak_ref<Source> source;bool ready=false;std::vector<std::function<void()>> waiting;};
+    static std::map<std::filesystem::path,BundledEntry>& BundledEntries(){
+        static thread_local std::map<std::filesystem::path,BundledEntry> entries;return entries;
+    }
+    static Source Bundled(std::filesystem::path const& path,std::function<void()> ready={}){
+        auto& entry=BundledEntries()[path];
+        if(auto source=entry.source.get()){
+            if(ready){if(entry.ready)ready();else entry.waiting.push_back(std::move(ready));}
+            return source;
+        }
+        Source source;entry={winrt::make_weak(source),false,{}};
+        if(ready)entry.waiting.push_back(std::move(ready));
+        LoadBundled(source,path,winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread());
+        return source;
+    }
+    static winrt::fire_and_forget LoadBundled(Source source,std::filesystem::path path,
+        winrt::Microsoft::UI::Dispatching::DispatcherQueue queue){
+        co_await winrt::resume_background();
+        Bitmap bitmap{nullptr};
+        try{
+            std::ifstream file(path,std::ios::binary);
+            std::vector<uint8_t> encoded{std::istreambuf_iterator<char>(file),std::istreambuf_iterator<char>()};
+            uint32_t width=0,height=0;
+            PreviewPacket packet(capy_decode_webp(encoded.data(),encoded.size(),&width,&height),capy_preview_free);
+            if(!packet)co_return;
+            bitmap=Copy(nullptr,ReadPacket(packet)(),0,int(width),int(height),true);
+        }catch(...){co_return;}
+        queue.TryEnqueue([source,bitmap,path]{ShowBundled(source,bitmap,path);});
+    }
+    static winrt::fire_and_forget ShowBundled(Source source,Bitmap bitmap,std::filesystem::path path){
+        try{co_await source.SetBitmapAsync(bitmap);}catch(...){co_return;}
+        auto& entry=BundledEntries()[path];
+        if(entry.source.get()!=source)co_return;
+        entry.ready=true;
+        for(auto& ready:std::exchange(entry.waiting,{}))ready();
+    }
     static winrt::fire_and_forget Fill(std::weak_ptr<BitmapUpload> weak,
         winrt::Microsoft::UI::Dispatching::DispatcherQueue queue,std::shared_ptr<Job> job){
         try{
             co_await winrt::resume_background();
-            auto const& request=job->request;auto bytes=request.read();auto input=bytes.data();auto length=bytes.size();
-            uint64_t rowBytes=uint64_t(request.width)*4,needed=rowBytes*uint64_t(request.height);
-            if(!input||request.width<=0||request.height<=0||length>request.byteLimit
-                ||(request.exactLength&&length!=request.byteLimit)||request.offset>length
-                ||needed>length-request.offset)throw winrt::hresult_invalid_argument();
-            if(!job->bitmap||job->bitmap.PixelWidth()!=request.width||job->bitmap.PixelHeight()!=request.height)
-                job->bitmap=Bitmap(winrt::Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8,
-                    request.width,request.height,winrt::Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied);
-            auto locked=job->bitmap.LockBuffer(winrt::Windows::Graphics::Imaging::BitmapBufferAccessMode::Write);
-            auto memory=locked.CreateReference();auto plane=locked.GetPlaneDescription(0);auto output=memory.data();
-            int64_t first=plane.StartIndex,last=first+int64_t(plane.Stride)*(request.height-1);
-            if(plane.Width<request.width||plane.Height<request.height||std::min(first,last)<0
-                ||uint64_t(std::max(first,last))+rowBytes>memory.Capacity()
-                ||uint64_t(plane.Stride<0?-int64_t(plane.Stride):plane.Stride)<rowBytes)
-                throw winrt::hresult_invalid_argument();
-            for(int y=0;y<request.height;++y){
-                auto in=input+request.offset+size_t(y)*size_t(rowBytes);auto out=output+first+int64_t(y)*plane.Stride;
-                if(!request.straightRgba)std::memcpy(out,in,size_t(rowBytes));
-                else for(int x=0;x<request.width;++x){
-                    auto p=in+x*4;auto d=out+x*4;unsigned a=p[3];
-                    d[0]=uint8_t((unsigned(p[2])*a+127)/255);d[1]=uint8_t((unsigned(p[1])*a+127)/255);
-                    d[2]=uint8_t((unsigned(p[0])*a+127)/255);d[3]=uint8_t(a);
-                }
-            }
+            auto const& request=job->request;auto bytes=request.read();
+            if(bytes.size()>request.byteLimit||(request.exactLength&&bytes.size()!=request.byteLimit))throw winrt::hresult_invalid_argument();
+            job->bitmap=Copy(std::move(job->bitmap),bytes,request.offset,request.width,request.height,request.straightRgba);
         }catch(...){job->bitmap=nullptr;}
         job->request.read={};
         try{queue.TryEnqueue([weak,job]{

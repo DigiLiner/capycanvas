@@ -146,10 +146,10 @@ export function packageWeb() {
     }
     for (const path of [...readdirSync(web).filter(path => path.endsWith(".js") && path !== "sw.js"), "style.css"])
       cpSync(join(web, path), join(runtime, path));
-    for (const directory of ["icons", "brush-previews"]) {
+    for (const directory of ["icons", "brush-previews", "filter-previews"]) {
       mkdirSync(join(runtime, directory));
       for (const path of readdirSync(join(web, directory)).sort()) {
-        if (path.endsWith(directory === "icons" ? ".svg" : ".png"))
+        if (path.endsWith(directory === "icons" ? ".svg" : ".webp"))
           cpSync(join(web, directory, path), join(runtime, directory, path));
       }
     }

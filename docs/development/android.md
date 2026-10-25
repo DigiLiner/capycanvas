@@ -515,13 +515,13 @@ manual save checkpoints and undo/redo after an actual process death.
     `p3-grid-8bit.heic`, `p3-gray-10bit.heic` and `p3-12bit.avif` fixtures, plus
     `web-hdr.jpg` and `web-hdr.avif` produced by Web's `--portable-photo` test,
     into that directory.
-  - `#attachedFilterPreviewsReferenceAndRecoveryKeepOwnerInput` checks Filters
-    drawer previews for a clipped owner and its attached Motion Blur in both
-    themes, exact Histogram Reference statistics, hidden-owner animation idle,
+  - `#attachedFilterPreviewsReferenceAndRecoveryKeepOwnerInput` opens the Filters
+    drawer for a clipped owner and its attached Motion Blur in both
+    themes, and checks exact Histogram Reference statistics, hidden-owner animation idle,
     and captured-session undo/redo. It generates private translucent fixtures
     and writes screenshots and `attached-filter-owner-journey.json` to the
     app's external-files directory.
-  - `#largePhotoFilterPreviews` and `#largePhotoFilterPreviewLifecycle` opt in
+  - `#largePhotoFilterPreviews` opts in
     with `-e filterPhoto true`, `#largePhotoFilterPreviewDrawing` with
     `-e filterDrawing true`. They read the app's private
     `files/filter-memory-test.jpg` and write reports to its external-files
@@ -946,8 +946,8 @@ has no synchronous state query; the probe observes pending work at its first
 camera sample. Use `--settle-delay-ms` for a matched control after settling.
 The raw `settle_probe` records action times and camera revisions. Use
 `--presentation-trace` for screen cadence; completed artwork updates do not
-count camera-only frames. Brush preview PNGs load off the UI thread and share a
-bounded cache across panel lifetimes.
+count camera-only frames. Brush and filter preview WebP files load off the UI
+thread and share a bounded cache across panel lifetimes.
 `--radius-x` and `--radius-y` set the ellipse radii in surface pixels;
 `--photo-layers` creates 1–32 photos with translucent duplicates. The runner
 places paint at the top by default. `--paint-layer-index` moves it to the given

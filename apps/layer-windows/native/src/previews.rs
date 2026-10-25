@@ -10,7 +10,6 @@ use std::{
 #[serde(deny_unknown_fields)]
 struct Query {
     filters: Vec<Arc<str>>,
-    size: [u32; 2],
     cache: layer_ui::FilterPreviewCache,
 }
 pub struct CapyPreview {
@@ -19,7 +18,7 @@ pub struct CapyPreview {
 }
 pub fn query(host: &mut NativeHost, json: &str) -> Result<CapyPreview, String> {
     let query: Query = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let update = host.poll_filter_previews(query.filters, query.size, query.cache)?;
+    let update = host.poll_filter_previews(query.filters, query.cache)?;
     let mut metadata = serde_json::to_value(update.status).map_err(|e| e.to_string())?;
     let bytes = if let Some(atlas) = update.image {
         let image = atlas.image;
@@ -67,6 +66,18 @@ pub(crate) fn copied_bytes(value:u64)->Vec<u8> {
 #[cfg(test)]
 pub(crate) fn copied_metadata(value:u64)->serde_json::Value {
     serde_json::from_slice(crate::owned::take_text(capy_preview_metadata(value)).as_bytes()).unwrap()
+}
+
+/// # Safety
+/// Data must point to length readable bytes; width and height must point to
+/// writable storage. Callable from any thread; free the result with capy_preview_free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_decode_webp(data: *const u8, length: usize, width: *mut u32, height: *mut u32) -> u64 {
+    let (Some(width), Some(height)) = (unsafe { width.as_mut() }, unsafe { height.as_mut() }) else { return 0 };
+    if data.is_null() { return 0; }
+    let Ok(([w, h], pixels)) = layer_color::photo::decode_rgba8_webp(unsafe { std::slice::from_raw_parts(data, length) }) else { return 0 };
+    [*width, *height] = [w, h];
+    store(CapyPreview { metadata: CString::default(), bytes: pixels }).unwrap_or(0)
 }
 
 impl CapyPreview {
@@ -204,21 +215,19 @@ mod tests {
     #[test]
     fn preview_transport_uses_shared_identity_and_cache_bounds() {
         let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-        let epoch = host.session.state().document_file.epoch;
         let request = |filters: Vec<&str>, rows: Vec<&str>| serde_json::json!({
-            "filters": filters, "size": [512, 128],
+            "filters": filters,
             "cache": {"key": null, "rows": rows}
         }).to_string();
         let json = request(vec!["curves"], vec![]);
         let packet = query(&mut host, &json).unwrap();
         let before: serde_json::Value = serde_json::from_str(packet.metadata.to_str().unwrap()).unwrap();
-        assert!(before["key"].as_str().unwrap().starts_with(&format!("{epoch}:")));
         host.session.reset_filter_previews();
         let packet = query(&mut host, &json).unwrap();
         let after: serde_json::Value = serde_json::from_str(packet.metadata.to_str().unwrap()).unwrap();
         assert_ne!(before["key"], after["key"]);
         assert!(query(&mut host, &request(vec![], vec!["curves"; 65])).is_err());
-        assert!(query(&mut host, r#"{"filters":[],"size":[512,128],"request":"1"}"#).is_err());
+        assert!(query(&mut host, r#"{"filters":[],"request":"1"}"#).is_err());
     }
     #[test]
     fn owned_binary_lifetime() {
@@ -237,6 +246,17 @@ mod tests {
         assert!(!unsafe {capy_preview_copy(p,0,bytes.as_mut_ptr(),0)});
         assert_eq!(capy_preview_metadata(p),0);
         assert_eq!(bytes,[1,2,3,4]);
+    }
+    #[test]
+    fn bundled_webp_decodes_to_straight_rgba() {
+        let bytes = include_bytes!("../../../layer-web/filter-previews/curves.webp");
+        let (mut width, mut height) = (0, 0);
+        let packet = unsafe { capy_decode_webp(bytes.as_ptr(), bytes.len(), &mut width, &mut height) };
+        assert_eq!([width, height], layer_render::FILTER_PREVIEW_SIZE);
+        assert_eq!(copied_bytes(packet).len(), (width * height * 4) as usize);
+        capy_preview_free(packet);
+        assert_eq!(capy_preview_length(packet), 0);
+        assert_eq!(unsafe { capy_decode_webp(bytes.as_ptr(), 12, &mut width, &mut height) }, 0);
     }
 
     #[test]

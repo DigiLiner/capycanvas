@@ -378,22 +378,11 @@ impl ThumbnailTarget {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FilterPreviewSource {
-    LayerStack(OccurrenceHandle),
-    OwnerContent(OccurrenceHandle),
-    EffectInput(OccurrenceHandle),
-}
-
-/// Small idle-time picker request; paint stays in renderer-owned GPU storage.
+pub const FILTER_PREVIEW_SIZE: [u32; 2] = [480, 80];
+/// Small idle-time picker request, rendered on the renderer's own preview scene.
 #[derive(Clone, Debug)]
 pub struct FilterPreviewRequest {
     pub request_id:u64,
-    pub source:FilterPreviewSource,
-    pub size:[u32;2],
-    pub view:ViewState,
-    pub snapshot:std::sync::Arc<SceneSnapshot>,
-    pub scope:SceneScope,
     pub filters:Vec<std::sync::Arc<layer_core::EffectInstance>>,
 }
 

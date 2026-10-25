@@ -511,11 +511,10 @@ Rows require only their active render and preparation pipelines; unrelated
 optional shaders do not delay a ready row. Cancelling a request discards its
 unencoded preparation work and bindings while retaining compiled recipes.
 
-Picker previews crop larger documents around the selected content point. A
-document smaller than the preview row is centered on each smaller axis, with
-transparent padding outside its finite frame. Attached-filter previews read the
-owner before its outer opacity and clipping composition; replacement previews
-read the input immediately before the selected filter.
+Picker previews show each filter on a built-in tile scene rather than the
+document, so a filter row looks the same whatever is open. Built-in filters use
+bundled images; installed filters render live on the same scene. See
+[filter previews](../internals/rendering.md) for how the images are made.
 
 | Space | Built-in filters |
 | --- | --- |

@@ -630,7 +630,7 @@ LAYER_TEST_ARTIFACTS=artifacts/web-android \
 - `--staged-startup` holds shader validation and checks that controls, paper and
   painting become usable in order, including Space-drag right after Preferences
   closes and returns focus to its clicked button; `--filter-previews` checks
-  preview pixels and cache lifecycle. `--paper-rows` checks that Space presses
+  that built-in rows show their bundled images without preview requests. `--paper-rows` checks that Space presses
   a keyboard-focused button.
 - `--pipeline-readiness` holds compilation during Fill followed by Deselect,
   checks pixels and undo history, then applies a cold transform and commits
