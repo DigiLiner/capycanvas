@@ -608,7 +608,7 @@ private fun DrawScope.checker(colors: Palette) {
     val chooseCaption=remember(paletteName, host.languageTag) { JSONObject(Native.nativeCaption(obj("type" to "choose_palette", "name" to paletteName).toString(), host.languageTag)).getString("text") }
     Row(Modifier.fillMaxWidth().testTag("palette-footer"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         HoverTip(chooseCaption, Modifier.weight(1f)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 24.dp).clip(ControlShape).paletteFocus(controller)
+            Row(Modifier.fillMaxWidth().heightIn(min = panelMetrics().height).clip(ControlShape).paletteFocus(controller)
                 .clickable(role = Role.Button, onClickLabel = host.catalog.getJSONObject("native_copy").getJSONObject("palettes").getString("choose")) {
                     if (controller.editing) controller.commitName(controller.editText)
                     controller.expanded = false; controller.chooser = !controller.chooser
@@ -621,7 +621,7 @@ private fun DrawScope.checker(colors: Palette) {
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
             if (controller.editing && !static) NameEditor(controller, name)
             else HoverTip("$name · Click to rename") {
-                Text(name, Modifier.heightIn(min = 24.dp).clip(ControlShape).alpha(if (view.getBoolean("can_name")) 1f else .4f).paletteFocus(controller)
+                Text(name, Modifier.heightIn(min = panelMetrics().height).clip(ControlShape).alpha(if (view.getBoolean("can_name")) 1f else .4f).paletteFocus(controller)
                     .clickable(enabled = view.getBoolean("can_name"), role = Role.Button, onClickLabel = host.catalog.getJSONObject("native_copy").getJSONObject("palettes").getString("name")) {
                         controller.beginEditing()
                     }.testTag("palette-color-name").padding(horizontal = 6.dp, vertical = 3.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -644,7 +644,7 @@ private fun DrawScope.checker(colors: Palette) {
     LaunchedEffect(Unit) { focus.requestFocus() }
     DisposableEffect(Unit) { onDispose { host.editingText = false; host.textComposition.clear(focus) } }
     BasicTextField(value, { value = it; host.textComposition.update(focus, value, hadFocus) },
-        Modifier.widthIn(min = 64.dp, max = 180.dp).height(24.dp).paletteFocus(controller).focusRequester(focus).testTag("palette-name-editor")
+        Modifier.widthIn(min = 64.dp, max = 180.dp).height(panelMetrics().height).paletteFocus(controller).focusRequester(focus).testTag("palette-name-editor")
             .background(colors.input, ControlShape)
             .then(if (controller.message?.second == true) Modifier.border(1.dp, Color(0xffee5555), ControlShape) else Modifier)
             .onPreviewKeyEvent { event ->
@@ -671,9 +671,9 @@ private fun DrawScope.checker(colors: Palette) {
     val matches = palettes.filter { it.getString("name").lowercase().contains(query.trim().lowercase()) }
     Column(modifier.blockInput().testTag("palette-browser"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            CoreTextField(query, { query = it }, Modifier.weight(1f).paletteFocus(controller).focusRequester(focus).testTag("palette-search"), height = 24.dp,
+            CoreTextField(query, { query = it }, Modifier.weight(1f).paletteFocus(controller).focusRequester(focus).testTag("palette-search"), height = panelMetrics().height,
                 shape = ControlShape, placeholder = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("palettes").getString("find")) }, leadingIcon = { SharedIcon("search", null, Modifier.size(14.dp)) })
-            PaletteButton("plus", host.catalog.getJSONObject("native_copy").getJSONObject("palettes").getString("new_import"), Modifier.size(24.dp).onGloballyPositioned { addBounds = it.boundsInRoot() }
+            PaletteButton("plus", host.catalog.getJSONObject("native_copy").getJSONObject("palettes").getString("new_import"), Modifier.size(panelMetrics().height).onGloballyPositioned { addBounds = it.boundsInRoot() }
                 .testTag("palette-library-add")) {
                 controller.openMenu(obj("kind" to "library"), addBounds.bottomLeft, owner, false)
             }

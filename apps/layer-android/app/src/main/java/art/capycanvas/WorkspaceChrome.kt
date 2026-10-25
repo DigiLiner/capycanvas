@@ -301,7 +301,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                                     bodies[panelId.toString()]?.let { panel ->
                                         if (panel.array("tiles").length() > 0) DrawerToolbar(host, panel, dock, bounds.number("width"))
                                         else PanelControls(host, host.snapshot?.getJSONObject("state") ?: snapshot.getJSONObject("state"), panel,
-                                            if (panelId in listOf("layers", "adjustments", "filter_types")) Modifier.height(480.dp).then(if(panelId=="layers") Modifier.padding(8.dp) else Modifier) else Modifier.fillMaxWidth().then(if(model.optBoolean("compact"))Modifier.padding(12.dp) else Modifier), scrollable = false,
+                                            if (panelId in listOf("layers", "adjustments", "filter_types")) Modifier.height(480.dp).then(if(panelId=="layers") Modifier.padding(vertical=panelMetrics().inset) else Modifier) else Modifier.fillMaxWidth().then(if(model.optBoolean("compact"))Modifier.padding(12.dp) else Modifier), scrollable = false,
                                             splitFilters = columns.any { it.values().contains("filter_types") },
                                             toolSet = model.objectOrNull("tool_set").takeIf { panelId == "brushes" })
                                     }
@@ -343,7 +343,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
         val pageHeight=(height-footerHeight).coerceAtLeast(0f)
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("layer-properties-pages")) {
             LayerPanel(host,state,Modifier.fillMaxWidth().requiredHeight(pageHeight.coerceAtLeast((measurement.fixedHeight ?: 0f)+measurement.unitHeight+inset.value*2).dp)
-                .offset { IntOffset(0,(-position*pageHeight*density).roundToInt()) }.padding(inset),listState=list, full=full) { measurement=it }
+                .offset { IntOffset(0,(-position*pageHeight*density).roundToInt()) }.padding(vertical=inset),listState=list, full=full) { measurement=it }
             Column(Modifier.fillMaxWidth().height(pageHeight.dp).offset { IntOffset(0,((1f-position)*pageHeight*density).roundToInt()) }
                 .panelScroll(rememberScrollState())) {
                 Box(Modifier.fillMaxWidth().padding(8.dp).onSizeChanged { propertiesHeight=it.height/density+16f }) { LayerPropertiesPanel(host,state) }
@@ -353,19 +353,23 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
         val label=labelOverride ?: disclosure.getString(if(open)"return_label" else "label")
         val summary=if(open || !full)"" else disclosure.getString("summary")
         Row(Modifier.fillMaxWidth().height((footerHeight-1f).dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-        if (!full) Box(Modifier.width(48.dp).fillMaxHeight().testTag("bubble-new-layer-$bubbleId")
-            .graphicsLayer { alpha=if(open)0f else 1f }.clickable(enabled=!open) { host.layer(obj("op" to "new", "group" to false, "clipped" to false)) }, contentAlignment=Alignment.Center) {
-            SharedIcon("add-layer", host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_layer"))
+        val slot=panelMetrics().height
+        if (!full) Box(Modifier.fillMaxHeight().testTag("bubble-new-layer-$bubbleId")
+            .graphicsLayer { alpha=if(open)0f else 1f }.clickable(enabled=!open) { host.layer(obj("op" to "new", "group" to false, "clipped" to false)) }
+            .padding(horizontal=LayerEdge), contentAlignment=Alignment.Center) {
+            Box(Modifier.size(slot).testTag("bubble-new-layer-slot-$bubbleId"),contentAlignment=Alignment.Center) {
+                SharedIcon("add-layer", host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_layer"))
+            }
         }
         Row(Modifier.weight(1f).fillMaxHeight().testTag("layer-properties-disclosure")
             .clickable(enabled=open || !view.isNull("layer")) { toggle() }
-            .padding(horizontal=if(full)inset*2 else 16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-            if (full) Box(Modifier.size(24.dp).testTag("layer-properties-icon-slot"),contentAlignment=Alignment.Center) { SharedIcon("properties",null,Modifier.size(16.dp)) }
+            .padding(horizontal=LayerEdge),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            if (full) Box(Modifier.size(slot).testTag("layer-properties-icon-slot"),contentAlignment=Alignment.Center) { SharedIcon("properties",null,Modifier.size(16.dp)) }
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(1.dp)) {
                 Text(label,Modifier.fillMaxWidth().testTag("layer-properties-disclosure-label"),textAlign=if(full)androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.End,maxLines=1,overflow=TextOverflow.Ellipsis)
                 if(summary.isNotEmpty())Text(summary,Modifier.testTag("layer-properties-disclosure-summary"),color=LocalPalette.current.secondary,fontSize=LocalTextStyle.current.fontSize*.9f,maxLines=1,overflow=TextOverflow.Ellipsis)
             }
-            Box(Modifier.size(if(full)24.dp else 16.dp).testTag("layer-properties-chevron-slot"),contentAlignment=Alignment.Center) { SharedIcon("chevron-down",null,Modifier.size(16.dp).graphicsLayer { rotationZ=if(open)0f else 180f }) }
+            Box(Modifier.size(slot).testTag("layer-properties-chevron-slot"),contentAlignment=Alignment.Center) { SharedIcon("chevron-down",null,Modifier.size(16.dp).graphicsLayer { rotationZ=if(open)0f else 180f }) }
         }
         }
     }

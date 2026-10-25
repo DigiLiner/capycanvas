@@ -2000,6 +2000,7 @@ class AndroidTitleBarTest {
             val before=rows().size
             while(rows().size<7)add()
             assertTrue("Seventh row grows drawer",height()>floor+20)
+            shot("layer-drawer-$theme")
             val grown=height()
             val disclosure=bounds("layer-properties-disclosure")
             val first=actionCenter("new_layer");val last=actionCenter("actions")
@@ -2007,10 +2008,19 @@ class AndroidTitleBarTest {
             val labelLeft=bounds("layer-properties-disclosure-label").left
             observe(obj("theme" to theme,"floor_dp" to floor,"grown_dp" to grown,"density" to density,
                 "first_action_center_x" to first.x,"last_action_center_x" to last.x,"first_disclosure_slot_center_x" to firstSlot,"last_disclosure_slot_center_x" to lastSlot,
-                "label_left" to labelLeft,"expected_label_left" to (disclosure.left+46*density)))
+                "label_left" to labelLeft,"expected_label_left" to (disclosure.left+38*density)))
             assertEquals("First footer slot aligns with New Layer",first.x,firstSlot,1f)
             assertEquals("Last footer slot aligns with Actions",last.x,lastSlot,1f)
-            assertEquals("Disclosure label follows aligned 24 dp slot and 6 dp gap",disclosure.left+46*density,labelLeft,1f)
+            assertEquals("Disclosure label follows the 6 dp edge, the 26 dp slot and a 6 dp gap",disclosure.left+38*density,labelLeft,1f)
+            fun inDrawer(tag:String):Rect { var r:Rect?=null; instrumentation.runOnMainSync { r=node("layer-inspector")?.second?.find(hasTag(tag))?.boundsInRoot }; return checkNotNull(r) { "Missing $tag in the drawer" } }
+            val inspector=bounds("layer-inspector");val row=inDrawer("layer-row-${rows().first().getLong("id")}")
+            val control=host.catalog.getJSONObject("panel_metrics").getDouble("control_height").toFloat()*density
+            assertEquals("Rows run edge to edge in the drawer",inspector.width,row.width,1f)
+            assertEquals("Rows start at the drawer edge",inspector.left,row.left,1f)
+            for((name,x) in listOf("eye" to inDrawer("layer-eye-${rows().first().getLong("id")}").left,"New Layer" to first.x-control/2,"properties slot" to firstSlot-control/2))
+                assertEquals("$name sits 6 dp in from the drawer edge",inspector.left+6*density,x,1f)
+            for((name,x) in listOf("Actions" to last.x+control/2,"chevron slot" to lastSlot+control/2))
+                assertEquals("$name sits 6 dp in from the right edge",inspector.right-6*density,x,1f)
             page(floor,true,"Raster Properties reaches floor")
             waitFor("native properties page") { state().getJSONObject("customization").getJSONObject("drawer").getBoolean("layer_properties") }
             assertEquals("Raster properties use six-row floor",floor,height(),2f)

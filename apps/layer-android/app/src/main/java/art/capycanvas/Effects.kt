@@ -190,7 +190,7 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
                 Box {
                     TextButton({ menu = model }, colors = ButtonDefaults.textButtonColors(contentColor = LocalPalette.current.text),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                        modifier = Modifier.height(24.dp).testTag("properties-add-filter")) {
+                        modifier = Modifier.height(panelMetrics().height).testTag("properties-add-filter")) {
                         SharedIcon("add-filter", null)
                         Spacer(Modifier.width(6.dp))
                         Text(model.getString("title"))

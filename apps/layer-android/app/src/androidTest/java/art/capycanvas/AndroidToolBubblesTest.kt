@@ -841,7 +841,15 @@ class AndroidToolBubblesTest {
             if (input == MotionEvent.TOOL_TYPE_FINGER) secondFingerTakesLayerRow(layers)
             val layerCount = state().getJSONArray("layers").length()
             val footer = bounds("bubble-new-layer-$layers"); val cardCenter = center(layers)
-            assertEquals("Simple Layers footer keeps the GTK 48dp add cell", 48f, footer.width / density, 1f)
+            val simpleBounds = bounds("bubble-card-$layers")
+            val control = host.catalog.getJSONObject("panel_metrics").getDouble("control_height").toFloat()
+            assertEquals("Simple Layers footer's add cell is its slot and 6 dp sides", control + 12f, footer.width / density, 1f)
+            val firstRow = state().getJSONArray("layers").getJSONObject(0).getLong("id")
+            fun inCard(tag: String): Rect { var r: Rect? = null; instrumentation.runOnMainSync { r = findTag("bubble-card-$layers")?.second?.find(hasTag(tag))?.boundsInRoot }; return checkNotNull(r) { "Missing $tag in the Layers card" } }
+            assertEquals("Simple Layers footer's New Layer slot sits 6 dp in, like the eye", simpleBounds.left + 6 * density, inCard("bubble-new-layer-slot-$layers").left, 1f)
+            assertEquals("Simple Layers chevron sits 6 dp from the right edge", simpleBounds.right - 6 * density, inCard("layer-properties-chevron-slot").right, 1f)
+            assertEquals("Simple Layers rows run edge to edge", simpleBounds.width, inCard("layer-row-$firstRow").width, 1f)
+            assertEquals("Simple Layers eye sits 6 dp in", simpleBounds.left + 6 * density, inCard("layer-eye-$firstRow").left, 1f)
             val footerLocal = (footer.center - cardCenter) / density
             val footerHit = query(obj("type" to "bubble_hit", "id" to layers, "x" to footerLocal.x, "y" to footerLocal.y))
             val cardBefore = view(layers); val nativeCardBounds = bounds("bubble-card-$layers"); val beforeMotion = query(obj("type" to "bubble_motion", "now_ns" to System.nanoTime()))

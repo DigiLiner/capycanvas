@@ -396,7 +396,7 @@ manual save checkpoints and undo/redo after an actual process death.
   colors along selected-tab contours in both themes, with opaque and translucent
   panels, docked and drawer headers, and first, middle and last selected tabs.
 - `AndroidHostTest#compactPanelSpacingAndAlignmentAcrossContexts` captures Tools
-  and Properties at 242/320 dp in both themes. It checks 24 dp controls, 36 dp
+  and Properties at 242/320 dp in both themes. It checks 26 dp controls, 36 dp
   slider rows, 8 dp content edges, common caption columns and 4 dp gaps on both
   axes; it also exercises numeric expressions and refusals through native input.
 - `AndroidHostTest#nativeGradientStopContactsAndCompactControlsRetainDefinition`
@@ -466,7 +466,8 @@ manual save checkpoints and undo/redo after an actual process death.
   resize handles while its own controls remain interactive.
   `#layerPropertiesDrawerUsesNativeSizingAndActions` checks the combined
   Layers/Properties drawer from the header and a custom toolbar, immediate growth,
-  compact Properties, footer alignment and swipe action history in both themes.
+  compact Properties, footer alignment, rows and icons 6 dp from both edges and
+  swipe action history in both themes.
 - `AndroidPortParityTest` checks color-scrub modifiers, standalone numeric input,
   advanced toolbar prompts, automatic conversion-copy admission, profile search,
   custom preference swatches and direct dial input. `AndroidWorkspacePresentationTest`

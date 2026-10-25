@@ -4000,6 +4000,8 @@ class AndroidHostTest {
     @Test fun compactPanelSpacingAndAlignmentAcrossContexts() {
         device.landscape(compose.activityRule.scenario)
         val density = compose.activity.resources.displayMetrics.density
+        val control = host.catalog.getJSONObject("panel_metrics").getDouble("control_height").toFloat()
+        val panelControl = control
         val reports = JSONArray()
         val output = File(compose.activity.getExternalFilesDir(null), "validation").apply { mkdirs() }
         fun node(panel: String, tag: String) = compose.onNode(hasTestTag(tag) and hasAnyAncestor(hasTestTag("panel-body-$panel")), useUnmergedTree = true)
@@ -4026,7 +4028,7 @@ class AndroidHostTest {
                 assertTrue("$context ${it.config.getOrNull(SemanticsProperties.TestTag)} fits its horizontal panel bounds", it.boundsInRoot.left >= body.left - 1 && it.boundsInRoot.right <= body.right + 1)
                 val tag = it.config.getOrNull(SemanticsProperties.TestTag) ?: ""
                 if (tag.startsWith("tool-action-") || tag.startsWith("property-action-") || tag == "properties-page") {
-                    assertEquals("$context $tag compact single-line control", 24f * density, it.boundsInRoot.height, 1f)
+                    assertEquals("$context $tag compact single-line control", control * density, it.boundsInRoot.height, 1f)
                 }
             }
         }
@@ -4061,7 +4063,7 @@ class AndroidHostTest {
                     assertEquals("$context $id reserves the upstream editor column", bounds.right - 76f * density, slider.right, 1f)
                     assertEquals("$context $id readout bottom aligns with the slider row", bounds.bottom, readout.bottom, 1f)
                     assertEquals("$context $id readout glyphs retain field padding", bounds.right - 6f * density, readout.right, 1f)
-                    assertEquals("$context $id compact readout height", 24f * density, readout.height, 1f)
+                    assertEquals("$context $id compact readout height", control * density, readout.height, 1f)
                 }
                 fields.zipWithNext().filter { (first, next) -> first.getString("group") == next.getString("group") && first.getString("id") !in compound && next.getString("id") !in compound }.forEach { (first, next) ->
                     gap("tool_settings", "tool-setting-${first.getString("id")}", "tool-setting-${next.getString("id")}", 4f)
@@ -4078,14 +4080,14 @@ class AndroidHostTest {
                         val caption = host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("color")
                         gap("tool_settings", "gradient-remove", "property-color-$caption", 4f, horizontal = true)
                         for (tag in listOf("gradient-reverse", "gradient-reset", "gradient-remove", "gradient-use-color", "property-color-$caption")) {
-                            assertEquals("Gradient $tag compact peer height", 24f * density, area("tool_settings", tag).height, 1f)
+                            assertEquals("Gradient $tag compact peer height", control * density, area("tool_settings", tag).height, 1f)
                         }
                     }
                     "eyedropper" -> {
                         gap("tool_settings", "picker-setting-source", "picker-setting-size", 4f)
                         val source = area("tool_settings", "picker-setting-source"); val size = area("tool_settings", "picker-setting-size")
-                        assertEquals("Picker source compact row", 24f * density, source.height, 1f)
-                        assertEquals("Picker size compact row", 24f * density, size.height, 1f)
+                        assertEquals("Picker source compact row", control * density, source.height, 1f)
+                        assertEquals("Picker size compact row", control * density, size.height, 1f)
                         fun choice(tag: String) = compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                         val sourceChoice = choice("picker-setting-source"); val sizeChoice = choice("picker-setting-size")
                         assertEquals("Picker dropdowns share their left column", sourceChoice.left, sizeChoice.left, 1f)
@@ -4158,7 +4160,7 @@ class AndroidHostTest {
             val categoryChoice = compose.onNode(hasClickAction() and hasText(category) and hasAnyAncestor(hasTestTag("panel-body-adjustments")))
             val categoryBounds = categoryChoice.fetchSemanticsNode().boundsInRoot
             val filterBody = compose.onNodeWithTag("panel-body-adjustments", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertEquals("Filters category compact height", 24f * density, categoryBounds.height, 1f)
+            assertEquals("Filters category compact height", control * density, categoryBounds.height, 1f)
             assertEquals("Filters category/search peer gap", 4f * density, area("adjustments", "filter-search-toggle").left - categoryBounds.right, 1f)
             assertEquals("Filters search button right rail", filterBody.right - 8f * density, area("adjustments", "filter-search-toggle").right, 1f)
             assertEquals("Filters header/list peer gap", 4f * density, area("adjustments", "filter-list").top - categoryBounds.bottom, 1f)
@@ -4172,7 +4174,7 @@ class AndroidHostTest {
             waitState { it.array("adjustments").objects().map { choice -> choice.getString("id") } == listOf("glass", "rainy_glass") }
             search.assertTextContains("glass").performImeAction()
             search.assertTextContains("glass").assertIsNotFocused()
-            assertEquals("Filters search compact height", 24f * density, area("adjustments", "filter-search").height, 1f)
+            assertEquals("Filters search compact height", control * density, area("adjustments", "filter-search").height, 1f)
             assertEquals("Filters search left rail", filterBody.left + 8f * density, area("adjustments", "filter-search").left, 1f)
             gap("adjustments", "filter-search", "filter-search-toggle", 4f, horizontal = true)
             gap("adjustments", "filter-search", "filter-list", 4f)
@@ -4187,7 +4189,7 @@ class AndroidHostTest {
             for ((control, tag) in proofControls.zip(proofTags)) {
                 val caption = compose.onNode(hasText(control.getString("label")) and hasAnyAncestor(hasTestTag("panel-body-proof")), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                 assertEquals("Proof ${control.getString("id")} label/control peer gap", 4f * density, area("proof", tag).left - caption.right, 1f)
-                assertEquals("Proof $tag compact height", 24f * density, area("proof", tag).height, 1f)
+                assertEquals("Proof $tag compact height", panelControl * density, area("proof", tag).height, 1f)
             }
             val proofModes = listOf("off") + (if (host.proof.form!!.optBoolean("hdr")) listOf("sdr") else emptyList()) + "print"
             proofModes.zipWithNext().forEach { (first, next) -> gap("proof", "proof-mode-$first", "proof-mode-$next", 4f, horizontal = true) }
@@ -4202,12 +4204,12 @@ class AndroidHostTest {
             assertEquals("Palette footer left rail", paletteBody.left + 8f * density, footer.left, 1f)
             assertEquals("Palette footer right rail", paletteBody.right - 8f * density, footer.right, 1f)
             assertEquals("Palette footer bottom inset", paletteBody.bottom - 8f * density, footer.bottom, 1f)
-            assertEquals("Palette chooser compact height", 24f * density, area("palettes", "palette-chooser").height, 1f)
+            assertEquals("Palette chooser compact height", control * density, area("palettes", "palette-chooser").height, 1f)
             assertEquals("Palette chooser text padding", 6f * density, area("palettes", "palette-selector-name").left - area("palettes", "palette-chooser").left, 1f)
             inspect("palettes-footer", "palettes", theme, width)
             node("palettes", "palette-chooser").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("palette-search").fetchSemanticsNodes().isNotEmpty() }
-            assertEquals("Palette search compact height", 24f * density, area("palettes", "palette-search").height, 1f)
+            assertEquals("Palette search compact height", control * density, area("palettes", "palette-search").height, 1f)
             gap("palettes", "palette-search", "palette-library-add", 4f, horizontal = true)
             inspect("palettes-search", "palettes", theme, width)
             node("palettes", "palette-chooser").performClick()
@@ -4281,6 +4283,7 @@ class AndroidHostTest {
         action(obj("type" to "reset_tool_setting", "id" to "size"))
         val defaultSize = diameter()
         val density = compose.activity.resources.displayMetrics.density
+        val control = host.catalog.getJSONObject("panel_metrics").getDouble("control_height").toFloat()
         for (theme in listOf("light", "dark")) {
             action(obj("type" to "set_theme", "theme" to theme))
             compose.onNodeWithTag("tab-sizes").performClick()
@@ -4325,7 +4328,7 @@ class AndroidHostTest {
                     val editor = field.fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
                     val slider = compose.onAllNodesWithTag("number-slider-Brush size").onFirst().fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
                     assertEquals(68f * density, editor.width, 1f)
-                    assertEquals(24f * density, editor.height, 1f)
+                    assertEquals(control * density, editor.height, 1f)
                     assertEquals(slider.bottom, editor.bottom, 1f)
                     assertEquals(beforeSlider, slider)
                     assertEquals(beforeValue.right + 6f * density, editor.right, 1f)
