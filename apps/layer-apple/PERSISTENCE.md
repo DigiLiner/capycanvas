@@ -20,7 +20,7 @@ iPad without multiple-window support reports that limitation.
   | Folder | Contents |
   | --- | --- |
   | `Application Support/<bundle id>` | `settings.json`, `export-presets`, `color-profiles/`, `workspaces/workspaces.sqlite3` |
-  | `Application Support/<bundle id>/State` | `sessions/<scene UUID>/` drawing checkpoints; excluded from backups |
+  | `Application Support/<bundle id>/State` | `sessions/<scene UUID>/` drawing checkpoints and `FileAccess/` bookmark grants; excluded from backups |
   | The app's temporary folder | Anonymous copies of opened `.capy` files and parked drawing tabs |
 
   On macOS these folders are inside the app's sandbox container.
@@ -92,18 +92,20 @@ iPad without multiple-window support reports that limitation.
   `PackageView`. The bridge exposes its summary and bounded preview without
   replacing editable artwork. Copy original streams the retained package bytes.
 - Security-scoped access and `NSFileCoordinator` surround file operations. The
-  owner keeps the picker URL for later saves; the shared URI is an identity, not
-  an access grant. Writes stream into a system replacement directory on the
-  destination volume, sync, then publish with `FileManager` replacement.
+  owner keeps the picker URL for later saves and the file worker persists its
+  bookmark separately from artwork after a validated read or successful save.
+  Looking up a stale bookmark never rewrites the saved grant. The shared URI is
+  an identity, not an access grant. Writes stream into a system replacement
+  directory on the destination volume, sync, then publish with `FileManager`
+  replacement.
 - Image export captures immutable artwork and a GPU reference and encodes
   through the shared Float32 snapshot worker, never through the display cache.
   It never renames the drawing or marks unsaved edits as saved. Export presets
   and ICC library copies are saved atomically in Application Support.
 - Image imports use the same coordinated file worker and shared Rust decoder;
   the bridge rejects a result that arrives after the document was replaced.
-- Not handled: restoring a provider URL across launches, provider conflicts and
-  file presenters. Recovery restores a private copy, not access to the original
-  destination.
+- Provider conflicts and file presenters remain separate work. An unavailable
+  saved grant uses the ordinary destination picker.
 
 ## Drawing session restart
 
@@ -147,13 +149,14 @@ iPad without multiple-window support reports that limitation.
   failed attempt preserves its data and exposes Retry. Markers remain pending
   until actual owner adoption, including the worker-to-owner transfer. Retry uses the retained
   original session; a failed restore never publishes a blank session over it.
-- Save destinations remain display identities after restart. A restored Apple
-  drawing asks for a destination on Save because provider access/bookmarks have
-  not been restored. Before adoption, the file worker attempts a security-scoped,
-  coordinated read of each original and passes its fingerprint to shared Rust.
+- Before adoption, the file worker resolves the original's saved grant, attempts
+  a security-scoped, coordinated read of each original and passes its fingerprint
+  to shared Rust.
   A matching original preserves clean state; changed, missing or inaccessible
   originals require Save or Discard before close. Unavailable access does not
-  prompt during restart. Private checkpoints never overwrite an original project.
+  prompt during restart. Save resolves the grant on the file worker and validates
+  the original fingerprint even when the bookmark resolves to a moved file.
+  Private checkpoints never overwrite an original project.
 - GPU loss retains the CPU document, sources, rasters, history and settings. The
   shared renderer replacement supports Restart Canvas or Save As.
 

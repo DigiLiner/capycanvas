@@ -1,4 +1,6 @@
 import Foundation
+import Darwin
+import CryptoKit
 import AppKit
 import QuartzCore
 import ImageIO
@@ -22,6 +24,10 @@ import ImageIO
         try await Task.sleep(for: .milliseconds(10))
     }
     @MainActor static func main() async throws {
+        if CommandLine.arguments.dropFirst().first == "--grant-lifecycle" {
+            try await persistedGrantLifecycle()
+            return
+        }
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
         precondition(StorageLocations.installation != nil, "Private installation storage must initialize")
@@ -339,5 +345,232 @@ import ImageIO
             withExtendedLifetime(layer) {}
             print("Project files pass for Apple platform \(platform)")
         }
+    }
+    @MainActor static func persistedGrantLifecycle() async throws {
+        let arguments = CommandLine.arguments
+        try require(arguments.count == 7, "Expected phase, original, picked bookmark, scene UUID and platform")
+        let phase = arguments[2], original = URL(fileURLWithPath: arguments[3])
+        let bookmark = URL(fileURLWithPath: arguments[4]), scene = arguments[5]
+        guard let platform = UInt32(arguments[6]), [0, 1].contains(platform), UUID(uuidString: scene) != nil else {
+            throw HostFailure(message: "Invalid private lifecycle identity")
+        }
+        if phase == "prepare" {
+            try Data("owned Save As placeholder".utf8).write(to: original)
+            try original.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil).write(to: bookmark)
+            return
+        }
+        try require(["create", "original", "moved", "reject"].contains(phase), "Unknown lifecycle phase")
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("capy-native-grant-\(scene)-\(platform)", isDirectory: true)
+        let temporary = root.appendingPathComponent("tmp", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        setenv("CAPY_STORAGE_DIR", root.path, 1); setenv("TMPDIR", temporary.path, 1)
+        FileHandle.standardError.write(Data(("LIFECYCLE_CONTEXT " + (try JSON(["state": root.path, "phase": phase,
+            "scene": scene, "platform": platform]).encoded()) + "\n").utf8))
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        let persistence = EditorPersistence(root: root)
+        let store = EditorStore(platform: platform, scene: scene, persistence: persistence, managedWorkspaces: false)
+        let native = store.native!, surface = attachSurface(store, CGSize(width: 256, height: 192))
+        defer { native.detach(); withExtendedLifetime(surface) {} }
+        var pickers = 0, exported: Data?, exportFailure: String?, exportStage = "idle"
+        store.projectFiles = ProjectFiles(store: store, dialogs: .init(open: { _, _ in
+            preconditionFailure("Recovery must not reopen an Open picker")
+        }, save: { _, _, done in
+            pickers += 1
+            guard phase == "create" else { done(nil); return }
+            do {
+                var stale = false
+                let url = try URL(resolvingBookmarkData: Data(contentsOf: bookmark), options: [.withoutUI, .withoutImplicitStartAccessing],
+                    relativeTo: nil, bookmarkDataIsStale: &stale)
+                done(url)
+            } catch { preconditionFailure("Picked test grant: \(error)") }
+        }, export: { url, done in
+            if url.pathExtension == "capy" {
+                pickers += 1
+                FileHandle.standardError.write(Data("Grant provider package: phase=\(phase), picked=\(pickers)\n".utf8))
+                guard phase == "create" else { done(nil); return }
+                Task { @MainActor in
+                    do {
+                        let destination = try await Task.detached(priority: .utility) {
+                            var stale = false
+                            let destination = try URL(resolvingBookmarkData: Data(contentsOf: bookmark),
+                                options: [.withoutUI, .withoutImplicitStartAccessing], relativeTo: nil, bookmarkDataIsStale: &stale)
+                            try ProjectFileIO.coordinate(url, writing: false) { source in
+                                let input = try FileHandle(forReadingFrom: source)
+                                defer { try? input.close() }
+                                try ProjectFileIO.coordinate(destination, writing: true) { target in
+                                    try ProjectFileIO.atomicWrite(to: target) { descriptor in
+                                        guard Darwin.fcopyfile(input.fileDescriptor, descriptor, nil, copyfile_flags_t(COPYFILE_DATA)) == 0 else {
+                                            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                                        }
+                                    }
+                                }
+                            }
+                            return destination
+                        }.value
+                        done(destination)
+                    } catch { preconditionFailure("Picked test grant provider delivery: \(error)") }
+                }
+                return
+            }
+            exportStage = "delivery"; print("Grant export: \(exportStage)")
+            Task { @MainActor in
+                do { exported = try await Task.detached { try decodedExportPixels(url) }.value }
+                catch { exportFailure = error.localizedDescription }
+                exportStage = "decoded"; print("Grant export: \(exportStage)")
+                done(nil)
+            }
+        }, exportOptions: {
+            exportStage = "options"; print("Grant export: \(exportStage)")
+            $0.choose($0.recipe.replacing("format", with: JSON("Png")))
+        }))
+        func wait(_ label: String, _ ready: () -> Bool) async throws {
+            try await CapyTest.wait(label, seconds: 60, failure: { store.failure ?? store.recovery.error },
+                step: { await frame(native) }, ready)
+        }
+        func invoke(_ command: String) async throws {
+            try await store.apply(["type": "invoke", "command": command])
+            try await wait(command) { !store.projectFiles.busy && store.state["requests"].array.isEmpty }
+        }
+        func pixels() async throws -> Data {
+            exported = nil; exportFailure = nil
+            exportStage = "requested"; print("Grant export: \(exportStage)")
+            try await invoke("export_document")
+            try await CapyTest.wait("Grant PNG export (\(exportStage))", seconds: 60,
+                failure: { store.projectFiles.error ?? store.failure ?? store.recovery.error },
+                step: { await frame(native) }) { exported != nil || exportFailure != nil }
+            guard let exported else { throw HostFailure(message: exportFailure ?? "Missing production PNG export") }
+            return exported
+        }
+        func layers() -> String {
+            JSON(store.state["layers"].array.map {
+                $0.replacing("paint_revision", with: JSON(0)).replacing("mask_revision", with: JSON(0)).raw
+            }).stableKey
+        }
+        func fill(_ rgba: [Double]) async throws {
+            try await store.apply(["type": "color", "action": ["op": "definition", "color": ["space": "Srgb", "rgba": rgba]]])
+            try await invoke("select_all")
+            try await store.apply(["type": "layer", "action": ["op": "fill_selection"]])
+        }
+        func destination(_ uri: String) async throws -> URL {
+            let result = await withCheckedContinuation { done in native.savedDestination(uri) { done.resume(returning: $0) } }
+            guard let result else { throw HostFailure(message: "NativeOwner must resolve the persisted file grant") }
+            return result
+        }
+        func grants() async throws -> [String: Data] {
+            let directory = persistence.locations!.state.appendingPathComponent("FileAccess")
+            return try await Task.detached(priority: .utility) { try storedTestFiles(directory) }.value
+        }
+        func grantHashes(_ files: [String: Data]) -> String {
+            JSON(files.mapValues { data in SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }).stableKey
+        }
+        let marker = root.appendingPathComponent("lifecycle.json")
+        try await wait("Native lifecycle restoration") { store.snapshot["shaders_ready"].bool && !store.recovery.restoring }
+        try require(store.recovery.restoreError == nil && store.recovery.failedDrawings.isEmpty, "Saved artwork must restore without failure")
+        var baseline: Data, undoPixels: Data
+        var expectedGrantBytes: [String: Data]?
+        if phase == "create" {
+            try await invoke("add_layer")
+            try await fill([0.13, 0.41, 0.79, 1])
+            baseline = try await pixels()
+            try await invoke("undo"); undoPixels = try await pixels()
+            try require(undoPixels != baseline, "The fixture must contain real painted pixels and meaningful Undo")
+            try await invoke("redo")
+            try require(try await pixels() == baseline, "Redo must restore exact authored pixels")
+            try await invoke("save_document_as")
+            try await wait("Picked Save As completion") {
+                !store.projectFiles.busy && store.state["requests"].array.isEmpty
+                    && (store.projectFiles.error != nil || (pickers == 1 && !store.state["document_file"]["modified"].bool
+                        && store.state["document_file"]["location"]["uri"].string == original.absoluteString))
+            }
+            try require(pickers == 1 && store.projectFiles.error == nil, "Save As must use the picked file grant exactly once")
+        } else {
+            let expected = try JSON.decode(String(contentsOf: marker, encoding: .utf8))
+            try require(expected["process"].string != String(ProcessInfo.processInfo.processIdentifier), "Each lifecycle phase must use a fresh process")
+            baseline = try Data(contentsOf: root.appendingPathComponent("pixels.bin"))
+            undoPixels = try Data(contentsOf: root.appendingPathComponent("undo-pixels.bin"))
+            let restoredPixels = try await pixels()
+            try require(layers() == expected["layers"].string && restoredPixels == baseline,
+                "Fresh NativeOwner/ArtworkRecovery must restore exact layers and painted pixels")
+            try await invoke("undo"); try require(try await pixels() == undoPixels, "Restart must preserve exact Undo pixels")
+            try await invoke("redo"); try require(try await pixels() == baseline, "Restart must preserve exact Redo pixels")
+            try require(store.state["document_file"]["location"]["uri"].string == expected["uri"].string,
+                "Recovery must retain the saved destination URI until a new save succeeds")
+            let target = try await destination(expected["uri"].string)
+            FileHandle.standardError.write(Data(("GRANT_DESTINATION " + (try JSON(["phase": phase,
+                "saved_uri": expected["uri"].string, "original_uri": original.absoluteString,
+                "resolved_uri": target.absoluteString]).encoded()) + "\n").utf8))
+            if phase == "moved" {
+                try require(expected["uri"].string == original.absoluteString && target.standardizedFileURL != original.standardizedFileURL,
+                    "Moved-file scenarios must validate the original saved URI against its relocated grant")
+            }
+            let before = try ProjectFileIO.coordinate(target, writing: false) { try Data(contentsOf: $0) }
+            if phase == "reject" {
+                try require(expected["uri"].string == original.absoluteString && target.standardizedFileURL == original.standardizedFileURL,
+                    "The ABA fixture must observe the foreign file at the saved original URI")
+                try require(!expected["grants"].object.isEmpty, "The preceding validated Save must retain its exact grant bytes")
+                expectedGrantBytes = try expected["grants"].object.mapValues { value in
+                    guard let text = value as? String, let bytes = Data(base64Encoded: text) else {
+                        throw HostFailure(message: "Invalid private grant baseline")
+                    }
+                    return bytes
+                }
+                try require(store.state["document_file"]["modified"].bool && !store.state["document_file"]["recovered"].bool,
+                    "A changed original must be modified while the prior clean exit retains its recovery classification")
+                let identity = store.drawingIdentity, authored = layers()
+                try await invoke("save_document")
+                try await wait("Original fingerprint refusal") {
+                    !store.projectFiles.busy && store.state["requests"].array.isEmpty && store.projectFiles.error != nil
+                }
+                try require(pickers == 0 && store.projectFiles.error != nil, "A changed original must refuse direct Save without silently opening a picker")
+                let refusal = "The saved drawing changed outside Capy Canvas. Save a copy to keep both versions."
+                try require(store.projectFiles.error == refusal,
+                    "Normal Save must reach the shared destination fingerprint refusal: \(store.projectFiles.error ?? "nil")")
+                try require(try ProjectFileIO.coordinate(target, writing: false) { try Data(contentsOf: $0) } == before,
+                    "Fingerprint refusal must leave the foreign original bytes intact")
+                store.projectFiles.dismissAlert()
+                let refusedPixels = try await pixels()
+                try require(store.drawingIdentity == identity && layers() == authored && refusedPixels == baseline,
+                    "A refused Save must preserve live artwork and its owner")
+            } else {
+                try require(!store.state["document_file"]["modified"].bool && !store.state["document_file"]["recovered"].bool,
+                    "Persisted grant observation must recognize the unchanged original, including after its move")
+                if phase == "moved" { try require(target.standardizedFileURL != original.standardizedFileURL, "The bookmark must follow the moved file") }
+                undoPixels = baseline
+                try await fill(phase == "original" ? [0.73, 0.21, 0.37, 1] : [0.23, 0.69, 0.31, 1])
+                baseline = try await pixels()
+                try require(baseline != undoPixels, "Each lazy Save must contain a new authored paint edit")
+                try await invoke("save_document")
+                try await wait("Lazy Save completion") {
+                    !store.projectFiles.busy && store.state["requests"].array.isEmpty
+                        && (store.projectFiles.error != nil || (!store.state["document_file"]["modified"].bool
+                            && store.state["document_file"]["location"]["uri"].string == target.absoluteString))
+                }
+                try require(pickers == 0 && store.projectFiles.error == nil && !store.state["document_file"]["modified"].bool,
+                    "Fresh ProjectFiles must lazily Save through the persisted grant without a picker")
+                try require(store.state["document_file"]["location"]["uri"].string == target.absoluteString,
+                    "Successful moved-file Save must publish its resolved destination")
+                try require(try ProjectFileIO.coordinate(target, writing: false) { try Data(contentsOf: $0) } != before,
+                    "Lazy Save must replace the actual original with the accepted edit")
+            }
+        }
+        let copied = await withCheckedContinuation { done in store.recovery.flush(cleanExit: true) { done.resume(returning: $0) } }
+        try require(copied && store.recovery.hasCurrentCopy, "The accepted artwork/history must be durable before process exit")
+        let savedGrants = try await grants()
+        if let expectedGrantBytes {
+            FileHandle.standardError.write(Data("GRANT_PRESERVATION expected=\(grantHashes(expectedGrantBytes)) actual=\(grantHashes(savedGrants))\n".utf8))
+            try require(savedGrants == expectedGrantBytes, "Rejected foreign Save must preserve every original grant byte")
+        }
+        if phase != "reject" {
+            let savedURI = store.state["document_file"]["location"]["uri"].string
+            try require(try savedGrants.values.contains { try JSON.decode(String(decoding: $0, as: UTF8.self))["uri"].string == savedURI },
+                "A validated Save must persist access for its accepted destination URI")
+            try baseline.write(to: root.appendingPathComponent("pixels.bin")); try undoPixels.write(to: root.appendingPathComponent("undo-pixels.bin"))
+            try AtomicJSONFile.write(try JSON(["layers": layers(), "uri": store.state["document_file"]["location"]["uri"].string,
+                "process": String(ProcessInfo.processInfo.processIdentifier),
+                "grants": savedGrants.mapValues { $0.base64EncodedString() }]).encoded().data(using: .utf8)!, to: marker)
+        }
+        print("PASS platform \(platform) phase \(phase): NativeOwner/ArtworkRecovery/ProjectFiles grant, exact pixels/history and destination safety")
     }
 }

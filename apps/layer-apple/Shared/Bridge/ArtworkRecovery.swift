@@ -8,6 +8,7 @@ import UIKit
     @Published private(set) var restoring = true
     @Published private(set) var error: String?
     @Published private(set) var restoreError: String?
+    @Published private(set) var failedDrawings: [JSON] = []
     @Published private var dismissedError: String?
     private weak var store: EditorStore?
     private var scheduled: Task<Void, Never>?
@@ -37,11 +38,12 @@ import UIKit
                 restoring = false; store.projectFiles.submitExternalOpen(); return
             }
             store.native?.restoreSession(sessions: sessions, scene: store.sessionIdentity, adopt: Self.adoptsUnrestoredSessions) {
-                [weak self] failure, adopted in DispatchQueue.main.async {
+                [weak self] failure, adopted, failures in DispatchQueue.main.async {
                 guard let self else { return }
                 self.restoring = false
                 if self.restoreError != failure { self.dismissedError = nil }
                 self.restoreError = failure
+                self.failedDrawings = failures
                 self.restoreFailed = failure != nil && !adopted
                 if !self.restoreFailed { self.schedule() }
                 self.store?.projectFiles.submitExternalOpen()
@@ -135,9 +137,10 @@ import UIKit
         let available = !restoreFailed
         restoring = true
         store.native?.restoreSession(sessions: sessions, scene: store.sessionIdentity, adopt: false, retry: true) {
-            [weak self] failure, adopted in DispatchQueue.main.async {
+            [weak self] failure, adopted, failures in DispatchQueue.main.async {
             guard let self else { return }
             self.restoring = false; self.restoreFailed = failure != nil && !adopted && !available; self.restoreError = failure
+            self.failedDrawings = failures
             if !self.restoreFailed { self.schedule() }
             self.store?.projectFiles.submitExternalOpen()
         } }

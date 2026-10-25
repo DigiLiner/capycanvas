@@ -1,5 +1,28 @@
 import Foundation
 import QuartzCore
+import ImageIO
+func decodedExportPixels(_ url: URL) throws -> Data {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        let image = CGImageSourceCreateImageAtIndex(source, 0, nil), let pixels = image.dataProvider?.data else {
+        throw HostFailure(message: "Could not decode the fixture's production export")
+    }
+    var result = Data("\(image.width):\(image.height):\(image.bitsPerPixel):\(image.bytesPerRow):".utf8)
+    result.append(pixels as Data)
+    return result
+}
+
+func storedTestFiles(_ root: URL) throws -> [String: Data] {
+    var result: [String: Data] = [:]
+    func visit(_ directory: URL) throws {
+        for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) {
+            if try file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true { try visit(file) }
+            else if file.lastPathComponent != ".lock" { result[String(file.path.dropFirst(root.path.count + 1))] = try Data(contentsOf: file) }
+        }
+    }
+    try visit(root)
+    return result
+}
+
 
 func require(_ value: Bool, _ message: String) throws {
     if !value { throw HostFailure(message: message) }

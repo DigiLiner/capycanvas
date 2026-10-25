@@ -18,11 +18,14 @@ private final class LanguageJob: @unchecked Sendable {
 private final class SessionJob: @unchecked Sendable {
     let handle: UInt64
     private let failure: String
-    init(_ handle: UInt64, failure: String) { self.handle = handle; self.failure = failure }
+    private let access: ProjectFileAccess
+    init(_ handle: UInt64, failure: String, access: ProjectFileAccess) { self.handle = handle; self.failure = failure; self.access = access }
     deinit { let handle = handle; NativeProjectTask.io.async { capy_session_free(nativeValue(handle)) } }
     func work() -> String? {
-        let result = capy_session_work(nativeValue(handle), { uri in
-            guard let uri, let url = URL(string: String(cString: uri)), url.isFileURL else { return 0 }
+        let result = capy_session_work(nativeValue(handle), { uri, context in
+            guard let uri, let context, let original = URL(string: String(cString: uri)), original.isFileURL else { return 0 }
+            let job = Unmanaged<SessionJob>.fromOpaque(context).takeUnretainedValue()
+            let url = (try? job.access.resolve(original.absoluteString)) ?? original
             var observed: UInt64?
             do {
                 try ProjectFileIO.coordinate(url, writing: false) { source in
@@ -35,8 +38,12 @@ private final class SessionJob: @unchecked Sendable {
                 capy_session_destination_free(nativeValue(observed))
                 return 0
             }
-        })
+        }, Unmanaged.passUnretained(self).toOpaque())
         return result < 0 ? diagnostic ?? failure : nil
+    }
+    var failures: [JSON] {
+        guard let text = takeNativeText(capy_session_failures(nativeValue(handle))) else { return [] }
+        return (try? JSON.decode(text))?.array ?? []
     }
     var diagnostic: String? {
         guard let text = takeNativeText(capy_session_error(nativeValue(handle))) else { return nil }
@@ -520,28 +527,29 @@ final class NativeOwner: @unchecked Sendable {
         }
     }
     func restoreSession(sessions: URL, scene: String, adopt: Bool, retry: Bool = false,
-        completion: @escaping @Sendable (String?, Bool) -> Void) {
+        completion: @escaping @Sendable (String?, Bool, [JSON]) -> Void) {
         queue.async { [self] in
             let opened = sessions.path.withCString { sessions in
                 scene.withCString { nativeHandle(capy_apple_session_open(nativeValue(handle), sessions, $0, adopt, retry)) }
             }
             guard let pointer = opened else {
                 launchSessionPending = false
-                completion(takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["open_operation"].string, false); return
+                completion(takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["open_operation"].string, false, []); return
             }
-            let task = SessionJob(pointer, failure: documentDeliveryCopy["change_in_progress"].string)
+            let task = SessionJob(pointer, failure: documentDeliveryCopy["change_in_progress"].string, access: ProjectFileAccess(state: persistence.locations?.state))
             NativeProjectTask.io.async { [self] in
-                if let failure = task.work() { queue.async { [self] in launchSessionPending = false; completion(failure, false) }; return }
+                if let failure = task.work() { queue.async { [self] in launchSessionPending = false; completion(failure, false, []) }; return }
                 queue.async { [self] in
                     do { try check(capy_apple_session_adopt(nativeValue(handle),nativeValue(task.handle))) }
-                    catch { launchSessionPending = false; completion(error.localizedDescription, false); return }
+                    catch { launchSessionPending = false; completion(error.localizedDescription, false, []); return }
                     do { try publish() } catch { receive(nil, error.localizedDescription) }
                     NativeProjectTask.io.async { [self] in
                         _ = capy_session_restore_finished(nativeValue(task.handle))
                         let failure = task.diagnostic
+                        let failures = task.failures
                         queue.async { [self] in
                             launchSessionPending = false
-                            completion(failure, true)
+                            completion(failure, true, failures)
                         }
                     }
                 }
@@ -565,7 +573,7 @@ final class NativeOwner: @unchecked Sendable {
             guard ready == 0, let pointer = nativeHandle(capy_apple_session_capture(nativeValue(handle), exclusion, cleanExit)) else {
                 completion(takeNativeText(capy_apple_error(nativeValue(handle))) ?? documentDeliveryCopy["change_in_progress"].string, false); return
             }
-            let task = SessionJob(pointer, failure: documentDeliveryCopy["change_in_progress"].string)
+            let task = SessionJob(pointer, failure: documentDeliveryCopy["change_in_progress"].string, access: ProjectFileAccess(state: persistence.locations?.state))
             NativeProjectTask.io.async { let failure = task.work(); completion(failure ?? task.diagnostic, capy_session_committed(nativeValue(task.handle))) }
         }
         queue.async(execute: poll)
@@ -602,11 +610,19 @@ final class NativeOwner: @unchecked Sendable {
                             : capy_apple_project_saved(nativeValue(handle),nativeValue(task.handle), name, uri))
                     }
                 }
-                try publish(); completion(nil)
+                try publish()
+                if let url {
+                    let access = ProjectFileAccess(state: persistence.locations?.state)
+                    NativeProjectTask.io.async { try? access.remember(url); completion(nil) }
+                } else { completion(nil) }
                 if opening { documentStorage() }
             } catch { completion(error.localizedDescription) }
         }
         queue.async(execute: attempt)
+    }
+    func savedDestination(_ uri: String, completion: @escaping @Sendable (URL?) -> Void) {
+        let access = ProjectFileAccess(state: persistence.locations?.state)
+        NativeProjectTask.io.async { completion(try? access.resolve(uri)) }
     }
     private final class DocumentJob: @unchecked Sendable {
         let handle: UInt64

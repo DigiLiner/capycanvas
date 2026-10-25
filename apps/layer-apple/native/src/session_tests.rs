@@ -5,7 +5,7 @@ struct SessionJob(u64);
 impl Drop for SessionJob { fn drop(&mut self) { unsafe { capy_session_free(self.0) }; } }
 impl SessionJob {
     fn run(&self) {
-        assert_eq!(unsafe { capy_session_work(self.0, None) }, 0, "{:?}", self.error());
+        assert_eq!(unsafe { capy_session_work(self.0, None, std::ptr::null_mut()) }, 0, "{:?}", self.error());
     }
     fn error(&self) -> Option<String> {
         let text = unsafe { capy_session_error(self.0) };
@@ -13,6 +13,11 @@ impl SessionJob {
         let error = handles::take_text(text).to_string_lossy().into_owned();
 
         Some(error)
+    }
+    fn failures(&self) -> Vec<serde_json::Value> {
+        let text = unsafe { capy_session_failures(self.0) };
+        assert_ne!(text, 0);
+        serde_json::from_slice(handles::take_text(text).to_bytes()).unwrap()
     }
 }
 fn open(app: &App, path: &Path, adopt: bool) -> SessionJob {
@@ -52,26 +57,50 @@ fn launch_observed(platform: u32, path: &Path, observe: Option<SessionDestinatio
     launch_report(platform, path, observe, adopt).0
 }
 fn launch_report(platform: u32, path: &Path, observe: Option<SessionDestinationObserver>, adopt: bool) -> (App, Option<String>) {
+    let (app, warning, _) = launch_with_failures(platform, path, observe, adopt);
+    (app, warning)
+}
+fn launch_with_failures(platform: u32, path: &Path, observe: Option<SessionDestinationObserver>, adopt: bool) -> (App, Option<String>, Vec<serde_json::Value>) {
+    launch_with_observer_context(platform, path, observe, adopt, std::ptr::null_mut())
+}
+fn launch_with_observer_context(platform: u32, path: &Path, observe: Option<SessionDestinationObserver>, adopt: bool,
+    context: *mut std::ffi::c_void) -> (App, Option<String>, Vec<serde_json::Value>) {
     let app = App::new(platform);
     app.borrow().host.session.renderer_mut().0 = Some(native_renderer());
     app.draw_until_idle();
     let task = open(&app, path, adopt);
-    assert!(!(task.0==0), "{:?}", app.borrow().error);
-    assert_eq!(unsafe { capy_session_work(task.0, observe) }, 0, "{:?}", task.error());
+    assert_ne!(task.0, 0, "{:?}", app.borrow().error);
+    assert_eq!(unsafe { capy_session_work(task.0, observe, context) }, 0, "{:?}", task.error());
     let index = path.join("window.json");
     let pending = layer_ui::SessionManifest::read(&index).unwrap().map(|manifest| manifest.restoring).unwrap_or_default();
     assert_eq!(unsafe { capy_apple_session_adopt(app.0, task.0) }, 0, "{:?}", app.borrow().error);
     assert_eq!(layer_ui::SessionManifest::read(&index).unwrap().map(|manifest| manifest.restoring).unwrap_or_default(), pending);
     assert_eq!(unsafe { capy_session_restore_finished(task.0) }, 0);
     assert!(layer_ui::SessionManifest::read(&index).unwrap().is_none_or(|manifest| manifest.restoring.is_empty()));
+    let failures = task.failures();
+    let blocked = layer_ui::SessionManifest::read(&index).unwrap().map(|manifest| manifest.blocked).unwrap_or_default();
+    assert_eq!(failures.len(), blocked.len());
+    assert_eq!(failures.iter().map(|failure| failure["id"].as_u64().unwrap()).collect::<std::collections::BTreeSet<_>>(), blocked.into_iter().collect());
+    assert!(failures.iter().all(|failure| failure["error"].as_str().is_some_and(|error| !error.is_empty())));
     app.draw_until_idle();
-    (app, task.error())
+    (app, task.error(), failures)
 }
-unsafe extern "C" fn observe_original(uri: *const std::ffi::c_char) -> u64 {
+#[derive(Default)]
+struct OriginalObservation {
+    uris: Vec<String>,
+    destinations: Vec<u64>,
+}
+unsafe extern "C" fn observe_original(uri: *const std::ffi::c_char, context: *mut std::ffi::c_void) -> u64 {
     let uri = unsafe { CStr::from_ptr(uri) }.to_str().unwrap();
     let Some(path) = uri.strip_prefix("file://") else { return 0; };
     let Ok(file) = std::fs::File::open(path) else { return 0; };
-    unsafe { capy_session_destination_read(file.as_raw_fd()) }
+    let destination = unsafe { capy_session_destination_read(file.as_raw_fd()) };
+    if !context.is_null() {
+        let observed = unsafe { &mut *context.cast::<OriginalObservation>() };
+        observed.uris.push(uri.to_owned());
+        observed.destinations.push(destination);
+    }
+    destination
 }
 #[test]
 fn apple_saved_session_checks_original_before_clean_close() {
@@ -91,7 +120,21 @@ fn apple_saved_session_checks_original_before_clean_close() {
         assert_eq!(unsafe { capy_apple_project_saved(app.0, save.0, c"drawing.capy".as_ptr(), uri.as_ptr()) }, 0);
         checkpoint(&app, 0, true);
         drop((save, file, app));
-        let restored = launch_observed(platform, &path, Some(observe_original), false);
+        let mut observed = OriginalObservation::default();
+        let restored = launch_with_observer_context(platform, &path, Some(observe_original), false,
+            (&mut observed as *mut OriginalObservation).cast()).0;
+        assert_eq!(observed.uris, vec![uri.to_str().unwrap().to_owned()]);
+        assert_eq!(observed.destinations.len(), 1);
+        assert_ne!(observed.destinations[0], 0);
+        assert!(handles::take::<CapySessionDestination>(observed.destinations[0]).is_none(),
+            "Session work must consume the observed destination generation exactly once");
+        let file = std::fs::File::open(&original).unwrap();
+        let replacement = unsafe { capy_session_destination_read(file.as_raw_fd()) };
+        assert_ne!(replacement, 0);
+        assert_ne!(replacement, observed.destinations[0]);
+        assert!(handles::take::<CapySessionDestination>(observed.destinations[0]).is_none());
+        unsafe { capy_session_destination_free(replacement) };
+        drop(file);
         assert_eq!(restored.pixels(), pixels);
         assert_eq!(restored.state()["document_file"]["modified"], false);
         checkpoint(&restored, 0, true);
@@ -556,8 +599,8 @@ fn apple_session_failed_peer_checkpoint_keeps_closing_drawing_indexed() {
         std::fs::rename(&generation, &held).unwrap();
         std::fs::write(&generation, b"blocked").unwrap();
         let task = SessionJob(unsafe { capy_apple_session_capture(app.0, closing, false) });
-        assert!(!(task.0==0));
-        assert_eq!(unsafe { capy_session_work(task.0, None) }, -1);
+        assert_ne!(task.0, 0);
+        assert_eq!(unsafe { capy_session_work(task.0, None, std::ptr::null_mut()) }, -1);
         assert!(!unsafe { capy_session_committed(task.0) });
         let retained = layer_ui::SessionManifest::read(&path.join("window.json")).unwrap().unwrap();
         assert_eq!(retained.drawings, manifest.drawings);

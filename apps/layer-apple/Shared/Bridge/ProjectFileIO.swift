@@ -2,6 +2,43 @@ import Foundation
 import Darwin
 import CoreGraphics
 import UniformTypeIdentifiers
+import CryptoKit
+
+struct ProjectFileAccess: Sendable {
+    private struct Entry: Codable { let uri: String; let bookmark: Data }
+    private let directory: URL?
+    init(state: URL?) { directory = state?.appendingPathComponent("FileAccess", isDirectory: true) }
+    private func location(_ uri: String) -> URL? {
+        let key = SHA256.hash(data: Data(uri.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory?.appendingPathComponent(key + ".json")
+    }
+    func remember(_ url: URL) throws {
+        let uri = url.absoluteString
+        guard url.isFileURL, let destination = location(uri) else { return }
+        let bookmark = try ProjectFileIO.coordinate(url, writing: false) { _ in
+            #if os(macOS)
+            try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            #else
+            try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+            #endif
+        }
+        try AtomicJSONFile.write(JSONEncoder().encode(Entry(uri: uri, bookmark: bookmark)), to: destination)
+    }
+    func resolve(_ uri: String) throws -> URL? {
+        guard let source = location(uri), let data = try AtomicJSONFile.read(source) else { return nil }
+        let entry = try JSONDecoder().decode(Entry.self, from: data)
+        guard entry.uri == uri else { return nil }
+        var stale = false
+        #if os(macOS)
+        let options: URL.BookmarkResolutionOptions = [.withoutUI, .withoutImplicitStartAccessing, .withSecurityScope]
+        #else
+        let options: URL.BookmarkResolutionOptions = [.withoutUI, .withoutImplicitStartAccessing]
+        #endif
+        let url = try URL(resolvingBookmarkData: entry.bookmark, options: options, relativeTo: nil, bookmarkDataIsStale: &stale)
+        guard url.isFileURL else { return nil }
+        return url
+    }
+}
 
 extension UTType {
     static let capyProject = UTType(exportedAs: "art.capycanvas.project", conformingTo: .data)
@@ -34,7 +71,7 @@ final class NativeProjectTask: @unchecked Sendable {
 
         throw HostFailure(message: error ?? "Document operation failed")
     }
-    func write(to url: URL, previewOnly: Bool = false, original: URL? = nil, destinationError: String = "") throws {
+    func write(to url: URL, previewOnly: Bool = false, original: URL? = nil, destinationError: String = "", expectedURI: String? = nil) throws {
         try ProjectFileIO.coordinate(url, writing: true) { destination in
             if previewOnly, let original {
                 let access = original.startAccessingSecurityScopedResource()
@@ -44,7 +81,7 @@ final class NativeProjectTask: @unchecked Sendable {
             try ProjectFileIO.atomicWrite(to: destination, beforeCommit: { [self] in
                 let existing = try? FileHandle(forReadingFrom: destination)
                 defer { try? existing?.close() }
-                try url.absoluteString.withCString { try self.check(capy_project_destination_matches(nativeValue(self.handle), existing?.fileDescriptor ?? -1, $0)) }
+                try (expectedURI ?? url.absoluteString).withCString { try self.check(capy_project_destination_matches(nativeValue(self.handle), existing?.fileDescriptor ?? -1, $0)) }
                 guard capy_project_begin_commit(nativeValue(self.handle)) == 0 else { throw HostFailure(message: "Document operation cancelled") }
             }) { [self] descriptor in try self.check(previewOnly ? capy_project_export_preview(nativeValue(self.handle), descriptor) : capy_project_write(nativeValue(self.handle), descriptor)) }
         }

@@ -43,6 +43,38 @@ extension XCTestCase {
         XCTAssertTrue(create.waitForNonExistence(timeout: 60))
     }
 
+    #if os(iOS)
+    @MainActor func selectedNewDrawingDocument(in app: XCUIApplication, expectedTitle: String? = nil) -> (id: String, label: String, value: String?) {
+        editorMenu(in: app, menu: "Window", id: "drawings", label: "Drawings…")
+        let selector = app.descendants(matching: .any)["drawing-selector"].firstMatch
+        XCTAssertTrue(selector.waitForExistence(timeout: 15))
+        let selected = selector.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND selected == YES", "drawing-tab-"))
+        expectation(for: NSPredicate { _, _ in selected.count == 1 }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        if let expectedTitle {
+            expectation(for: NSPredicate { _, _ in
+                guard selected.count == 1 else { return false }
+                let document = selected.firstMatch
+                return document.label.contains(expectedTitle) || (document.value as? String)?.contains(expectedTitle) == true
+            }, evaluatedWith: app)
+            waitForExpectations(timeout: 30)
+        }
+        guard let snapshot = try? selected.firstMatch.snapshot() else {
+            XCTFail("The Drawings selector must expose its selected drawing")
+            return ("", "", nil)
+        }
+        XCTAssertTrue(snapshot.isSelected)
+        XCTAssertTrue(snapshot.identifier.hasPrefix("drawing-tab-"))
+        let result = (id: snapshot.identifier, label: snapshot.label, value: snapshot.value as? String)
+        let proof = XCTAttachment(string: "Selected drawing ID: \(result.id)\nLabel: \(result.label)\nValue: \(result.value ?? "nil")\n\(selector.debugDescription)")
+        proof.name = "new-drawing-selected-document"; proof.lifetime = .keepAlways; add(proof)
+        attachEditor(in: app, name: "new-drawing-selected-document")
+        workspaceActivate(app.buttons["Done"].firstMatch)
+        XCTAssertTrue(selector.waitForNonExistence(timeout: 10))
+        return result
+    }
+    #endif
+
     @MainActor func checkNewDrawingDialog(in app: XCUIApplication, theme: String) {
         let create = app.buttons["new-drawing-create"]
         XCTAssertTrue(create.waitForExistence(timeout: 60), "The New drawing dialog did not open after canvas startup")

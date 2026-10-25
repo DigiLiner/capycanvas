@@ -37,7 +37,7 @@ impl WindowDisk {
 }
 pub struct CapySessionTask(Mutex<SessionJob>);
 pub struct CapySessionDestination(layer_ui::DestinationFingerprint);
-pub type SessionDestinationObserver = unsafe extern "C" fn(*const c_char) -> u64;
+pub type SessionDestinationObserver = unsafe extern "C" fn(*const c_char, *mut std::ffi::c_void) -> u64;
 struct SessionOpen {
     sessions: PathBuf,
     scene: String,
@@ -104,6 +104,7 @@ struct SessionJob {
     retired: Vec<Box<layer_render_wgpu::WgpuRasterizer>>,
     error: Option<CString>,
     warning: Option<CString>,
+    failures: BTreeMap<String, String>,
     restored: bool,
     adopted: bool,
     sequence: u64,
@@ -115,7 +116,7 @@ impl SessionJob {
         self.disk.as_ref().map(|disk| disk.lock().unwrap_or_else(|e| e.into_inner()).path.join("window.json"))
             .ok_or_else(|| "The editing session is unavailable".into())
     }
-    fn load(&mut self, observe: Option<SessionDestinationObserver>) -> Result<(), String> {
+    fn load(&mut self, observe: Option<SessionDestinationObserver>, context: *mut std::ffi::c_void) -> Result<(), String> {
         let open = self.open.take().ok_or("Session storage is unavailable")?;
         if self.disk.is_none() {
             let (path, owner, warning) = claim(open)?;
@@ -182,7 +183,7 @@ impl SessionJob {
             let result = (|| -> Result<_, String> {
                 let observed = restore.state.location.as_ref().and_then(|location| {
                     let uri = CString::new(location.uri.as_str()).ok()?;
-                    let fingerprint = unsafe { observe?(uri.as_ptr()) };
+                    let fingerprint = unsafe { observe?(uri.as_ptr(), context) };
                     handles::take::<CapySessionDestination>(fingerprint).map(|fingerprint|fingerprint.0)
                 });
                 let mut candidate = environment.prepare(restore.document().clone(), || false)?;
@@ -216,7 +217,8 @@ impl SessionJob {
             && !self.candidates.iter().any(|(id, _)| *id == self.active) {
                 self.active = self.candidates.first().map_or(0, |(id, _)| *id);
             }
-        let warnings: Vec<_> = failures.into_iter().map(|(key, error)| format!("Drawing {key}: {error}")).collect();
+        self.failures = failures;
+        let warnings: Vec<_> = self.failures.iter().map(|(key, error)| format!("Drawing {key}: {error}")).collect();
         self.warning = if warnings.is_empty() { None } else { CString::new(warnings.join("\n\n").replace('\0', " ")).ok() };
         manifest = manifest.reconcile(manifest.drawings.clone(), manifest.active, false)?;
         self.candidates.sort_by_key(|(id, _)| manifest.drawings.iter().position(|drawing| drawing.id == *id).unwrap());
@@ -322,7 +324,7 @@ pub unsafe extern "C" fn capy_apple_session_open(app: u64, sessions: *const c_ch
         Ok(handles::store(CapySessionTask(Mutex::new(SessionJob {
             open: Some(open), disk: if retry { a.session_disk.clone() } else { None }, environment: Some(environment), captures: None,
             candidates: Vec::new(), active: 0, clean_exit: false, retry, stamp: a.host.session.session_stamp(), retired: Vec::new(), error: None, restored: false, adopted: false, sequence: 0, exclusion: 0, committed: false,
-            warning: None, append: retry && a.session_disk.is_some(),
+            warning: None, failures: Default::default(), append: retry && a.session_disk.is_some(),
         }))))
     }).unwrap_or(0)
 }
@@ -342,20 +344,22 @@ pub unsafe extern "C" fn capy_apple_session_capture(app: u64, exclusion: u64, cl
         Ok(handles::store(CapySessionTask(Mutex::new(SessionJob {
             open: None, disk: Some(disk), environment: None, captures: Some(captures), candidates: Vec::new(), active, clean_exit, retry: false,
             stamp: a.host.session.session_stamp(), retired: Vec::new(), error: None, restored: false, adopted: false, sequence: a.session_capture_sequence, exclusion, committed: false,
-            warning: None, append: false,
+            warning: None, failures: Default::default(), append: false,
         }))))
     }).unwrap_or(0)
 }
 /// # Safety
 /// File worker only; no concurrent calls use this task. The observer transfers
-/// a fingerprint allocation from capy_session_destination_read or returns null.
+/// a fingerprint handle from capy_session_destination_read or returns zero.
+/// Its context remains valid until this call returns, including on the worker.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_session_work(task: u64, observe: Option<SessionDestinationObserver>) -> i32 {
+pub unsafe extern "C" fn capy_session_work(task: u64, observe: Option<SessionDestinationObserver>, context: *mut std::ffi::c_void) -> i32 {
     let Some(lease_task)=handles::shared::<CapySessionTask>(task) else { return -1; };
     let task=&*lease_task;
+    let context = context as usize;
     on_large_stack("capy-session", || {
         let mut job = task.0.lock().unwrap_or_else(|e| e.into_inner());
-        let result = catch_unwind(AssertUnwindSafe(|| if job.open.is_some() { job.load(observe) } else { job.write() }));
+        let result = catch_unwind(AssertUnwindSafe(|| if job.open.is_some() { job.load(observe, context as *mut std::ffi::c_void) } else { job.write() }));
         match result {
             Ok(Ok(())) => 0,
             error => {
@@ -458,6 +462,18 @@ pub unsafe extern "C" fn capy_session_error(task: u64) -> u64 {
         job.error.clone().or_else(|| job.warning.clone())
     })
         .map_or(0, handles::text)
+}
+/// # Safety
+/// Worker completion must precede this read. Release the owned JSON string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_session_failures(task: u64) -> u64 {
+    handles::shared::<CapySessionTask>(task).and_then(|task| {
+        let job = task.0.lock().unwrap_or_else(|e| e.into_inner());
+        let disk = job.disk.as_ref()?.lock().unwrap_or_else(|e| e.into_inner());
+        let failures: Vec<_> = disk.manifest.drawings.iter().filter(|drawing| disk.manifest.blocked.contains(&drawing.id))
+            .filter_map(|drawing| job.failures.get(&drawing.key).map(|error| serde_json::json!({"id": drawing.id, "error": error}))).collect();
+        serde_json::to_string(&failures).ok().and_then(|json| CString::new(json).ok())
+    }).map_or(0, handles::text)
 }
 /// # Safety
 /// Worker completion must precede this read.

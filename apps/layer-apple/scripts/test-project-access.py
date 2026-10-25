@@ -5,6 +5,7 @@ from pathlib import Path
 import plistlib
 import subprocess
 import tempfile
+import uuid
 
 repo = Path(__file__).resolve().parents[3]
 apple = repo / "apps/layer-apple"
@@ -23,18 +24,22 @@ with tempfile.TemporaryDirectory(prefix="capy-project-access-") as temporary:
         "CFBundlePackageType": "APPL"}))
     entitlements = root / "entitlements.plist"
     entitlements.write_bytes(plistlib.dumps({"com.apple.security.app-sandbox": True,
-                                           "com.apple.security.files.user-selected.read-write": True}))
-    subprocess.run(["cargo", "build", "--offline", "-p", "layer-apple-link", "--target", "aarch64-apple-darwin"],
+                                           "com.apple.security.files.user-selected.read-write": True,
+                                           "com.apple.security.files.bookmarks.app-scope": True}))
+    subprocess.run(["cargo", "build", "--offline", "--locked", "-j2", "-p", "layer-apple-link", "--target", "aarch64-apple-darwin"],
                    cwd=repo, env=env, check=True)
     target = Path(env.get("CARGO_TARGET_DIR", repo / "target"))
     subprocess.run(["xcrun", "swiftc", "-import-objc-header", str(apple / "native/include/CapyApple.h"),
-                    str(apple / "Shared/Bridge/JSON.swift"), str(apple / "Shared/Bridge/ProjectFileIO.swift"),
+                    str(apple / "Shared/Bridge/JSON.swift"), str(apple / "Shared/Bridge/AtomicJSONFile.swift"),
+                    str(apple / "Shared/Bridge/NativeBuffers.swift"), str(apple / "Shared/Bridge/ProjectFileIO.swift"),
                     str(apple / "tests/project-file-access.swift"), "-L", str(target / "aarch64-apple-darwin/debug"),
                     "-llayer_apple", "-lsqlite3", "-lc++", "-framework", "Metal", "-framework", "QuartzCore",
                     "-framework", "Security", "-framework", "AppKit", "-o", str(binary)], env=env, check=True)
     subprocess.run([str(binary), str(source), str(content / "Resources/input.bookmark")], env=env, check=True)
     subprocess.run(["codesign", "--force", "--sign", "-", "--entitlements", str(entitlements), str(content.parent)],
                    env=env, check=True)
-    subprocess.run([str(binary), str(source)], env=env, check=True)
+    token = str(uuid.uuid4())
+    subprocess.run([str(binary), str(source), "remember", token], env=env, check=True)
+    subprocess.run([str(binary), str(source), "restore", token], env=env, check=True)
     assert source.read_bytes() == b"saved revision 3"
     assert list(source.parent.iterdir()) == [source], "No temporary siblings or unrelated writes"

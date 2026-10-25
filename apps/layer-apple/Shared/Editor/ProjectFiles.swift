@@ -338,6 +338,17 @@ import UIKit
     #endif
     private func save(to uri: String, name: String, completion: @escaping (Bool) -> Void) {
         if let destination, destination.absoluteString == uri { write(destination, completion: completion); return }
+        guard let store, let native = store.native, let id = requestID else { completion(false); return }
+        let identity = store.drawingIdentity
+        native.savedDestination(uri) { [weak self] destination in DispatchQueue.main.async {
+            guard let self else { completion(false); return }
+            guard self.requestID == id, self.store?.drawingIdentity == identity else { return }
+            guard !self.cancelled else { completion(false); return }
+            if let destination { self.write(destination, expectedURI: uri, completion: completion) }
+            else { self.saveAs(name: name, completion: completion) }
+        } }
+    }
+    private func saveAs(name: String, completion: @escaping (Bool) -> Void) {
         task(.save) { [weak self] task in
             guard let self else { return }
             deliver(task, name: name, type: .capyProject) { [weak self] url in
@@ -523,11 +534,11 @@ import UIKit
             }
         }
     }
-    private func write(_ url: URL, completion: @escaping (Bool) -> Void) {
+    private func write(_ url: URL, expectedURI: String? = nil, completion: @escaping (Bool) -> Void) {
         task(.save) { [weak self] task in
             NativeProjectTask.io.async {
                 do {
-                    try task.write(to: url)
+                    try task.write(to: url, expectedURI: expectedURI)
                     DispatchQueue.main.async { self?.saved(task, at: url, completion: completion) }
                 } catch {
                     let message = error.localizedDescription
