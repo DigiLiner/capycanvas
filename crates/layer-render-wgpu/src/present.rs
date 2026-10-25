@@ -1086,7 +1086,7 @@ impl ViewportPresenter {
             inverse[1],
             inverse[2],
             inverse[3],
-            self.quarter_turns as f32, overlay.filter(|o|o.active).map_or(0.,|o| if o.protected { 2. } else { 1. }), f32::from(renderer.selection_previews.buffer.is_some()), 1.,
+            self.quarter_turns as f32, overlay.filter(|o|o.active).map_or(0.,|o| if o.protected { 2. } else { 1. }), f32::from(renderer.selection_previews.texture.is_some()), 1.,
             overlay_color[0], overlay_color[1], overlay_color[2], overlay_color[3],
             ca, cb, cc, cd,
             cx, cy, crop.map_or(0., |c| c.dim.clamp(0., 1.)), f32::from(crop.is_some()),

@@ -271,16 +271,6 @@ fn enclose_fill_preserves_polygon_containment_gap_closing_expansion_and_smoothin
     }
 }
 
-fn limited_renderer(storage_binding_bytes: u64) -> WgpuRasterizer {
-    let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let required_limits = wgpu::Limits { max_storage_buffer_binding_size: storage_binding_bytes, ..reference.device().limits() };
-    let (device, queue) = pollster::block_on(reference.adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("limited storage bindings"), required_features: reference.device().features(), required_limits,
-        memory_hints: crate::memory_hints(), ..Default::default() })).unwrap();
-    let mut renderer = *WgpuRasterizer::from_wgpu_inner(reference.adapter.clone(), device.into(), queue, Initialization::Headless).unwrap();
-    renderer.initialize_native(Default::default()).unwrap();
-    renderer
-}
 fn uniform_document(extent: [u32; 2], alpha: &[f32]) -> Document {
     let mut document = paint_document(extent, "Windowed region reference");
     placement::set_source(&mut document, depth_source(extent, SampleDepth::F32, RgbSpace::Srgb,

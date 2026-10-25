@@ -36,6 +36,17 @@ mod paper_shade;
 #[path = "paint_mixing_tests.rs"]
 mod paint_mixing;
 
+fn limited_renderer(storage_binding_bytes: u64) -> WgpuRasterizer {
+    let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let required_limits = wgpu::Limits { max_storage_buffer_binding_size: storage_binding_bytes, ..reference.device().limits() };
+    let (device, queue) = pollster::block_on(reference.adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("limited storage bindings"), required_features: reference.device().features(), required_limits,
+        memory_hints: crate::memory_hints(), ..Default::default() })).unwrap();
+    let mut renderer = *WgpuRasterizer::from_wgpu_inner(reference.adapter.clone(), device.into(), queue, Initialization::Headless).unwrap();
+    renderer.initialize_native(Default::default()).unwrap();
+    renderer
+}
+
 fn view() -> ViewState {
     ViewState {
         width_px: 128,

@@ -210,6 +210,45 @@ fn saved_selection_overlay_uses_working_visibility_without_changing_authored_art
 }
 
 #[test]
+fn saved_selection_overlays_beyond_one_storage_binding_draw_in_row_bands() {
+    use layer_core::{Edit, SavedSelection};
+    let extent = [1300, 900];
+    let mut document = paint_document(extent, "artwork");
+    let stack = document.composition().result;
+    let mut visibility = layer_core::authored::SelectionOverlays::default();
+    for corners in [[[40., 20.], [1260., 270.], [520., 880.]], [[870., 90.], [1210., 860.], [650., 680.]]] {
+        let saved = RecordChange::insert(&document.artwork.selections, SavedSelection {
+            selection: Selection::polygon(corners.map(|[x, y]| Point { x, y }).to_vec()).unwrap(),
+        });
+        let occurrence = RecordChange::insert(&document.artwork.occurrences, Occurrence::new(OccurrenceContent::Selection(saved.handle), "Saved coverage"));
+        visibility.visibility.insert(occurrence.handle, true);
+        let mut membership = document.artwork.stacks.get(stack).unwrap().clone();
+        membership.entries.insert(0, occurrence.handle);
+        let membership = RecordChange::replace(&document.artwork.stacks, stack, Some(membership)).unwrap();
+        document.apply(Edit::Batch(vec![Edit::SavedSelection(saved), Edit::Occurrence(occurrence), Edit::Stack(membership)])).unwrap();
+    }
+    let limit = 4 << 20;
+    assert!(32 + 5376 * u64::from(extent[1]) > limit, "the whole overlay exceeds one binding");
+    let shown = |mut r: WgpuRasterizer| {
+        r.set_selection_overlay(Some(layer_render::SelectionOverlay {
+            active: false, editing: None, color: [1., 0., 0., 0.5], protected: false, saved_protected: false,
+        }));
+        r.submit(FramePacket { selection_overlays: Some(&visibility), ..packet(document.scene(), extent) }).unwrap();
+        assert!(r.selection_previews.texture.is_some());
+        let target = crate::create_target(&r.device, extent, wgpu::TextureFormat::Rgba8UnormSrgb, "banded overlay").0;
+        let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+        presenter.present(&r, &target.create_view(&Default::default()), crate::test_support::view(extent), [1.; 4]).unwrap();
+        page_bytes(&r, &target)
+    };
+    let banded = shown(limited_renderer(limit));
+    let whole = shown(WgpuRasterizer::new_native_headless(Default::default()).unwrap());
+    let at = |x: usize, y: usize| &banded[(y * 1300 + x) * 4..][..4];
+    assert!(at(600, 300)[0] > at(600, 300)[1] + 15, "inside a saved selection is tinted: {:?}", at(600, 300));
+    assert_eq!(at(20, 860)[0], at(20, 860)[1], "outside stays untinted");
+    assert!(banded == whole, "banded overlay matches one whole-canvas pass");
+}
+
+#[test]
 fn selection_gradient_shapes_preserve_scalar_coverage_and_contact_opacity() {
     use layer_core::{GradientShape, ScalarGradient, ScalarGradientStop};
     for shape in GradientShape::ALL {

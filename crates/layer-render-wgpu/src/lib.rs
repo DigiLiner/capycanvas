@@ -2474,7 +2474,7 @@ impl WgpuRasterizer {
             .saturating_add(self.zero_pages.iter().map(texture_bytes).sum::<u64>())
             .saturating_add(self.selection_clip.storage_bytes())
             .saturating_add(self.selection_painter.as_ref().map_or(0, |p| p.storage_bytes()))
-            .saturating_add(self.selection_previews.buffer.as_ref().map_or(0, |b|b.size()*2))
+            .saturating_add(self.selection_previews.texture.as_ref().map_or(0, |view|texture_bytes(view.texture())))
             .saturating_add(self.color_sampler.storage_bytes())
             .saturating_add(self.regions.as_ref().map_or(0, |r| r.storage_bytes()));
         self.metrics.paint_state_storage_bytes += self.paint_layers.iter().flat_map(|l| &l.pages)

@@ -171,6 +171,11 @@ an immutable typed preview scene supplied by `CanvasEngine::set_scene_preview`.
 `ScenePreview` retains that scene and the target occurrence; it does not add an
 authored occurrence or history entry to the live document.
 
+Visible saved selections are merged into one display-only overlay texture that
+the presentation pass tints with. The merge works in row bands that each fit one
+storage binding, rasterizing each selection's coverage for the band, so any
+admitted canvas size can show them.
+
 The Crop tool's shield is drawn by the presentation pass itself. `set_crop_overlay`
 passes a `CropOverlay` (the map from document pixels onto the crop's unit square,
 and the shield opacity) to the renderer, which folds it into the presentation

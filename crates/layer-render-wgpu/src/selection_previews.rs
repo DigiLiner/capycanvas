@@ -10,13 +10,12 @@ type PreviewKey = (Vec<(Selection, layer_core::SelectionMaskProperties)>, [u32; 
 pub(super) struct SelectionPreviews {
     pub definitions: std::collections::BTreeMap<SourceTarget, Selection>,
     key: Option<PreviewKey>,
-    pub buffer: Option<wgpu::Buffer>,
     pub texture: Option<wgpu::TextureView>,
     pipeline: Option<PreviewPipeline>,
 }
 impl SelectionPreviews {
     fn reset(&mut self) {
-        (self.key, self.buffer, self.texture) = (None, None, None);
+        (self.key, self.texture) = (None, None);
     }
 }
 struct PreviewPipeline {
@@ -84,10 +83,12 @@ impl PreviewPipeline {
             thumbnail,
         }
     }
+    #[expect(clippy::too_many_arguments, reason = "Overlay bands keep their extent, first row and mask rule explicit")]
     fn bind(
         &self,
         r: &WgpuRasterizer,
         extent: [u32; 2],
+        top: u32,
         protected: bool,
         color: [f32; 4],
         input: &wgpu::Buffer,
@@ -97,7 +98,7 @@ impl PreviewPipeline {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("saved mask display parameters"),
-                contents: &[extent[0], extent[1], u32::from(protected), 0]
+                contents: &[extent[0], extent[1], u32::from(protected), top]
                     .into_iter()
                     .chain(color.map(f32::to_bits))
                     .flat_map(u32::to_ne_bytes)
@@ -164,67 +165,19 @@ impl WgpuRasterizer {
             }
             let [w, h] = self.document_extent;
             let row = (w * 4).div_ceil(256) * 256;
-            let size = 32 + u64::from(row) * u64::from(h);
-            if size > self.device.limits().max_storage_buffer_binding_size
-                || h > self.device.limits().max_compute_workgroups_per_dimension
-            {
+            let limits = self.device.limits();
+            let band = (limits.max_storage_buffer_binding_size.saturating_sub(32) / u64::from(row))
+                .min(u64::from(limits.max_compute_workgroups_per_dimension))
+                .min(u64::from(h)) as u32;
+            if band == 0 {
                 return Err(GpuRasterError::SizeOverflow);
             }
             let output = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("visible saved-mask overlay"),
-                size,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
+                label: Some("visible saved-mask overlay band"),
+                size: 32 + u64::from(row) * u64::from(band),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
-            let header = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("saved overlay header"),
-                    contents: &[0u32, 0, w, h, 0, 2, 0, 0]
-                        .into_iter()
-                        .flat_map(u32::to_ne_bytes)
-                        .collect::<Vec<_>>(),
-                    usage: wgpu::BufferUsages::COPY_SRC,
-                });
-            let mut encoder = crate::submission::CommandEncoder::new(
-                &self.device,
-                &wgpu::CommandEncoderDescriptor {
-                    label: Some("saved selection previews"),
-                },
-            );
-            encoder.copy_buffer_to_buffer(&header, 0, &output, 0, 32);
-            for (mask, properties) in &key.0 {
-                self.selection_clip.prepare(
-                    &self.device,
-                    &mut encoder,
-                    self.document_extent,
-                    &Arc::new(mask.clone()),
-                )?;
-                let bind = gpu.bind(
-                    self,
-                    self.document_extent,
-                    options.saved_protected,
-                    {
-                        let mut color = properties
-                            .color
-                            .encoded_in(layer_core::color::RgbSpace::Srgb)
-                            .map_err(|_| GpuRasterError::InvalidImage)?;
-                        color[3] *= properties.opacity;
-                        color
-                    },
-                    self.selection_clip.buffer.as_ref().unwrap(),
-                    &output,
-                );
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("saved mask overlays"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&gpu.merge);
-                pass.set_bind_group(0, &bind, &[]);
-                pass.dispatch_workgroups(w.div_ceil(64), h, 1);
-            }
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("saved overlay texture"),
                 size: wgpu::Extent3d {
@@ -239,27 +192,68 @@ impl WgpuRasterizer {
                 usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
-            encoder.copy_buffer_to_texture(
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &output,
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 32,
-                        bytes_per_row: Some(row),
-                        rows_per_image: Some(h),
-                    },
+            let mut encoder = crate::submission::CommandEncoder::new(
+                &self.device,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("saved selection previews"),
                 },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                texture.size(),
             );
+            for top in (0..h).step_by(band as usize) {
+                let rows = band.min(h - top);
+                encoder.clear_buffer(&output, 0, None);
+                for (mask, properties) in &key.0 {
+                    self.selection_clip.prepare_region(
+                        &self.device,
+                        &mut encoder,
+                        self.document_extent,
+                        &Arc::new(mask.clone()),
+                        Some(PixelRect::new(0, top, w, top + rows)),
+                    )?;
+                    let bind = gpu.bind(
+                        self,
+                        [w, rows],
+                        top,
+                        options.saved_protected,
+                        {
+                            let mut color = properties
+                                .color
+                                .encoded_in(layer_core::color::RgbSpace::Srgb)
+                                .map_err(|_| GpuRasterError::InvalidImage)?;
+                            color[3] *= properties.opacity;
+                            color
+                        },
+                        self.selection_clip.buffer.as_ref().unwrap(),
+                        &output,
+                    );
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("saved mask overlays"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&gpu.merge);
+                    pass.set_bind_group(0, &bind, &[]);
+                    pass.dispatch_workgroups(w.div_ceil(64), rows, 1);
+                }
+                encoder.copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &output,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 32,
+                            bytes_per_row: Some(row),
+                            rows_per_image: Some(rows),
+                        },
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: 0, y: top, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d { width: w, height: rows, depth_or_array_layers: 1 },
+                );
+            }
             previews.texture = Some(texture.create_view(&Default::default()));
             self.uploads.finish(&encoder);
             encoder.submit(&self.queue);
-            previews.buffer = Some(output);
             previews.key = Some(key);
             Ok(())
         })();
@@ -306,6 +300,7 @@ impl WgpuRasterizer {
         let bind = gpu.bind(
             self,
             self.document_extent,
+            0,
             false,
             [0.; 4],
             self.selection_clip.buffer.as_ref().unwrap(),
