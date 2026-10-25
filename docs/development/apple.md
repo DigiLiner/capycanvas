@@ -351,6 +351,9 @@ mutation or release.
 - **UIKit fields.** iPadOS consumes Escape before SwiftUI handlers. Use UIKit text
   fields with priority key commands, explicit height, and fonts/placeholders assigned
   only when changed, to avoid repeated size invalidation.
+- **Native control cancellation.** Cancel a control's owned contact once. Idle
+  AppKit controls forward `cancelOperation` through the next responder's
+  `tryToPerform`; the superclass need not implement that action.
 
 ## Tool bubbles
 

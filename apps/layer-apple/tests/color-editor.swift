@@ -39,10 +39,13 @@ import SwiftUI
         try require(session.view["value"].stableKey == before, "Native cancellation restores the complete pre-scrub color")
     }
     @MainActor static func unownedEscape() throws {
-        let input = ControlInput.InputView(), receiver = EscapeReceiver()
-        input.nextResponder = receiver
+        let input = ControlInput.InputView(), bridge = NSResponder(), receiver = EscapeReceiver()
+        input.nextResponder = bridge; bridge.nextResponder = receiver
         input.cancelOperation(nil)
         try require(receiver.count == 1, "An idle native readout forwards Escape to its containing dialog")
+        input.nextResponder = nil
+        input.cancelOperation(nil)
+        try require(receiver.count == 1, "An idle native readout without a containing dialog has no cancellation target")
     }
     @MainActor static func run() async throws {
         try unownedEscape()

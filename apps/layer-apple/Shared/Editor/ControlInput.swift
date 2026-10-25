@@ -81,7 +81,9 @@ struct ControlInput: NSViewRepresentable {
             super.keyUp(with: event)
         }
         override func cancelOperation(_ sender: Any?) {
-            guard !NativeTextContext.composing, active || keyActive else { super.cancelOperation(sender); return }
+            guard !NativeTextContext.composing, active || keyActive else {
+                _ = nextResponder?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: sender); return
+            }
             cancel()
         }
         override func resignFirstResponder() -> Bool { cancel(); return true }
