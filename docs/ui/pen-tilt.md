@@ -26,7 +26,8 @@ reduce output even from the neutral response. Each step changes an endpoint
 coordinate by 2.5 percentage points; its minimum is 2.25°.
 
 The direction preview shows input in gray and adjusted tilt in blue. It sits above
-the joined icon bar on the same centerline as the graph. Its independent **Reverse horizontal**, **Reverse vertical** and
+the compact segmented icon bar used by Tool Options, on the same centerline as
+the graph. Its independent **Reverse horizontal**, **Reverse vertical** and
 **Swap axes** toggles retain their text in tooltips and accessible labels. They
 can be combined to represent all eight signed axis mappings.
 Swapping happens before the reflections. Direction correction preserves the lean
@@ -35,11 +36,15 @@ magnitude; the response curve changes magnitude without changing direction.
 GTK gives both calibration utilities a 384-pixel minimum width and 16-pixel
 content margins. The pen name sits below the title; the title and Close share a
 vertical center. Both units use the same square plot size, with equal side gutters
-measured from the common maximum-label width in the current font. Sensitivity,
-direction and footer actions share 34-pixel heights. Body groups have 12-pixel
-gaps; sections and the footer have 16-pixel separation. Joined direction controls
-touch, and other adjacent actions have 8-pixel gaps. Apply is the suggested action.
+measured from the common maximum-label width in the current font. Sensitivity
+and footer actions share 34-pixel heights. Direction segments have 24-pixel
+targets and 16-pixel icons, joined outer corners and the normal selection fill.
+Body groups have 12-pixel gaps; sections and the footer have 16-pixel separation.
+Joined direction controls touch, and other adjacent actions have 8-pixel gaps.
+Apply is the suggested action.
 The utility is shown after shared placement accepts its measured native size.
+Like pressure, it opens within the clear canvas with a 16-pixel inset and stays
+above expanded workspace columns and drawer connections.
 
 **Reset** previews the neutral response and direction. **Apply** saves this pen's
 profile and closes. **Cancel**, Close and Escape discard the draft. Escape first
@@ -91,7 +96,8 @@ contact and localization tests. Run `native_tilt_calibration` through
 in both themes. It covers Preferences, mouse/touch/pen controls, native tilt
 metadata, editing before first pen input, hover with a hidden cursor, retained
 drafts, independent icon toggles, tooltips, matched square plots, header alignment,
-footer geometry, live arrows, graph and
+footer geometry, clear-canvas placement, stacking and opaque pixels above an
+expanded column and connector, live arrows, graph and
 window dragging, canvas painting, Apply, Reset,
 Cancel, Close and Escape. Run the pressure and tonal Curves journeys after changes
 to their shared widgets. Set `LAYER_TILT_MOTION=1` and `LAYER_NATIVE_EVENT_MS=8`

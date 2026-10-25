@@ -67,7 +67,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             PressureCalibrationAction::Sensitivity { lighter } => {
                 self.pressure_calibration.sensitivity(lighter); self.engine.set_pressure_curve(self.pressure_calibration.curve());
             }
-            PressureCalibrationAction::Measure { extent, viewport } => self.pressure_calibration.fit(extent, viewport),
+            PressureCalibrationAction::Measure { extent, viewport } => {
+                if self.pressure_calibration.placement.is_none() {self.pressure_calibration.placement=self.response_calibration_placement(extent,viewport);}
+                self.pressure_calibration.fit(extent, viewport);
+            },
             PressureCalibrationAction::Drag { phase, position, viewport } => self.pressure_calibration.drag(phase,position,viewport),
         }
         if placement_only {

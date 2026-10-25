@@ -90,6 +90,32 @@ fn utility_placement_cancel_and_resize_leave_workspace_untouched() {
 }
 
 #[test]
+fn response_utilities_open_inside_the_clear_canvas_after_native_measurement() {
+    let viewport=[1600.,1000.];
+    for command in [CommandId::PenPressure,CommandId::PenTilt] {
+        let mut s=session(Platform::Gtk);
+        let dispatch=|s:&mut UiSession<Recorder>,action| {
+            s.dispatch(if command==CommandId::PenTilt {UiAction::TiltCalibration{action:TiltCalibrationAction::Panel{action}}}
+                else {UiAction::PressureCalibration{action}}).unwrap();
+        };
+        let bounds=|s:&UiSession<Recorder>| if command==CommandId::PenTilt {s.state.tilt_calibration.as_ref().unwrap().panel.bounds}
+            else {s.state.pressure_calibration.as_ref().unwrap().bounds};
+        invoke(&mut s,command);
+        dispatch(&mut s,PressureCalibrationAction::Measure{extent:[384.,622.],viewport});
+        let area=s.layout(viewport).work_area;let initial=bounds(&s);
+        assert_eq!(initial.x+initial.width,area.x+area.width-16.,"{command:?} clears the right panel");
+        assert_eq!(initial.y,area.y+16.,"{command:?} clears the upper panel");
+        for (phase,position) in [(ContactPhase::Down,[initial.x+30.,initial.y+20.]),(ContactPhase::Move,[500.,300.]),(ContactPhase::Up,[500.,300.])] {
+            dispatch(&mut s,PressureCalibrationAction::Drag{phase,position,viewport});
+        }
+        let moved=bounds(&s);assert_ne!(initial,moved);
+        dispatch(&mut s,PressureCalibrationAction::Measure{extent:[384.,622.],viewport});assert_eq!(bounds(&s),moved);
+        dispatch(&mut s,PressureCalibrationAction::Cancel);invoke(&mut s,command);
+        dispatch(&mut s,PressureCalibrationAction::Measure{extent:[384.,622.],viewport});assert_eq!(bounds(&s),initial);
+    }
+}
+
+#[test]
 fn preferences_launch_closes_settings_on_every_platform() {
     for platform in Platform::ALL {
         let mut s=session(platform);

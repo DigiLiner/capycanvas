@@ -4796,3 +4796,36 @@ measurements repeated for better results, or external processes stopped.
 Reports, load observations, screenshots and geometry are in
 `artifacts/tilt-layout-review/`, with final functional results under `final/` and
 all pacing results under `motion-final/summary.json`.
+
+### Calibration utilities above expanded columns
+
+Measured on 2026-10-25 UTC on the `2fd981a34` working tree with shared
+clear-canvas placement and the GTK utility above column drawers and connections.
+Final release test SHA-256 is
+`0439f08dc943b9c7939049fb42759138480279cd585a8e0a2ab08dfc6d4e1c0e`.
+The private 1600 × 1000/120 Hz display, 256 × 256 F32 drawing, RTX PRO 6000
+at `F1:00.0`, driver `615.71.09` and six-gesture protocol are unchanged.
+All four native journeys pass, including mouse/touch/pen controls, default
+placement, native clicks over expanded columns and exact utility-interior pixel
+comparisons with the column shown and hidden. Light and dark renders retain
+matching plots and use the app's compact 24-pixel direction segments.
+
+| Case | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
+| --- | --- | --- |
+| Tilt: Frame | 116.02–117.41 / 16.710 ms | 118.81–119.01 / 16.516 ms |
+| Tilt: Curve | 116.42–118.61 / 16.693 ms | 117.81–119.20 / 16.665 ms |
+| Pressure: Frame | 117.61–118.61 / 16.732 ms | 115.02–118.21 / 16.723 ms |
+| Pressure: Curve | 117.61–118.41 / 16.696 ms | 117.22–118.01 / 16.668 ms |
+
+All 24 gestures meet the unchanged 114 presents/s floor; nine miss the strict
+2000/120 ms p99 limit, leaving 15 gestures that meet both gates. Desktop GPU
+utilization was 14% before motion, and external Rust builds remained active.
+These desktop diagnostics leave reference-tablet qualification open and do not
+establish a change in speed from the earlier runs under different loads.
+The dark pressure run reports one GDK duplicate-presentation warning with an
+8.516 ms timestamp difference. Other runs have no GTK/GDK warnings; existing
+portal/a11y helper and secret-proxy warnings remain in the logs. No thresholds
+were changed, runs repeated for better results, or external processes stopped.
+Reports, screenshots, geometry, warnings and load observations are under
+`artifacts/calibration-layering/`; shared placement and full UI results are under
+`artifacts/pen-response-placement/`.

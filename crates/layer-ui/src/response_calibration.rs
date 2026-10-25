@@ -1,5 +1,5 @@
 use crate::{Bounds, ContactPhase, CurveEditorAction, CurveDomain, CurveAxisView, CurveControls,
-    CurveEditorView, Localizer, MessageId, PressureCalibrationView};
+    CurveEditorView, Localizer, MessageId, PressureCalibrationView, UiSession};
 use layer_core::{PressureResponse, TiltResponse};
 use layer_engine::{PressureCurve, TiltCurve};
 
@@ -87,6 +87,7 @@ impl<R: EditableResponse> Calibration<R> {
     pub fn curve(&self) -> R::Compiled { self.compiled.clone() }
     pub fn open(&mut self, current: &R) {
         if self.draft.is_some() { return; }
+        self.placement=None;
         self.draft = Some(current.clone()); self.compiled = current.compile(); self.selected = Some(0);
         self.epoch = self.epoch.wrapping_add(1);
     }
@@ -97,7 +98,7 @@ impl<R: EditableResponse> Calibration<R> {
     }
     pub fn fit(&mut self, extent: [f32; 2], viewport: [f32; 2]) {
         if extent.iter().chain(&viewport).any(|v| !v.is_finite() || *v <= 0.) { return; }
-        let mut b = self.placement.unwrap_or(Bounds { x: viewport[0] - extent[0] - 24., y: 64., width: extent[0], height: extent[1] });
+        let mut b = self.placement.unwrap_or_default();
         b.width = extent[0].min(viewport[0]); b.height = extent[1].min(viewport[1]);
         b.x = b.x.clamp(0., viewport[0] - b.width); b.y = b.y.clamp(0., viewport[1] - b.height);
         self.placement = Some(b);
@@ -162,4 +163,67 @@ impl<R: EditableResponse> Calibration<R> {
         }
     }
     pub fn compile(&mut self) { if let Some(draft) = &self.draft { self.compiled = draft.compile(); } }
+}
+
+impl<R: layer_render::CanvasRenderer> UiSession<R> {
+    pub(crate) fn response_calibration_placement(&self,extent:[f32;2],viewport:[f32;2])->Option<Bounds> {
+        if extent.iter().chain(&viewport).any(|v|!v.is_finite() || *v<=0.) {return None;}
+        let layout=self.layout(viewport);let mut area=layout.work_area;
+        if layout.status.height>0. {area.height=area.height.min((layout.status.y-area.y).max(0.));}
+        let mut obstacles:Vec<_>=layout.groups.iter().map(|g|g.bounds)
+            .chain(layout.collapsed.iter().filter_map(|c|c.open.as_ref().map(|o|o.bounds))).collect();
+        let customization=&self.state.customization;
+        for drawer in customization.column_drawers.iter().chain(customization.drawer.iter()) {
+            let measured=if let crate::DrawerAnchor::Column{group,..}=drawer.anchor {
+                customization.column_drawer_bounds.iter().find(|m|m.group==group).map(|m|m.bounds)
+            } else {None};
+            if let Some(bounds)=measured.or_else(||customization.drawer_placement(drawer,&self.state.workspace.layout,viewport,&vec![viewport[1];drawer.columns.len()]).map(|p|p.bounds)) {
+                obstacles.push(bounds);
+            }
+        }
+        if let Some(panel)=customization.expanded
+            && let Some(expansion)=self.state.workspace.layout.expanded_panel(viewport,panel,[0.;2],1.) {obstacles.push(expansion.bounds);}
+        Some(place_response_calibration(area,&obstacles,extent,viewport))
+    }
+}
+
+fn place_response_calibration(area:Bounds,obstacles:&[Bounds],extent:[f32;2],viewport:[f32;2])->Bounds {
+    let margin=16.;let [width,height]=[extent[0].min(viewport[0]),extent[1].min(viewport[1])];
+    let range=|start:f32,length:f32,size:f32,limit:f32| {
+        let low=(start+margin).clamp(0.,limit-size);let high=(start+length-size-margin).clamp(0.,limit-size);
+        if low<=high {(low,high)} else {let center=(start+(length-size)*0.5).clamp(0.,limit-size);(center,center)}
+    };
+    let (left,right)=range(area.x,area.width,width,viewport[0]);let (top,bottom)=range(area.y,area.height,height,viewport[1]);
+    let padded:Vec<_>=obstacles.iter().map(|b|Bounds{x:b.x-margin,y:b.y-margin,width:b.width+2.*margin,height:b.height+2.*margin}).collect();
+    let mut xs=vec![right,left];let mut ys=vec![top,bottom];
+    for b in &padded {xs.extend([(b.x-width).clamp(left,right),(b.x+b.width).clamp(left,right)]);ys.extend([(b.y-height).clamp(top,bottom),(b.y+b.height).clamp(top,bottom)]);}
+    let score=|b:Bounds| {
+        let overlap:f32=padded.iter().filter_map(|o|b.intersection(*o)).map(|b|b.width*b.height).sum();
+        (overlap,(b.x-right).powi(2)+(b.y-top).powi(2))
+    };
+    xs.into_iter().flat_map(|x|ys.iter().map(move |&y|Bounds{x,y,width,height}))
+        .min_by(|a,b|{let (oa,da)=score(*a);let (ob,db)=score(*b);oa.total_cmp(&ob).then_with(||da.total_cmp(&db))}).unwrap()
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+    #[test]
+    fn response_placement_avoids_floating_panels_and_drawers_with_a_common_margin() {
+        let area=Bounds{x:300.,y:100.,width:1000.,height:800.};let viewport=[1600.,1000.];let extent=[384.,600.];
+        let panel=Bounds{x:1000.,y:100.,width:280.,height:700.};
+        let placed=place_response_calibration(area,&[panel],extent,viewport);
+        assert_eq!(placed.x+placed.width,panel.x-16.);assert_eq!(placed.y,area.y+16.);
+        let drawer=Bounds{x:800.,y:100.,width:300.,height:80.};
+        let placed=place_response_calibration(area,&[drawer],extent,viewport);
+        assert_eq!(placed.y,drawer.y+drawer.height+16.);assert_eq!(placed.x+placed.width,area.x+area.width-16.);
+    }
+    #[test]
+    fn response_placement_keeps_controls_inside_a_window_when_the_canvas_is_too_small() {
+        for viewport in [[320.,360.],[640.,480.],[1600.,1000.]] {
+            let area=Bounds{x:viewport[0]-100.,y:60.,width:80.,height:viewport[1]-100.};
+            let placed=place_response_calibration(area,&[],[384.,622.],viewport);
+            assert!(placed.x>=0. && placed.y>=0. && placed.x+placed.width<=viewport[0] && placed.y+placed.height<=viewport[1]);
+        }
+    }
 }

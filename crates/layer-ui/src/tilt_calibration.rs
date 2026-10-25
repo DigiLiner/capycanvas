@@ -190,7 +190,10 @@ impl<R:CanvasRenderer> UiSession<R> {
                     self.tilt_calibration.unbound_response|=self.tilt_calibration.target.is_none();
                     self.tilt_calibration.editor.sensitivity(lighter);self.sync_tilt_curves();
                 },
-                PressureCalibrationAction::Measure{extent,viewport}=>self.tilt_calibration.editor.fit(extent,viewport),
+                PressureCalibrationAction::Measure{extent,viewport}=>{
+                    if self.tilt_calibration.editor.placement.is_none() {self.tilt_calibration.editor.placement=self.response_calibration_placement(extent,viewport);}
+                    self.tilt_calibration.editor.fit(extent,viewport);
+                },
                 PressureCalibrationAction::Drag{phase,position,viewport}=>self.tilt_calibration.editor.drag(phase,position,viewport),
             },
         }

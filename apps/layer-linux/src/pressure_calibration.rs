@@ -63,10 +63,10 @@ impl PressurePanel {
         let direction_title = gtk::Label::builder().xalign(0.).build(); direction_title.add_css_class("heading");direction_title.set_widget_name("pen-tilt-direction-title");direction.append(&direction_title);
         let direction_controls=gtk::Box::new(gtk::Orientation::Vertical,8);direction_controls.set_halign(gtk::Align::Center);
         let arrows = gtk::DrawingArea::builder().content_width(72).content_height(72).build(); arrows.set_widget_name("pen-tilt-direction");arrows.set_halign(gtk::Align::Center);direction_controls.append(&arrows);
-        let axis_bar=gtk::Box::new(gtk::Orientation::Horizontal,0);axis_bar.add_css_class("linked");axis_bar.add_css_class("selection-modes");axis_bar.add_css_class("dialog-actions");axis_bar.set_homogeneous(true);axis_bar.set_halign(gtk::Align::Center);
+        let axis_bar=gtk::Box::new(gtk::Orientation::Horizontal,0);axis_bar.add_css_class("linked");axis_bar.add_css_class("selection-modes");axis_bar.set_homogeneous(true);axis_bar.set_halign(gtk::Align::Center);
         axis_bar.set_widget_name("pen-tilt-axes");axis_bar.set_valign(gtk::Align::Center);
         let axes = ["layer-flip-horizontal-symbolic","layer-flip-vertical-symbolic","layer-swap-orientation-symbolic"].map(|icon|{
-            let button=gtk::ToggleButton::new();crate::icons::set_button(&button,icon);axis_bar.append(&button);button
+            let button=gtk::ToggleButton::new();button.set_size_request(24,24);button.set_child(Some(&crate::icons::image(icon)));axis_bar.append(&button);button
         });
         direction_controls.append(&axis_bar);direction.append(&direction_controls);body.append(&direction);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);

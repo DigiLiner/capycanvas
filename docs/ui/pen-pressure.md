@@ -11,6 +11,11 @@ Each client reuses its existing panel surfaces, theme roles and curve widget. Th
 button uses the shared window-close glyph in a 16px icon box, with a compact
 squircle hover area and space around it in the title bar.
 Its opaque background prevents inner controls from requesting canvas backdrops.
+On GTK, pressure and tilt utilities stay above workspace panels, expanded columns and
+their drawer connections. Each opening starts near the upper-right corner of
+the clear canvas area with a 16-pixel inset, avoiding floating panels and open
+drawers where space allows. A dragged position lasts until the utility closes.
+If the canvas cannot hold the measured utility, it stays within the window.
 
 The panel shows the curve, its control polygon, selectable handles and a live
 pressure marker. Input is centered below the horizontal axis; Output is centered
@@ -95,6 +100,9 @@ with `--tablet`, in light and dark themes. It checks mouse, touch and pen graph
 and frame input, axis label placement, title and Close geometry, painting while
 open, launching from Preferences, drag-out removal, live pressure, Apply, Cancel, Close, Reset and Escape. Also run the tonal Curves
 journey after changing the shared widget.
+Both calibration journeys open over an expanded collapsed column, check the
+default clear-canvas placement, then drag across it and verify native clicks and
+opaque pixels above the column and its connector.
 
 Set `LAYER_PRESSURE_MOTION=1` and `LAYER_NATIVE_EVENT_MS=8` for three sustained
 panel drags and three curve drags. Panel motion follows a 200 × 100 logical-pixel

@@ -414,9 +414,7 @@ mod allocation {
                 let Some(node) = node else {
                     continue;
                 };
-                // The canvas already contains the GPU overviews. In explicit
-                // screenshots it is represented by a native texture: don't cut it.
-                if matches!(slot, Slot::Canvas) {
+                if matches!(slot, Slot::Canvas | Slot::PressureCalibration) {
                     snapshot.append_node(node);
                 } else {
                     let bridge = matches!(slot, Slot::DrawerConnection(_) | Slot::ColumnConnection(_, _));
@@ -623,6 +621,7 @@ impl DockSurface {
         if children
             .iter()
             .rev()
+            .filter(|(slot,_)|*slot!=Slot::PressureCalibration)
             .take(2)
             .map(|(slot, _)| *slot)
             .eq([Slot::DrawerConnection(id), Slot::Drawer(id)])
@@ -638,6 +637,8 @@ impl DockSurface {
                 children.push(item);
             }
         }
+        drop(children);
+        self.raise_canvas_overlays();
     }
     fn raise_group(&self, id: u32) {
         let mut children = self.imp().children.borrow_mut();
@@ -655,7 +656,7 @@ impl DockSurface {
             children.push(item);
         }
         drop(children);
-        self.raise_canvas_bar();
+        self.raise_canvas_overlays();
     }
     fn add(&self, slot: Slot, child: &impl IsA<gtk::Widget>) {
         child.set_parent(self);
@@ -663,13 +664,11 @@ impl DockSurface {
             .children
             .borrow_mut()
             .push((slot, child.clone().upcast()));
-        if slot != Slot::CanvasBar {
-            self.raise_canvas_bar();
-        }
+        self.raise_canvas_overlays();
     }
-    fn raise_canvas_bar(&self) {
+    fn raise_canvas_overlays(&self) {
         let mut children = self.imp().children.borrow_mut();
-        for slot in [Slot::Bubbles, Slot::PressureCalibration, Slot::CanvasBar, Slot::ZenCapy] {
+        for slot in [Slot::Bubbles, Slot::CanvasBar, Slot::ZenCapy] {
             let Some(index) = children.iter().position(|(s, _)| *s == slot) else { continue; };
             let overlay = children.remove(index);
             let drawer = children.iter().position(|(s, w)| {
@@ -679,6 +678,10 @@ impl DockSurface {
                 Some(i) => { overlay.1.insert_before(self, Some(&children[i].1)); children.insert(i, overlay); }
                 None => { overlay.1.insert_after(self, children.last().map(|(_, w)| w)); children.push(overlay); }
             }
+        }
+        if let Some(index)=children.iter().position(|(s,_)|*s==Slot::PressureCalibration) && index+1!=children.len() {
+            let utility=children.remove(index);
+            utility.1.insert_after(self,children.last().map(|(_,w)|w));children.push(utility);
         }
     }
     fn remove_slots(&self, remove: impl Fn(Slot) -> bool) {

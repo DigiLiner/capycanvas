@@ -126,6 +126,7 @@ fn native_pressure_calibration() {
     w.dispatch(UiAction::Invoke{command:CommandId::PenPressure}); pump(200);
     let graph=find_named(panel,"pen-pressure-graph").unwrap();graph.grab_focus();
     native.key(0xff1b);assert!(state(&w).pressure_calibration.is_none());
+    utility_over_column(&w,&mut native,&output,theme,false);
     if std::env::var("LAYER_PRESSURE_MOTION").is_ok_and(|value|value=="1") {
         w.dispatch(UiAction::Invoke{command:CommandId::PenPressure});pump(300);
         w.dispatch(UiAction::CurveEditor {target:layer_ui::CurveEditorTarget::Pressure,action:layer_ui::CurveEditorAction::Reset});pump(300);
@@ -346,6 +347,7 @@ fn native_tilt_calibration() {
     let pressure_graph=find_named(panel,"pen-pressure-graph").unwrap();
     assert_eq!([pressure_graph.width(),pressure_graph.height()],tilt_plot,"pressure and tilt reserve the same font-sized axis gutters");
     let cancel=find_named(panel,"pen-pressure-cancel").unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
+    utility_over_column(&w,&mut native,&output,theme,true);
     if std::env::var("LAYER_TILT_MOTION").is_ok_and(|v|v=="1") {
         w.dispatch(UiAction::Invoke{command:CommandId::PenTilt});pump(200);
         w.dispatch(UiAction::CurveEditor{target:layer_ui::CurveEditorTarget::Tilt,action:layer_ui::CurveEditorAction::Reset});
@@ -384,6 +386,7 @@ fn assert_dialog_footer(panel:&gtk::Widget,prefix:&str) {
 
 fn assert_axis_bar(panel:&gtk::Widget,w:&Workspace) {
     let bar=find_named(panel,"pen-tilt-axes").unwrap();assert!(bar.has_css_class("linked"));
+    assert!(bar.has_css_class("selection-modes") && !bar.has_css_class("dialog-actions"));
     let buttons=["reverse-horizontal","reverse-vertical","swap-axes"].map(|name|find_named(panel,&format!("pen-tilt-{name}")).unwrap().downcast::<gtk::ToggleButton>().unwrap());
     let view=state(w).tilt_calibration.unwrap();
     for (button,label) in buttons.iter().zip([view.reverse_horizontal,view.reverse_vertical,view.swap_axes]) {
@@ -396,9 +399,73 @@ fn assert_axis_bar(panel:&gtk::Widget,w:&Workspace) {
     assert!((preview_bounds.x()+preview_bounds.width()*0.5-center).abs()<1.);
     assert!((bar_bounds.x()+bar_bounds.width()*0.5-center).abs()<1.,"plot, preview and icon bar share one centerline");
     assert!((bar_bounds.y()-preview_bounds.y()-preview_bounds.height()-8.).abs()<1.,"consistent preview/control gap");
-    assert!(buttons.iter().all(|button|button.height()>=34));
+    assert!(buttons.iter().all(|button|button.width()==24 && button.height()==24));
     let bounds=buttons.each_ref().map(|button|button.compute_bounds(&bar).unwrap());
     assert!(bounds.windows(2).all(|pair|(pair[0].x()+pair[0].width()-pair[1].x()).abs()<1.));
+}
+
+fn utility_over_column(w:&Rc<Workspace>,native:&mut RemoteInput,output:&std::path::Path,theme:Theme,tilt:bool) {
+    let saved=state(w).workspace;
+    let group=saved.layout.panel_group(Panel::Layers).unwrap();
+    let column=saved.layout.column_for_group(group).unwrap();
+    w.customize(CustomizationAction::SetColumnCollapsed {group,collapsed:true});
+    enable_individual_column_panels(w,group);pump(200);
+    let icon=find_named(w.surface.upcast_ref(),"column-icon-Layers").unwrap();
+    native.click(screen_point(&icon,&w.window,[0.5,0.5]));
+    let drawer=find_named(w.surface.upcast_ref(),&format!("column-drawer-{column}")).unwrap();
+    until(||drawer.is_mapped(),"collapsed Layers column expands");pump(200);
+    let drawer_bounds=drawer.compute_bounds(&w.surface).unwrap();
+    w.dispatch(UiAction::Invoke {command:if tilt {CommandId::PenTilt}else{CommandId::PenPressure}});pump(250);
+    let prefix=if tilt {"pen-tilt"}else{"pen-pressure"};
+    let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
+    let initial=panel.compute_bounds(&w.surface).unwrap();let area=w.resolved().work_area;
+    crate::snapshot(w).save_to_png(output.join(format!("{prefix}-{theme:?}-clear-canvas.png"))).unwrap();
+    let title=find_named(panel,&format!("{prefix}-title")).unwrap();
+    let start=screen_point(&title,&w.window,[0.5,0.5]);
+    let origin=[drawer_bounds.x()-80.,(drawer_bounds.y()+8.).min(w.surface.height() as f32-panel.height() as f32-16.)];
+    let end=[start[0]+origin[0]-initial.x(),start[1]+origin[1]-initial.y()];
+    native.perform(json!([{"point":start,"down":true},{"point":end},{"down":false}]));pump(200);
+    let actual=panel.compute_bounds(&w.surface).unwrap();
+    crate::snapshot(w).save_to_png(output.join(format!("{prefix}-{theme:?}-over-column.png"))).unwrap();
+    std::fs::write(output.join(format!("{prefix}-{theme:?}-column-placement.json")),serde_json::to_vec_pretty(&json!({
+        "initial":{"x":initial.x(),"y":initial.y(),"width":initial.width(),"height":initial.height()},
+        "work_area":area,"drawer":{"x":drawer_bounds.x(),"y":drawer_bounds.y(),"width":drawer_bounds.width(),"height":drawer_bounds.height()},
+        "overlap":{"x":actual.x(),"y":actual.y(),"width":actual.width(),"height":actual.height()},
+    })).unwrap()).unwrap();
+    assert!(drawer.is_mapped(),"utility keeps the expanded column open");
+    for target in [&title,&find_named(panel,&format!("{prefix}-lighter")).unwrap()] {
+        let at=screen_point(target,&w.window,[0.5,0.5]);
+        let b=target.compute_bounds(&w.surface).unwrap();
+        assert!(b.x()+b.width()*0.5>drawer_bounds.x() && b.x()+b.width()*0.5<drawer_bounds.x()+drawer_bounds.width() && b.y()+b.height()*0.5>drawer_bounds.y() && b.y()+b.height()*0.5<drawer_bounds.y()+drawer_bounds.height(),"utility target overlaps expanded column");
+        let hit=w.window.pick(f64::from(at[0]),f64::from(at[1]),gtk::PickFlags::DEFAULT).unwrap();
+        assert!(hit==*target || hit.is_ancestor(target),"{prefix} stays above expanded column at {at:?}: hit {}",hit.widget_name());
+    }
+    let with_drawer=crate::snapshot(w);
+    w.customize(CustomizationAction::CloseExpanded);pump(200);
+    let without_drawer=crate::snapshot(w);
+    without_drawer.save_to_png(output.join(format!("{prefix}-{theme:?}-column-hidden.png"))).unwrap();
+    assert_eq!(panel.compute_bounds(&w.surface).unwrap(),actual,"closing column keeps the manually placed utility");
+    let width=with_drawer.width() as usize;let height=with_drawer.height() as usize;
+    assert_eq!((width,height),(without_drawer.width() as usize,without_drawer.height() as usize));
+    let mut front=vec![0;width*height*4];let mut reference=vec![0;width*height*4];
+    with_drawer.download(&mut front,width*4);without_drawer.download(&mut reference,width*4);
+    let b=panel.compute_bounds(&w.window).unwrap();let scale=width as f32/w.window.width() as f32;
+    let mut different=Vec::new();
+    for y in ((b.y()+8.)*scale).ceil() as usize..((b.y()+b.height()-8.)*scale).floor() as usize {
+        for x in ((b.x()+8.)*scale).ceil() as usize..((b.x()+b.width()-8.)*scale).floor() as usize {
+            let i=(y*width+x)*4;
+            if front[i..i+4]!=reference[i..i+4] {different.push([x,y]);}
+        }
+    }
+    assert!(different.is_empty(),"expanded column cannot paint or clip the opaque utility: {} changed pixels, first {:?}",different.len(),different.first());
+    w.customize(CustomizationAction::ToggleColumnDrawer {group,panel:Panel::Layers});pump(200);
+    let before=response_view(w,tilt).editor.points;
+    let lighter=find_named(panel,&format!("{prefix}-lighter")).unwrap();native.click(screen_point(&lighter,&w.window,[0.5,0.5]));
+    assert_ne!(response_view(w,tilt).editor.points,before,"utility receives native clicks above expanded content");
+    assert!(initial.x()>=area.x+15. && initial.y()>=area.y+15. && initial.x()+initial.width()<=area.x+area.width-15. && initial.y()+initial.height()<=area.y+area.height-15.,"default utility stays inset in clear canvas: {initial:?}, {area:?}");
+    assert!(initial.x()+initial.width()<=drawer_bounds.x() || initial.x()>=drawer_bounds.x()+drawer_bounds.width() || initial.y()+initial.height()<=drawer_bounds.y() || initial.y()>=drawer_bounds.y()+drawer_bounds.height(),"default utility avoids expanded column: {initial:?}, {drawer_bounds:?}");
+    let cancel=find_named(panel,&format!("{prefix}-cancel")).unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
+    w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(saved)});pump(200);
 }
 
 fn record_layout(w:&Workspace,panel:&gtk::Widget,prefix:&str,output:&std::path::Path,theme:Theme) {
