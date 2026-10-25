@@ -27,16 +27,16 @@ fn native_smoothing_strokes() {
     w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::GPen as u32 });
     w.dispatch(UiAction::SetBrushSize { value: 8. });
     pump(250);
+    let smoothing = state(&w).tool_settings.into_iter().find(|f| f.id == "smoothing_strength").unwrap();
+    assert_eq!(smoothing.label.as_ref(), "Smoothing");
+    assert!(smoothing.group_id.is_empty() && smoothing.group.is_empty());
     for theme in [Theme::Light, Theme::Dark] {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
         pump(150);
         let empty = glib::MainContext::default().block_on(read_canvas_pixels(&w, 800)).unwrap();
         for strength in [0.06, 0.5, 1.] {
-            let panel = w.panel_widget(Panel::ToolSettings);
             capture_reference(&w, output.join(format!("controls-{theme:?}-{strength}.png")).to_str().unwrap(), 1.);
             w.dispatch(UiAction::SetToolSetting { id: "smoothing_strength".into(), value: strength });
-            let speed = named::<gtk::CheckButton>(&panel, "tool-action-SmoothingAdjustSpeed");
-            if !speed.is_active() { input.click(screen_point(speed.upcast_ref(), &w.window, [0.5, 0.5])); }
             assert_eq!(state(&w).settings.feedback, feedback_enabled);
             let before = ui_session(&w).engine().metrics().committed_strokes;
             let mut actions = Vec::new();
@@ -61,7 +61,6 @@ fn native_smoothing_strokes() {
             assert_eq!(redone.bytes, painted.bytes, "strength-{strength} reproduces committed pixels on redo");
             w.dispatch(UiAction::Invoke { command: CommandId::Undo });
             pump(100);
-            assert!(state(&w).commands.iter().find(|c| c.id == CommandId::SmoothingAdjustSpeed).unwrap().selected);
         }
     }
     assert!(state(&w).host_error.is_none());

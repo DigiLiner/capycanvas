@@ -660,7 +660,6 @@ menu-paste-special = Collage spécial
 menu-rotate-and-flip = Rotation et retournement
 menu-color-management = Gestion des couleurs
 command-pen-pressure = Pression du stylet…
-command-smoothing-adjust-speed = Ajuster selon la vitesse
 command-erase-whole-paths = Effacer les tracés entiers
 commands-move-layers-not-together = Les calques sélectionnés ne peuvent pas être déplacés ensemble
 commands-move-pixels-needs-paint = Choisissez un calque de peinture ou un masque pour déplacer les pixels sélectionnés

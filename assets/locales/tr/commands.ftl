@@ -657,7 +657,6 @@ menu-paste-special = Özel Yapıştır
 menu-rotate-and-flip = Döndür ve Çevir
 menu-color-management = Renk Yönetimi
 command-pen-pressure = Kalem basıncı…
-command-smoothing-adjust-speed = Hıza göre ayarla
 command-erase-whole-paths = Yolların tamamını sil
 commands-move-layers-not-together = Seçili katmanlar birlikte taşınamaz
 commands-move-pixels-needs-paint = Seçili pikselleri taşımak için bir boya katmanı veya maske seçin

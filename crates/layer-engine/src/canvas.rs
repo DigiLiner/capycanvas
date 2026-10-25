@@ -5968,7 +5968,7 @@ mod tests {
 
         let next_brush = BrushSnapshot {
             diameter: 40.0,
-            stabilization: layer_core::BrushStabilization { strength: 1., adjust_by_speed: true, ..Default::default() },
+            stabilization: layer_core::BrushStabilization { strength: 1., ..Default::default() },
             ..BrushSnapshot::default()
         };
         engine.set_brush(next_brush).unwrap();
@@ -5986,7 +5986,6 @@ mod tests {
             let (mut input, mut engine) = engine("vector smoothing", 1024, 512);
             let mut brush = default_brush(DefaultBrushPreset::GPen);
             brush.stabilization.strength = 0.5;
-            brush.stabilization.adjust_by_speed = true;
             engine.set_brush(brush).unwrap();
             engine.set_view(ViewState { document_to_surface: [2., 0., 0., 2., 0., 0.], ..view(1024, 512) },
                 ViewTransform { revision: 2, surface_to_document: [0.5, 0., 0., 0.5, 0., 0.] });
@@ -6051,7 +6050,6 @@ mod tests {
                     brush.diameter = 8.;
                     brush.stabilization.strength = 0.5;
 
-                    brush.stabilization.adjust_by_speed = true;
                     engine.set_brush(brush).unwrap();
                     engine.set_instant_feedback(InstantFeedbackConfig { enabled: feedback, use_platform_prediction: false, ..Default::default() }).unwrap();
                     let mut prefix = Vec::new();
@@ -6097,7 +6095,6 @@ mod tests {
         let mut brush = default_brush(DefaultBrushPreset::GPen);
         brush.diameter = 8.;
         brush.stabilization.strength = 1.;
-        brush.stabilization.adjust_by_speed = false;
         engine.set_brush(brush).unwrap();
         let mut start = 0;
         let mut last_time = 0;

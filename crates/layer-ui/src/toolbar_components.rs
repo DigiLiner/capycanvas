@@ -412,13 +412,7 @@ impl UiState {
         }
         for a in self.tool_actions.iter().filter(|a| !completion(a.command) && a.group().is_none()) {
             let Some(option) = action(a) else { continue };
-            let after = a.setting_group().and_then(|group| options.iter().rposition(|option| {
-                matches!(option, ToolOption::Numeric(field) if field.group_id == group.key())
-            }));
-            match after {
-                Some(index) => options.insert(index + 1, option),
-                None => options.push(option),
-            }
+            options.push(option);
         }
         options
     }

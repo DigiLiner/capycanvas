@@ -2731,9 +2731,6 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::ColorMixOklab | CommandId::ColorMixLinear | CommandId::ColorMixClassic => {
                 tool_settings::mixes_color(self.engine.configured_brush())
             }
-            CommandId::SmoothingAdjustSpeed => {
-                self.smoothing_available()
-            }
             CommandId::EraseTouchedPart | CommandId::EraseWholePaths | CommandId::EraseToIntersection => self.vector_erasing_layer(false).is_some(),
             CommandId::ScaleOutlineWidths => self.selected_vector_items().is_some(),
             _ => true,
@@ -2742,7 +2739,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         let selection_mode = self.effective_selection_mode();
         let selected = (id == CommandId::LiquifyAdjust && self.operation.liquify.is_some())
             || (id == CommandId::CenterZoomClicks && self.state.settings.zoom_tool.center_clicked_point)
-            || (id == CommandId::SmoothingAdjustSpeed && self.engine.configured_brush().stabilization.adjust_by_speed)
             || vector_eraser(id) == Some(self.state.settings.vector_eraser)
             || (id == CommandId::ScaleOutlineWidths && !self.state.settings.keep_outline_widths)
             || (id == CommandId::QuickMask && self.selection_masks.quick())
@@ -5120,11 +5116,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.state.settings.vector_eraser = vector_eraser(command).unwrap_or_default();
                 Ok((SETTINGS | BRUSH | COMMANDS, false))
             }
-            CommandId::SmoothingAdjustSpeed => {
-                let value = f32::from(u8::from(!self.engine.configured_brush().stabilization.adjust_by_speed));
-                self.edit_brush(tool_settings::SMOOTHING_SPEED, value)?;
-                Ok((BRUSH | COMMANDS, false))
-            }
             CommandId::WarpSplitVertical | CommandId::WarpSplitHorizontal | CommandId::WarpSplitCross | CommandId::WarpSelectPoints | CommandId::WarpResetGrid => {
                 self.warp_command(command)?;
                 Ok((DOCUMENT | COMMANDS | BRUSH, true))
@@ -5850,9 +5841,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 })
                 .collect()
         };
-        if self.smoothing_available() {
-            self.state.tool_actions.push(ToolSettingAction { command: CommandId::SmoothingAdjustSpeed, checkable: true });
-        }
         self.sync_retouch();
         if matches!(self.layer_interaction.tool, LayerCanvasTool::EncloseFill { .. }) {
             self.state.tool_actions = [CommandId::SelectionVisible, CommandId::SelectionEditing, CommandId::SelectionReference]

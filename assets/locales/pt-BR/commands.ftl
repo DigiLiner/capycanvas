@@ -661,7 +661,6 @@ menu-paste-special = Colar especial
 menu-rotate-and-flip = Girar e inverter
 menu-color-management = Gerenciamento de cores
 command-pen-pressure = Pressão da caneta…
-command-smoothing-adjust-speed = Ajustar pela velocidade
 command-erase-whole-paths = Apagar caminhos inteiros
 commands-move-layers-not-together = As camadas selecionadas não podem ser movidas juntas
 commands-move-pixels-needs-paint = Escolha uma camada de pintura ou uma máscara para mover os pixels selecionados

@@ -659,7 +659,6 @@ menu-paste-special = Incolla speciale
 menu-rotate-and-flip = Ruota e rifletti
 menu-color-management = Gestione del colore
 command-pen-pressure = Pressione della penna…
-command-smoothing-adjust-speed = Regola in base alla velocità
 command-erase-whole-paths = Cancella tracciati interi
 commands-move-layers-not-together = I livelli selezionati non possono essere spostati insieme
 commands-move-pixels-needs-paint = Scegli un livello di pittura o una maschera per spostare i pixel selezionati

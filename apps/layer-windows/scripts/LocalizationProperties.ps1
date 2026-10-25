@@ -464,9 +464,9 @@ function Toolbar-GroupedLanguageSurface{
  $pencil=@((Fresh-Model).state.commands|Where-Object id -eq 'pencil')
  if($pencil.Count-ne1-or!$pencil[0].enabled){throw 'Shared current Pencil command unavailable'}
  Search-Command $pencil[0].label 'pencil'
- Wait-Until {$v=Model;$v.state.brush.preset-eq2-and$v.brush_ready-and(@($v.state.tool_settings.id)-join',')-ceq'size,flow,grain_depth,material_hardness,angle,opacity,smoothing_strength'} 'Current Pencil did not prepare grouped options' 8
+ Wait-Until {$v=Model;$v.state.brush.preset-eq2-and$v.brush_ready-and(@($v.state.tool_settings.id)-join',')-ceq'size,flow,grain_depth,material_hardness,smoothing_strength,angle,opacity'} 'Current Pencil did not prepare grouped options' 8
  $pencilSmoothing=@((Fresh-Model).state.tool_settings|Where-Object id -eq 'smoothing_strength')
- if($pencilSmoothing.Count-ne1-or$pencilSmoothing[0].group_id-ne'tool-setting-group-smoothing'-or!$pencilSmoothing[0].group){throw 'Current grouped Pencil smoothing metadata absent'}
+ if($pencilSmoothing.Count-ne1-or$pencilSmoothing[0].group_id-or$pencilSmoothing[0].group){throw 'Current Pencil smoothing must have no section heading'}
  $options=@(foreach($panel in (Fresh-Model).panels){$panel.tiles|Where-Object {$_.control.kind-eq'tool_options'}})
  if($options.Count-ne1){throw 'Exactly one current ToolOptions component required'}
  $pencilTile=Control (Tool-Tile 'pencil') -Arranged

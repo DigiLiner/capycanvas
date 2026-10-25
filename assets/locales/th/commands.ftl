@@ -656,7 +656,6 @@ menu-paste-special = วางแบบพิเศษ
 menu-rotate-and-flip = หมุนและพลิก
 menu-color-management = การจัดการสี
 command-pen-pressure = แรงกดปากกา…
-command-smoothing-adjust-speed = ปรับตามความเร็ว
 command-erase-whole-paths = ลบเส้นพาธทั้งเส้น
 commands-move-layers-not-together = ไม่สามารถย้ายเลเยอร์ที่เลือกไว้พร้อมกันได้
 commands-move-pixels-needs-paint = เลือกเลเยอร์ระบายสีหรือมาสก์เพื่อย้ายพิกเซลที่เลือก

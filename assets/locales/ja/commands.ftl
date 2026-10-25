@@ -656,7 +656,6 @@ menu-paste-special = 特殊貼り付け
 menu-rotate-and-flip = 回転と反転
 menu-color-management = カラー管理
 command-pen-pressure = 筆圧…
-command-smoothing-adjust-speed = 速度で調整
 command-erase-whole-paths = パス全体を消去
 commands-move-layers-not-together = 選択したレイヤーは一緒に移動できません。
 commands-move-pixels-needs-paint = 選択したピクセルを移動するには、描画レイヤーかマスクを選んでください。

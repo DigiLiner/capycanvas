@@ -20,13 +20,13 @@ fn assert_gap(panel: &gtk::Widget, before: &str, after: &str, gap: f32, horizont
 
 fn primary_fields(context: &str) -> Option<&'static [&'static str]> {
     Some(match context {
-        "painting" => &["size", "flow", "hardness"],
-        "wet-mixing" => &["size", "flow", "paint", "pull"],
-        "watercolor" => &["size", "flow", "water_load", "wet_edge"],
-        "smudge" => &["size", "flow", "pull"],
-        "bristles" => &["size", "flow", "bristle_load", "bristle_scale"],
-        "liquify-push" | "liquify-twirl" | "liquify-pinch" | "liquify-crystals" => &["size", "strength"],
-        name if name.starts_with("dry-") => &["size", "flow", "grain_depth", "material_hardness"],
+        "painting" => &["size", "flow", "hardness", "smoothing_strength"],
+        "wet-mixing" => &["size", "flow", "paint", "pull", "smoothing_strength"],
+        "watercolor" => &["size", "flow", "water_load", "wet_edge", "smoothing_strength"],
+        "smudge" => &["size", "flow", "pull", "spread", "smoothing_strength"],
+        "bristles" => &["size", "flow", "bristle_load", "bristle_scale", "smoothing_strength"],
+        "liquify-push" | "liquify-twirl" | "liquify-pinch" | "liquify-crystals" => &["size", "strength", "smoothing_strength"],
+        name if name.starts_with("dry-") => &["size", "flow", "grain_depth", "material_hardness", "smoothing_strength"],
         _ => return None,
     })
 }
@@ -42,7 +42,7 @@ fn assert_family(w: &Rc<Workspace>, panel: &gtk::Widget, context: &str) {
     assert!(!ids.contains(&"contact_softness"), "Contact softness is hidden");
     if context.starts_with("dry-") {
         assert_eq!(ids, ["size", "flow", "grain_depth", "material_hardness", "smoothing_strength", "angle", "opacity"], "{context}: dry fields");
-        for (id, group) in [("smoothing_strength", "tool-setting-group-smoothing"), ("angle", "tool-setting-group-tip"), ("opacity", "tool-setting-group-blending")] {
+        for (id, group) in [("angle", "tool-setting-group-tip"), ("opacity", "tool-setting-group-blending")] {
             let field = settings.iter().find(|field| field.id == id).unwrap();
             assert_eq!(field.group_id, group, "{context}: stable secondary category");
             let heading = named::<gtk::Widget>(panel, &format!("tool-setting-{id}")).prev_sibling().and_downcast::<gtk::Label>().unwrap();

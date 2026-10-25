@@ -4049,8 +4049,8 @@ class AndroidHostTest {
             action(obj("type" to "set_theme", "theme" to theme))
             for ((context, command) in listOf("painting" to "brush", "fill" to "fill", "zoom" to "zoom", "eyedropper" to "eyedropper", "gradient" to "gradient", "crop" to "crop")) {
                 action(obj("type" to "invoke", "command" to command))
-                val fields = state().array("tool_settings").objects()
                 inspect(context, "tool_settings", theme, width)
+                val fields = state().array("tool_settings").objects()
                 val compound = state().array("tool_extra").objects().mapNotNull { it.optJSONObject("Choice")?.optString("beside")?.takeIf(String::isNotEmpty) }.toSet()
                 fields.filter { it.getJSONObject("numeric").getString("kind") == "slider" && it.getString("id") !in compound }.forEach { field ->
                     val id = field.getString("id")
@@ -4069,7 +4069,12 @@ class AndroidHostTest {
                     gap("tool_settings", "tool-setting-${first.getString("id")}", "tool-setting-${next.getString("id")}", 4f)
                 }
                 when (context) {
-                    "painting" -> gap("tool_settings", "tool-setting-smoothing_strength", "tool-action-smoothing_adjust_speed", 4f)
+                    "painting" -> {
+                        val smoothing = fields.single { it.getString("id") == "smoothing_strength" }
+                        assertEquals("Smoothing", smoothing.getString("label"))
+                        assertEquals("", smoothing.getString("group_id"))
+                        assertEquals("", smoothing.getString("group"))
+                    }
                     "zoom" -> gap("tool_settings", "tool-segments-zoom-click", "tool-segments-zoom-drag", 4f)
                     "gradient" -> {
                         gap("tool_settings", "tool-segments-gradient-shape", "gradient-interpolation", 4f)

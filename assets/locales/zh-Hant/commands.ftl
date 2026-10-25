@@ -656,7 +656,6 @@ menu-paste-special = 選擇性貼上
 menu-rotate-and-flip = 旋轉與翻轉
 menu-color-management = 色彩管理
 command-pen-pressure = 筆壓…
-command-smoothing-adjust-speed = 依速度調整
 command-erase-whole-paths = 擦除整條路徑
 commands-move-layers-not-together = 所選圖層無法一起移動
 commands-move-pixels-needs-paint = 請選擇繪畫圖層或遮色片來移動所選像素

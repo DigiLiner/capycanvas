@@ -479,8 +479,8 @@ Escape cancellation.
 `--selection-tools` checks mode-row alignment inside the active drawer and
 Photo command availability through the slots' published variant menus.
 
-`--smoothing` checks the Strength slider's 30-at-75% mapping and Adjust by speed
-in both themes, then draws pen contacts at strengths 0, 6, 50 and 100 with stroke
+`--smoothing` checks the ungrouped Smoothing control and its 30-at-75% slider
+mapping in both themes, then draws pen contacts at strengths 0, 6, 50 and 100 with stroke
 preview on and off. It requires visible committed pixels and exact Undo/Redo.
 The same journey runs through `device.test.mjs` on a reserved tablet.
 
@@ -528,7 +528,7 @@ Radio segments, the Tool panel's selection menu, the Layers blend button and Add
 Filter use GTK's button fill (`--control-fill`). Horizontal Tool Options dropdowns
 take their natural width and refit when the chosen item changes.
 
-Panel and toolbar checkboxes (Log counts, Tool Settings checks, Adjust by speed,
+Panel and toolbar checkboxes (Log counts, Tool Settings checks,
 Center on click, Proof options) stay native inputs for focus, keyboard and
 accessibility but draw like GTK's: a 16-pixel box with a 4-pixel corner, a 2-pixel
 `--divider-line` outline unchecked, the accent fill and check mark checked, and

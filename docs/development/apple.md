@@ -823,7 +823,8 @@ checking its dismissal region.
 Paper choice and Scale retain shared history and the temporary relief preview; the relief does not enter artwork exports.
 
 `testStrengthAndSmoothing` and its dark variant check Strength separately from
-Opacity, grouped controls, per-brush smoothing, Reset and Quick Mask omission.
+Opacity, the ungrouped Smoothing control, per-brush values, Reset and Quick Mask
+omission.
 On macOS they also paint and check exact Undo and Redo pixels.
 `testToolbarComponents` and its dark variant check canonical preview stamps at
 zero and full Strength, bookmarks and retirement when the drawing or tool changes.

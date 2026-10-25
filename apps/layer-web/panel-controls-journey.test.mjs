@@ -91,12 +91,12 @@ export async function checkPanelControls({call,evaluate,settle}) {
     const ids=profile.fields.map(f=>f.id);
     assert.equal(new Set(ids).size,ids.length,`${name} shared fields are unique`);
     assert.deepEqual(profile.rendered,ids,`${name} scoped DOM matches the current family without stale or duplicate fields`);
-    assert.deepEqual(profile.fields.filter(f=>!f.group_id).map(f=>f.id),primary,`${name} primary family order`);
+    assert.deepEqual(profile.fields.filter(f=>!f.group_id).map(f=>f.id),[...primary,'smoothing_strength'],`${name} ungrouped field order`);
     assert.ok(!ids.includes('contact_softness'),`${name} Contact softness is hidden`);
     for(let i=1;i<profile.rects.length;i++)near(profile.rects[i].top-profile.rects[i-1].bottom,4,`${name} primary peer gap`);
     if(dry){
       assert.deepEqual(ids,[...dryPrimary,'smoothing_strength','angle','opacity'],`${name} seven dry fields`);
-      for(const[id,group]of[['angle','tool-setting-group-tip'],['opacity','tool-setting-group-blending'],['smoothing_strength','tool-setting-group-smoothing']]){
+      for(const[id,group]of[['angle','tool-setting-group-tip'],['opacity','tool-setting-group-blending']]){
         const field=profile.fields.find(f=>f.id===id),heading=profile.headings.find(h=>h.id===id);
         assert.equal(field.group_id,group,`${name} stable ${id} category`);assert.equal(heading.tag,'H3',`${name} ${id} category heading`);assert.equal(heading.text,field.group,`${name} published category label`);
       }

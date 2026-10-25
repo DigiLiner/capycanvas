@@ -145,9 +145,6 @@ struct ToolSettingsControls: View {
         let editingContext = context
         let actions = store.state["tool_actions"].array
         let modes = actions.filter { $0["segmented"].bool }
-        let settingGroupIDs = Set(settings.map { $0["group_id"].string })
-        let anchored = actions.filter { !$0["segmented"].bool && !$0["setting_group"].string.isEmpty && settingGroupIDs.contains($0["setting_group"].string) }
-        let anchoredCommands = Set(anchored.map { $0["command"].string })
         VStack(alignment: .leading, spacing: store.panelMetrics.group) {
             if !modes.isEmpty {
                 VStack(spacing: store.panelMetrics.spacing) {
@@ -191,9 +188,8 @@ struct ToolSettingsControls: View {
                 } else {
                     ForEach(group, id: \.settingID) { setting($0, editingContext: editingContext) }
                 }
-                ForEach(anchored.filter { $0["setting_group"].string == first["group_id"].string }, id: \.["command"].string) { actionButton($0) }
             }
-            ForEach(actionGroups(actions.filter { !$0["segmented"].bool && !anchoredCommands.contains($0["command"].string) }), id: \.id) { group in
+            ForEach(actionGroups(actions.filter { !$0["segmented"].bool }), id: \.id) { group in
                 if !group.items[0]["group"].isNull { actionChoice(group) }
                 else if !group.items[0]["row"].isNull {
                     HStack(spacing: store.panelMetrics.spacing) { ForEach(group.items, id: \.["command"].string) { actionButton($0) } }

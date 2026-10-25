@@ -698,7 +698,6 @@ command_ids! {
     ColorMixOklab,
     ColorMixLinear,
     ColorMixClassic,
-    SmoothingAdjustSpeed,
     EraseTouchedPart,
     EraseWholePaths,
     EraseToIntersection,
@@ -736,7 +735,7 @@ impl CommandId {
                 | Self::TransformSnapping | Self::TransformFree | Self::TransformUniform | Self::TransformDistort | Self::TransformPerspective
                 | Self::TransformNearest | Self::TransformBilinear | Self::TransformBicubic | Self::TransformLanczos
                 | Self::ColorMixOklab | Self::ColorMixLinear | Self::ColorMixClassic
-                | Self::SmoothingAdjustSpeed | Self::EraseTouchedPart | Self::EraseWholePaths | Self::EraseToIntersection | Self::ScaleOutlineWidths
+                | Self::EraseTouchedPart | Self::EraseWholePaths | Self::EraseToIntersection | Self::ScaleOutlineWidths
                 | Self::TransformWarp | Self::WarpGridThree | Self::WarpGridFour | Self::WarpGridFive
                 | Self::WarpSplitVertical | Self::WarpSplitHorizontal | Self::WarpSplitCross | Self::WarpSelectPoints
                 | Self::ZenMode
@@ -857,7 +856,7 @@ impl CommandId {
             Self::FitWidth => "fit",
             Self::RotateView => "rotate-right",
             Self::Zoom => "search",
-            Self::CenterZoomClicks | Self::SmoothingAdjustSpeed | Self::ScaleOutlineWidths => return None,
+            Self::CenterZoomClicks | Self::ScaleOutlineWidths => return None,
             Self::EraseTouchedPart => "erase-touched-part",
             Self::EraseWholePaths => "erase-whole-path",
             Self::EraseToIntersection => "erase-to-intersection",
@@ -1294,7 +1293,6 @@ impl CommandId {
             Self::ColorMixOklab => MessageId::COMMAND_COLOR_MIX_OKLAB,
             Self::ColorMixLinear => MessageId::COMMAND_COLOR_MIX_LINEAR,
             Self::ColorMixClassic => MessageId::COMMAND_COLOR_MIX_CLASSIC,
-            Self::SmoothingAdjustSpeed => MessageId::COMMAND_SMOOTHING_ADJUST_SPEED,
             Self::EraseTouchedPart => MessageId::COMMAND_ERASE_TOUCHED_PART,
             Self::EraseWholePaths => MessageId::COMMAND_ERASE_WHOLE_PATHS,
             Self::EraseToIntersection => MessageId::COMMAND_ERASE_TO_INTERSECTION,
@@ -1903,7 +1901,7 @@ mod icon_tests {
     #[test]
     fn command_icons_ship_and_editing_semantics_are_distinct() {
         assert_eq!(CommandId::ALL.into_iter().filter(|command| command.icon().is_none()).collect::<Vec<_>>(),
-            [CommandId::CenterZoomClicks, CommandId::SmoothingAdjustSpeed, CommandId::ScaleOutlineWidths]);
+            [CommandId::CenterZoomClicks, CommandId::ScaleOutlineWidths]);
         for command in CommandId::ALL {
             if let Some(icon) = command.icon() { assert!(icon_ships(icon), "{command:?}: missing SVG"); }
         }

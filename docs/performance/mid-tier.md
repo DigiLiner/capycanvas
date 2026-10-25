@@ -85,6 +85,28 @@ filter performance; raw witnesses remain in
 
 ## Operations
 
+### Smoothing
+
+Measured 2026-10-25 on the reference MovinkPad 11 with speed adjustment removed,
+using G-Pen 1536 px above the 6000 × 4000 photo at Fit. Each row has three
+warmed five-second contacts, factory density 240, font scale 1 and thermal
+status 0 before and after. Rust uses the release profile; the benchmark APK is
+unminified. Its SHA-256 is
+`90f681b01e0518e7525ac892a4b0d44f73a8dd6c2b0eb0f935ac42a814172c72`.
+
+The private app remains at 60 Hz because its Adaptive entry was not enabled.
+These are diagnostics, with no 90 Hz qualification or matched baseline.
+
+| Smoothing | Completed canvas updates/s, range | Fresh input updates/s, range | Fresh completion gap p99, range | 90/s and 22.22 ms target |
+| --- | --- | --- | --- | --- |
+| 6, default | 29.27–29.50 | 29.27–29.50 | 42.42–44.93 ms | Not met |
+| 100 | 26.53–26.72 | 26.53–26.72 | 48.00–48.46 ms | Not met |
+
+Raw measurements and device witnesses remain in
+`artifacts/remove-smoothing/android-performance-default-report.txt`,
+`artifacts/remove-smoothing/android-performance-max-report.txt` and
+`artifacts/remove-smoothing/android-performance-after-device.txt`.
+
 ### Checked upload comparison
 
 Measured 2026-10-25: `e038e3361` baseline, `c1b215667` checked dab/style upload

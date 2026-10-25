@@ -660,7 +660,6 @@ menu-paste-special = Inhalte einfügen
 menu-rotate-and-flip = Drehen und spiegeln
 menu-color-management = Farbverwaltung
 command-pen-pressure = Stiftdruck…
-command-smoothing-adjust-speed = Nach Geschwindigkeit anpassen
 command-erase-whole-paths = Ganze Pfade radieren
 commands-move-layers-not-together = Die ausgewählten Ebenen können nicht gemeinsam verschoben werden
 commands-move-pixels-needs-paint = Wähle eine Malebene oder eine Maske, um ausgewählte Pixel zu verschieben

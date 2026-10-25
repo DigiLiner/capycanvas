@@ -656,7 +656,6 @@ menu-paste-special = 선택하여 붙여넣기
 menu-rotate-and-flip = 회전 및 뒤집기
 menu-color-management = 색상 관리
 command-pen-pressure = 필압…
-command-smoothing-adjust-speed = 속도에 따라 조정
 command-erase-whole-paths = 패스 전체 지우기
 commands-move-layers-not-together = 선택한 레이어는 함께 이동할 수 없습니다.
 commands-move-pixels-needs-paint = 선택한 픽셀을 이동하려면 페인팅 레이어나 마스크를 선택하세요.

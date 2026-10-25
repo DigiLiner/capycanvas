@@ -660,7 +660,6 @@ menu-paste-special = Paste Special
 menu-rotate-and-flip = Rotate and Flip
 menu-color-management = Color Management
 command-pen-pressure = Pen pressure…
-command-smoothing-adjust-speed = Adjust by speed
 command-erase-whole-paths = Erase whole paths
 commands-move-layers-not-together = The selected layers cannot be moved together
 commands-move-pixels-needs-paint = Choose a paint layer or a mask to move selected pixels

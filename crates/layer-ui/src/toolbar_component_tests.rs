@@ -387,15 +387,10 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
         let fields=&s.state().tool_settings;
         let ids=fields.iter().map(|f|f.id).collect::<Vec<_>>();
         assert_eq!(ids,["size","flow","grain_depth","material_hardness","smoothing_strength","angle","opacity"],"{preset:?}");
-        assert!(fields[..4].iter().all(|f|f.group_id.is_empty() && f.group.is_empty()));
-        assert_eq!(fields[4].group_id,MessageId::TOOL_SETTING_GROUP_SMOOTHING.key());
+        assert!(fields[..5].iter().all(|f|f.group_id.is_empty() && f.group.is_empty()));
+        assert_eq!(fields[4].label.as_ref(),"Smoothing");
         assert_eq!(fields[5].group_id,MessageId::TOOL_SETTING_GROUP_TIP.key());
         assert_eq!(fields[6].group_id,MessageId::TOOL_SETTING_GROUP_BLENDING.key());
-        let speed=s.state().tool_actions.iter().find(|a|a.command==CommandId::SmoothingAdjustSpeed).unwrap();
-        assert_eq!(speed.setting_group(),Some(MessageId::TOOL_SETTING_GROUP_SMOOTHING));
-        let options=s.state().tool_options();
-        let smoothing=options.iter().position(|o|matches!(o,ToolOption::Numeric(f) if f.id=="smoothing_strength")).unwrap();
-        assert!(matches!(&options[smoothing+1],ToolOption::Action{state,..} if state.id==CommandId::SmoothingAdjustSpeed),"{preset:?}: Adjust by speed follows Smoothing");
         assert_eq!(fields.iter().find(|f|f.id=="angle").unwrap().label.as_ref(),"Tip angle");
         assert_eq!(fields.iter().find(|f|f.id=="grain_depth").unwrap().numeric.max,2.);
         let material=fields.iter().find(|f|f.id=="material_hardness").unwrap();

@@ -553,7 +553,6 @@ impl Default for BrushPath {
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BrushStabilization {
     pub strength: f32,
-    pub adjust_by_speed: bool,
     pub input_scale: f32,
     pub pressure_smoothing: f32,
     /// Minimum time for modeled pressure to fall by one full unit. Its fall
@@ -566,7 +565,6 @@ impl Default for BrushStabilization {
     fn default() -> Self {
         Self {
             strength: 0.06,
-            adjust_by_speed: false,
             input_scale: 1.0,
             pressure_smoothing: 0.0,
             pressure_fall_micros: 0,

@@ -660,7 +660,6 @@ menu-paste-special = Pegado especial
 menu-rotate-and-flip = Girar y voltear
 menu-color-management = Gestión del color
 command-pen-pressure = Presión del lápiz…
-command-smoothing-adjust-speed = Ajustar por velocidad
 command-erase-whole-paths = Borrar trazados completos
 commands-move-layers-not-together = Las capas seleccionadas no se pueden mover juntas
 commands-move-pixels-needs-paint = Elige una capa de pintura o una máscara para mover los píxeles seleccionados

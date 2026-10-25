@@ -79,24 +79,18 @@ function Check-Smoothing{
  $edit=Field 'smoothing_strength';$selection=@($edit.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).GetSelection()|ForEach-Object {$_.GetText(-1)})-join'|'
  if($selection-cne'invalid'-or!$edit.Current.HasKeyboardFocus){throw 'Smoothing draft selection or focus lost'}
  [CapyRowPointer]::Key([uint32]$ProcessId,27);Wait-Until {(Field 'smoothing_strength').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value-eq'30'} 'Smoothing Escape did not restore30'
- $speed=Control 'tool-action-smoothing_adjust_speed' ([System.Windows.Automation.ControlType]::CheckBox) -Id
- if($speed.Current.ProcessId-ne$ProcessId){throw 'Smoothing checkbox owner mismatch'}
- $sliderBounds=$slider.Current.BoundingRectangle;$speedBounds=$speed.Current.BoundingRectangle
- if($speedBounds.Top-lt$sliderBounds.Bottom-or$speedBounds.Top-$sliderBounds.Bottom-gt48){throw "Adjust by speed is not directly below Smoothing: slider=$sliderBounds; check=$speedBounds"}
- $speed.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle();Wait-Until {((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').selected} 'Smoothing speed toggle did not reach shared state'
+ $smoothing=@((Model).state.tool_settings|Where-Object id -eq 'smoothing_strength')
+ if($smoothing.Count-ne1-or$smoothing[0].label-ne'Smoothing'-or$smoothing[0].group_id-or$smoothing[0].group){throw 'Smoothing must have one ungrouped control'}
  Select-Tool 'pencil';Wait-Until {(Model).brush_ready-and[math]::Abs((Value 'smoothing_strength')-.06)-lt.0001} 'Pencil smoothing default did not prepare' 8
- if(((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').selected){throw 'Pen speed adjustment leaked into Pencil'}
- Select-Tool 'pen';Wait-Until {(Model).brush_ready-and[math]::Abs((Value 'smoothing_strength')-.3)-lt.0001-and((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').selected} 'PerPen smoothing choices did not restore' 8
+ Select-Tool 'pen';Wait-Until {(Model).brush_ready-and[math]::Abs((Value 'smoothing_strength')-.3)-lt.0001} 'PerPen smoothing choices did not restore' 8
  Dismiss-FeatureDrawer;$null=Reveal-Number 'smoothing_strength' 36 $scale
  $caption=Arranged 'number-caption-tool-setting-smoothing_strength' ([System.Windows.Automation.ControlType]::Text);$bounds=$caption.Current.BoundingRectangle
  $null=[CapyRowPointer]::DoubleClick([int]($bounds.Left+$bounds.Width/2),[int]($bounds.Top+$bounds.Height/2))
  Wait-Until {[math]::Abs((Value 'smoothing_strength')-.06)-lt.0001} 'Native smoothing caption reset did not restore6'
- (Control 'tool-action-smoothing_adjust_speed' ([System.Windows.Automation.ControlType]::CheckBox) -Id).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
- Wait-Until {!((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').selected} 'Smoothing speed reset did not restore default'
- Select-Tool 'auto_select';Wait-Until {!@((Model).state.tool_settings|Where-Object id -eq 'smoothing_strength').Count-and!((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').enabled} 'Selection retained smoothing controls' 8
+ Select-Tool 'auto_select';Wait-Until {!@((Model).state.tool_settings|Where-Object id -eq 'smoothing_strength').Count} 'Selection retained smoothing controls' 8
  if(Find 'tool-setting-smoothing_strength' ([System.Windows.Automation.ControlType]::Edit) -Id){throw 'Selection retained native smoothing editor'}
  Select-Tool 'pen';Dismiss-FeatureDrawer;Feature-Command 'quick_mask'
- Wait-Until {!@((Model).state.tool_settings|Where-Object id -eq 'smoothing_strength').Count-and!((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').enabled} 'Coverage mask retained smoothing' 8
+ Wait-Until {!@((Model).state.tool_settings|Where-Object id -eq 'smoothing_strength').Count} 'Coverage mask retained smoothing' 8
  Feature-Command 'return_to_artwork';Feature-Command 'clone'
  Wait-Until {(Model).brush_ready-and@((Model).state.tool_settings|Where-Object id -eq 'smoothing_strength').Count-eq1} 'Clone smoothing did not prepare' 8
  Check-Projection;Select-Tool 'pen';Dismiss-FeatureDrawer;Check-Projection

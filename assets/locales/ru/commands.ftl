@@ -663,7 +663,6 @@ menu-paste-special = Специальная вставка
 menu-rotate-and-flip = Поворот и отражение
 menu-color-management = Управление цветом
 command-pen-pressure = Нажим пера…
-command-smoothing-adjust-speed = Учитывать скорость
 command-erase-whole-paths = Стирать контуры целиком
 commands-move-layers-not-together = Выбранные слои нельзя переместить вместе
 commands-move-pixels-needs-paint = Выберите рисованный слой или маску, чтобы переместить выделенные пиксели

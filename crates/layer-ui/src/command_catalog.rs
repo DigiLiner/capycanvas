@@ -668,16 +668,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
         }
         for setting in &self.state.tool_settings {
-            let label = if setting.id == "smoothing_strength" {
-                command_text(l, MessageId::COMMANDS_PATH, &[("path", setting.group.to_string()), ("label", setting.label.to_string())])
-            } else { setting.label.to_string() };
-            let search_label = if setting.id == "smoothing_strength" {
-                command_text(&english, MessageId::COMMANDS_PATH, &[("path", english.text(MessageId::TOOL_SETTING_GROUP_SMOOTHING).to_string()), ("label", english.text(setting.label_id).to_string())])
-            } else { english.text(setting.label_id).to_string() };
             let item = parameter_entry(
                 format!("tool_setting.{}", setting.id),
-                &label,
-                &search_label,
+                &setting.label,
+                &english.text(setting.label_id),
                 l.text(MessageId::COMMANDS_TOOL_SETTINGS),
                 &setting.label,
                 &setting.numeric,

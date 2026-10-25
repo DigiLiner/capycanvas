@@ -346,7 +346,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                 }
                 if(!labeled)body.Children().Append(bar);
             }
-            auto settings=array(data->state,L"tool_settings");StackPanel numbers{nullptr};std::map<std::wstring,uint32_t> groupEnds;
+            auto settings=array(data->state,L"tool_settings");StackPanel numbers{nullptr};
             for(auto value:settings){
                 auto item=value.GetObject();auto id=str(item,L"id");
                 if(compact&&id==L"tonal_upper")continue;
@@ -411,7 +411,6 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                     fields.emplace_back([text,title=presentation.title]{text.Text(title());});
                     control.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(control,1);row.Children().Append(control);body.Children().Append(row);
                 }else body.Children().Append(control);
-                groupEnds[group.c_str()]=body.Children().Size();
             }
             std::map<std::wstring,Grid> actionRows;std::map<std::wstring,size_t> actionIndices;std::vector<hstring> groups;
             for(auto value:actions){
@@ -427,9 +426,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                 }else if(flag(item,L"checkable")){
                     CheckBox check;auto text=label(data,str(command,L"label"));check.Content(text);check.MinWidth(0);check.MinHeight(data->controlHeight());check.Height(data->controlHeight());check.Padding({0});check.HorizontalAlignment(HorizontalAlignment::Stretch);check.VerticalContentAlignment(VerticalAlignment::Center);
                     AutomationProperties::SetName(check,str(command,L"label"));AutomationProperties::SetAutomationId(check,L"tool-action-"+id);check.Click([invoke](auto&&,auto&&){invoke();});
-                    auto settingGroup=str(item,L"setting_group");auto anchor=groupEnds.find(settingGroup.c_str());
-                    if(!settingGroup.empty()&&anchor!=groupEnds.end()){auto at=anchor->second;body.Children().InsertAt(at,check);for(auto& entry:groupEnds)if(entry.second>=at)++entry.second;}
-                    else body.Children().Append(check);
+                    body.Children().Append(check);
                     fields.emplace_back([weak,id,check,text]{if(auto self=weak.lock()){auto command=find(array(self->data->state,L"commands"),L"id",id);text.Text(str(command,L"label"));AutomationProperties::SetName(check,str(command,L"label"));check.IsEnabled(flag(command,L"enabled"));check.IsChecked(flag(command,L"selected"));tooltip(check,str(command,L"tooltip"));}});
                 }else{
                     bool iconOnly=flag(item,L"icon_only");auto pick=button(data,str(command,L"label"),invoke);pick.MinHeight(iconOnly?data->panelMetric(L"control_height"):data->controlHeight());pick.Padding({iconOnly?0.:6.,0,iconOnly?0.:6.,0});pick.HorizontalAlignment(HorizontalAlignment::Stretch);

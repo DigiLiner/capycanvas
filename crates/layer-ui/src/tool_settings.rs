@@ -25,8 +25,6 @@ struct ToolSettingActionView {
     #[serde(skip_serializing_if = "Option::is_none")]
     row: Option<&'static str>,
     icon_only: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    setting_group: Option<&'static str>,
 }
 impl From<ToolSettingAction> for ToolSettingActionView {
     fn from(action: ToolSettingAction) -> Self {
@@ -36,13 +34,7 @@ impl From<ToolSettingAction> for ToolSettingActionView {
             segmented: action.group().is_some_and(ToolActionGroup::segmented),
             row: action.row().map(ToolActionRow::id),
             icon_only: action.row().is_some_and(ToolActionRow::icon_only),
-            setting_group: action.setting_group().map(MessageId::key),
         }
-    }
-}
-impl ToolSettingAction {
-    pub fn setting_group(self) -> Option<MessageId> {
-        (self.command == crate::CommandId::SmoothingAdjustSpeed).then_some(MessageId::TOOL_SETTING_GROUP_SMOOTHING)
     }
 }
 
@@ -231,7 +223,6 @@ pub(crate) fn ring_defaults(brush: &BrushSnapshot, controls: &[ToolSetting]) -> 
 }
 
 const GROUP_ORDER: &[MessageId] = &[
-    MessageId::TOOL_SETTING_GROUP_SMOOTHING,
     MessageId::TOOL_SETTING_GROUP_TIP,
     MessageId::TOOL_SETTING_GROUP_MATERIAL,
     MessageId::TOOL_SETTING_GROUP_TEXTURE,
@@ -263,7 +254,6 @@ pub(crate) const COLOR_MIXING: &str = "color_mixing";
 pub(crate) const COLOR_MIXING_COMMANDS: [crate::CommandId; 3] =
     [crate::CommandId::ColorMixOklab, crate::CommandId::ColorMixLinear, crate::CommandId::ColorMixClassic];
 pub(crate) const NOT_MIXING: &str = "Choose a brush that mixes paint first";
-pub(crate) const SMOOTHING_SPEED: &str = "smoothing_speed";
 
 pub(crate) fn color_mixing(command: crate::CommandId) -> Option<ColorMixSpace> {
     use crate::CommandId::*;
@@ -277,7 +267,6 @@ pub(crate) fn color_mixing(command: crate::CommandId) -> Option<ColorMixSpace> {
 
 /// The stored value of a setting, including the Color mixing choice.
 pub(crate) fn value(brush: &BrushSnapshot, id: &str) -> Option<f32> {
-    if id == SMOOTHING_SPEED { return Some(f32::from(u8::from(brush.stabilization.adjust_by_speed))); }
     if id == COLOR_MIXING {
         return mixes_color(brush).then_some(f32::from(brush.wet_mix.mix_space as u8));
     }
@@ -588,8 +577,8 @@ const DEFINITIONS: &[Definition] = &[
     },
     Definition {
         id: "smoothing_strength",
-        label: MessageId::TOOL_SETTING_SMOOTHING_STRENGTH,
-        group: Some(MessageId::TOOL_SETTING_GROUP_SMOOTHING),
+        label: MessageId::TOOL_SETTING_SMOOTHING,
+        group: None,
         numeric: || NumericControl {
             mapping: crate::NumericMapping::Log,
             log_offset: 0.00886269125382811,
@@ -648,12 +637,6 @@ pub(crate) fn edit(brush: &BrushSnapshot, id: &str, value: f32, localizer: &Loca
 }
 
 pub(crate) fn edit_value(brush: &BrushSnapshot, id: &str, value: f32) -> Result<BrushSnapshot, crate::WorkspaceValidationError> {
-    if id == SMOOTHING_SPEED {
-        if value != 0. && value != 1. { return Err("Unknown tool setting".into()); }
-        let mut next = brush.clone();
-        next.stabilization.adjust_by_speed = value == 1.;
-        return Ok(next);
-    }
     if id == COLOR_MIXING {
         let space = ColorMixSpace::ALL
             .into_iter()
@@ -810,7 +793,6 @@ mod tests {
             ("smoothing_strength", f32::NAN),
             ("smoothing_strength", -0.01),
             ("smoothing_strength", 1.01),
-            (SMOOTHING_SPEED, 0.5),
             ("flow", f32::NAN),
             ("size", 3000.0),
         ] {

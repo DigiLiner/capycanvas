@@ -644,37 +644,25 @@ extension XCTestCase {
         }
         selectPaintPreset("Pen", group: "Pen", preset: "G-Pen", in: app)
         edit("flow", "37"); edit("opacity", "42")
-        let speed = app.descendants(matching: .any)["tool-action-smoothing_adjust_speed"].firstMatch
         expect("smoothing_strength", "6")
         let toolScroll = app.scrollViews.containing(.button, identifier: value("smoothing_strength").identifier).firstMatch
         revealEditorControl(value("smoothing_strength"), in: toolScroll)
-        XCTAssertTrue(speed.exists, "Adjust by speed must be accessible after revealing Smoothing: \(app.debugDescription)")
-        revealEditorControl(speed, in: toolScroll)
-        XCTAssertFalse(speed.isSelected)
+        XCTAssertEqual(value("smoothing_strength").label, "Smoothing")
         let smoothingTrack = app.descendants(matching: .any)["number-track-tool-smoothing_strength"].firstMatch
         XCTAssertTrue(smoothingTrack.isHittable)
         smoothingTrack.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)).clickOrTap()
         expect("smoothing_strength", "30")
-        revealEditorControl(speed, in: toolScroll)
-        workspaceActivate(speed)
-        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: speed); waitForExpectations(timeout: 10)
         selectPaintPreset("Pencil", group: "Pencil", preset: "Pencil", in: app)
-        expect("smoothing_strength", "6"); XCTAssertFalse(speed.isSelected)
+        expect("smoothing_strength", "6")
         selectPaintPreset("Pen", group: "Pen", preset: "G-Pen", in: app)
-        expect("smoothing_strength", "30"); XCTAssertTrue(speed.isSelected)
+        expect("smoothing_strength", "30")
         resetPaintSetting("smoothing_strength", in: app)
-        expect("smoothing_strength", "6"); XCTAssertTrue(speed.isSelected, "Resetting numeric Strength preserves Adjust by speed")
+        expect("smoothing_strength", "6")
         edit("smoothing_strength", "30")
         XCTAssertEqual(editorPixels(in: app), paper, "Tool settings preserve artwork")
         XCTAssertFalse(undo.isEnabled); XCTAssertFalse(redo.isEnabled)
-        for (strength, adjusted) in [("0", false), ("30", true)] {
+        for strength in ["0", "30"] {
             edit("smoothing_strength", strength)
-            if speed.isSelected != adjusted {
-                revealEditorControl(speed, in: toolScroll)
-                workspaceActivate(speed)
-                expectation(for: NSPredicate(format: "selected == %@", NSNumber(value: adjusted)), evaluatedWith: speed)
-                waitForExpectations(timeout: 10)
-            }
             attachEditor(in: app, name: "smoothing-controls-\(strength)-\(theme)")
             #if os(macOS)
             editPaintSize("120", in: app)
@@ -697,17 +685,16 @@ extension XCTestCase {
         editorTool("Lasso selection", in: app)
         editorChoice("Rectangle select", in: app)
         XCTAssertTrue(value("smoothing_strength").waitForNonExistence(timeout: 10))
-        XCTAssertFalse(speed.exists)
         selectPaintPreset("Pen", group: "Pen", preset: "G-Pen", in: app)
-        expect("smoothing_strength", "30"); XCTAssertTrue(speed.isSelected)
+        expect("smoothing_strength", "30")
         editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
         let quick = app.descendants(matching: .any)["layer-row-0"].firstMatch
         XCTAssertTrue(quick.waitForExistence(timeout: 10))
-        XCTAssertTrue(value("smoothing_strength").waitForNonExistence(timeout: 10)); XCTAssertFalse(speed.exists)
+        XCTAssertTrue(value("smoothing_strength").waitForNonExistence(timeout: 10))
         attachEditor(in: app, name: "quick-mask-smoothing-hidden-\(theme)")
         editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
         XCTAssertTrue(quick.waitForNonExistence(timeout: 10))
-        expect("smoothing_strength", "30"); XCTAssertTrue(speed.isSelected)
+        expect("smoothing_strength", "30")
         XCTAssertEqual(viewport.frame, frame)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }

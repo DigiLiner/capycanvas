@@ -34,8 +34,6 @@ export async function checkSmoothing({call, evaluate, settle}) {
     await action({type:"set_brush_size", value:18});
     await action({type:"set_color", rgba:[0.05,0.1,0.3,1]});
     await waitForInk();
-    if (await evaluate('layerApp.state().commands.find(c=>c.id==="smoothing_adjust_speed").selected'))
-      await action({type:"invoke", command:"smoothing_adjust_speed"});
     await action({type:"customize",action:{type:"set_panel_visible",panel:"tool_settings",visible:true}});
     await action({type:"move_panel", panel:"tool_settings", target:{kind:"float",position:[10,70]}});
     for (const theme of ["light","dark"]) {
@@ -46,10 +44,10 @@ export async function checkSmoothing({call, evaluate, settle}) {
       });
       await settle();
       assert.equal(await evaluate('document.querySelector(\'[data-tool-setting="smoothing_strength"] .number-value\').textContent'), "30");
-      assert.equal(await evaluate(`(()=>{let field=document.querySelector('[data-tool-setting="smoothing_strength"]');while(field.parentElement&&!field.parentElement.classList.contains('tool-settings-body'))field=field.parentElement;return field.nextElementSibling?.dataset.toolAction;})()`), "smoothing_adjust_speed");
-      await inPage(() => document.querySelector('[data-tool-action="smoothing_adjust_speed"]').click());
-      await settle();
-      assert.equal(await evaluate('layerApp.state().commands.find(c=>c.id==="smoothing_adjust_speed").selected'), theme === "light");
+      const control = await evaluate('layerApp.state().tool_settings.find(c=>c.id==="smoothing_strength")');
+      assert.equal(control.label, "Smoothing");
+      assert.equal(control.group, "");
+      assert.equal(control.group_id, "");
     }
     await action({type:"restore_workspace", workspace});
     for (const theme of ["light","dark"]) for (const feedback of [false,true]) {

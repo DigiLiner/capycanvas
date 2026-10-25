@@ -67,8 +67,8 @@ tile does not make it evaluate intervening contacts elsewhere on the canvas.
 
 ## Stroke smoothing
 
-The Smoothing group exposes Strength from 0 to 100, initially 6, and Adjust by
-speed, initially off. Slider travel is logarithmic, with 30 at 75% of the track.
+Smoothing is one control from 0 to 100, initially 6, without a section heading.
+Slider travel is logarithmic, with 30 at 75% of the track.
 Zero bypasses position smoothing. Each brush keeps its own choices. Selection
 and coverage-mask painting use unsmoothed positions.
 
@@ -77,9 +77,8 @@ The shared engine uses the Curve fit model described in the
 It integrates a positive polynomial kernel over every delivered position;
 continuous evaluation between samples keeps the path smooth at low input rates.
 Input-interval calibration keeps strength comparable across sample rates.
-Adjust by speed increases smoothing during slow motion and approaches the
-selected strength at high speed. The captured view scale keeps speed and curve
-evaluation tolerance in surface pixels.
+The selected smoothing strength applies at every pen speed. The captured view
+scale keeps curve evaluation tolerance in surface pixels.
 
 Committed geometry depends on real samples, regardless of whether stroke preview
 is enabled. Preview continues that same curve with reduced prediction lead at
