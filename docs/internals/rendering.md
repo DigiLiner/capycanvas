@@ -239,6 +239,10 @@ staging changes. CPU staging reserves bounded geometric capacity before GPU
 replacement; a limit or CPU allocation refusal preserves existing GPU buffers
 and the style cache. GPU allocation failure follows renderer recovery.
 
+When a view's level would need a native window larger than the 608 MiB display
+budget or a texture, for example a large photo with a blur at about half zoom
+on a 4K screen, the display presents the next coarser level that fits.
+
 When the view is reduced, each screen pixel spans one to two texels of the
 display level and reads only that level, bilinearly. A bilinear sample of the
 finer level stays closer to the pixel's area average than a blend with the

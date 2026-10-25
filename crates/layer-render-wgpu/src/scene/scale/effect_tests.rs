@@ -480,6 +480,23 @@ fn finite_radius_default_tablet_view_admits_reduced_composition_with_reserved_sc
 }
 
 #[test]
+fn native_filters_beyond_the_display_budget_at_a_zoom_present_a_coarser_level() {
+    let mut doc = document_at([9504, 6336]);
+    let ink=paint_occurrence(&mut doc,"empty ink",None);insert_occurrence(&mut doc,ink,0);
+    let blur = effect(&mut doc,"gaussian_blur");
+    set_effect_value(&mut doc,blur,"sigma", EffectValue::Number(3.));
+    insert_occurrence(&mut doc,blur,0);
+    let r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut frame = packet(doc.scene(), doc.composition().size);
+    frame.view.width_px = 3840;
+    frame.view.height_px = 2160;
+    frame.view.document_to_surface = [0.54, 0., 0., 0.54, -400., -300.];
+    assert!(matches!(request_at(&r, frame, 0), Err(GpuRasterError::ExtentUnsupported)), "the native window at this zoom exceeds the display budget");
+    let request = request(&r, frame).unwrap();
+    assert!(request.plan.level >= 1, "a coarser level presents the view");
+}
+
+#[test]
 fn finite_radius_effects_admit_large_reduced_windows_and_global_effects_keep_full_bounds() {
     let mut doc = document_at([65, 33]);
     let paint = primary_paint(&doc);

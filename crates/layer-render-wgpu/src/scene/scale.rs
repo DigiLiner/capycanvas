@@ -460,6 +460,18 @@ pub(crate) fn request(r: &WgpuRasterizer, packet: FramePacket<'_>) -> Result<Req
         return Ok(Request { plan: display_mips::Plan::at(packet.document_extent, 0), evaluation: Evaluation::Native });
     }
     let level = display_mips::view_level(packet.view.document_to_surface, 4).ok_or(GpuRasterError::InvalidExtent)?;
+    let coarsest = display_mips::Plan::new(packet.document_extent)?.level;
+    let mut result = request_at(r, packet, level);
+    for coarser in level + 1..=coarsest.max(level) {
+        if !matches!(result, Err(GpuRasterError::ExtentUnsupported)) { break; }
+        result = request_at(r, packet, coarser);
+    }
+    result
+}
+
+/// The display request at `level`, or ExtentUnsupported when its native
+/// window would exceed the display budget or a texture.
+fn request_at(r: &WgpuRasterizer, packet: FramePacket<'_>, level: u32) -> Result<Request, GpuRasterError> {
     let plan = view_plan(packet, level, Evaluation::Display).ok_or(GpuRasterError::InvalidExtent)?;
     let input = input_plan(plan, packet.scene,r.scene.as_ref().map(|s|&s.object_spatial));
     let records = records_for(r, plan, packet.scene);
