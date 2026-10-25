@@ -14,6 +14,10 @@ deserializes into owned values; text-only transports use a scoped callback.
 The boundary tests run on Linux too, and compile-fail doctests reject escaping
 string borrows.
 
+Binary WebP preview calls reject invalid slice lengths and overlapping dimension
+outputs before borrowing input. They write dimensions only after the decoded
+preview handle is stored. Input and output allocations remain valid for the call.
+
 ## Prerequisites
 
 On Windows 11, install:

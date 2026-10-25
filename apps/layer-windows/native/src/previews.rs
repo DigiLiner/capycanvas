@@ -73,11 +73,12 @@ pub(crate) fn copied_metadata(value:u64)->serde_json::Value {
 /// writable storage. Callable from any thread; free the result with capy_preview_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_decode_webp(data: *const u8, length: usize, width: *mut u32, height: *mut u32) -> u64 {
-    let (Some(width), Some(height)) = (unsafe { width.as_mut() }, unsafe { height.as_mut() }) else { return 0 };
-    if data.is_null() { return 0; }
+    if data.is_null() || length == 0 || length > isize::MAX as usize || width.is_null() || height.is_null()
+        || width.addr().abs_diff(height.addr()) < std::mem::size_of::<u32>() { return 0; }
     let Ok(([w, h], pixels)) = layer_color::photo::decode_rgba8_webp(unsafe { std::slice::from_raw_parts(data, length) }) else { return 0 };
-    [*width, *height] = [w, h];
-    store(CapyPreview { metadata: CString::default(), bytes: pixels }).unwrap_or(0)
+    let Ok(packet) = store(CapyPreview { metadata: CString::default(), bytes: pixels }) else { return 0 };
+    unsafe { width.write(w); height.write(h); }
+    packet
 }
 
 impl CapyPreview {
@@ -257,6 +258,20 @@ mod tests {
         capy_preview_free(packet);
         assert_eq!(capy_preview_length(packet), 0);
         assert_eq!(unsafe { capy_decode_webp(bytes.as_ptr(), 12, &mut width, &mut height) }, 0);
+    }
+
+    #[test]
+    fn webp_decode_rejects_invalid_ranges_and_overlapping_dimensions() {
+        let bytes = include_bytes!("../../../layer-web/filter-previews/curves.webp");
+        let (mut width, mut height) = (93, 71);
+        for (data, length) in [(std::ptr::null(), bytes.len()), (bytes.as_ptr(), 0), (bytes.as_ptr(), usize::MAX)] {
+            assert_eq!(unsafe { capy_decode_webp(data, length, &mut width, &mut height) }, 0);
+            assert_eq!([width, height], [93, 71]);
+        }
+        for (output_width, output_height) in [(std::ptr::null_mut(), &raw mut height), (&raw mut width, std::ptr::null_mut()), (&raw mut width, &raw mut width)] {
+            assert_eq!(unsafe { capy_decode_webp(bytes.as_ptr(), bytes.len(), output_width, output_height) }, 0);
+            assert_eq!([width, height], [93, 71]);
+        }
     }
 
     #[test]
