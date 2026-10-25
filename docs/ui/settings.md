@@ -82,6 +82,8 @@ next, with a per-pen response curve and direction correction in the same utility
 [`shortcuts.rs`](../../crates/layer-ui/src/shortcuts.rs) associates key chords with
 typed editor actions. Shared code handles defaults, user overrides and conflicts.
 A shortcut invokes the same command as a toolbar or menu item.
+Tool Set row tooltips resolve their variant's command, including tool-family keys
+and user overrides, so they show the same shortcut as the command.
 Settings store user chords and modifier maps. Generated shortcut definitions are
 runtime values; hosts receive the shortcut page and row views.
 

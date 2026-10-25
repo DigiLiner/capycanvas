@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyWaitSeconds=10
@@ -24,6 +24,7 @@ function Center([string]$Id,[switch]$Name){
 try{
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
+ [IO.File]::WriteAllText((Settings-File),(@{theme=$Theme}|ConvertTo-Json))
  $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log');$null=$review.Handle
  Write-Output "Owned tooltip review $($review.Id): $run"
  Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Tooltip review did not start' 45
@@ -61,7 +62,7 @@ try{
  Start-Sleep -Milliseconds 400
  if(Tooltip){throw 'A tooltip appeared after the touch hold'}
  [CapyRowPointer]::Key([uint32]$review.Id,[ushort]0x1B)
- @{mouse_hover='passed';touch_hold_without_tooltip='passed';action_shortcut_hint=$shown.text;target=$target.name}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
+ @{theme=$Theme;mouse_hover='passed';touch_hold_without_tooltip='passed';action_shortcut_hint=$shown.text;target=$target.name}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
  Get-Content (Join-Path $run 'results.json')
 }catch{
  if($review -and !$review.HasExited){try{Capture 'failure' -WithModel}catch{}}

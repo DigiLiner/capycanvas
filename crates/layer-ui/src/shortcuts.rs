@@ -897,6 +897,7 @@ impl Settings {
         fn canonical(action: &UiAction) -> UiAction {
             action_command(action)
                 .or_else(|| tool_command(action))
+                .or_else(|| match action { UiAction::ChooseToolVariant { variant, .. } => Some(variant.command()), _ => None })
                 .map_or_else(|| action.clone(), |command| UiAction::Invoke { command })
         }
         let action = canonical(action);
@@ -1281,6 +1282,33 @@ mod tests {
             [key("b", false, false)]
         );
         assert!(!settings.shortcut_modified(ToolFamily::Paint.shortcut_id()));
+    }
+
+    #[test]
+    fn tool_variant_tooltips_follow_command_bindings() {
+        let mut settings = Settings::default();
+        let anchor = DrawerAnchor::Tile { panel: Panel::Toolbar, tile: 1 };
+        let variants = [
+            ToolVariant::Command { command: CommandId::Move },
+            ToolVariant::BrushGroup { group: ToolGroup::Pen },
+            ToolVariant::BrushPreset { id: layer_core::DefaultBrushPreset::Pencil as u32 },
+            ToolVariant::Figure { shape: FigureShape::Rectangle },
+            ToolVariant::Ruler { kind: RulerKind::Straight },
+            ToolVariant::Gradient { shape: layer_core::GradientShape::Linear },
+        ];
+        let move_action = UiAction::ChooseToolVariant { anchor, variant: variants[0] };
+        assert_eq!(settings.action_tooltip_english("Operation", &move_action, Platform::Windows), "Operation (O)");
+        for variant in variants {
+            let action = UiAction::ChooseToolVariant { anchor, variant };
+            let command = UiAction::Invoke { command: variant.command() };
+            for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Windows, Platform::Mac, Platform::Ios] {
+                assert_eq!(settings.action_keys(&action, platform), settings.action_keys(&command, platform), "{variant:?} {platform:?}");
+            }
+        }
+        settings.shortcuts.insert(CommandId::Move.shortcut_id(), vec![key("j", true, false)]);
+        assert_eq!(settings.action_tooltip_english("Operation", &move_action, Platform::Gtk), "Operation (Ctrl+J)");
+        settings.shortcuts.insert(CommandId::Move.shortcut_id(), Vec::new());
+        assert_eq!(settings.action_tooltip_english("Operation", &move_action, Platform::Gtk), "Operation");
     }
 
     #[test]
