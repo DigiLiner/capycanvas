@@ -3,17 +3,24 @@ import XCTest
 extension EditorLaunchTests {
     @MainActor func testNativeZenContextAction() {
         XCUIDevice.shared.orientation = .landscapeLeft
-        let app = editorTestApplication()
-        app.launch()
-        let zen = app.buttons["zen-button"]
-        XCTAssertTrue(zen.waitForExistence(timeout: 20))
-        zen.press(forDuration: 0.8)
-        let icon = app.buttons["Change icon…"]
-        XCTAssertTrue(icon.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["layer-New layer"].exists, "Opening the native menu must suppress the Zen button tap")
-        icon.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["preference-zen_icon"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+        for theme in ["light", "dark"] {
+            let app = editorTestApplication()
+            app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"customize","action":{"type":"set_panel_visible","panel":"layers","visible":true}}]"#
+            app.launch()
+            let zen = app.descendants(matching: .any)["zen-button"].firstMatch.buttons.firstMatch
+            XCTAssertTrue(zen.waitForExistence(timeout: 20))
+            zen.press(forDuration: 0.8)
+            let icon = app.buttons["Change icon…"]
+            XCTAssertTrue(icon.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["layer-New layer"].exists, "Opening the native menu must suppress the Zen button tap")
+            icon.tap()
+            let choices = (0..<4).map { app.buttons["preference-zen_icon-\($0)"] }
+            for choice in choices { XCTAssertTrue(choice.waitForExistence(timeout: 10)) }
+            XCTAssertEqual(choices.filter { $0.isSelected }.count, 1)
+            XCTAssertTrue(choices[0].isSelected)
+            XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+            app.terminate()
+        }
     }
 }
 

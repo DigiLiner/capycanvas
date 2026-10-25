@@ -63,7 +63,8 @@ final class EditorMenuChecks: XCTestCase {
             expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
             waitForExpectations(timeout: 60)
             waitForEditorInteraction(in: app)
-            let trigger = app.buttons["menu-View"]
+            let viewMenu = app.buttons["menu-View"]
+            let trigger = viewMenu.exists ? viewMenu : app.buttons["application-menus"]
             workspaceActivate(trigger)
             expectation(for: NSPredicate(format: "value == %@", "Expanded"), evaluatedWith: trigger)
             waitForExpectations(timeout: 5)
@@ -80,6 +81,7 @@ final class EditorMenuChecks: XCTestCase {
             attachEditor(in: app, name: "header-menu-hold-\(theme)")
             outside.tap()
             XCTAssertTrue(context.waitForNonExistence(timeout: 5))
+            XCTAssertFalse(app.staticTexts["Canvas error"].exists)
             app.terminate()
         }
     }

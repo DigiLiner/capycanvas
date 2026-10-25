@@ -84,9 +84,8 @@ private final class NativeContextMenuController<Content: View>: UIHostingControl
         recognizer === secondary ? event.buttonMask.contains(.secondary) : !event.buttonMask.contains(.secondary)
     }
     func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-        // A button tap waits for the hold to fail; scrolling keeps its usual
-        // early movement path. UIKit then suppresses the tap after a hold.
-        recognizer === hold && !(other is UIPanGestureRecognizer) && !(other is UIPinchGestureRecognizer)
+        recognizer === hold && other.view === recognizer.view
+            && !(other is UIPanGestureRecognizer) && !(other is UIPinchGestureRecognizer)
     }
 
 }

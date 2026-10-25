@@ -298,6 +298,8 @@ mutation or release.
   glass shine. Preserve native keyboard and accessibility conventions.
   Apply a custom button label’s `contentShape` after its final frame so blank
   space inside the control accepts input with its text and icon.
+  UIKit menu holds add failure priority only within their own native host view.
+  Exclude pan and pinch recognizers from this added priority.
   The iPad chrome observer attaches passively to the editor window. It converts
   contacts through the noninteractive editor marker and admits only points inside
   that marker's bounds. Canvas contacts stay on the canvas input path; native
