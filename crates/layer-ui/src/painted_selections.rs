@@ -418,6 +418,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     .map_err(error)?;
                 return Ok(0);
             }
+            if !job.paint && self.engine.raster_backing_pending() { return Ok(0); }
             let Some(result) = self.engine.backend_mut().take_region() else {
                 return Ok(0);
             };
@@ -445,6 +446,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             .gestures
             .front()
             .is_some_and(|g| g.capturing)
+            && !self.engine.raster_backing_pending()
             && let Some(result) = self.engine.backend_mut().take_selection_paint()
         {
             let gesture = self.painted_selections.gestures.pop_front().unwrap();

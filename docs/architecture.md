@@ -124,7 +124,11 @@ edits that arrive during raster capture in one ordered queue with subsequent pen
 samples. Frames drain that queue after earlier edits finish, validating each
 action against the resulting document. Completed contacts wait for preparation;
 only unfinished contacts expire. Both share a bounded sample queue. Delayed
-contacts keep their captured view and brush settings. Transform mode and grid
+contacts keep their captured view and brush settings. A press or release that
+the session handles itself, such as a gradient, shape, selection, fill, ruler,
+Move or vector path contact, joins that queue while raster backing is pending,
+so its edit commits once the earlier work lands. Fill, wand and selection brush
+results stay with the renderer until then. Transform mode and grid
 choices stay available during background rendering, preserving queued input and
 edit order. Camera navigation stays available;
 document activation and renderer replacement retire queued input. Hosts forward

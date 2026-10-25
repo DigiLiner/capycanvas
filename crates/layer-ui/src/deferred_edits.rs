@@ -98,6 +98,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         self.defer_pen(event, held);
     }
+    pub(super) fn contact_waits_for_raster_backing(&self, event: &PenEvent) -> bool {
+        matches!(event.phase, PenPhase::Down | PenPhase::Up) && self.engine.raster_backing_pending()
+    }
     pub(super) fn apply_loaded_paper(&mut self) -> u32 {
         if self.rendering_suspended || !self.deferred_edits.is_empty() || !self.canvas_idle() || self.engine.raster_backing_pending() { return 0; }
         let Some(crate::paper_library::PendingPaper { layer, epoch, image: Some(image), .. }) = self.papers.pending.take_if(|pending| pending.image.is_some()) else { return 0 };

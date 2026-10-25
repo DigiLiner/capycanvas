@@ -308,3 +308,168 @@ fn held_contacts_keep_their_pressure_and_tilt_calibration_at_admission() {
     assert!(samples.iter().all(|point|(point.pressure-pressure.map(0.5)).abs()<1e-5 && point.tilt[0]<0.));
     assert_eq!(s.engine.configured_tilt_curve(),&layer_engine::TiltCurve::default());
 }
+
+#[derive(Clone, Copy, Debug)]
+enum Landing { Pipelines, Submission }
+
+fn edits(s: &UiSession<Recorder>) -> (u64, u64) {
+    (s.engine.checkpoint(), s.engine.document().working.generation)
+}
+
+fn land(s: &mut UiSession<Recorder>) {
+    s.renderer_mut().settling = false;
+    s.renderer_mut().raster_dependencies_blocked = false;
+    settle(s);
+}
+
+fn region_reply(s: &mut UiSession<Recorder>) {
+    let request = s.renderer_mut().region_requests.last().unwrap().request_id;
+    s.renderer_mut().region_reply = Some(layer_render::RegionResult { request_id: request, tonal_sample: None,
+        pixels: Arc::new(layer_core::SelectionPixels::bytes([8, 1], [0, 0, 8, 1], vec![0xffffffff; 2]).unwrap()),
+        placement: layer_core::Affine::IDENTITY });
+}
+
+#[test]
+fn tool_contacts_wait_for_raster_backing_and_commit_once_it_lands() {
+    use layer_core::{FigurePaint, FigureShape, GradientShape, RulerKind};
+    let tools = [
+        LayerCanvasTool::Gradient { shape: GradientShape::Linear },
+        LayerCanvasTool::Figure { shape: FigureShape::Rectangle, paint: FigurePaint::Fill },
+        LayerCanvasTool::Figure { shape: FigureShape::Line, paint: FigurePaint::Outline },
+        LayerCanvasTool::LassoFill,
+        LayerCanvasTool::Select,
+        LayerCanvasTool::Selection { kind: SelectionTool::Rectangle },
+        LayerCanvasTool::Selection { kind: SelectionTool::Ellipse },
+        LayerCanvasTool::Ruler { kind: RulerKind::Straight },
+    ];
+    for landing in [Landing::Pipelines, Landing::Submission] {
+        for tool in tools {
+            let mut s = session(Platform::Gtk);
+            s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
+            invoke(&mut s, CommandId::FitCanvas);
+            select(&mut s, rectangle([100., 100., 900., 900.]));
+            s.layer_action(LayerAction::Tool { tool }).unwrap();
+            if let Landing::Pipelines = landing {
+                s.dispatch(UiAction::Invoke { command: CommandId::FillSelection }).unwrap();
+                s.renderer_mut().raster_dependencies_blocked = true;
+                s.frame(2, 2).unwrap();
+            }
+            let before = edits(&s);
+            pen_at(&mut s, 1, PenPhase::Down, [200., 200.]);
+            pen_at(&mut s, 2, PenPhase::Move, [400., 250.]);
+            pen_at(&mut s, 3, PenPhase::Move, [350., 450.]);
+            if let Landing::Submission = landing {
+                s.frame(3, 3).unwrap();
+                s.renderer_mut().settling = true;
+            }
+            pen_at(&mut s, 4, PenPhase::Up, [350., 450.]);
+            assert!(s.engine.raster_backing_pending());
+            assert_eq!(notice_text(&s), None, "{landing:?} {tool:?}");
+            assert_eq!(edits(&s), before, "{landing:?} {tool:?}: the release waits for the earlier work");
+            land(&mut s);
+            assert_eq!(notice_text(&s), None, "{landing:?} {tool:?}");
+            assert!(s.deferred_edits.is_empty(), "{landing:?} {tool:?}");
+            assert_ne!(edits(&s), before, "{landing:?} {tool:?}: the release commits once the work lands");
+        }
+    }
+}
+
+#[test]
+fn vector_contacts_wait_for_raster_backing_and_commit_once_it_lands() {
+    use layer_core::{FigurePaint, FigureShape};
+    let mut s = session(Platform::Gtk);
+    s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
+    invoke(&mut s, CommandId::FitCanvas);
+    layer(&mut s, LayerAction::NewVector);
+    let layer = s.engine.document().working.occurrence.unwrap();
+    let paths = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().path_count();
+    let waits = |s: &mut UiSession<Recorder>, first: u64, points: &[[f32; 2]], commit: PenPhase| {
+        let before = edits(s);
+        for (index, point) in points.iter().enumerate() {
+            let phase = if index == 0 { PenPhase::Down } else if index + 1 == points.len() { PenPhase::Up } else { PenPhase::Move };
+            if phase == commit { s.renderer_mut().settling = true; }
+            pen_at(s, first + index as u64, phase, *point);
+        }
+        assert_eq!(notice_text(s), None);
+        assert_eq!(edits(s), before, "the {commit:?} waits for the earlier work");
+        land(s);
+        assert_eq!(notice_text(s), None);
+        assert_ne!(edits(s), before, "the {commit:?} commits once the work lands");
+    };
+    let line: Vec<[f32; 2]> = (0..16).map(|i| [200. + i as f32 * 20., 300. + (i as f32 * 0.6).sin() * 40.]).collect();
+    waits(&mut s, 10, &line, PenPhase::Up);
+    assert_eq!(paths(&s), 1);
+    invoke(&mut s, CommandId::Move);
+    settle(&mut s);
+    assert!(s.engine.document().working.vector_items.is_none());
+    waits(&mut s, 40, &[line[0], line[0]], PenPhase::Down);
+    assert!(s.engine.document().working.vector_items.is_some(), "the press selects the path");
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline } }).unwrap();
+    for (index, point) in [[400., 500.], [500., 500.], [450., 580.]].into_iter().enumerate() {
+        pen_at(&mut s, 50 + index as u64 * 2, PenPhase::Down, point);
+        pen_at(&mut s, 51 + index as u64 * 2, PenPhase::Up, point);
+    }
+    settle(&mut s);
+    waits(&mut s, 60, &[[401., 501.], [401., 501.]], PenPhase::Down);
+    assert_eq!(paths(&s), 2, "clicking the first anchor closes the path");
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: RegionSource::Visible } }).unwrap();
+    waits(&mut s, 70, &[[450., 520.], [450., 520.]], PenPhase::Up);
+    invoke(&mut s, CommandId::Eraser);
+    waits(&mut s, 80, &[[300., 200.], [300., 400.], [300., 400.]], PenPhase::Up);
+}
+
+#[test]
+fn region_and_selection_brush_results_wait_for_raster_backing() {
+    for tool in [LayerCanvasTool::Region { fill: true, source: RegionSource::Visible },
+        LayerCanvasTool::Region { fill: false, source: RegionSource::Visible }] {
+        let mut s = session(Platform::Gtk);
+        s.layer_action(LayerAction::Tool { tool }).unwrap();
+        let before = edits(&s);
+        pen_at(&mut s, 1, PenPhase::Down, [200., 200.]);
+        pen_at(&mut s, 2, PenPhase::Up, [200., 200.]);
+        s.frame(2, 2).unwrap();
+        s.renderer_mut().settling = true;
+        region_reply(&mut s);
+        s.frame(3, 3).unwrap();
+        assert_eq!(edits(&s), before, "{tool:?}: the result waits for the earlier work");
+        land(&mut s);
+        assert_eq!(notice_text(&s), None);
+        assert_ne!(edits(&s), before, "{tool:?}: the result commits once the work lands");
+    }
+    let mut s = session(Platform::Gtk);
+    invoke(&mut s, CommandId::SelectionBrush);
+    pen_at(&mut s, 1, PenPhase::Down, [100., 100.]);
+    pen_at(&mut s, 2, PenPhase::Up, [100., 100.]);
+    s.frame(2, 2).unwrap();
+    let id = s.engine.backend().selection_updates.last().unwrap().id;
+    s.renderer_mut().settling = true;
+    s.renderer_mut().selection_reply = Some(layer_render::SelectionPaintResult { changed: true, request_id: id,
+        pixels: Arc::new(layer_core::SelectionPixels::bytes([4, 1], [0, 0, 4, 1], vec![0x80808080]).unwrap()) });
+    s.frame(3, 3).unwrap();
+    assert!(s.engine.document().working.selection.is_none(), "the capture waits for the earlier work");
+    land(&mut s);
+    assert!(s.engine.document().working.selection.is_some(), "the capture commits once the work lands");
+}
+
+#[test]
+fn a_waiting_selection_press_that_is_cancelled_leaves_no_selection_mode_behind() {
+    let mut s = session(Platform::Gtk);
+    s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
+    invoke(&mut s, CommandId::FitCanvas);
+    select(&mut s, rectangle([100., 100., 300., 300.]));
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Selection { kind: SelectionTool::Rectangle } }).unwrap();
+    s.dispatch(UiAction::Invoke { command: CommandId::FillSelection }).unwrap();
+    s.renderer_mut().raster_dependencies_blocked = true;
+    s.frame(2, 2).unwrap();
+    s.interaction.modifiers.shift = true;
+    pen_at(&mut s, 1, PenPhase::Down, [500., 500.]);
+    pen_at(&mut s, 2, PenPhase::Cancel, [500., 500.]);
+    s.interaction.modifiers.shift = false;
+    land(&mut s);
+    pen_at(&mut s, 3, PenPhase::Down, [500., 500.]);
+    pen_at(&mut s, 4, PenPhase::Move, [700., 700.]);
+    pen_at(&mut s, 5, PenPhase::Up, [700., 700.]);
+    settle(&mut s);
+    let bounds = s.engine.document().working.selection.as_ref().unwrap().coverage_bounds();
+    assert!(bounds.min.x >= 499., "the later drag replaces the selection instead of adding to it: {bounds:?}");
+}

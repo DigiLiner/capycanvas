@@ -4278,6 +4278,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             spring.used = true;
         }
         self.engine.backend_mut().shader_input();
+        let gesture = (self.selection_tools.gesture_mode, self.selection_tools.start_modifiers);
         if event.phase == PenPhase::Down && self.layer_interaction.tool.selection_tool().is_some()
             && self.layer_interaction.path.is_empty() && self.selection_tools.gesture_mode.is_none() {
             self.selection_tools.gesture_mode = Some(self.effective_selection_mode());
@@ -4285,6 +4286,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let notice = self.notice_id();
         let result = self.pen_inner(event);
+        if result.is_err() { (self.selection_tools.gesture_mode, self.selection_tools.start_modifiers) = gesture; }
         if result.is_ok() && event.phase == PenPhase::Down {
             self.dismiss_notice_unless_raised(notice);
         }
@@ -4325,6 +4327,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         if self.layer_interaction.tool.region().is_some()
             && !matches!(self.layer_interaction.tool, LayerCanvasTool::EncloseFill { .. }) {
+            if self.contact_waits_for_raster_backing(&event) { return Err(event); }
             self.region_pen(event);
             return Ok(());
         }
@@ -4350,25 +4353,18 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             return Ok(());
         }
-        if self.layer_interaction.tool != LayerCanvasTool::Paint {
-            if event.phase == PenPhase::Up && (self.operation.moving_pixels() || self.operation.moving_layer())
-                && self.engine.raster_backing_pending() {
-                return Err(event);
-            }
-            if let Err(error) = self.layer_pen(event) {
-                let _ = self.cancel_layer_gesture();
+        let layer_tool = self.layer_interaction.tool != LayerCanvasTool::Paint;
+        let erasing = !layer_tool && (self.vector_lines.erasing()
+            || (event.phase == PenPhase::Down && self.vector_erasing_layer(self.erasing_event(&event)).is_some()));
+        let drawing = !layer_tool && !erasing && (self.vector_lines.active() || self.vector_lines.corrects(&event)
+            || (event.phase == PenPhase::Down && self.vector_drawing_layer().is_some()));
+        if layer_tool || erasing || drawing {
+            if self.contact_waits_for_raster_backing(&event) { return Err(event); }
+            let result = if layer_tool { self.layer_pen(event) } else if erasing { self.vector_erase_pen(event) } else { self.vector_line_pen(event) };
+            if let Err(error) = result {
+                if layer_tool { let _ = self.cancel_layer_gesture(); }
                 self.notify(error);
             }
-            self.input_pending = true;
-            return Ok(());
-        }
-        if self.vector_lines.erasing() || (event.phase == PenPhase::Down && self.vector_erasing_layer(self.erasing_event(&event)).is_some()) {
-            if let Err(error) = self.vector_erase_pen(event) { self.notify(error); }
-            self.input_pending = true;
-            return Ok(());
-        }
-        if self.vector_lines.active() || self.vector_lines.corrects(&event) || (event.phase == PenPhase::Down && self.vector_drawing_layer().is_some()) {
-            if let Err(error) = self.vector_line_pen(event) { self.notify(error); }
             self.input_pending = true;
             return Ok(());
         }

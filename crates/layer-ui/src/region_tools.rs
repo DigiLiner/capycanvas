@@ -347,7 +347,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.queue_region(request, Purpose::Refine);
     }
     pub(super) fn poll_region_tool(&mut self) -> Result<u32, String> {
-        if self.region_tools.pending
+        if self.region_tools.pending && !self.engine.raster_backing_pending()
             && let Some(result) = self.engine.backend_mut().take_region()
         {
             self.region_tools.pending = false;
