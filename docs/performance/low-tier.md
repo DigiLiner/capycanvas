@@ -1089,6 +1089,24 @@ Both use release Rust. Records are in
 `artifacts/validation/{baseline-brush,candidate-clock-brush}`, with native
 consumed-input traces, completed submissions, geometry and final screenshots.
 
+### Transform reach check
+
+Measured 2026-10-25 on the TCL with `AndroidCanvasBarBenchmarkTest`, the
+4248 × 2832 tier photo, opened as the drawing or placed in a new one, at Fit
+zoom with Navigator open, release builds of the
+parent (control) and the transform reach check (candidate), four runs per build
+in ABBA order and thermal status 0 throughout. The per-drag page check adds no
+measurable cost.
+
+| Journey | Control completed updates/s | Candidate completed updates/s | Owner CPU p50, control → candidate |
+| --- | ---: | ---: | ---: |
+| Placed photo, Free resize | 44.54 (44.38–44.91) | 44.45 (44.31–44.51) | 5.34 → 4.90 ms |
+| Placed photo, Distort | 38.37 (38.28–38.48) | 38.42 (38.27–38.50) | 3.89 → 4.04 ms |
+| Opened photo, Free resize | 45.56 (45.25–45.68) | 45.16 (45.06–45.43) | 4.94 → 4.78 ms |
+| Opened photo, Distort | 38.93 (38.87–39.08) | 38.91 (38.69–39.11) | 3.91 → 3.91 ms |
+
+Both builds remain below the 60 Hz target on these rows.
+
 ## Earlier direct-presentation comparison
 
 Measured 2026-09-29 on the 12 MP Perceptual reference photo at Fit: release Rust,

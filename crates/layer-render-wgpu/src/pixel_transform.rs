@@ -5,7 +5,7 @@ use crate::{submission::ColorPass, GpuRasterError};
 use super::{Deferred, PipelineDevice, Uploads};
 use layer_core::{ImageTransform, Interpolation, Projective};
 
-pub(super) const TRANSFORM_SLOTS: usize = 16;
+pub(super) const TRANSFORM_SLOTS: usize = layer_core::TRANSFORM_SOURCE_PAGES;
 /// Taps per axis a minified pixel averages in drag previews.
 pub(super) const PREVIEW_TAPS: u32 = 4;
 /// Taps per axis a minified pixel averages at most in exact passes: commits

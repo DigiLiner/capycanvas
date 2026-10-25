@@ -594,6 +594,7 @@ commands-wait-for-transform = Auf den Abschluss der Transformation warten oder s
 commands-wait-for-current-edit = Auf die aktuelle Bearbeitung warten
 commands-transform-pixels-drawing-changed = Die Zeichnung wurde geändert; die Transformation erneut anwenden
 commands-transform-pixels-unexpected-result = Transformierte Pixel konnten nicht angewandt werden
+commands-transform-too-squeezed = So stark lassen sich die Pixel nicht zusammendrücken
 commands-transform-pixels-layer-changed = Die transformierte Ebene wurde geändert
 
 commands-transform-single-warp = Eine einzelne Mal- oder Fotoebene zum Verformen auswählen

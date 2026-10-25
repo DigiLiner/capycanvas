@@ -594,6 +594,7 @@ commands-wait-for-transform = Wait for the transform to finish, or cancel it
 commands-wait-for-current-edit = Wait for the current edit
 commands-transform-pixels-drawing-changed = The drawing changed; apply the transform again
 commands-transform-pixels-unexpected-result = Couldn't apply the transformed pixels
+commands-transform-too-squeezed = The pixels can't be squeezed this far
 commands-transform-pixels-layer-changed = The transformed layer changed
 
 commands-transform-single-warp = Select one paint or photo layer to warp

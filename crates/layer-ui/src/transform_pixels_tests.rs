@@ -183,6 +183,36 @@ fn a_distorted_stroke_commits_though_its_perspective_folds_beyond_the_layer() {
 }
 
 #[test]
+fn a_distort_corner_stops_where_its_pixels_would_squeeze_past_one_pass() {
+    use layer_core::raster::RasterPlane;
+    let mut doc = Document::new(PortableId::random(), 2048, 2048, layer_core::DocumentNames { paint: "Photo".into(), paper: "Paper".into() });
+    let color = doc.composition().color;
+    doc.artwork.paint.get_mut(bake_paint_handle(&doc)).unwrap().raster = raw_revision(color, &[RasterPlane::Color], 40);
+    let mut s = UiSession::new(Recorder { tiled_sources: true, ..Default::default() }, doc, [1600, 1000], Platform::Gtk).unwrap();
+    s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
+    invoke(&mut s, CommandId::FitCanvas);
+    s.frame(1, 1).unwrap();
+    s.dispatch(UiAction::Invoke { command: CommandId::ScaleRotate }).unwrap();
+    reply_bounds(&mut s, [0., 0., 2048., 2048.]);
+    invoke(&mut s, CommandId::TransformDistort);
+    let from = s.operation.quad()[0];
+    s.transform_pen(event(&s, 1, PenPhase::Down, 1.), from).unwrap();
+    let kept = Point { x: 400., y: 300. };
+    s.transform_pen(event(&s, 2, PenPhase::Move, 1.), kept).unwrap();
+    let accepted = s.engine.transform_preview().cloned().unwrap();
+    s.transform_pen(event(&s, 3, PenPhase::Move, 1.), Point { x: 1022.9555, y: 1022.9555 }).unwrap();
+    assert_eq!(s.operation.quad()[0], kept, "the corner stays at its last drawable pose");
+    assert_eq!(s.engine.transform_preview(), Some(&accepted));
+    assert_eq!(notice_text(&s), Some("The pixels can't be squeezed this far"));
+    let back = Point { x: 300., y: 200. };
+    s.transform_pen(event(&s, 4, PenPhase::Up, 1.), back).unwrap();
+    assert_eq!(s.operation.quad()[0], back, "moving back out draws again");
+    s.dispatch(UiAction::Invoke { command: CommandId::ApplyTransform }).unwrap();
+    let plan = frozen_plan(&s);
+    assert!(plan.geometry.fits_source_pages(layer_core::Rect::from_extent([2048, 2048]), layer_core::Rect::from_extent(plan.extent)));
+}
+
+#[test]
 fn layer_transform_is_pending_then_one_atomic_undo_restores_all_native_roots() {
     for linked in [false, true] {
         let mut s = bake_session(linked);

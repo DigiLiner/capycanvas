@@ -591,6 +591,7 @@ commands-wait-for-transform = Dönüşümün bitmesini bekleyin veya iptal edin
 commands-wait-for-current-edit = Geçerli düzenlemeyi bekleyin
 commands-transform-pixels-drawing-changed = Çizim değişti; dönüşümü yeniden uygulayın
 commands-transform-pixels-unexpected-result = Dönüştürülen pikseller uygulanamadı
+commands-transform-too-squeezed = Pikseller bu kadar sıkıştırılamaz
 commands-transform-pixels-layer-changed = Dönüştürülen katman değişti
 
 commands-transform-single-warp = Çarpıtmak için tek bir boya veya fotoğraf katmanı seçin

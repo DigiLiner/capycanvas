@@ -1150,3 +1150,92 @@ fn native_move_drags_selected_pixels() {
         }
     }
 }
+
+#[test]
+#[ignore = "isolated compositor, hardware GPU and native mouse delivery"]
+#[allow(deprecated)]
+fn native_distort_near_collinear_corner_recovery() {
+    let app=native_test_app("art.capycanvas.DistortCornerRecovery");
+    let extent=[2048;2];
+    let mut project=new_drawing(extent[0],extent[1],&layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
+    active_paint_mut(&mut project).base=Some(layer_core::PaintBase::new(
+        layer_core::color::source::rgba8_source(extent,|x,y|[(x%251) as u8,(y%239) as u8,160,255]).into()));
+    let working=project.working.clone();
+    let mut project=layer_core::Document::from_artwork(project.artwork).unwrap();project.working=working;
+    let w=Workspace::with_project(&app,Some((project,None)));
+    w.window.maximize();w.window.present();super::new_photo::ready(&w);
+    if let Ok(theme)=std::env::var("CAPY_NATIVE_TEST_THEME") {
+        w.dispatch(UiAction::SetTheme {theme:Some(if theme=="dark" {layer_ui::Theme::Dark}else{layer_ui::Theme::Light})});
+    }
+    for panel in layer_ui::Panel::ALL.into_iter().filter(|panel|!matches!(panel,layer_ui::Panel::Toolbar|layer_ui::Panel::Commands|layer_ui::Panel::ToolSettings)) {
+        w.dispatch(UiAction::Customize {action:layer_ui::CustomizationAction::SetPanelVisible {panel,visible:false}});
+    }
+    w.dispatch(UiAction::SetZoom {zoom:1.});super::new_photo::ready(&w);
+    assert!((state(&w).camera.zoom-1.).abs()<0.001,"native input fixture must use100%zoom");
+    let mut native=remote_input();
+    for filter in [CommandId::TransformBilinear,CommandId::TransformBicubic] {
+        w.dispatch(UiAction::Invoke {command:CommandId::ScaleRotate});
+        until(|| state(&w).tool_settings.iter().any(|field|field.id=="transform_x"),"native Transform controls must be ready");
+        w.dispatch(UiAction::Invoke {command:CommandId::TransformDistort});
+        w.dispatch(UiAction::Invoke {command:filter});
+        super::new_photo::ready(&w);
+        let mut steps=vec![json!({"point":canvas_point(&w,[0.,0.])}),json!({"down":true}),json!({"wait_ms":40})];
+        for corner in [900.,1015.,1019.,1020.5,1021.5,1022.2,1022.9555] {
+            steps.extend([json!({"point":canvas_point(&w,[corner,corner])}),json!({"wait_ms":60})]);
+        }
+        steps.push(json!({"down":false}));
+        native.perform(serde_json::Value::Array(steps));
+        super::new_photo::ready(&w);
+        let geometry=ui_session(&w).engine().transform_preview().map(|preview|preview.transform.placement.clone());
+        let corners=geometry.as_ref().map(|placement|[[0.,0.],[2048.,0.],[2048.,2048.],[0.,2048.]].map(|[x,y]|placement.map(Point {x,y}).unwrap()));
+        println!("Distort near-line filter={filter:?} corners={corners:?} notice={:?}",state(&w).notice.as_ref().map(|notice|notice.text.clone()));
+        assert!(!w.status.is_visible(),"approaching the line must leave the renderer usable: {}",w.status.text());
+        assert!(corners.as_ref().is_some_and(|c|c[0].x<1022.9),"the corner stops before it squeezes the photo past one pass: {corners:?}");
+        let current=corners.expect("Distort keeps a transform preview")[0];
+        let from=canvas_point(&w,[current.x,current.y]);
+        let back=canvas_point(&w,[256.,256.]);
+        native.perform(json!([{"point":from},{"down":true},{"wait_ms":40},
+            {"point":back},{"wait_ms":60},{"down":false}]));
+        super::new_photo::ready(&w);
+        assert!(!w.status.is_visible(),"near-line Distort must leave renderer usable: {}",w.status.text());
+        let before_apply=ui_session(&w).engine().checkpoint();
+        w.dispatch(UiAction::Invoke {command:CommandId::ApplyTransform});
+        super::new_photo::ready(&w);
+        assert_ne!(ui_session(&w).engine().checkpoint(),before_apply,"backed-out Distort must Apply");
+        assert!(ui_session(&w).engine().transform_preview().is_none());
+        w.dispatch(UiAction::Layer {action:LayerAction::Tool {tool:LayerCanvasTool::Paint}});
+        w.dispatch(UiAction::SelectBrush {id:layer_core::DefaultBrushPreset::GPen as u32});
+        w.dispatch(UiAction::SetColor {rgba:[1.,0.,1.,1.]});
+        w.dispatch(UiAction::SetBrushSize {value:40.});
+        super::new_photo::ready(&w);
+        let unpainted=ui_session(&w).engine().checkpoint();
+        native_pen_path(&w,&[[900.,900.],[1000.,950.],[1100.,1000.]]);
+        super::new_photo::ready(&w);
+        let painted=ui_session(&w).engine().checkpoint();assert_ne!(painted,unpainted);
+        w.dispatch(UiAction::Invoke {command:CommandId::Undo});super::new_photo::ready(&w);
+        assert_eq!(ui_session(&w).engine().checkpoint(),unpainted);
+        w.dispatch(UiAction::Invoke {command:CommandId::Redo});super::new_photo::ready(&w);
+        assert_eq!(ui_session(&w).engine().checkpoint(),painted);
+        let before=glib::MainContext::default().block_on(read_canvas_pixels(&w,9910)).unwrap();
+        let output=std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap());
+        std::fs::create_dir_all(&output).unwrap();
+        let path=output.join("native-distort-recovery.capy");
+        let first_save=state(&w).document_file.location.is_none();
+        w.dispatch(UiAction::Invoke {command:CommandId::SaveDocument});
+        if first_save {
+            let chooser=super::new_photo::chooser();
+            chooser.set_current_folder(Some(&gtk::gio::File::for_path(&output))).unwrap();
+            chooser.set_current_name(path.file_name().unwrap().to_str().unwrap());pump(100);
+            chooser.response(gtk::ResponseType::Accept);
+        }
+        super::new_photo::finish(&w);
+        assert!(!state(&w).document_file.modified);
+        let reopened=open_native_document(std::fs::File::open(&path).unwrap());
+        let restored=Workspace::with_project(&app,Some((reopened,None)));
+        restored.window.maximize();restored.window.present();super::new_photo::ready(&restored);
+        let after=glib::MainContext::default().block_on(read_canvas_pixels(&restored,9911)).unwrap();
+        assert_eq!(before.bytes,after.bytes,"saved Distort and subsequent painted pixels must reopen exactly");
+        restored.window.close();pump(100);w.window.present();super::new_photo::ready(&w);
+    }
+    w.window.close();pump(200);
+}

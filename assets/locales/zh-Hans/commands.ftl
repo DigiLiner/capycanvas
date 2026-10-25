@@ -591,6 +591,7 @@ commands-wait-for-transform = 请等待变换完成，或取消变换
 commands-wait-for-current-edit = 请等待当前编辑完成
 commands-transform-pixels-drawing-changed = 绘画已更改，请重新应用变换
 commands-transform-pixels-unexpected-result = 无法应用变换后的像素
+commands-transform-too-squeezed = 无法将像素压缩到这种程度
 commands-transform-pixels-layer-changed = 变换结果的图层不匹配
 
 commands-transform-single-warp = 请选择一个绘画或照片图层进行网格变形

@@ -67,7 +67,7 @@ mod rulers;
 pub use rulers::{Ruler, RulerConstraint, RulerGeometry, RulerKind, choose_ruler};
 mod affine;
 pub mod offsets;
-pub use affine::{Affine, ImageTransform, Interpolation, LayerPlacement};
+pub use affine::{Affine, ImageTransform, Interpolation, LayerPlacement, TRANSFORM_SOURCE_PAGES};
 mod projective;
 pub use projective::{Projective, clip_convex};
 mod warp;
@@ -1809,7 +1809,7 @@ impl Document {
                     .map_err(DocumentError::InvalidArtwork)?;
             }
             for operation in s.operations.iter() {
-                operation.validate()?;
+                operation.validate(s.domain)?;
             }
         }
         for (_,_,object) in self.artwork.objects.iter() {object.validate().map_err(DocumentError::InvalidArtwork)?;}
@@ -1825,7 +1825,7 @@ impl Document {
                     .map_err(DocumentError::InvalidArtwork)?;
             }
             for operation in s.operations.iter() {
-                operation.validate()?;
+                operation.validate(s.domain)?;
             }
         }
         for (h, _, o) in self.artwork.occurrences.iter() {

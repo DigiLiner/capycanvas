@@ -594,6 +594,7 @@ commands-wait-for-transform = Attendi la fine della trasformazione oppure annull
 commands-wait-for-current-edit = Attendi la modifica corrente
 commands-transform-pixels-drawing-changed = Il disegno è cambiato; applica di nuovo la trasformazione
 commands-transform-pixels-unexpected-result = Impossibile applicare i pixel trasformati
+commands-transform-too-squeezed = Non è possibile comprimere i pixel così tanto
 commands-transform-pixels-layer-changed = Il livello trasformato è cambiato
 commands-transform-single-warp = Seleziona un solo livello di pittura o fotografico da deformare
 commands-transform-groups-move-only = Gruppi e più livelli si spostano di pixel interi; trasforma un solo livello di pittura per ridimensionarlo, ruotarlo o deformarlo

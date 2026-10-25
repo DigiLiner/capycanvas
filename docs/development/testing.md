@@ -149,7 +149,11 @@ pixels and Undo/Redo. This prevents optional preparation from hiding a missing
 restoration dependency. The GTK
 `native_photo_transform_reference_pivot_snap_and_nudge` journey checks temporary
 panning, accepting a rotation by selecting Pencil, and exact Undo/Redo pixels
-in both themes.
+in both themes. `native_distort_near_collinear_corner_recovery` (GTK) and Web
+`--transform-footprint` drag a Distort corner onto its neighbours' line on a dense
+2048-pixel photo with Bilinear and Bicubic, then back out, Apply, paint, Undo/Redo
+and save/reopen. The windowless `transforms_the_shared_page_check_admits_always_plan`
+property test splits every admitted random pose with the renderer's planner.
 
 Liquify's `native_liquify_pinch_stroke_on_a_pattern` GTK journey and Web
 `--liquify-journey` cover all eight modes, tool switching, exact Undo/Redo,

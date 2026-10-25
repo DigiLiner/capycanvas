@@ -54,8 +54,9 @@ impl TileSnapshot {
         &self,
         transform: &layer_core::ImageTransform,
         mesh: Option<std::sync::Arc<super::mesh::MeshGeometry>>,
+        source: PixelRect,
     ) -> Result<Splitter<impl Fn([u32; 2]) -> bool + '_>, GpuRasterError> {
-        Splitter::new(self.bounds, transform, mesh, |c| self.contains(c))
+        Splitter::reading(self.bounds, self.bounds.intersect(source), transform, mesh, |c| self.contains(c))
     }
     pub fn binding(
         &self,
@@ -162,6 +163,8 @@ impl TileSnapshot {
 pub(crate) struct Splitter<F> {
     map: SourceMap,
     bounds: PixelRect,
+    /// The moved pixels a piece can read; `bounds` also holds unmoved ones.
+    source: PixelRect,
     contains: F,
     /// Pieces start and end on multiples of this, unless at the region's edge.
     align: u32,
@@ -176,9 +179,19 @@ impl<F: Fn([u32; 2]) -> bool> Splitter<F> {
         mesh: Option<std::sync::Arc<super::mesh::MeshGeometry>>,
         contains: F,
     ) -> Result<Self, GpuRasterError> {
+        Self::reading(bounds, bounds, transform, mesh, contains)
+    }
+    pub fn reading(
+        bounds: PixelRect,
+        source: PixelRect,
+        transform: &layer_core::ImageTransform,
+        mesh: Option<std::sync::Arc<super::mesh::MeshGeometry>>,
+        contains: F,
+    ) -> Result<Self, GpuRasterError> {
         Ok(Self {
-            map: SourceMap::new(transform, bounds, mesh)?,
+            map: SourceMap::new(transform, source, mesh)?,
             bounds,
+            source,
             contains,
             align: 1,
             original: true,
@@ -209,7 +222,7 @@ impl<F: Fn([u32; 2]) -> bool> Splitter<F> {
                     (x1 + support).ceil().max(0.) as u32,
                     (y1 + support).ceil().max(0.) as u32,
                 )
-                .intersect(self.bounds);
+                .intersect(self.source);
                 if !footprint.is_empty() && required.len() <= self.map.slots {
                     for c in page_coordinates(footprint) {
                         if !required.contains(&c) && (self.contains)(c) {
@@ -224,9 +237,7 @@ impl<F: Fn([u32; 2]) -> bool> Splitter<F> {
             });
             if required.len() <= self.map.slots {
                 if jobs.len() == 65_536 {
-                    return Err(GpuRasterError::InvalidTransform(
-                        "Transform requires too many source regions",
-                    ));
+                    return Err(GpuRasterError::TransformReach);
                 }
                 required.sort_unstable();
                 jobs.push(Footprint {
@@ -262,9 +273,7 @@ impl<F: Fn([u32; 2]) -> bool> Splitter<F> {
                     middle,
                 ));
             } else {
-                return Err(GpuRasterError::InvalidTransform(
-                    "Transform exceeds stable Float32 coordinate precision",
-                ));
+                return Err(GpuRasterError::TransformReach);
             }
         }
         Ok(())
@@ -681,6 +690,86 @@ mod tests {
                 "foreshortened regions split further"
             );
         }
+    }
+
+    fn plans(extent: [u32; 2], transform: &ImageTransform) -> Result<usize, GpuRasterError> {
+        let bounds = PixelRect::full(extent);
+        let splitter = Splitter::new(bounds, transform, None, |_| true)?;
+        let mut jobs = Vec::new();
+        for y in (0..extent[1]).step_by(512) {
+            for x in (0..extent[0]).step_by(512) {
+                splitter.split(PixelRect::new(x, y, x + 512, y + 512).intersect(bounds), &mut jobs)?;
+            }
+        }
+        Ok(jobs.len())
+    }
+
+    #[test]
+    fn transforms_the_shared_page_check_admits_always_plan() {
+        use layer_core::Interpolation::*;
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut random = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f32 / (1u64 << 53) as f32
+        };
+        let [mut admitted, mut refused, mut plannable_refusals] = [0; 3];
+        for case in 0..640 {
+            let extent = [[256, 256], [1000, 700], [2048, 2048], [2048, 1536]][case % 4];
+            let interpolation = [Nearest, Linear, Bicubic, Lanczos][(case / 4) % 4];
+            let [w, h] = extent.map(|v| v as f32);
+            let source = Rect::from_extent(extent);
+            let mut quad = [[0., 0.], [w, 0.], [w, h], [0., h]].map(|[x, y]| Point { x: x + (random() - 0.5) * w * 0.6, y: y + (random() - 0.5) * h * 0.6 });
+            let corner = case % 4;
+            let [previous, next] = [quad[(corner + 3) % 4], quad[(corner + 1) % 4]];
+            let along = 0.2 + 0.6 * random();
+            let [dx, dy] = [next.x - previous.x, next.y - previous.y];
+            let length = dx.hypot(dy).max(1.);
+            if let Some(&reach) = [0.5, 4., 24., 0.1 * length].get((case / 16) % 5) {
+                let off = reach * (random() + 0.05) * if random() < 0.5 { -1. } else { 1. };
+                quad[corner] = Point { x: previous.x + dx * along - dy / length * off, y: previous.y + dy * along + dx / length * off };
+            }
+            let scaled = ImageTransform::affine(layer_core::Affine([0.5 / (1. + 2000. * random()), 0., 0., 0.5 / (1. + 2000. * random()), 0., 0.]));
+            let distorted = Projective::rect_to_quad(source, quad).filter(|map| map.covers(source))
+                .map(|map| ImageTransform { placement: LayerPlacement::from_projective(map), ..Default::default() });
+            let ordinary = (case / 16) % 5 == 4;
+            for mut transform in distorted.into_iter().chain([scaled]) {
+                transform.placement.interpolation = interpolation;
+                let planned = plans(extent, &transform);
+                let fits = transform.fits_source_pages(source, source);
+                assert!(fits || !ordinary || transform.as_affine().is_some(), "{extent:?} {quad:?} {interpolation:?}: an ordinary distortion was refused");
+                if fits {
+                    admitted += 1;
+                    planned.unwrap_or_else(|error| panic!("{extent:?} {quad:?} {interpolation:?}: admitted but {error}"));
+                } else {
+                    refused += 1;
+                    plannable_refusals += usize::from(planned.is_ok());
+                }
+            }
+        }
+        assert!(admitted > 400 && refused > 100, "{admitted} admitted, {refused} refused, {plannable_refusals} plannable");
+        assert!(plannable_refusals * 2 < refused, "{plannable_refusals} of {refused} refusals would have planned");
+    }
+
+    #[test]
+    fn near_collinear_corners_are_refused_before_planning_fails() {
+        for (extent, corner) in [([2048, 2048], [1022.9555, 1022.9555]), ([6000, 4000], [2994., 1996.])] {
+            let [w, h] = extent.map(|v| v as f32);
+            let source = Rect::from_extent(extent);
+            let map = Projective::rect_to_quad(source, [corner, [w, 0.], [w, h], [0., h]].map(|[x, y]| Point { x, y })).unwrap();
+            for interpolation in [layer_core::Interpolation::Linear, layer_core::Interpolation::Bicubic] {
+                let transform = ImageTransform { placement: LayerPlacement { interpolation, ..LayerPlacement::from_projective(map) }, ..Default::default() };
+                transform.validate_for(source).unwrap();
+                assert!(!transform.fits_source_pages(source, source), "{extent:?} {interpolation:?}");
+                assert!(matches!(plans(extent, &transform), Err(GpuRasterError::TransformReach)));
+            }
+        }
+        let small = Rect::from_extent([100, 100]);
+        let map = Projective::rect_to_quad(small, [[49.9, 49.9], [100., 0.], [100., 100.], [0., 100.]].map(|[x, y]| Point { x, y })).unwrap();
+        let transform = ImageTransform { placement: LayerPlacement::from_projective(map), ..Default::default() };
+        assert!(transform.fits_source_pages(small, small));
+        plans([100, 100], &transform).unwrap();
     }
 
     #[test]

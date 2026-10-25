@@ -596,6 +596,7 @@ commands-wait-for-transform = Дождитесь завершения транс
 commands-wait-for-current-edit = Дождитесь текущей правки
 commands-transform-pixels-drawing-changed = Рисунок изменился; примените трансформацию снова
 commands-transform-pixels-unexpected-result = Не удалось применить трансформированные пиксели
+commands-transform-too-squeezed = Нельзя сжать пиксели так сильно
 commands-transform-pixels-layer-changed = Трансформированный слой изменился
 
 commands-transform-single-warp = Выберите один рисованный слой или фотографию для деформации

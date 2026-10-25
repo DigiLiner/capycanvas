@@ -206,7 +206,7 @@ impl Document {
             .placement
             .post(Projective::from_affine(Affine::translation(Point { x: -local.x, y: -local.y })))
             .ok_or("Invalid capture origin")?;
-        Ok(TransformPixelsPlan {
+        let plan = TransformPixelsPlan {
             target,
             scope,
             scene: self.snapshot(),
@@ -218,6 +218,14 @@ impl Document {
             extent,
             paint,
             coverage,
-        })
+        };
+        for t in paint.map(SourceTarget::Paint).into_iter().chain(coverage.map(SourceTarget::Coverage)) {
+            let domain = plan.plane_domain(t);
+            let geometry = plan.plane_geometry(t);
+            if !domain.is_empty() && !geometry.fits_source_pages(geometry.read_source(None, domain, scene.target_extent(t)), Rect::from_extent(extent)) {
+                return Err(crate::affine::TOO_SQUEEZED.into());
+            }
+        }
+        Ok(plan)
     }
 }

@@ -34,6 +34,34 @@ fn layer_transform_plan_needs_a_perspective_valid_only_over_the_content_it_moves
     }
 }
 #[test]
+fn transforms_whose_pixels_read_past_one_pass_are_refused_before_they_change_the_document() {
+    let content = Rect::from_extent([2048, 2048]);
+    let corner = |at: [f32; 2]| Projective::rect_to_quad(content, [at, [2048., 0.], [2048., 2048.], [0., 2048.]].map(|[x, y]| Point { x, y })).unwrap();
+    let (collapsed, mild) = (corner([1021.5251, 1021.5251]), corner([400., 300.]));
+    let mut doc = fixture::document([2048, 2048], &["Ink"]);
+    let color = doc.composition().color;
+    fixture::paint_mut(&mut doc, "Ink").raster = raster(RasterPlane::Color, color, &[[0, 0], [7, 7]]);
+    let target = fixture::target(&doc, "Ink");
+    let refused = doc.layer_transform_plan(target, &LayerPlacement::from_projective(collapsed), Some(content), Default::default());
+    assert_eq!(refused.err().as_deref(), Some(crate::affine::TOO_SQUEEZED));
+    doc.layer_transform_plan(target, &LayerPlacement::from_projective(mild), Some(content), Default::default()).unwrap();
+    let selection = Selection::polygon(content.corners().to_vec()).unwrap();
+    for (map, fits) in [(collapsed, false), (mild, true), (Projective::from_affine(Affine([1. / 600., 0., 0., 1. / 600., 0., 0.])), false)] {
+        let mut operation = RasterOperation { placement: Affine::IDENTITY, coverage: CoverageSnapshot::reveal_all(CoverageHandle::from_index(3), [2048, 2048], [0; 2]),
+            kind: RasterOperationKind::Transform(ImageTransform { placement: LayerPlacement::from_projective(map), ..Default::default() }) };
+        operation.coverage.source.default_coverage = 0.;
+        operation.coverage.selection = Some(selection.clone());
+        assert_eq!(operation.validate([2048, 2048]).is_ok(), fits, "{map:?}");
+        let SourceTarget::Paint(handle) = target else { unreachable!() };
+        let mut paint = doc.artwork.paint.get(handle).unwrap().clone();
+        Arc::make_mut(&mut paint.operations).push(operation);
+        let mut candidate = doc.clone();
+        let edit = Edit::Paint(RecordChange::replace(&doc.artwork.paint, handle, Some(paint)).unwrap());
+        assert_eq!(candidate.apply(edit).is_ok(), fits, "{map:?}");
+        if !fits { assert_eq!(candidate.revision, doc.revision); }
+    }
+}
+#[test]
 fn layer_transform_plan_freezes_raw_planes_and_preserves_unlinked_mask_identity() {
     for linked in [false, true] {
         let doc = transformed_document(linked);

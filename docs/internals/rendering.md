@@ -876,6 +876,15 @@ retire previous query tiles. Apply evaluates the authoritative transform, and
 Cancel restores only native pixels that a preview or query changed. There is
 no separate placement-drag composite or post-release settling queue.
 
+A transform job binds at most `TRANSFORM_SOURCE_PAGES` source pages.
+`ImageTransform::fits_source_pages` bounds the pages any destination pixel reads
+from its read domain, including Float32 evaluation error. Drags, transform
+operations and whole-layer Apply plans refuse a pose beyond it, so Distort keeps
+the last pose short of collapsing a corner onto its neighbours' line. Native
+previews read moved pixels only within the selection's bounds and plan every job
+for a layer and its linked mask before changing a page. A plan that still
+exceeds the binding keeps the last drawn pose without a frame error.
+
 Move's Leave Copy retains the original under the moved selection. Selected and
 unselected captures reconstruct that original without another image allocation.
 While Move is active over a selection, `prepare_moving_pixels` names the layer

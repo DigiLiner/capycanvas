@@ -591,6 +591,7 @@ commands-wait-for-transform = 변형이 끝날 때까지 기다리거나 취소�
 commands-wait-for-current-edit = 현재 편집이 끝날 때까지 기다리세요.
 commands-transform-pixels-drawing-changed = 그림이 변경되었습니다. 변형을 다시 적용하세요.
 commands-transform-pixels-unexpected-result = 변형된 픽셀을 적용하지 못했습니다.
+commands-transform-too-squeezed = 픽셀을 이 이상 압축할 수 없습니다
 commands-transform-pixels-layer-changed = 변형 결과의 레이어가 일치하지 않습니다.
 
 commands-transform-single-warp = 뒤틀 페인트 또는 사진 레이어 하나를 선택하세요

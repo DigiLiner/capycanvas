@@ -591,6 +591,7 @@ commands-wait-for-transform = Chờ biến đổi hoàn tất hoặc hủy
 commands-wait-for-current-edit = Chờ chỉnh sửa hiện tại
 commands-transform-pixels-drawing-changed = Bản vẽ đã thay đổi; áp dụng biến đổi lại
 commands-transform-pixels-unexpected-result = Không thể áp dụng pixel đã biến đổi
+commands-transform-too-squeezed = Không thể ép các điểm ảnh nhỏ đến mức này
 commands-transform-pixels-layer-changed = Lớp được biến đổi đã thay đổi
 
 commands-transform-single-warp = Chọn một lớp vẽ hoặc ảnh để uốn cong

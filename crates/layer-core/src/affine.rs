@@ -2,6 +2,10 @@
 use crate::{DocumentError, MeshMap, Point, Projective, Rect};
 use std::sync::Arc;
 
+/// Source pages one transform job binds; a mesh keeps one for its positions.
+pub const TRANSFORM_SOURCE_PAGES: usize = 16;
+pub(crate) const TOO_SQUEEZED: &str = "The transform squeezes the pixels too far";
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Interpolation {
@@ -89,6 +93,22 @@ impl ImageTransform {
         let domain = self.source_from_owner.map_or(Some(source), |m| m.inverse()?.bounds(source))
             .ok_or(DocumentError::InvalidLayerOperation("Invalid source placement"))?;
         self.placement.validate_for(domain)
+    }
+    /// Whether one transform job can bind, beside the destination page it
+    /// keeps, every page of `source` a pixel within `destination` reads.
+    pub fn fits_source_pages(&self, source: Rect, destination: Rect) -> bool {
+        let Some(map) = self.projective() else { return true };
+        let support = self.placement.interpolation.support().max(1);
+        map.pixel_pages(source, destination, support, crate::raster::TILE_SIZE)
+            .is_some_and(|pages| pages < TRANSFORM_SOURCE_PAGES as f64)
+    }
+    /// The whole pixels a transform of `content` reads under `selection`
+    /// within `extent`.
+    pub fn read_source(&self, selection: Option<&crate::Selection>, content: Rect, extent: [u32; 2]) -> Rect {
+        let reach = (self.placement.interpolation.support().max(1) + 1) as f32;
+        let read = selection.filter(|s| !s.inverted).map_or(content, |s| s.bounds().outset(reach));
+        Rect { min: Point { x: read.min.x.floor(), y: read.min.y.floor() }, max: Point { x: read.max.x.ceil(), y: read.max.y.ceil() } }
+            .intersect(Rect::from_extent(extent))
     }
     pub fn conjugate(&self, to: Affine) -> Option<Self> {
         to.inverse()?;

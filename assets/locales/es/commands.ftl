@@ -594,6 +594,7 @@ commands-wait-for-transform = Espera a que termine la transformación o cancéla
 commands-wait-for-current-edit = Espera a que termine la edición actual
 commands-transform-pixels-drawing-changed = El dibujo cambió; aplica la transformación de nuevo
 commands-transform-pixels-unexpected-result = No se pudieron aplicar los píxeles transformados
+commands-transform-too-squeezed = Los píxeles no se pueden comprimir tanto
 commands-transform-pixels-layer-changed = La capa transformada cambió
 
 commands-transform-single-warp = Selecciona una capa de pintura o foto para deformar

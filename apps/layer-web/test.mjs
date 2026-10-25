@@ -84,6 +84,7 @@ import {checkImageObjectFixture} from "./image-object-journey.test.mjs";
 import {checkImageRows} from "./image-rows-journey.test.mjs";
 import {checkImageLayers} from "./image-layers-journey.test.mjs";
 import { checkCanvasBar } from "./canvas-bar-journey.test.mjs";
+import {checkTransformFootprint} from './transform-footprint-journey.test.mjs';
 import { checkNotices } from "./notice-journey.test.mjs";
 import { checkZoomReadout, checkWheelNavigation, checkZoomToolSettings } from "./zoom-readout-journey.test.mjs";
 import {checkPanelControls} from './panel-controls-journey.test.mjs';
@@ -143,7 +144,7 @@ const cdp = await launchChrome(
     "--window-size=1440,1000",
   ],
   {
-    timeout: process.argv.some(x=>['--capture-readiness','--hdr-bubbles','--vector-edges','--vector-files','--layer-properties-drawer','--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients','--panel-controls'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--vector-tools","--vector-milestone","--selection-tools","--color-mixing","--contact-brushes","--layer-properties-drawer","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--paper-texture-readiness","--pipeline-readiness","--tip-resize-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending","--editor","--new-drawing"].includes(x)) ? 180000 : 30000,
+    timeout: process.argv.includes('--transform-footprint')?60000:process.argv.some(x=>['--capture-readiness','--hdr-bubbles','--vector-edges','--vector-files','--layer-properties-drawer','--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients','--panel-controls'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--vector-tools","--vector-milestone","--selection-tools","--color-mixing","--contact-brushes","--layer-properties-drawer","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--paper-texture-readiness","--pipeline-readiness","--tip-resize-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending","--editor","--new-drawing"].includes(x)) ? 180000 : 30000,
     onEvent: (event) => {
       if (
         event.method === "Runtime.consoleAPICalled" &&
@@ -267,6 +268,7 @@ try {
     [process.argv.includes("--image-layers"), () => checkImageLayers({call,evaluate,settle}), checkRasterErrors],
     [process.argv.includes("--image-rows"), () => checkImageRows({call,evaluate,settle,canvasPixels}), checkErrors],
     [process.argv.includes("--canvas-bar"), () => checkCanvasBar({call,evaluate,settle}), checkErrors],
+    [process.argv.includes('--transform-footprint'), () => checkTransformFootprint({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--notices"), () => checkNotices({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--screen-status"), () => checkScreenStatus({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--paper-texture-readiness"), () => checkPaperTextureReadiness({cdp,call,evaluate,settle}), checkErrors],

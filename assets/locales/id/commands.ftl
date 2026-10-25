@@ -1160,6 +1160,7 @@ commands-wait-for-current-edit = Tunggu pengeditan saat ini
 commands-transform-pixels-drawing-changed = Gambar berubah; terapkan transformasi lagi
 
 commands-transform-pixels-unexpected-result = Tidak dapat menerapkan piksel yang ditransformasi
+commands-transform-too-squeezed = Piksel tidak bisa dimampatkan sejauh ini
 
 commands-transform-pixels-layer-changed = Lapisan yang ditransformasi berubah
 

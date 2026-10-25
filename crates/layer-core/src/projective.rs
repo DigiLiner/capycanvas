@@ -131,6 +131,52 @@ impl Projective {
             .then(|| Rect::around(rect.corners().into_iter().filter_map(|p| self.map(p))))
     }
 
+    /// The most `page`-sized pages of `source` that one destination pixel
+    /// within `destination` can read through a filter reaching `support`
+    /// pixels, including Float32 evaluation error. None when unbounded.
+    pub fn pixel_pages(self, source: Rect, destination: Rect, support: u32, page: u32) -> Option<f64> {
+        const STEPS: u32 = 16;
+        let forward = self.wide();
+        let inverse = Self::invert(forward)?;
+        let reach = f64::from(support) + 1.;
+        let edges = |r: Rect| [r.min.x, r.min.y, r.max.x, r.max.y].map(f64::from);
+        let [x0, y0, x1, y1] = edges(source);
+        let bounds = [x0 - reach, y0 - reach, x1 + reach, y1 + reach];
+        let far = edges(destination).map(f64::abs);
+        if source.is_empty() || destination.is_empty() || !bounds.iter().chain(&far).all(|v| v.is_finite()) {
+            return None;
+        }
+        let weight = |[x, y]: [f64; 2]| forward[6] * x + forward[7] * y + forward[8];
+        let at = |low: f64, high: f64, step: u32| low + (high - low) * f64::from(step) / f64::from(STEPS);
+        let mut slope = [[0f64; 2]; 2];
+        for cell in 0..STEPS * STEPS {
+            let [column, row] = [cell % STEPS, cell / STEPS];
+            let xs = [at(bounds[0], bounds[2], column), at(bounds[0], bounds[2], column + 1)];
+            let ys = [at(bounds[1], bounds[3], row), at(bounds[1], bounds[3], row + 1)];
+            let corners = [[xs[0], ys[0]], [xs[1], ys[0]], [xs[0], ys[1]], [xs[1], ys[1]]];
+            let w = corners.iter().map(|&c| weight(c)).fold(0., f64::max);
+            for (axis, rates) in slope.iter_mut().enumerate() {
+                for (along, rate) in rates.iter_mut().enumerate() {
+                    let steepest = corners.iter().map(|c| (inverse[axis * 3 + along] - c[axis] * inverse[6 + along]).abs()).fold(0., f64::max);
+                    *rate = rate.max(w * steepest);
+                }
+            }
+        }
+        let largest = [[0, 1], [2, 1], [2, 3], [0, 3]].map(|[x, y]| weight([bounds[x], bounds[y]])).into_iter().fold(0., f64::max);
+        let scale = [far[0].max(far[2]) + 1., far[1].max(far[3]) + 1., 1.];
+        let size = |row: usize| (0..3).map(|k| inverse[row + k].abs() * scale[k]).sum::<f64>();
+        let page = f64::from(page);
+        let [columns, rows] = [0, 1].map(|axis| {
+            let extent = bounds[axis].abs().max(bounds[axis + 2].abs());
+            let error = (size(axis * 3) + extent * size(6)) * f64::from(f32::EPSILON) * 4. * largest;
+            let span = slope[axis][0] + slope[axis][1] + 2. * error + 2. * f64::from(support) + 2.;
+            let within = ([x1, y1][axis] / page).ceil() - ([x0, y0][axis] / page).floor();
+            ((span / page).ceil() + 1.).min(within.max(1.))
+        });
+        let pages = columns * rows;
+        pages.is_finite().then_some(pages)
+    }
+
     pub fn magnification(self, bounds: Rect) -> f32 {
         if let Some(affine) = self.as_affine() { return affine.magnification(); }
         let [a,b,c,d,e,f,g,h,i] = self.0.map(f64::from);

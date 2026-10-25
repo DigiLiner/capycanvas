@@ -58,7 +58,7 @@ impl CoverageSource {
             if !matches!(op.kind, RasterOperationKind::Transform(_) | RasterOperationKind::Coverage | RasterOperationKind::Bake { .. } | RasterOperationKind::Erase { alpha_locked: false }) {
                 return Err(DocumentError::InvalidLayerOperation("Unsupported mask operation"));
             }
-            op.validate()?;
+            op.validate(self.domain)?;
         }
         Ok(())
     }
@@ -423,9 +423,14 @@ impl RasterOperation {
         }
         if let RasterOperationKind::Transform(transform) = &self.kind { transform.affected_bounds(bounds) } else { bounds }
     }
-    pub fn validate(&self) -> Result<(), DocumentError> {
+    pub fn validate(&self, extent: [u32; 2]) -> Result<(), DocumentError> {
         if self.placement.inverse().is_none() {
             return Err(DocumentError::InvalidLayerOperation("Invalid paint operation placement"));
+        }
+        if let RasterOperationKind::Transform(transform) = &self.kind
+            && !transform.fits_source_pages(transform.read_source(self.coverage.selection.as_ref(), Rect::from_extent(extent), extent), Rect::from_extent(extent))
+        {
+            return Err(DocumentError::InvalidLayerOperation(crate::affine::TOO_SQUEEZED));
         }
         if !self.coverage.source.operations.is_empty() && self.kind != RasterOperationKind::ApplyMask {
             return Err(DocumentError::InvalidLayerOperation("Nested coverage operations"));
@@ -1133,7 +1138,7 @@ mod organization_tests {
         assert!(p3[0] > 1. && p3[1] < 0.);
         for color in [p3, [8., -0.125, 2., 0.25], [-0.01, 1.01, 0., 0.], [1.; 4]] {
             for operation in operations(color) {
-                operation.validate().unwrap();
+                operation.validate([100; 2]).unwrap();
             }
         }
         for channel in 0..4 {
@@ -1141,13 +1146,13 @@ mod organization_tests {
                 let mut color = [0.5; 4];
                 color[channel] = value;
                 for operation in operations(color) {
-                    assert!(operation.validate().is_err(), "channel {channel}: {value}");
+                    assert!(operation.validate([100; 2]).is_err(), "channel {channel}: {value}");
                 }
             }
         }
         for alpha in [-0.001, 1.001] {
             for operation in operations([0.5, 0.5, 0.5, alpha]) {
-                assert!(operation.validate().is_err());
+                assert!(operation.validate([100; 2]).is_err());
             }
         }
     }
@@ -1266,13 +1271,13 @@ mod organization_tests {
         mask.source.operations = operations;
         assert!(mask.validate().is_ok());
         let mut snapshot = RasterOperation { placement: Affine::IDENTITY, coverage: mask.clone(), kind: RasterOperationKind::ApplyMask };
-        assert!(snapshot.validate().is_ok());
+        assert!(snapshot.validate([100; 2]).is_ok());
         for mut operation in [op.clone(), snapshot.clone()] {
             operation.placement = Affine::translation(Point { x: 12., y: -7. });
-            assert!(operation.validate().is_err());
+            assert!(operation.validate([100; 2]).is_err());
         }
         snapshot.kind = op.kind;
-        assert!(snapshot.validate().is_err());
+        assert!(snapshot.validate([100; 2]).is_err());
         mask.source.operations = Arc::default();
         mask.source.default_coverage = f32::NAN;
         assert!(mask.validate().is_err());

@@ -267,6 +267,49 @@ fn moving_bicubic_previews_draw_bilinearly_and_only_still_previews_commit_in_pla
     }
 }
 
+#[test]
+fn an_unplannable_preview_keeps_the_last_pose_without_stopping_the_canvas() {
+    let extent = [2048, 2048];
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let layer = paint_document(extent, "near-line distort");
+    let mut d = dab([0.2, 0.5, 0.9, 1.]);
+    d.center = Point { x: 1024., y: 1024. };
+    d.radii = [1500.; 2];
+    let source = Rect::from_extent(extent);
+    frame(&mut r, layer.scene(), extent, &[d], &[DabBatch { damage: source, ..batch(target(&layer)) }], false);
+    let original = r.readback_srgb_rgba8().unwrap();
+    let preview = |corner: [f32; 2]| {
+        let quad = [corner, [2048., 0.], [2048., 2048.], [0., 2048.]].map(|[x, y]| Point { x, y });
+        layer_render::TransformPreview {
+            transaction: 1,
+            moving: true,
+            target: target(&layer),
+            selection: None,
+            transform: ImageTransform { placement: LayerPlacement::from_projective(layer_core::Projective::rect_to_quad(source, quad).unwrap()), ..Default::default() },
+        }
+    };
+    let accepted = preview([400., 300.]);
+    r.set_transform_preview(Some(&accepted)).unwrap();
+    frame(&mut r, layer.scene(), extent, &[], &[], false);
+    frame(&mut r, layer.scene(), extent, &[], &[], false);
+    let shown = r.readback_srgb_rgba8().unwrap();
+    assert!(shown != original);
+    let refused = preview([1022.9555, 1022.9555]);
+    assert!(!refused.transform.fits_source_pages(source, source));
+    for _ in 0..2 {
+        r.set_transform_preview(Some(&refused)).unwrap();
+        frame(&mut r, layer.scene(), extent, &[], &[], false);
+        assert!(r.readback_srgb_rgba8().unwrap() == shown, "the last pose stays on screen");
+    }
+    assert_eq!(r.metrics().transform_reach_refusals, 1, "an unchanged refused pose is not planned again");
+    r.set_transform_preview(Some(&preview([300., 200.]))).unwrap();
+    frame(&mut r, layer.scene(), extent, &[], &[], false);
+    assert!(r.readback_srgb_rgba8().unwrap() != shown, "later poses draw again");
+    r.set_transform_preview(None).unwrap();
+    frame(&mut r, layer.scene(), extent, &[], &[], false);
+    assert!(r.readback_srgb_rgba8().unwrap() == original, "cancel restores the layer");
+}
+
 /// Previews of each map of a selection's `source` over paint and wetness,
 /// cutting the source or keeping it, match replaying it as an operation,
 /// cancelling restores the layer, and applying the last keeps its preview.

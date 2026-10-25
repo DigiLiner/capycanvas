@@ -661,8 +661,12 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             t.revision = self.engine.document().revision;
         } else {
+            let (preview, source) = (t.preview(), t.source);
+            if preview.as_ref().is_some_and(|preview| !self.preview_fits(preview, source)) {
+                return Err(self.localization().text(MessageId::COMMANDS_TRANSFORM_TOO_SQUEEZED).to_string());
+            }
             self.engine
-                .set_transform_preview(t.preview())
+                .set_transform_preview(preview)
                 .map_err(error)?;
         }
         if !moving {
@@ -671,6 +675,24 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.operation.changed = true;
         }
         Ok(())
+    }
+    /// Whether the renderer can draw `preview` and its linked companion from
+    /// the pages around `content`, in the preview target's pixels, and a
+    /// whole-layer Apply accepts it.
+    fn preview_fits(&self, preview: &TransformPreview, content: Rect) -> bool {
+        let doc = self.engine.document();
+        let page = layer_core::raster::TILE_SIZE as f32;
+        let companion = preview.companion(doc.scene());
+        std::iter::once(preview).chain(companion.as_ref()).all(|p| {
+            let extent = doc.target_extent(p.target);
+            let [from, into] = [preview.target, p.target].map(|t| doc.target_offset(t));
+            let local = content.translated(layer_core::offsets::point([from[0] - into[0], from[1] - into[1]]));
+            let pages = Rect { min: Point { x: (local.min.x / page).floor() * page, y: (local.min.y / page).floor() * page },
+                max: Point { x: (local.max.x / page).ceil() * page, y: (local.max.y / page).ceil() * page } };
+            let support = p.transform.placement.interpolation.support() as f32;
+            (p.selection.is_some() || p.transform.validate_for(local.intersect(Rect::from_extent(extent)).outset(support)).is_ok())
+                && p.transform.fits_source_pages(p.transform.read_source(p.selection.as_ref(), pages, extent), Rect::from_extent(extent))
+        })
     }
     pub(super) fn transform_controls(&self) -> Vec<tool_settings::ToolSetting> {
         let localizer = self.localization();

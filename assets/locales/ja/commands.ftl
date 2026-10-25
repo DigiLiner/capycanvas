@@ -591,6 +591,7 @@ commands-wait-for-transform = 変形が完了するまで待つか、キャン�
 commands-wait-for-current-edit = 現在の編集が完了するまで待ってください。
 commands-transform-pixels-drawing-changed = 描画が変更されました。変形をもう一度適用してください。
 commands-transform-pixels-unexpected-result = 変形後のピクセルを適用できませんでした。
+commands-transform-too-squeezed = これ以上ピクセルを縮めることはできません
 commands-transform-pixels-layer-changed = 変形結果のレイヤーが一致しません。
 
 commands-transform-single-warp = メッシュ変形するペイントまたは写真レイヤーを1つ選択してください

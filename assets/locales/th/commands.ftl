@@ -591,6 +591,7 @@ commands-wait-for-transform = รอให้การแปลงรูปเ�
 commands-wait-for-current-edit = รอการแก้ไขปัจจุบัน
 commands-transform-pixels-drawing-changed = ภาพวาดเปลี่ยนไป ใช้การแปลงรูปอีกครั้ง
 commands-transform-pixels-unexpected-result = ใช้พิกเซลที่แปลงรูปไม่ได้
+commands-transform-too-squeezed = ไม่สามารถบีบพิกเซลได้มากขนาดนี้
 commands-transform-pixels-layer-changed = เลเยอร์ที่แปลงรูปเปลี่ยนไป
 commands-transform-single-warp = เลือกเลเยอร์ระบายสีหรือภาพถ่ายหนึ่งเลเยอร์เพื่อบิดรูปตาข่าย
 commands-transform-groups-move-only = กลุ่มและหลายเลเยอร์จะย้ายทีละพิกเซลเต็ม หากต้องการปรับขนาด หมุน หรือบิดรูปตาข่าย ให้แปลงเลเยอร์ระบายสีเพียงเลเยอร์เดียว

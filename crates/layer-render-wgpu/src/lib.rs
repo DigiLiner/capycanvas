@@ -312,6 +312,9 @@ pub struct GpuRasterMetrics {
     pub source_tile_hits: u64,
     pub source_tile_misses: u64,
     pub source_tile_evictions: u64,
+    /// Transform previews kept at their last pose because a pixel would read
+    /// more source than one pass binds.
+    pub transform_reach_refusals: u64,
     pub moving_image_evictions: u64,
     pub moving_image_request_bytes: u64,
     pub material_sample_storage_bytes: u64,
@@ -393,6 +396,7 @@ pub enum GpuRasterError {
     UnsupportedBrushFeature(&'static str),
     InvalidDabRange,
     InvalidTransform(&'static str),
+    TransformReach,
     MultiplePreviewLayers,
     SizeOverflow,
     UploadLimit {required:u64,limit:u64},
@@ -442,6 +446,7 @@ impl fmt::Display for GpuRasterError {
             }
             Self::InvalidDabRange => formatter.write_str("dab batch references an invalid range"),
             Self::InvalidTransform(message) => formatter.write_str(message),
+            Self::TransformReach => formatter.write_str("A transformed pixel reads more of its source than one pass binds"),
             Self::MultiplePreviewLayers => {
                 formatter.write_str("one frame cannot preview strokes on multiple layers")
             }
@@ -1000,6 +1005,7 @@ pub struct WgpuRasterizer {
     #[cfg(target_arch="wasm32")]
     preparation_compiler: Option<startup::Compiler>,
     transform_preview: Option<layer_render::TransformPreview>,
+    refused_transform: Option<layer_render::TransformPreview>,
     transform_damage: Vec<(SourceTarget, PixelRect)>,
     /// Document regions to recompose whose layers' own pixels are unchanged.
     document_damage: Vec<PixelRect>,
@@ -1406,6 +1412,7 @@ impl WgpuRasterizer {
             #[cfg(target_arch="wasm32")]
             preparation_compiler: None,
             transform_preview: None,
+            refused_transform: None,
             transform_damage: Vec::with_capacity(2),
             document_damage: Vec::new(),
             background_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -4933,12 +4940,18 @@ impl WgpuRasterizer {
         self.preview_layer_id = new_preview_layer;
         self.preview_requires_base = new_preview_requires_base;
 
-        if let Some(preview) = self.transform_preview.clone() {
+        if let Some(preview) = self.transform_preview.clone().filter(|preview| self.refused_transform.as_ref() != Some(preview)) {
             let level = self.scale_display.as_ref().filter(|cache| cache.evaluation != scene::scale::Evaluation::Native).map(|cache| cache.plan.level).filter(|level| *level > 0);
             let mut transforms = self.transforms.take().expect("retained transform renderer");
             let result = transforms.update_preview(self, &mut encoder, &preview, packet.scene, level);
             self.transforms = Some(transforms);
-            self.transform_damage.extend(result?);
+            match result {
+                Err(GpuRasterError::TransformReach) => {
+                    self.metrics.transform_reach_refusals += 1;
+                    self.refused_transform = Some(preview);
+                }
+                result => self.transform_damage.extend(result?),
+            }
         }
         let local_contacts = !original_batches.is_empty()
             && watercolor_style_dirty.is_empty()
