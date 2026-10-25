@@ -1105,7 +1105,7 @@ fn transform_position_reference_projects_beside_x_and_floating_modes_are_joined(
     let ToolOption::Choice { segmented, beside, items, .. } = &modes.option else { panic!("mode choice required") };
     assert!(*segmented);
     assert_eq!(*beside, None);
-    assert_eq!(items.len(), 4);
+    assert_eq!(items.len(), 3);
     assert!(serde_json::to_value(&modes.option).unwrap()["Choice"].get("beside").is_none());
 }
 

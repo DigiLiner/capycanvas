@@ -60,7 +60,6 @@ toolbar-style = 樣式
 toolbar-thirds = 三分法
 toolbar-tool = 工具
 toolbar-transform-outline = 變形輪廓
-toolbar-uniform = 等比
 toolbar-variant = 變體
 toolbar-visible-color = 可見色彩
 toolbar-editing-layer = 正在編輯{ $name }

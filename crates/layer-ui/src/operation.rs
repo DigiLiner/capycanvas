@@ -1066,7 +1066,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.update_transform()?;
         Ok(true)
     }
-    pub(super) fn set_transform_mode(&mut self, mode: TransformMode, uniform: bool) -> Result<(), String> {
+    pub(super) fn set_transform_mode(&mut self, mode: TransformMode) -> Result<(), String> {
         self.require_idle()?;
         let t = self.operation.current.as_mut().ok_or("Start a transform first")?;
         if mode != TransformMode::Free && t.outline.is_some() {
@@ -1076,8 +1076,16 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Err(self.localization().text(MessageId::COMMANDS_TRANSFORM_SINGLE_WARP).to_string());
         }
         t.set_mode(mode);
-        self.operation.aspect = uniform;
         self.update_transform()
+    }
+    pub(super) fn toggle_transform_aspect(&mut self) -> Result<(), String> {
+        let t = self.operation.current.as_ref().ok_or("Start a transform first")?;
+        if t.mode != TransformMode::Free {
+            return Err(self.localization().text(MessageId::COMMANDS_CHOOSE_FREE_FIRST).to_string());
+        }
+        self.operation.aspect = !self.operation.aspect;
+        self.refresh_tools();
+        Ok(())
     }
     pub(super) fn toggle_transform_perspective(&mut self) -> Result<(), String> {
         let t = self.operation.current.as_mut().ok_or("Start a transform first")?;

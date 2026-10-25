@@ -698,7 +698,7 @@ workspace-tool-description-edit-layer-content = Lukis pada piksel lapisan aktif,
 
 workspace-tool-description-transform-free = Skalakan, putar, dan miringkan dengan pegangan kotak
 
-workspace-tool-description-transform-uniform = Skalakan, putar, dan miringkan, dengan mempertahankan proporsi
+workspace-tool-description-transform-uniform = Pertahankan proporsi saat menskalakan
 
 workspace-tool-description-transform-distort = Pindahkan setiap sudut kotak secara terpisah
 

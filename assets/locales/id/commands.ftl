@@ -275,7 +275,7 @@ command-mask-selection = Mask sesuai seleksi
 
 command-transform-free = Transformasi bebas
 
-command-transform-uniform = Transformasi seragam
+command-transform-uniform = Pertahankan proporsi
 
 command-transform-distort = Distorsi
 
@@ -560,7 +560,7 @@ commands-help-remove-selection-point = Hapus titik terbaru dari seleksi poligon 
 
 commands-help-mask-selection = Tambah atau ganti mask lapisan aktif sehingga hanya seleksi yang terlihat.
 
-commands-help-transform-free = Transformasikan dengan pegangan kotak; Seragam mempertahankan proporsi.
+commands-help-transform-free = Transformasikan dengan pegangan kotak; Pertahankan proporsi menskalakan secara merata.
 
 commands-help-transform-distort = Atur setiap sudut kotak transformasi secara terpisah, termasuk perspektif.
 
@@ -809,6 +809,7 @@ commands-select-an-unlocked-photo-or-image = Pilih lapisan foto atau gambar yang
 commands-applying-the-transform = Menerapkan transformasi
 
 commands-choose-distort-first = Pilih Distorsi terlebih dahulu
+commands-choose-free-first = Pilih Bebas terlebih dahulu
 
 commands-start-a-transform-first = Mulai transformasi terlebih dahulu
 

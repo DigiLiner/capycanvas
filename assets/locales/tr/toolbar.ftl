@@ -60,7 +60,6 @@ toolbar-style = Tarz
 toolbar-thirds = Üçler
 toolbar-tool = Araç
 toolbar-transform-outline = Seçim anahattını dönüştür
-toolbar-uniform = Orantılı
 toolbar-variant = Çeşit
 toolbar-visible-color = Görünür renk
 toolbar-editing-layer = Düzenleniyor: { $name }

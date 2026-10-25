@@ -60,7 +60,6 @@ toolbar-style = スタイル
 toolbar-thirds = 三分割
 toolbar-tool = ツール
 toolbar-transform-outline = 選択範囲の輪郭を変形
-toolbar-uniform = 縦横比を維持
 toolbar-variant = 種類
 toolbar-visible-color = 表示されている色
 toolbar-editing-layer = 「{ $name }」を編集中

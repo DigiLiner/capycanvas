@@ -150,7 +150,6 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
         CommandId::CancelSelection | CommandId::CancelPath => MessageId::TOOLBAR_CANCEL,
         CommandId::PlacementOriginalSize => MessageId::TOOLBAR_ORIGINAL_SIZE,
         CommandId::TransformFree => MessageId::TOOLBAR_FREE,
-        CommandId::TransformUniform => MessageId::TOOLBAR_UNIFORM,
         CommandId::TransformNearest => MessageId::TOOLBAR_NEAREST,
         CommandId::WarpGridThree => MessageId::TOOLBAR_3_3,
         CommandId::WarpGridFour => MessageId::TOOLBAR_4_4,
@@ -160,6 +159,7 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
         | CommandId::TransformRotateLeft
         | CommandId::TransformRotateRight
         | CommandId::TransformSnapping
+        | CommandId::TransformUniform
         | CommandId::TransformPerspective
         | CommandId::WarpSelectPoints
         | CommandId::ApplyTransform
@@ -524,9 +524,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         let offered = |id: &CommandId| self.state.tool_actions.iter().any(|a| a.command == *id);
         let modes = [
             CommandId::TransformFree,
-            CommandId::TransformUniform,
             CommandId::TransformDistort,
             CommandId::TransformWarp,
+            CommandId::TransformUniform,
             CommandId::TransformPerspective,
         ];
         let warp = self.warp_cells().map(|_| [PlanItem::Menu(CanvasBarMenu::WarpGrid), PlanItem::Command(CommandId::WarpSelectPoints)]);
@@ -717,13 +717,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             };
             let state = self.published(id);
             let group = ToolSettingAction { command: id, checkable: state.checkable }.group();
-            let choice = |group: ToolActionGroup| {
-                let item = state.choice_item(self.bar_label(id));
-                if group == ToolActionGroup::TransformMode { ToolSetItem { icon: "", ..item } } else { item }
-            };
             match (group, items.last_mut().map(|item| &mut item.option)) {
                 (Some(group), Some(ToolOption::Choice { id: current, items, .. })) if *current == group.id() => {
-                    items.push(choice(group));
+                    items.push(state.choice_item(self.bar_label(id)));
                 }
                 (Some(group), _) => items.push(CanvasBarItem {
                     option: ToolOption::Choice {
@@ -733,7 +729,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         labeled: false,
                         columns: None,
                         beside: None,
-                        items: vec![choice(group)],
+                        items: vec![state.choice_item(self.bar_label(id))],
                     },
                     label: group.localized_label(self.localization()),
                     accent: false,

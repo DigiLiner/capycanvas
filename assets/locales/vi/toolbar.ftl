@@ -60,7 +60,6 @@ toolbar-style = Kiểu
 toolbar-thirds = Một phần ba
 toolbar-tool = Công cụ
 toolbar-transform-outline = Biến đổi viền
-toolbar-uniform = Đồng tỷ lệ
 toolbar-variant = Biến thể
 toolbar-visible-color = Màu hiển thị
 toolbar-editing-layer = Đang sửa { $name }

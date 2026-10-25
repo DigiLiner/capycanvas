@@ -342,7 +342,7 @@ pub struct UiSession<R: CanvasRenderer> {
 }
 
 enum TransformChoice {
-    Mode(operation::TransformMode, bool),
+    Mode(operation::TransformMode),
     Interpolation(layer_core::Interpolation),
     Cells([u16; 2]),
 }
@@ -351,10 +351,9 @@ fn transform_choice(command: CommandId) -> Option<TransformChoice> {
     use layer_core::Interpolation::*;
     let cells = layer_core::MeshMap::PRESETS;
     Some(match command {
-        CommandId::TransformFree => TransformChoice::Mode(Free, false),
-        CommandId::TransformUniform => TransformChoice::Mode(Free, true),
-        CommandId::TransformDistort => TransformChoice::Mode(Distort, false),
-        CommandId::TransformWarp => TransformChoice::Mode(Warp, false),
+        CommandId::TransformFree => TransformChoice::Mode(Free),
+        CommandId::TransformDistort => TransformChoice::Mode(Distort),
+        CommandId::TransformWarp => TransformChoice::Mode(Warp),
         CommandId::TransformNearest => TransformChoice::Interpolation(Nearest),
         CommandId::TransformBilinear => TransformChoice::Interpolation(Linear),
         CommandId::TransformBicubic => TransformChoice::Interpolation(Bicubic),
@@ -2605,8 +2604,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             | CommandId::TransformFlipVertical
             | CommandId::TransformRotateLeft
             | CommandId::TransformRotateRight
-            | CommandId::TransformFree
-            | CommandId::TransformUniform => idle && self.operation.transforming(),
+            | CommandId::TransformFree => idle && self.operation.transforming(),
             CommandId::TransformWarp => idle && self.operation.warp_available(),
             CommandId::TransformDistort
             | CommandId::TransformNearest
@@ -2617,6 +2615,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             CommandId::TransformPerspective => {
                 idle && self.transform_mode().is_some_and(|(mode, _)| mode == operation::TransformMode::Distort)
+            }
+            CommandId::TransformUniform => {
+                idle && self.transform_mode().is_some_and(|(mode, _)| mode == operation::TransformMode::Free)
             }
             CommandId::WarpSplitVertical | CommandId::WarpSplitHorizontal | CommandId::WarpSplitCross | CommandId::WarpSelectPoints | CommandId::WarpResetGrid => idle && self.warp_command_available(id),
             CommandId::WarpGridThree | CommandId::WarpGridFour | CommandId::WarpGridFive => {
@@ -2833,10 +2834,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 && scene.occurrence(active.unwrap_or_default()).and_then(|l| l.mask.as_ref()).is_some_and(|m| m.enabled))
             || (id == CommandId::TransformSnapping && self.operation.snapping)
             || (id == CommandId::TransformPerspective && self.transform_mode().is_some_and(|(_, perspective)| perspective))
+            || (id == CommandId::TransformUniform && self.transform_mode().is_some() && self.operation.aspect)
             || transform_choice(id).is_some_and(|choice| match choice {
-                TransformChoice::Mode(mode, uniform) => self.transform_mode().is_some_and(|(current, _)| {
-                    current == mode && (mode != operation::TransformMode::Free || uniform == self.operation.aspect)
-                }),
+                TransformChoice::Mode(mode) => self.transform_mode().is_some_and(|(current, _)| current == mode),
                 TransformChoice::Interpolation(interpolation) => self.transform_interpolation() == Some(interpolation),
                 TransformChoice::Cells(cells) => self.warp_grid_selected(cells),
             })
@@ -5100,7 +5100,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 Ok((BRUSH | DOCUMENT, true))
             }
             CommandId::TransformFree
-            | CommandId::TransformUniform
             | CommandId::TransformDistort
             | CommandId::TransformWarp
             | CommandId::TransformNearest
@@ -5111,7 +5110,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             | CommandId::WarpGridFour
             | CommandId::WarpGridFive => {
                 match transform_choice(command).expect("a transform choice") {
-                    TransformChoice::Mode(mode, uniform) => self.set_transform_mode(mode, uniform)?,
+                    TransformChoice::Mode(mode) => self.set_transform_mode(mode)?,
                     TransformChoice::Interpolation(interpolation) => self.set_transform_interpolation(interpolation)?,
                     TransformChoice::Cells(cells) => self.set_warp_cells(cells)?,
                 }
@@ -5119,6 +5118,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             CommandId::TransformPerspective => {
                 self.toggle_transform_perspective()?;
+                Ok((BRUSH | COMMANDS, false))
+            }
+            CommandId::TransformUniform => {
+                self.toggle_transform_aspect()?;
                 Ok((BRUSH | COMMANDS, false))
             }
             CommandId::ColorMixOklab | CommandId::ColorMixLinear | CommandId::ColorMixClassic => {
@@ -5793,9 +5796,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         } else if self.operation.active() {
             [
                 CommandId::TransformFree,
-                CommandId::TransformUniform,
                 CommandId::TransformDistort,
                 CommandId::TransformWarp,
+                CommandId::TransformUniform,
                 CommandId::PlacementOriginalSize,
                 CommandId::TransformSnapping,
                 CommandId::TransformPerspective,
@@ -5824,7 +5827,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 (_, Some(TransformChoice::Cells(_))) => self.warp_cells().is_some(),
                 (CommandId::WarpSplitVertical | CommandId::WarpSplitHorizontal | CommandId::WarpSplitCross | CommandId::WarpSelectPoints | CommandId::WarpResetGrid, _) => self.warp_cells().is_some(),
                 (CommandId::PlacementOriginalSize, _) => false,
-                (CommandId::TransformDistort | CommandId::TransformWarp, _) => !self.operation.outline(),
+                (CommandId::TransformFree | CommandId::TransformDistort | CommandId::TransformWarp, _) => !self.operation.outline(),
+                (CommandId::TransformUniform, _) => {
+                    self.transform_mode().is_some_and(|(mode, _)| mode == operation::TransformMode::Free)
+                }
                 (CommandId::TransformPerspective, _) => {
                     self.transform_mode().is_some_and(|(mode, _)| mode == operation::TransformMode::Distort)
                 }

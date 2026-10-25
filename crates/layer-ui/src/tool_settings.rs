@@ -133,7 +133,7 @@ tool_action_groups! {
     SelectionSource: "selection-source", TOOL_ACTION_GROUP_SELECTION_SOURCE, false,
         [SelectionVisible, SelectionEditing, SelectionReference];
     TransformMode: "transform-mode", TOOL_ACTION_GROUP_TRANSFORM_MODE, true,
-        [TransformFree, TransformUniform, TransformDistort, TransformWarp];
+        [TransformFree, TransformDistort, TransformWarp];
     TransformInterpolation: "transform-interpolation", TOOL_ACTION_GROUP_TRANSFORM_INTERPOLATION, false,
         [TransformNearest, TransformBilinear, TransformBicubic, TransformLanczos];
     TransformWarpGrid: "transform-warp-grid", TOOL_ACTION_GROUP_TRANSFORM_WARP_GRID, false,

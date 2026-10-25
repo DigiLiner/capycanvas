@@ -60,7 +60,6 @@ toolbar-style = 스타일
 toolbar-thirds = 삼분할
 toolbar-tool = 도구
 toolbar-transform-outline = 선택 영역 윤곽 변형
-toolbar-uniform = 비율 유지
 toolbar-variant = 유형
 toolbar-visible-color = 보이는 색상
 toolbar-editing-layer = { $name } 편집 중

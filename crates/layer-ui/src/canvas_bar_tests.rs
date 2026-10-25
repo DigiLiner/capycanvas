@@ -127,7 +127,7 @@ fn every_command_on_a_transform_bar_is_a_tool_action() {
     let mut transform = filled_selection_session();
     invoke(&mut transform, CommandId::ScaleRotate);
     let mut placement = transformed_photo("layer transform actions");
-    for (s, mode) in [(&mut transform, CommandId::TransformDistort), (&mut placement, CommandId::TransformUniform)] {
+    for (s, mode) in [(&mut transform, CommandId::TransformDistort), (&mut placement, CommandId::TransformFree)] {
         for mode in [mode, CommandId::TransformWarp] {
             let _ = s.dispatch(UiAction::Invoke { command: mode });
             let bar = s.state.canvas_bar.clone().unwrap();
@@ -156,11 +156,11 @@ fn transform_publishes_a_bar_whose_edits_expire_with_the_transform() {
     assert_ne!(change.regions & regions::CANVAS_BAR, 0);
     let bar = s.state.canvas_bar.clone().expect("transform bar");
     assert_eq!(bar.context.kind, CanvasBarKind::Transform);
-    assert_eq!(mode_choice(&bar), [CommandId::TransformFree, CommandId::TransformUniform, CommandId::TransformDistort, CommandId::TransformWarp]);
-    assert_eq!(bar_commands(&bar.items), [CommandId::TransformFlipHorizontal, CommandId::TransformSnapping]);
+    assert_eq!(mode_choice(&bar), [CommandId::TransformFree, CommandId::TransformDistort, CommandId::TransformWarp]);
+    assert_eq!(bar_commands(&bar.items), [CommandId::TransformUniform, CommandId::TransformFlipHorizontal, CommandId::TransformSnapping]);
     assert_eq!(bar_commands(&bar.completion), [CommandId::CancelTransform, CommandId::ApplyTransform]);
-    assert!(matches!(&bar.items[0].option, ToolOption::Choice { segmented: true, items, .. } if items.iter().all(|i| i.icon.is_empty() && !i.label.is_empty())), "modes are words");
-    assert_eq!(bar.items.iter().map(|i| i.separated).collect::<Vec<_>>(), [false, true, false], "a divider follows the modes");
+    assert!(matches!(&bar.items[0].option, ToolOption::Choice { segmented: true, items, .. } if items.iter().all(|i| !i.icon.is_empty() && !i.label.is_empty())), "modes show icons and words");
+    assert_eq!(bar.items.iter().map(|i| i.separated).collect::<Vec<_>>(), [false, false, true, false], "a divider follows the modes and their lock");
     assert!(bar.completion[0].separated && bar.completion.iter().chain(&bar.items[1..]).all(|i| i.icon_only), "icons after the modes");
     let more = s.canvas_bar_menu(bar.context, bar.items.len()).unwrap();
     assert_eq!(
@@ -687,7 +687,7 @@ fn changing_transform_modes_keeps_the_accepted_transform() {
     s.frame(3, 3).unwrap();
     let preview = |s: &mut UiSession<Recorder>| s.renderer_mut().transform.clone().unwrap().transform;
     let accepted = preview(&mut s);
-    for command in [CommandId::TransformUniform, CommandId::TransformDistort, CommandId::TransformWarp, CommandId::TransformFree] {
+    for command in [CommandId::TransformDistort, CommandId::TransformWarp, CommandId::TransformFree] {
         invoke(&mut s, command);
         s.frame(4, 4).unwrap();
         assert!(s.command(command).selected);
@@ -1705,7 +1705,7 @@ fn transform_modes_collapse_into_a_dropdown_where_the_work_area_is_narrow() {
     assert!(s.layout([700., 800.]).work_area.width < canvas_bar::CANVAS_BAR_NARROW_WIDTH);
     assert!(!modes(&s), "a narrow work area shows the mode as a dropdown");
     let bar = s.state.canvas_bar.clone().unwrap();
-    assert_eq!(menu_labels(&s.canvas_bar_choice_menu(bar.context, "transform-mode").unwrap()), [["Free", "Uniform", "Distort", "Warp"]]);
+    assert_eq!(menu_labels(&s.canvas_bar_choice_menu(bar.context, "transform-mode").unwrap()), [["Free", "Distort", "Warp"]]);
     s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
     s.frame(3, 3).unwrap();
     assert!(modes(&s));
@@ -1742,4 +1742,24 @@ fn the_warp_grid_menu_names_and_changes_the_cells() {
     s.frame(3, 3).unwrap();
     assert!(s.command(CommandId::WarpGridFour).selected);
     assert_eq!(grid(&s).as_deref(), Some("4 × 4"), "the menu button follows the grid");
+}
+
+#[test]
+fn keep_proportions_is_a_lock_beside_free() {
+    let mut s = filled_selection_session();
+    invoke(&mut s, CommandId::ScaleRotate);
+    let lock = |s: &UiSession<Recorder>| (s.command(CommandId::TransformUniform).enabled, s.command(CommandId::TransformUniform).selected);
+    let on_bar = |s: &UiSession<Recorder>| bar_commands(&s.state.canvas_bar.as_ref().unwrap().items).contains(&CommandId::TransformUniform);
+    assert_eq!(lock(&s), (true, false));
+    assert!(on_bar(&s));
+    invoke(&mut s, CommandId::TransformUniform);
+    assert_eq!(lock(&s), (true, true));
+    assert!(s.command(CommandId::TransformFree).selected, "the lock keeps the Free mode");
+    invoke(&mut s, CommandId::TransformDistort);
+    assert!(!on_bar(&s), "the lock belongs to Free");
+    assert_eq!(s.command_disabled_reason(CommandId::TransformUniform).as_deref(), Some("Choose Free first"));
+    invoke(&mut s, CommandId::TransformFree);
+    assert_eq!(lock(&s), (true, true), "Free keeps the lock it had");
+    invoke(&mut s, CommandId::TransformUniform);
+    assert_eq!(lock(&s), (true, false));
 }

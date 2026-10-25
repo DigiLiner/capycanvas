@@ -11,8 +11,8 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 | Context | Shown when | Items | Placement |
 | --- | --- | --- | --- |
 | Placement | Images are placed or pasted, or whole layers and groups are being moved | For images: flips, quarter turns, Original Size and Nearest or Linear; for layers, the transform's Tool Options · Cancel, Apply | Beside the images or layers |
-| Transform | Transform is open on paint, a mask or selected pixels, or images are selected with Move | Mode (Free, Uniform, Distort, Warp), Perspective while distorting, Grid ▾ and Select Points while warping │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical, the quarter turns and Interpolation ▸. For selected images: flips, quarter turns, Original Size, Nearest or Linear, with no Cancel or Apply because each change is already one undo step | Beside the transform box or images |
-| Transform, labelled **Transform Outline** | Transform Outline is moving the selection outline | Mode (Free, Uniform) │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical and the quarter turns | Beside the outline's box |
+| Transform | Transform is open on paint, a mask or selected pixels, or images are selected with Move | Mode (Free, Distort, Warp), Keep proportions in Free, Perspective while distorting, Grid ▾ and Select Points while warping │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical, the quarter turns and Interpolation ▸. For selected images: flips, quarter turns, Original Size, Nearest or Linear, with no Cancel or Apply because each change is already one undo step | Beside the transform box or images |
+| Transform, labelled **Transform Outline** | Transform Outline is moving the selection outline | Keep proportions │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical and the quarter turns | Beside the outline's box |
 | Polygon | A polygon selection is under construction | Remove Last Point · Cancel, Finish | Bottom edge |
 | Crop | The Crop tool is active | Ratio ▾ (Free, Original, 1:1, 4:5, 2:3, 5:7, 16:9), Swap Orientation, Fit Content, Overlay ▾ (Thirds, Grid, Diagonal, Golden Ratio), Straighten, Delete Cropped Paint Pixels, Reset · Cancel, Apply | Bottom edge |
 | Guide | A guide is selected with the Ruler or Move tool and guides are shown | Delete, Snap, Guides, and Straighten for a straight guide | Beside the guide's handles |
@@ -36,7 +36,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
   - Undo and Redo that restore a selection do not bring it back.
   - A tool change ends the visibility that a selection command started.
 - **Bottom-edge placement:** inverted, tonal and painted selections use the bottom edge.
-- **Compact items:** an item with `icon_only` shows its icon alone, and a menu button its icon and arrow; names are in tooltips, accessibility labels and More. Transform modes, Warp's grid and the crop choices keep their words. An item with `separated` follows a divider: the selection bar separates what uses the selection from what changes it, the transform bar separates its modes from the rest, and the exits always follow a divider.
+- **Compact items:** an item with `icon_only` shows its icon alone, and a menu button its icon and arrow; names are in tooltips, accessibility labels and More. Transform modes keep their icons and words; Warp's grid and the crop choices show their current value. An item with `separated` follows a divider: the selection bar separates what uses the selection from what changes it, the transform bar separates its modes from the rest, and the exits always follow a divider.
 - **Accent:** Apply and Finish are drawn in the accent color.
 - **Dropdowns:** a choice that is not segmented, such as the crop ratio, opens its items from the bar. Where the work area is narrower than 600 logical pixels the transform modes become a dropdown too.
 - **Menu items:** an item can carry a menu. It opens from the bar as a dropdown, and in More it is a submenu.
@@ -81,7 +81,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 ## Transform modes
 
 - **Free:** scale, rotate and move with the box handles. Ctrl-dragging an edge skews about the opposite edge.
-- **Uniform:** Free with proportions kept.
+- **Keep proportions** (`TransformUniform`): a lock beside Free, shown only in Free, that keeps proportions on every handle drag and typed size. It stays on or off across modes and transforms; whole-layer and image placements turn it on.
 - **Distort:** each corner moves independently and each edge moves both of its corners. **Perspective**, or Shift, mirrors a corner drag onto its neighbour so opposite sides stay symmetric.
 - **Warp:** a mesh of curved patches over the content.
   - Drag a point to bend the mesh around it. Pressing a point shows its tangent handles, which shape the curves leaving it. Shift-click, or **Select Points** and tap, selects points to move together. Dragging elsewhere inside moves the whole mesh.
@@ -104,7 +104,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
   - The transform stays open, and Apply reads "Applying the transform" until the coverage returns; the result is one undo step.
   - Cancel discards the pending coverage, and any further edit to the transform supersedes it.
 - **Interpolation:** Nearest neighbor, Bilinear, Bicubic or Lanczos, in More and Tool Options.
-  - Until one is chosen, Free and Uniform resample bilinearly and Distort bicubically.
+  - Until one is chosen, Free resamples bilinearly and Distort bicubically.
   - A chosen filter stays for later pixel transforms in the session. Whole-layer transforms reopen with their saved filter.
   - Previews draw a moving Bicubic or Lanczos transform bilinearly; the still preview and Apply use the chosen filter.
 - **Touch:** a finger inside the box or on a handle manipulates the transform; elsewhere it navigates.
@@ -114,7 +114,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 **Transform Outline** (`TransformSelectionOutline`, in Refine ▾ and the Select menu) moves the selection instead of the pixels.
 - The box is the selection's exact bounds, or the canvas for an inverted selection, whose selected area is everything outside its shape.
 - It previews through the selection display, so the marching ants move while the pixels stay. Apply commits one `SetSelection` with the new placement; soft coverage is shared, not resampled.
-- A selection's placement is affine metadata, so only Free and Uniform are offered. Distort, Warp and Interpolation are left out of the bar, More and Tool Options, and are disabled with a reason in menus and search.
+- A selection's placement is affine metadata, so only Free is offered, with Keep proportions and no mode choice. Distort, Warp and Interpolation are left out of the bar, More and Tool Options, and are disabled with a reason in menus and search.
 - It is unavailable while editing Quick Mask, a Selection Layer or a mask.
 - Dragging it does no pixel work, and moving a pixel selection's outline reuses its uploaded coverage. `LAYER_PACING_TRANSFORM_MODE=outline LAYER_PACING_BRUSH=Transform` with GTK `native_frame_pacing` measures the drag.
 

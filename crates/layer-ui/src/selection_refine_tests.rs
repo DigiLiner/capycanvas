@@ -371,22 +371,18 @@ mod selection_refine_checks {
             assert!(s.renderer_mut().moving_layer.is_none());
             let bar = s.state.canvas_bar.clone().unwrap();
             assert_eq!((bar.context.kind, bar.label.as_deref()), (CanvasBarKind::Transform, Some("Transform Outline")));
-            let modes = match &bar.items[0].option {
-                ToolOption::Choice { items, .. } => items.iter().map(|i| i.action.clone()).collect::<Vec<_>>(),
-                _ => panic!("the bar starts with its modes"),
-            };
-            assert_eq!(modes, [CommandId::TransformFree, CommandId::TransformUniform].map(|command| UiAction::Invoke { command }));
+            assert!(bar.items.iter().all(|i| !matches!(i.option, ToolOption::Choice { .. })), "Free is the only mode, so no mode choice");
             let commands: Vec<_> = bar.items.iter().chain(&bar.completion).filter_map(|i| match &i.option {
                 ToolOption::Action { state, .. } => Some(state.id),
                 _ => None,
             }).collect();
-            assert_eq!(commands, [CommandId::TransformFlipHorizontal, CommandId::TransformSnapping, CommandId::CancelTransform, CommandId::ApplyTransform]);
+            assert_eq!(commands, [CommandId::TransformUniform, CommandId::TransformFlipHorizontal, CommandId::TransformSnapping, CommandId::CancelTransform, CommandId::ApplyTransform]);
             for command in [CommandId::TransformDistort, CommandId::TransformWarp] {
                 assert_eq!(s.command_disabled_reason(command).as_deref(), Some(s.localization().text(operation::OUTLINE_AFFINE).as_ref()));
             }
             assert_eq!(s.command_disabled_reason(CommandId::TransformBicubic).as_deref(), Some(s.localization().text(operation::OUTLINE_PIXELS).as_ref()));
             assert!(!s.state.tool_actions.iter().any(|a| a.command == CommandId::TransformBicubic));
-            assert!(s.set_transform_mode(operation::TransformMode::Warp, false).is_err());
+            assert!(s.set_transform_mode(operation::TransformMode::Warp).is_err());
 
             s.set_transform_control("transform_width", 2.).unwrap();
             s.frame(2, 2).unwrap();

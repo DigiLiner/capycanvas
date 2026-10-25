@@ -60,7 +60,6 @@ toolbar-style = Stile
 toolbar-thirds = Terzi
 toolbar-tool = Strumento
 toolbar-transform-outline = Trasforma contorno
-toolbar-uniform = Uniforme
 toolbar-variant = Variante
 toolbar-visible-color = Colore visibile
 toolbar-editing-layer = Modifica di { $name }

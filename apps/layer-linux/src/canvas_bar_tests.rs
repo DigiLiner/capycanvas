@@ -163,17 +163,18 @@ fn native_canvas_bar_input() {
         child.expect("mode segment")
     };
     assert!(!aspect(&w));
-    native.click(center(&w, &segment(1)));
-    until(|| aspect(&w), "a mouse click on Uniform keeps proportions");
-    let point = center(&w, &segment(0));
+    let lock = bar_widget(&w, "canvas-bar-TransformUniform");
+    native.click(center(&w, &lock));
+    until(|| aspect(&w), "a mouse click on Keep proportions locks them");
+    let point = center(&w, &lock);
     native.perform(json!([
         {"touch": "down", "point": point}, {"wait_ms": 40}, {"touch": "up"}
     ]));
-    until(|| !aspect(&w), "a finger tap on Free releases them");
+    until(|| !aspect(&w), "a finger tap releases them");
     assert!(transforming(&w));
     assert_eq!(revision(), before, "bar taps never paint or commit");
     let perspective = |w: &Workspace| find_named(w.canvas_bar.root.upcast_ref(), "canvas-bar-TransformPerspective").is_some();
-    native.click(center(&w, &segment(2)));
+    native.click(center(&w, &segment(1)));
     until(|| perspective(&w), "Distort offers Perspective");
     let corner = [anchor[2], anchor[3]];
     native.perform(json!([
@@ -396,7 +397,7 @@ fn native_canvas_bar_warps_a_selection() {
     until(|| kind(&w) == Some(layer_ui::CanvasBarKind::Transform) && shown(&w), "Transform opens the transform bar");
     let modes = bar_widget(&w, "canvas-bar-choice-transform-mode");
     let mut warp = modes.first_child();
-    for _ in 0..3 {
+    for _ in 0..2 {
         warp = warp.and_then(|c| c.next_sibling());
     }
     click(&mut native, &warp.expect("the Warp segment"));

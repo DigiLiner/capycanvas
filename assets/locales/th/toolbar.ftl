@@ -60,7 +60,6 @@ toolbar-style = รูปแบบ
 toolbar-thirds = กฎสามส่วน
 toolbar-tool = เครื่องมือ
 toolbar-transform-outline = แปลงเส้นขอบ
-toolbar-uniform = คงสัดส่วน
 toolbar-variant = รูปแบบย่อย
 toolbar-visible-color = สีที่มองเห็น
 toolbar-editing-layer = กำลังแก้ไข { $name }

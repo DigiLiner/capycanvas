@@ -227,7 +227,7 @@ fn linked_transform_waits_for_both_actual_bounds_and_warp_covers_the_registered_
         assert!(!s.content_bounds.busy());
         assert!(s.operation.active());
         assert_eq!(s.measured_target_bounds(), Some(expected));
-        s.set_transform_mode(super::operation::TransformMode::Warp, false).unwrap();
+        s.set_transform_mode(super::operation::TransformMode::Warp).unwrap();
         s.frame(102, 102).unwrap();
         assert!(s.engine.backend().transform.as_ref().unwrap().transform.placement.mesh.is_none(), "entering Warp keeps the accepted transform");
         s.set_warp_cells(layer_core::MeshMap::PRESETS[1]).unwrap();

@@ -60,7 +60,6 @@ toolbar-style = Stil
 toolbar-thirds = Drittel
 toolbar-tool = Werkzeug
 toolbar-transform-outline = Umriss transformieren
-toolbar-uniform = Einheitlich
 toolbar-variant = Variante
 toolbar-visible-color = Sichtbare Farbe
 toolbar-editing-layer = { $name } wird bearbeitet

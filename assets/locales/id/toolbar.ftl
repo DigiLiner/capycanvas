@@ -126,7 +126,6 @@ toolbar-tool = Alat
 
 toolbar-transform-outline = Transformasi Garis Seleksi
 
-toolbar-uniform = Seragam
 
 toolbar-variant = Varian
 
