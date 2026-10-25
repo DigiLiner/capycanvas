@@ -297,7 +297,7 @@ export async function checkColorPanel({call,evaluate,settle}) {
       });
     })()`);
     assert.ok(icons.some(i=>i.header)&&icons.some(i=>!i.header&&!i.tab)&&icons.some(i=>i.tab==='color'),`${name}: actual toolbar, title-bar and Color tab icons: ${JSON.stringify(icons)}`);
-    assert.equal(await evaluate(`document.querySelector('.dock-tab[data-panel="palettes"] svg')?.dataset.asset`),'palette',`${name}: Palettes tab symbol`);
+    assert.equal(await evaluate(`document.querySelector('.dock-tab[data-panel="palettes"] svg[data-asset]')?.dataset.asset`),'palette',`${name}: Palettes tab symbol`);
     const paint=pair.swatches.find(s=>s.slot===expected);
     for(const icon of icons){
       assert.equal(icon.front,expected,`${name}: selected circle drawn last`);

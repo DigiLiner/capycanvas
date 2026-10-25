@@ -561,6 +561,11 @@ Setup that some journeys need:
   four-tab contour matrix compares both lower corner regions for every active
   and inactive pairing, including reverse feet, straight ends and scrolled clips.
   It also checks the circular fallback when squircle corners are unavailable.
+- `--tab-surfaces` checks absolute colors along selected-tab faces and feet at
+  scales 1 and 2 in both themes. It covers opaque and translucent fills with equal
+  and unequal role opacity, round and squircle contours, docked and drawer tabs,
+  insertion after detached construction, fractional scroll offsets and dragged
+  previews over a contrasting backdrop.
 - `--workspace-rendering` checks Navigator GPU pixels at 1x and 2x, including
   live pen strokes, brush-up convergence and artwork undo/redo in both themes.
   It compares active tabs with their panel bodies at every transparency level.

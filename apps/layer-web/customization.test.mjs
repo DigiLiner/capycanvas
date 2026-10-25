@@ -153,7 +153,7 @@ export async function checkTabStyles({ call, evaluate, settle }) {
       for (const active of ['brushes','sizes','layers']) {
         await evaluate(`document.querySelector('.dock-tab[data-panel="${active}"]').click()`); await settle();
         await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-        const tabs = await evaluate(`[...document.querySelectorAll('[data-group="${group}"] .dock-tab')].map(n=>({panel:n.dataset.panel,icon:!!n.querySelector('svg'),name:[...n.childNodes].some(c=>c.nodeType===3?c.textContent.trim():c.tagName==='SPAN'&&!c.hidden&&c.textContent.trim()),title:n.getAttribute('aria-label'),height:n.getBoundingClientRect().height}))`);
+        const tabs = await evaluate(`[...document.querySelectorAll('[data-group="${group}"] .dock-tab')].map(n=>({panel:n.dataset.panel,icon:!!n.querySelector('svg:not(.tab-surface)'),name:[...n.childNodes].some(c=>c.nodeType===3?c.textContent.trim():c.tagName==='SPAN'&&!c.hidden&&c.textContent.trim()),title:n.getAttribute('aria-label'),height:n.getBoundingClientRect().height}))`);
         assert.equal(tabs.length, 3);
         if (style === 'automatic') { measured ??= tabs.map(t => t.name); assert.deepEqual(tabs.map(t => t.name), measured); assert.equal(measured[0], true); }
         for (const tab of tabs) {
@@ -168,7 +168,7 @@ export async function checkTabStyles({ call, evaluate, settle }) {
     }
     await send({type:'customize',action:{type:'set_tab_style',group,style:'automatic'}});
     await send({type:'move_panel',panel:'layers',target:{kind:'float',position:[850,200]}});
-    const names = async () => { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); return evaluate(`[...document.querySelectorAll('[data-group="${group}"] .dock-tab')].map(n=>({icon:!!n.querySelector('svg'),name:[...n.querySelectorAll('span')].some(s=>!s.hidden&&s.textContent.trim())}))`); };
+    const names = async () => { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); return evaluate(`[...document.querySelectorAll('[data-group="${group}"] .dock-tab')].map(n=>({icon:!!n.querySelector('svg:not(.tab-surface)'),name:[...n.querySelectorAll('span')].some(s=>!s.hidden&&s.textContent.trim())}))`); };
     assert.deepEqual(await names(), [{icon:true,name:true},{icon:true,name:true}], 'Automatic expands both names when the third tab leaves');
     const shot = await call('Page.captureScreenshot', {format:'png'});
     await writeFile(`${dir}/web-${theme}-automatic-two-tabs.png`, Buffer.from(shot.data, 'base64'));
@@ -336,7 +336,7 @@ export async function checkWorkspace({ call, evaluate, settle }) {
     assert.equal(await evaluate("[...document.querySelectorAll('.panel-configuration .toolbar-options button')].some(n=>n.textContent==='Icons only')"), false);
     await customize({ type: "close_expanded" });
     await context(grip("toolbar")); await choose("Icons only");
-    assert.equal(await evaluate(`document.querySelector('${tab("toolbar")} svg').dataset.asset`), await evaluate("layerApp.app.panel_view('toolbar').tiles[0].icon"));
+    assert.equal(await evaluate(`document.querySelector('${tab("toolbar")} svg[data-asset]').dataset.asset`), await evaluate("layerApp.app.panel_view('toolbar').tiles[0].icon"));
     await reset(); await float("toolbar");
     for (const mode of ["compact", "vertical", "horizontal"]) {
       if (mode !== "compact") await clickAt(await point(grip("toolbar")), 2);
@@ -588,7 +588,7 @@ export async function checkCustomization({ call, evaluate, settle, canvasPixels 
     assert.deepEqual(await context(tab("sizes")), ["Show tab bar", "Collapse column", "Configure Brush size panel…", "Hide Brush size panel"]);
     await shot(`panel-menu-${theme}`);
     await menuItem('Configure Brush size panel…');
-    assert.equal(await evaluate(`!!document.querySelector('${tab("sizes")} svg')`), true);
+    assert.equal(await evaluate(`!!document.querySelector('${tab("sizes")} svg[data-asset]')`), true);
     assert.equal(await expanded(), "sizes");
     assert.equal(await evaluate("document.querySelectorAll('.expanded-panel').length"), 1);
     assert.deepEqual(await evaluate(`(()=>{const root=document.querySelector('.expanded-panel');return [getComputedStyle(root).filter,...['.panel-preview','.panel-configuration'].map(s=>{const c=getComputedStyle(root.querySelector(s));return [c.boxShadow,c.filter]})];})()`),

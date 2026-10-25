@@ -156,17 +156,17 @@ struct WorkspaceTabStrip: View {
     var body: some View {
         GeometryReader { allocation in
             let origin = allocation.frame(in: .named("editor-workspace")).origin
-            let outline = shape.path(in: CGRect(origin: .zero, size: allocation.size))
             let cut = tab.flatMap { active -> Path? in
                 let clip = active.clip.offsetBy(dx: -origin.x, dy: -origin.y)
                 guard !clip.isNull, !clip.isEmpty else { return nil }
                 return WorkspaceTabShape().path(in: active.bounds.offsetBy(dx: -origin.x, dy: -origin.y))
-                    .intersection(Path(clip)).intersection(outline)
+                    .intersection(Path(clip))
             } ?? Path()
-            ZStack(alignment: .topLeading) {
-                outline.subtracting(cut).fill(strip)
-                cut.fill(panel)
-            }
+            Canvas { context, size in
+                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(strip))
+                context.blendMode = .copy
+                context.fill(cut, with: .color(panel))
+            }.clipShape(shape)
         }
     }
 }

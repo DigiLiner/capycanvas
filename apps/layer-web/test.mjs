@@ -120,6 +120,7 @@ import { checkCustomization, checkWorkspace, checkTabStyles, checkToolbarManager
 import { checkWorkspaceMotion } from "./workspace-motion.test.mjs";
 import { checkWorkspaceResize, checkWorkspaceConstraints } from "./workspace-resize.test.mjs";
 import { checkWorkspaceRendering } from "./workspace-rendering.test.mjs";
+import {checkTabSurfaceCoverage} from './tab-hover.test.mjs';
 
 const packageHost = process.argv.includes("--package") ? await servePackage() : null;
 
@@ -399,6 +400,7 @@ try {
     [process.argv.includes("--paper-library"), () => checkPaperLibrary({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--layers"), () => checkLayers({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--toolbar-manager"), () => checkToolbarManager({ call, evaluate, settle }), checkErrors],
+    [process.argv.includes('--tab-surfaces'), async()=>{for(const deviceScaleFactor of [1,2]){await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor,mobile:false});await checkTabSurfaceCoverage({call,evaluate,settle});}}, checkErrors],
     [process.argv.includes("--tab-styles"), () => checkTabStyles({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--settings-audit"), () => checkSettingsParity({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--workspace-constraints"), () => checkWorkspaceConstraints({call,evaluate,settle,reload}), checkErrors],
@@ -788,7 +790,7 @@ try {
       );
       const surfaces = await evaluate(`(() => {
       const group=document.querySelector('.dock-group:not(.toolbar)'), tab=group.querySelector('.dock-tab[aria-selected=true]');
-      return {panel:getComputedStyle(group.querySelector('.panel-frame')).backgroundColor, bar:getComputedStyle(tab,'::after').backgroundColor, active:getComputedStyle(tab).backgroundColor, radius:getComputedStyle(tab).borderBottomRightRadius, foot:getComputedStyle(tab,'::after').width};
+      return {panel:getComputedStyle(group.querySelector('.panel-frame')).backgroundColor, bar:getComputedStyle(tab.querySelector('.tab-surface-strip')).floodColor, active:getComputedStyle(tab.querySelector('.tab-surface-panel')).floodColor, radius:getComputedStyle(tab).borderBottomRightRadius, foot:tab.querySelector('.tab-surface > path').getAttribute('d')};
     })()`);
       assert.equal(
         surfaces.panel,
@@ -806,7 +808,7 @@ try {
         theme === "dark" ? "rgb(51, 51, 51)" : "rgb(250, 250, 250)",
       );
       assert.equal(surfaces.radius, "0px");
-      assert.equal(surfaces.foot, "6px");
+      assert.ok(surfaces.foot.includes("H -6"));
       const spacing = await evaluate(
         `(() => {const strip=document.querySelector('.toolbar-controls[data-axis="horizontal"]'),box=strip.getBoundingClientRect(),tiles=[...strip.querySelectorAll('.tile-button')].map(n=>n.getBoundingClientRect()),grip=strip.querySelector('.panel-grip').getBoundingClientRect(),tab=document.querySelector('.dock-tab').getBoundingClientRect();return{firstX:tiles[0].x-box.x,firstY:tiles[0].y-box.y,gaps:tiles.slice(1).map((b,i)=>b.x-tiles[i].right),gripRight:box.right-grip.right,gripCenter:grip.y+grip.height/2-box.y-box.height/2,tabHeight:tab.height,tileHeight:tiles[0].height};})()`,
       );

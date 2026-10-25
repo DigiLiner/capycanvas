@@ -11,9 +11,38 @@ const hoverFeet = [
   `path("M 6 0 L 6 6 L 0 6 ${squircleCorner([0,0],[0,6],[6,0])} Z")`,
   `path("M 0 0 L 0 6 L 6 6 ${squircleCorner([6,0],[0,6],[-6,0])} Z")`,
 ];
+const tabSizes=new WeakMap();let tabSurfaceId=0;
+function drawTabSurface(tab,size){
+  const surface=tab.querySelector(':scope > .tab-surface');if(!surface||size.width<=0||size.height<=0)return;
+  const style=getComputedStyle(tab),w=size.width,h=size.height,r=Math.min(parseFloat(style.borderTopLeftRadius),w/2,h/2),foot=6;
+  const squircle=['squircle','superellipse(2)'].includes(style.cornerTopLeftShape||style.cornerShape);
+  const corner=(center,start,end,sweep)=>squircle?squircleCorner(center,start,end):`A ${Math.abs(start[0]||start[1])} ${Math.abs(start[0]||start[1])} 0 0 ${sweep} ${center[0]+end[0]} ${center[1]+end[1]}`;
+  const face=`M ${r} 0 H ${w-r} ${corner([w-r,r],[0,-r],[r,0],1)} V ${h-foot} ${corner([w+foot,h-foot],[-foot,0],[0,foot],0)} H ${-foot} ${corner([-foot,h-foot],[0,foot],[foot,0],0)} V ${r} ${corner([r,r],[-r,0],[0,-r],1)} Z`;
+  const filter=surface.querySelector('filter'),extent=tab.parentElement.clientWidth;
+  for(const [name,value]of Object.entries({x:-extent,y:0,width:2*extent+w,height:h}))filter.setAttribute(name,value);
+  surface.setAttribute('viewBox',`0 0 ${w} ${h}`);surface.lastElementChild.setAttribute('d',face);
+}
+const tabSurfaces=new ResizeObserver(entries=>{
+  for(const entry of entries){
+    if(!entry.target.matches('.dock-tab')){for(const tab of entry.target.children){const size=tabSizes.get(tab);if(size)drawTabSurface(tab,size);}continue;}
+    const box=entry.borderBoxSize[0],size={width:box.inlineSize,height:box.blockSize};tabSizes.set(entry.target,size);drawTabSurface(entry.target,size);
+    if(entry.target.parentElement?.matches('.tab-list,.drawer-tab-strip'))tabSurfaces.observe(entry.target.parentElement);
+  }
+});
+export function releaseTabSurfaces(root){for(const node of root.querySelectorAll('.dock-tab,.tab-list,.drawer-tab-strip'))tabSurfaces.unobserve(node);}
+export function prepareTabPreview(tab){const surface=tab.querySelector(':scope > .tab-surface');if(surface){const id=`tab-surface-${++tabSurfaceId}`;surface.querySelector('filter').id=id;surface.lastElementChild.setAttribute('filter',`url(#${id})`);const box=surface.viewBox.baseVal;if(box.width>0)tabSizes.set(tab,{width:box.width,height:box.height});}}
 export function tabHover(tab, presentation) {
+  if(!tab.classList.contains('column-tab')&&!tab.querySelector(':scope > .tab-surface')){
+    const surface=document.createElementNS('http://www.w3.org/2000/svg','svg');surface.classList.add('tab-surface');surface.setAttribute('aria-hidden','true');surface.setAttribute('focusable','false');
+    surface.innerHTML='<defs><filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood class="tab-surface-strip" result="strip"/><feComposite in="strip" in2="SourceAlpha" operator="out" result="outside"/><feFlood class="tab-surface-panel" result="panel"/><feComposite in="panel" in2="SourceAlpha" operator="in" result="inside"/><feComposite in="outside" in2="inside" operator="arithmetic" k2="1" k3="1"/></filter></defs><path fill="white"/>';
+    tab.prepend(surface);prepareTabPreview(tab);
+    const size=tabSizes.get(tab);if(size)drawTabSurface(tab,size);
+  }
+  if(!tab.classList.contains('column-tab'))tabSurfaces.observe(tab);
+  if(tab.parentElement?.matches('.tab-list,.drawer-tab-strip'))tabSurfaces.observe(tab.parentElement);
   const [left,right]=presentation.hover_bottom;
   if(tab.dataset.hoverLeft===String(left)&&tab.dataset.hoverRight===String(right))return;
+  const size=tabSizes.get(tab);if(size)drawTabSurface(tab,size);
   tab.dataset.hoverLeft=left;tab.dataset.hoverRight=right;
   tab.style.setProperty('--hover-left-radius',`${Math.max(0,left)}px`);
   tab.style.setProperty('--hover-right-radius',`${Math.max(0,right)}px`);

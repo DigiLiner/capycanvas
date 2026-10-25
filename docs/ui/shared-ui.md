@@ -235,8 +235,9 @@ two surfaces. The tab strip leaves a hole under the active tab and its
 shoulders, which take the panel's fill, so the tab is the same surface as its
 panel at every [transparency](panel-transparency.md) level. An inactive tab has a
 subtle hover fill with rounded lower corners behind the active tab's shoulders.
-GTK uses one mask for the tab and shoulders and adds the complementary native
-fills at the shared contour so antialiased edges keep continuous coverage.
+Headers combine their strip and selected-tab fills in one isolated background.
+Antialiased coverage at their shared contour adds once before that background
+is composited over the canvas, preserving both opaque and translucent fills.
 Theme and transparency changes refresh cached tab fills in docks and drawers.
 Primary contact selects the tab immediately, before release or drag pickup.
 Tab labels and unused header space use the regular pointer; grips retain their

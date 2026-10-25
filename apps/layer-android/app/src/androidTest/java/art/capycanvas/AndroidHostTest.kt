@@ -881,7 +881,13 @@ class AndroidHostTest {
                     val x = (point.x - headerBounds.left).toInt()
                     val y = (point.y - headerBounds.top).toInt()
                     if (x !in 0 until baseline.width || y !in 0 until baseline.height) return
-                    assertEquals("$theme drawer=$drawer active=$active hovered=$hovered $label at $point", changed, baseline[x, y] != actual[x, y])
+                    val actualChange = baseline[x, y] != actual[x, y]
+                    val neighbors = if (changed == actualChange) "" else (maxOf(0, y - 2)..minOf(baseline.height - 1, y + 2)).joinToString(";") { row ->
+                        (maxOf(0, x - 2)..minOf(baseline.width - 1, x + 2)).joinToString(",") { column ->
+                            "%06X>%06X".format(baseline[column, row].toArgb() and 0xFFFFFF, actual[column, row].toArgb() and 0xFFFFFF)
+                        }
+                    }
+                    assertEquals("$theme drawer=$drawer active=$active hovered=$hovered $label at $point neighbors=$neighbors", changed, actualChange)
                 }
                 pixel(androidx.compose.ui.geometry.Offset(target.center.x, target.top + 5f * compose.activity.resources.displayMetrics.density), active != hovered, "face")
                 val bottom = target.bottom - 1f
@@ -2442,6 +2448,104 @@ class AndroidHostTest {
             }
         }
         assertTrue("Active tabs differ from their panels:\n${mismatches.joinToString("\n")}", mismatches.isEmpty())
+    }
+
+    @Test fun activeTabContoursCompositeTheirBackgroundOnce() {
+        fun coverage(path: android.graphics.Path, width: Int, height: Int): Bitmap {
+            val node = android.graphics.RenderNode("tab-contour").apply { setPosition(0, 0, width, height) }
+            val canvas = node.beginRecording(width, height)
+            canvas.drawPath(path, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE })
+            node.endRecording()
+            val reader = android.media.ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 1,
+                android.hardware.HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or android.hardware.HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
+            val renderer = android.graphics.HardwareRenderer().apply {
+                setOpaque(false); setSurface(reader.surface); setContentRoot(node)
+            }
+            try {
+                renderer.createRenderRequest().setWaitForPresent(true).syncAndDraw()
+                return checkNotNull(reader.acquireNextImage()).use { frame ->
+                    checkNotNull(frame.hardwareBuffer).use { buffer ->
+                        val bitmap = checkNotNull(Bitmap.wrapHardwareBuffer(buffer, android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)))
+                        try { bitmap.copy(Bitmap.Config.ARGB_8888, false) } finally { bitmap.recycle() }
+                    }
+                }
+            } finally { renderer.destroy(); reader.close(); node.discardDisplayList() }
+        }
+        val panels = listOf("brushes", "sizes", "tool_settings", "navigator")
+        val fixture = JSONObject(defaultWorkspace)
+        fixture.getJSONObject("layout").apply {
+            put("bands", JSONArray(listOf(
+                obj("id" to 40, "edge" to "left", "extent" to 252, "root" to tabs(41, *panels.toTypedArray())),
+                obj("id" to 42, "edge" to "right", "extent" to 252, "root" to tabs(43, "layers", "properties", "adjustments")))))
+            put("floating", JSONArray()); put("collapsed", JSONArray()); put("column_scroll", JSONArray()); put("fit_tab_groups", JSONArray()); put("fit_height_groups", JSONArray()); put("column_stacks", JSONArray())
+            put("next_id", maxOf(44, getInt("next_id")))
+        }
+        fixture.put("zen_mode", false)
+        val density = compose.activity.resources.displayMetrics.density
+        val directory = File(compose.activity.getExternalFilesDir(null), "validation").apply { mkdirs() }
+        val mismatches = mutableListOf<String>()
+        var covered = 0
+        for (theme in listOf("light", "dark")) for (transparency in listOf(0, 3)) for (drawer in listOf(false, true)) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "preferences", "action" to obj("type" to "edit", "id" to "transparency", "value" to transparency)))
+            action(obj("type" to "restore_workspace", "workspace" to fixture))
+            if (drawer) {
+                customize(obj("type" to "set_column_collapsed", "group" to 41, "collapsed" to true))
+                customize(obj("type" to "set_column_drawers", "column" to 41, "drawers" to true))
+                compose.onNodeWithTag("column-icon-brushes").performTouchInput { click() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("column-drawer-header-41").fetchSemanticsNodes().isNotEmpty() }
+            }
+            for (active in listOf(0, 1, 3)) {
+                action(obj("type" to "select_panel_tab", "group" to 41, "panel" to panels[active]))
+                settle()
+                val header = screenBounds(compose.onNodeWithTag(if (drawer) "column-drawer-header-41" else "group-header-41"))
+                val tab = screenBounds(compose.onNodeWithTag("${if (drawer) "drawer-" else ""}tab-${panels[active]}"))
+                val inactive = screenBounds(compose.onNodeWithTag("${if (drawer) "drawer-" else ""}tab-${panels[if (active == 0) 1 else 0]}"))
+                val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                File(directory, "tab-contour-$theme-$transparency-$drawer-$active.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                var mask: Bitmap? = null
+                try {
+                    val radius = 18f * density
+                    val foot = 6f * density
+                    val path = android.graphics.Path()
+                    fun corner(center: androidx.compose.ui.geometry.Offset, start: androidx.compose.ui.geometry.Offset, end: androidx.compose.ui.geometry.Offset) {
+                        squircleCorner(center, start, end).forEach { path.lineTo(it.x, it.y) }
+                    }
+                    fun point(x: Float, y: Float) = androidx.compose.ui.geometry.Offset(x, y)
+                    path.moveTo(tab.left + radius, tab.top)
+                    path.lineTo(tab.right - radius, tab.top)
+                    corner(point(tab.right - radius, tab.top + radius), point(0f, -radius), point(radius, 0f))
+                    path.lineTo(tab.right, tab.bottom - foot)
+                    corner(point(tab.right + foot, tab.bottom - foot), point(-foot, 0f), point(0f, foot))
+                    path.lineTo(tab.left - foot, tab.bottom)
+                    corner(point(tab.left - foot, tab.bottom - foot), point(0f, foot), point(foot, 0f))
+                    path.lineTo(tab.left, tab.top + radius)
+                    corner(point(tab.left + radius, tab.top + radius), point(-radius, 0f), point(0f, -radius))
+                    path.close()
+                    val maskImage = coverage(path, image.width, image.height)
+                    mask = maskImage
+                    val panel = image.getPixel(tab.center.x.toInt(), (tab.top + 5f * density).toInt())
+                    val strip = image.getPixel(inactive.center.x.toInt(), (inactive.top + 5f * density).toInt())
+                    var recorded = false
+                    for (y in tab.top.toInt() until tab.bottom.toInt()) for (x in maxOf(header.left.toInt() + 1, (tab.left - foot - 1).toInt())..minOf((header.right - 21 * density).toInt(), (tab.right + foot + 1).toInt())) {
+                        if (x < header.left + radius && y < header.top + radius) continue
+                        val coverage = android.graphics.Color.alpha(maskImage.getPixel(x, y))
+                        if (coverage !in 12..243) continue
+                        covered++
+                        val actual = image.getPixel(x, y)
+                        if (listOf(16, 8, 0).any { shift ->
+                            val expected = (((panel shr shift and 255) * coverage + (strip shr shift and 255) * (255 - coverage)) / 255f).toInt()
+                            kotlin.math.abs((actual shr shift and 255) - expected) > 5
+                        } && !recorded) {
+                            recorded = true
+                            mismatches += "$theme transparency=$transparency drawer=$drawer active=$active ($x,$y) coverage=$coverage actual=#%06X panel=#%06X strip=#%06X".format(actual and 0xFFFFFF, panel and 0xFFFFFF, strip and 0xFFFFFF)
+                        }
+                    }
+                } finally { mask?.recycle(); image.recycle() }
+            }
+        }
+        assertTrue("The contour includes antialiased pixels", covered > 100)
+        assertTrue("Active-tab backgrounds leave a seam:\n${mismatches.joinToString("\n")}", mismatches.isEmpty())
     }
 
     @Test fun dockedPanelHandlesCollapseTheirColumnOnFirstDoubleTap() {

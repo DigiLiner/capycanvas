@@ -241,10 +241,10 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
       const palette=layerApp.state().palette, probe=document.body.appendChild(document.createElement('i'));
       const css=color=>{probe.style.background=color;return getComputedStyle(probe).backgroundColor};
       const glass=name=>css('rgb('+palette.glass[name].slice(0,3).map(v=>v*255).join(' ')+' / '+palette.glass[name][3]+')');
-      const surfaces=[['.panel-preview:has(> .dock-tabs) > .panel-frame',glass('panel')],['.dock-tabs .tab-list > .dock-tab[aria-selected="true"]',glass('strip'),'::before'],
+      const surfaces=[['.panel-preview:has(> .dock-tabs) > .panel-frame',glass('panel')],['.dock-tabs .tab-list > .dock-tab[aria-selected="true"] .tab-surface-strip',glass('strip')],
         ['#settings',css(palette.settings)],['.preferences-sidebar',css(palette.sidebar)],['${selector}',css(palette.input)]];
       probe.remove();
-      return surfaces.every(([selector,color,pseudo])=>getComputedStyle(document.querySelector(selector),pseudo).backgroundColor===color);
+      return surfaces.every(([selector,color,pseudo])=>(()=>{const node=document.querySelector(selector),style=getComputedStyle(node,pseudo);return (node.matches('.tab-surface-strip')?style.floodColor:style.backgroundColor)===color})());
     })()`), 'all surfaces bind the core palette');
     await capture(`custom-base-${theme}`);
     const defaultColor = theme === 'dark' ? '#333333' : '#b8b8b8';

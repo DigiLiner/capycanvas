@@ -28,6 +28,24 @@ export async function checkDragCursors({ call, evaluate, settle }) {
   const press = async p => { await move(p); held = true; await call("Input.dispatchMouseEvent", { type: "mousePressed", ...p, button: "left", buttons: 1, clickCount: 1 }); };
   const release = async () => { await call("Input.dispatchMouseEvent", { type: "mouseReleased", ...last, button: "left", buttons: 0, clickCount: 1 }); held = false; await wait(); };
   try {
+    for(const theme of ['light','dark'])for(const drawer of [false,true]){
+      await send({type:'restore_workspace',workspace:fixture});await send({type:'set_theme',theme});
+      if(drawer){
+        await send({type:'customize',action:{type:'set_column_collapsed',group:41,collapsed:true}});
+        await send({type:'customize',action:{type:'set_column_drawers',column:41,drawers:true}});
+        await evaluate(`document.querySelector('.collapsed-column[data-column="41"] [data-panel="brushes"]').click()`);await wait();
+      }
+      const selector=drawer?'.drawer-tab-strip .dock-tab[data-panel="brushes"]':'.tab-list .dock-tab[data-panel="layers"]';
+      await evaluate(`window.focusedPanelTab=document.querySelector(${JSON.stringify(selector)});window.focusedPanelTab.nextElementSibling.focus()`);
+      for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8});
+      assert.deepEqual(await evaluate("({same:document.activeElement===window.focusedPanelTab,visible:window.focusedPanelTab.matches(':focus-visible'),tag:document.activeElement.tagName,panel:document.activeElement.dataset.panel})"),{same:true,visible:true,tag:'BUTTON',panel:drawer?'brushes':'layers'},`${theme} drawer=${drawer}: native keyboard focus reaches the selected tab`);
+      const start=center(await rect(selector));await press(start);await move({x:start.x+12,y:start.y});
+      assert.equal(await evaluate("!!document.querySelector('.dragged-tab-preview')"),true);
+      assert.equal(await evaluate('document.activeElement===window.focusedPanelTab'),true,`${theme} drawer=${drawer}: sliding retains focus on the real tab`);
+      await release();await clean();
+      assert.equal(await evaluate('document.activeElement===window.focusedPanelTab'),true,`${theme} drawer=${drawer}: release retains the focused tab`);
+      console.log(JSON.stringify({theme,drawer,keyboardFocusedTabRetained:true}));
+    }
     for (const end of ["release", "cancel", "capture", "blur"]) {
       await send({ type: "restore_workspace", workspace: fixture });
       const selector = '.dock-tab[data-panel="layers"]';
@@ -113,5 +131,6 @@ export async function checkDragCursors({ call, evaluate, settle }) {
   } finally {
     if (held) await release();
     await send({ type: "restore_workspace", workspace: saved });
+    await evaluate('delete window.focusedPanelTab');
   }
 }

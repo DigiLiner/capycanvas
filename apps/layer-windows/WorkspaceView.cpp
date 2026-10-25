@@ -11,6 +11,7 @@
 #include "PanelConfiguration.h"
 #include "WorkspaceExpansion.h"
 #include "WorkspaceGeometry.h"
+#include "WorkspaceTabSurface.h"
 #include "WorkspacePublication.h"
 #include "OverviewOcclusion.h"
 #include "WorkspaceShadow.h"
@@ -91,7 +92,8 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         Bindings paintIcons;
         ScrollView tabScroll{nullptr};
         ScrollView bodyScroll{nullptr};
-        Microsoft::UI::Xaml::Shapes::Path background,strip;
+        Microsoft::UI::Xaml::Shapes::Path background;
+        WorkspaceTabSurface strip;
         std::array<float,4> corners{SurfaceRadius,SurfaceRadius,SurfaceRadius,SurfaceRadius};
         Border footer{nullptr};
         std::wstring key;
@@ -200,12 +202,12 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                     auto name=label(data,str(model,L"title"),true);name.Visibility(flag(tabStyle,L"show_name")?Visibility::Visible:Visibility::Collapsed);content.Children().Append(name);
                     if(fitted)group.automatic.push_back({tab,name,std::wstring(id)+L"\n"+std::wstring(str(model,L"title"))+L"\n"+std::to_wstring(data->textSize())});
                 }
-                tab.Content(content);bool active=id==str(geometry,L"active");
+                tab.Content(content);
                 auto item=O({{L"kind",S(L"panel")},{L"panel",S(id)}});
                 gestures->Source(tab,O({{L"type",S(L"drag_workspace")},{L"item",item}}),item,false,
                     O({{L"group",N(num(geometry,L"id"))},{L"index",N(index++)},{L"panel",S(id)}}));
                 AutomationProperties::SetAutomationId(tab,L"panel-tab-"+id);
-                auto shell=panelTabShell(tab,active?Brush(data->glass(L"panel")):Brush(nullptr),data->tint(L"text",20));
+                auto shell=panelTabShell(tab,nullptr,data->tint(L"text",20));
                 {
                     auto cut=[weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))]{if(auto self=weak.lock())self->cutStrip(id);};
                     shell.SizeChanged([cut](auto&&,auto&&){cut();});
@@ -249,7 +251,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             label.Children().GetAt(0).Visibility(fitted||flag(presentation,L"show_icon")?Visibility::Visible:Visibility::Collapsed);
             if(!fitted)label.Children().GetAt(1).Visibility(flag(presentation,L"show_name")?Visibility::Visible:Visibility::Collapsed);
             bool selected=hstring(id)==str(geometry,L"active");
-            selectPanelTabShell(shell,selected,selected?Brush(data->glass(L"panel")):Brush(nullptr),presentation);
+            selectPanelTabShell(shell,selected,nullptr,presentation);
             if(selected)group.activeTab=shell;
         }
         if(group.tabScroll&&group.tabScroll.ActualWidth()>0)fitAutomaticTabs(data,group.automatic,group.tabScroll.ActualWidth(),tabWidths);
@@ -387,7 +389,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 group.frame.Child(group.content);group.frame.Background(clear());group.frame.CornerRadius({SurfaceRadius*CornerFit,SurfaceRadius*CornerFit,SurfaceRadius*CornerFit,SurfaceRadius*CornerFit});
                 group.frame.RenderTransform(group.translation);group.shadow.Root().RenderTransform(TranslateTransform());
                 group.background.IsHitTestVisible(false);group.background.Fill(data->brush(L"panel"));
-                group.strip.IsHitTestVisible(false);group.content.Children().Append(group.background);group.content.Children().Append(group.strip);group.content.Children().Append(group.border);
+                group.content.Children().Append(group.background);group.content.Children().Append(group.strip.Root());group.content.Children().Append(group.border);
                 group.configurationFrame.Background(clear());group.content.Children().Append(group.configurationFrame);
                 root.Children().Append(group.shadow.Root());root.Children().Append(group.frame);
                 AutomationProperties::SetAutomationId(group.frame,L"workspace-group-"+to_hstring(id));
@@ -766,12 +768,12 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             GeometryGroup shape;shape.FillRule(FillRule::EvenOdd);
             float width=float(num(bounds,L"width")),height=float(num(bounds,L"height"));
             auto outline=expanded?expansionShape(group.presented):tabbed?squircleRectangle(width,std::max(0.f,height-36),{0,0,corners[2],corners[3]}):squircleRectangle(width,height,corners);
-            cutStrip(group);group.strip.Fill(data->glass(L"strip"));
+            cutStrip(group);
             if(tabbed&&!expanded){TranslateTransform body;body.Y(36);outline.Transform(body);}
             group.background.Fill(expanded?data->brush(L"panel"):data->glass(source.Size()?L"source":L"panel"));
             if(group.header)group.header.Background(expanded?data->brush(L"tabbar"):clear());
             if(group.activeTab)for(auto layer:group.activeTab.Children())if(auto canvas=layer.try_as<Canvas>())for(auto item:canvas.Children())if(auto path=item.try_as<Microsoft::UI::Xaml::Shapes::Path>())
-                path.Fill(expanded?data->brush(L"panel"):data->glass(L"panel"));
+                path.Fill(expanded?Brush(data->brush(L"panel")):Brush(nullptr));
             auto shadowKey=O({{L"expansion",group.presented},{L"radius",N(radius)},{L"width",bounds.GetNamedValue(L"width")},{L"height",bounds.GetNamedValue(L"height")}}).Stringify();
             if(shadowKey!=group.shadowKey){
                 group.shadowKey=shadowKey;
@@ -796,18 +798,18 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     }
     void cutStrip(uint32_t id){if(auto found=groups.find(id);found!=groups.end())cutStrip(found->second);}
     void cutStrip(Group& group){
-        GeometryGroup shape;shape.FillRule(FillRule::EvenOdd);float width=placement(group).Width;
+        std::vector<Point> band,active;float width=placement(group).Width;
         if(flag(group.geometry,L"tabs_visible")&&!group.presented.Size()&&width>0){
-            shape.Children().Append(squircleRectangle(width,36,{SurfaceRadius,SurfaceRadius,0,0}));
+            band=squircleOutline(width,36,{SurfaceRadius,SurfaceRadius,0,0});
             if(auto tab=group.activeTab;tab&&tab.Opacity()>0&&tab.ActualWidth()>0){
                 auto view=group.tabScroll.TransformToVisual(group.content).TransformPoint({0,0});
                 float x=view.X+group.tabLabels.ActualOffset().x+tab.ActualOffset().x-float(group.tabScroll.HorizontalOffset())-6;
                 auto outline=panelTabOutline(float(tab.ActualWidth()),float(tab.ActualHeight()));
                 for(auto& point:outline){point.X+=x;point.Y+=view.Y;}
-                shape.Children().Append(polygon(clipColumns(outline,view.X,view.X+float(group.tabScroll.ActualWidth()))));
+                active=clipColumns(outline,view.X,view.X+float(group.tabScroll.ActualWidth()));
             }
         }
-        group.strip.Data(shape);
+        group.strip.Present(width,std::move(band),std::move(active),data->glass(L"strip").Color(),data->glass(L"panel").Color());
     }
     void resizeHandle(std::wstring const& key,J const& bounds,J const& action,int z,bool resetColumn=false){
         auto [it,added]=handles.try_emplace(key);

@@ -606,7 +606,7 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                     val names = automaticTabNames(host, group.getInt("id"), group.array("panels").values().map { panels[it.toString()] }, strip)
                     val cutout = remember { TabStrip() }
                     Row(Modifier.weight(1f).onGloballyPositioned { if(!visible) return@onGloballyPositioned;dock.tabClips[group.getInt("id")] = it.boundsInRoot().translate(-dock.origin); strip = it.size.width / dock.density }
-                        .tabStrip(cutout, colors.strip).horizontalScroll(rememberScrollState()).clickable(enabled = panel.optBoolean("expanded")) { host.customize(obj("type" to "close_expanded")) }) {
+                        .tabStrip(cutout, colors.strip, colors.panelFill).horizontalScroll(rememberScrollState()).clickable(enabled = panel.optBoolean("expanded")) { host.customize(obj("type" to "close_expanded")) }) {
                         group.array("panels").values().forEachIndexed { index, id ->
                             val p = panels[id.toString()] ?: return@forEachIndexed
                             val tab = Modifier.testTag("tab-$id").dragSource(dock, obj("kind" to "panel", "panel" to id), cursor = AndroidPointerIcon.TYPE_ARROW)

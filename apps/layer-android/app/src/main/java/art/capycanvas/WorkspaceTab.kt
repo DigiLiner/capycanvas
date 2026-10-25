@@ -13,10 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -77,37 +77,40 @@ internal class TabStrip {
     fun moved() { area?.invalidateDraw() }
 }
 
-internal fun Modifier.tabStrip(strip: TabStrip, color: Color) = graphicsLayer().then(StripElement(strip, color))
+internal fun Modifier.tabStrip(strip: TabStrip, color: Color, panel: Color) = this then StripElement(strip, color, panel)
 
-private data class StripElement(val strip: TabStrip, val color: Color) : ModifierNodeElement<StripNode>() {
-    override fun create() = StripNode(strip, color)
-    override fun update(node: StripNode) = node.update(strip, color)
+private data class StripElement(val strip: TabStrip, val color: Color, val panel: Color) : ModifierNodeElement<StripNode>() {
+    override fun create() = StripNode(strip, color, panel)
+    override fun update(node: StripNode) = node.update(strip, color, panel)
     override fun InspectorInfo.inspectableProperties() { name = "tabStrip" }
 }
 
-internal class StripNode(private var strip: TabStrip, private var color: Color) : Modifier.Node(), DrawModifierNode {
-    private val face = Path(); private val hole = Path(); private val band = Path(); private val cover = Path()
-    private var faceSize = IntSize.Zero; private var bandSize = Size.Zero
+internal class StripNode(private var strip: TabStrip, private var color: Color, private var panel: Color) : Modifier.Node(), DrawModifierNode {
+    private val face = Path(); private val hole = Path()
+    private val paint = Paint()
+    private var faceSize = IntSize.Zero
     override fun onAttach() { strip.area = this }
     override fun onDetach() { if (strip.area === this) strip.area = null }
-    fun update(strip: TabStrip, color: Color) {
+    fun update(strip: TabStrip, color: Color, panel: Color) {
         if (strip !== this.strip) { onDetach(); this.strip = strip; onAttach() }
         this.color = color
+        this.panel = panel
         invalidateDraw()
     }
     override fun ContentDrawScope.draw() {
+        drawContext.canvas.saveLayer(Rect(Offset.Zero, size), paint)
+        drawRect(color)
         val tab = strip.tab
-        if (tab == null) drawRect(color) else {
+        if (tab != null) {
             val placed = tab.requireLayoutCoordinates()
             if (placed.size != faceSize) {
                 faceSize = placed.size
                 face.reset(); face.tabFace(faceSize.width.toFloat(), faceSize.height.toFloat(), SurfaceRadius.toPx(), -TabFoot.toPx(), -TabFoot.toPx())
             }
-            if (size != bandSize) { bandSize = size; band.reset(); band.addRect(Rect(Offset.Zero, size)) }
             hole.reset(); hole.addPath(face, requireLayoutCoordinates().localPositionOf(placed, Offset.Zero) + Offset(tab.slide(), 0f))
-            cover.op(band, hole, PathOperation.Difference)
-            drawPath(cover, color)
+            drawPath(hole, panel, blendMode = BlendMode.Src)
         }
+        drawContext.canvas.restore()
         drawContent()
     }
 }
@@ -153,14 +156,12 @@ internal class HoleNode(private var strip: TabStrip, var slide: () -> Float) : M
         .then(if (selected) Modifier.tabHole(strip, slide) else Modifier)
         .graphicsLayer { translationX = slide() }
         .drawWithCache {
-            val face = if (selected) Path().apply { tabFace(size.width, size.height, SurfaceRadius.toPx(), -TabFoot.toPx(), -TabFoot.toPx()) } else null
             val hover = if (!selected && hovered) Path().apply {
                 val bottom = presentation.getJSONArray("hover_bottom")
                 tabFace(size.width, size.height, SurfaceRadius.toPx(), bottom.getInt(0).dp.toPx(), bottom.getInt(1).dp.toPx())
             } else null
             onDrawBehind {
                 if (dragged && !selected) drawRect(colors.tabs)
-                face?.let { drawPath(it, colors.panelFill) }
                 hover?.let { drawPath(it, colors.text.copy(alpha = .08f)) }
             }
         }

@@ -1,7 +1,74 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 
+export async function checkTabSurfaceCoverage({call,evaluate,settle}) {
+  await evaluate(`(async()=>{
+    const {tabHover,prepareTabPreview}=await import('./workspace-chrome.js');
+    const root=document.createElement('div');root.id='tab-surface-fixture';
+    Object.assign(root.style,{position:'fixed',left:'0',top:'0',width:'920px',height:'680px',zIndex:'2147483647',background:'rgb(255,0,255)',pointerEvents:'none'});
+    for(const theme of ['light','dark'])for(const alpha of [1,.65])for(const drawer of [false,true])for(const fractional of [false,true])for(const dragged of [false,true]){
+      const index=root.children.length,value=theme==='light'?237:65,color='rgba('+[value,value,value,alpha].join(',')+')',group=document.createElement('div');
+      group.className=drawer?'content-drawer':'dock-group';group.dataset.sample=JSON.stringify({theme,alpha,drawer,fractional,dragged,value});
+      Object.assign(group.style,{left:(24+index%4*220+(fractional?.25:0))+'px',top:(24+Math.floor(index/4)*80+(fractional?.25:0))+'px',width:'192px',height:'60px',borderRadius:'0',boxShadow:'none'});
+      for(const [name,value]of [['--glass-panel',color],['--glass-strip',color],['--tab-bar-height','36px']])group.style.setProperty(name,value);
+      group.innerHTML='<div class="panel-preview" style="border-radius:0"><nav class="dock-tabs"><div class="tab-list">'+Array.from({length:6},(_,i)=>'<button class="dock-tab icon-only-tab" aria-selected="'+(i===1)+'"></button>').join('')+'</div><button class="panel-grip"></button></nav><div class="panel-frame"></div></div>';
+      if(drawer){group.innerHTML=group.innerHTML.replace('class="dock-tabs"','class="drawer-tabs" style="inset:0 0 auto;height:36px"').replace('class="tab-list"','class="drawer-tab-strip"');group.firstChild.style.background='transparent';}
+      root.append(group);
+    }
+    for(const tab of root.querySelectorAll('.dock-tab')){const parent=tab.parentElement,next=tab.nextSibling;tab.remove();tabHover(tab,{hover_bottom:[0,0]});parent.insertBefore(tab,next);}
+    document.body.append(root);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    for(const group of root.children){
+      const sample=JSON.parse(group.dataset.sample),strip=group.querySelector('.tab-list,.drawer-tab-strip');if(sample.fractional)strip.scrollLeft=17.25;
+      if(sample.dragged){
+        const source=strip.querySelector('[aria-selected=true]'),preview=source.cloneNode(true),overlay=document.createElement('div'),rect=source.getBoundingClientRect(),origin=group.getBoundingClientRect();
+        prepareTabPreview(preview);source.classList.add('dragged-tab-source');overlay.className='tab-slide-overlay';preview.classList.add('dragged-tab-preview');if(!sample.drawer)preview.classList.add('docked-tab-preview');
+        Object.assign(overlay.style,{position:'absolute',left:'0',top:'0',width:strip.clientWidth+'px',height:'36px'});
+        Object.assign(preview.style,{left:(rect.x-origin.x+12.25)+'px',top:'0',width:rect.width+'px',height:'36px'});overlay.append(preview);group.append(overlay);
+      }
+    }
+  })()`);
+  try {
+    for(const round of [false,true]){
+      if(round)await evaluate("(async()=>{const {tabHover}=await import('./workspace-chrome.js');document.querySelectorAll('#tab-surface-fixture .dock-tab').forEach(tab=>{tab.style.cornerShape='round';tab.style.setProperty('--surface-radius','9.72px');tabHover(tab,{hover_bottom:[1,1]})});})()");
+      for(const unequal of [false,true]){
+        await evaluate(`document.querySelectorAll('#tab-surface-fixture>[data-sample]').forEach(group=>{const sample=JSON.parse(group.dataset.sample);group.style.setProperty('--glass-strip','rgba('+[sample.value,sample.value,sample.value,${unequal}&&sample.alpha<1?.35:sample.alpha].join(',')+')')})`);
+        await settle();
+        const shot=(await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width:920,height:680,scale:1}})).data;
+        const result=await evaluate(`(async()=>{
+          const image=new Image();image.src='data:image/png;base64,${shot}';await image.decode();
+          const canvas=new OffscreenCanvas(image.width,image.height),context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
+          const pixels=context.getImageData(0,0,image.width,image.height).data,scale=image.width/920,errors=[];let compared=0;
+          for(const group of document.querySelectorAll('#tab-surface-fixture>[data-sample]')){
+            const sample=JSON.parse(group.dataset.sample),rect=group.getBoundingClientRect(),selected=(group.querySelector('.tab-slide-overlay>.dock-tab')||group.querySelector('.dock-tab[aria-selected=true]')).getBoundingClientRect(),radius=${round?9.72:18},power=${round?2:4};
+            const inside=(x,y)=>{
+              if(y<selected.y||y>=selected.bottom)return false;
+              if(x>=selected.x&&x<selected.right){if(y>=selected.y+radius)return true;const dx=x<selected.x+radius?selected.x+radius-x:x>selected.right-radius?x-selected.right+radius:0;return (dx/radius)**power+((selected.y+radius-y)/radius)**power<=1;}
+              if(y<selected.bottom-6||x<selected.x-6||x>selected.right+6)return false;
+              const dx=x<selected.x?x-selected.x+6:selected.right+6-x;return (dx/6)**power+((y-selected.bottom+6)/6)**power>=1;
+            };
+            for(let y=Math.ceil((rect.y+1)*scale);y<Math.floor((rect.y+35)*scale);y++)for(let x=Math.ceil((rect.x+9)*scale);x<Math.floor((rect.right-22)*scale);x++){
+              const offset=(y*image.width+x)*4,actual=Array.from(pixels.slice(offset,offset+3));compared++;
+              let coverage=1,boundary=false;
+              if(${unequal}&&sample.alpha<1&&!sample.drawer){
+                const corners=[-1,.5,2].flatMap(dx=>[-1,.5,2].map(dy=>[dx,dy])).map(([dx,dy])=>inside((x+dx)/scale,(y+dy)/scale));coverage=corners[0]?1:0;boundary=corners.some(value=>value!==corners[0]);
+              }
+              const alpha=${unequal}&&sample.alpha<1&&!sample.drawer ? .35+coverage*(sample.alpha-.35):sample.alpha,expected=[255,0,255].map(background=>Math.round(sample.value*alpha+background*(1-alpha)));
+              const endpoints=[.35,sample.alpha].map(alpha=>[255,0,255].map(background=>Math.round(sample.value*alpha+background*(1-alpha))));
+              if(actual.some((value,k)=>boundary?value<Math.min(endpoints[0][k],endpoints[1][k])-2||value>Math.max(endpoints[0][k],endpoints[1][k])+2:Math.abs(value-expected[k])>2)&&errors.length<12)errors.push({...sample,x:x/scale,y:y/scale,expected,actual});
+            }
+          }
+          return{compared,errors,scale};
+        })()`);
+        assert.deepEqual(result.errors,[],`selected tab contours preserve complete surface coverage: ${JSON.stringify(result)}`);
+        console.log(JSON.stringify({tabSurfaceCoverage:true,themes:['light','dark'],alpha:[1,.65],drawers:true,fractionalScroll:true,dragPreviews:true,round,unequal,...result}));
+      }
+    }
+  } finally { await evaluate("(async()=>{const root=document.querySelector('#tab-surface-fixture');if(root){(await import('./workspace-chrome.js')).releaseTabSurfaces(root);root.remove()}})()"); }
+}
+
 export async function checkTabHoverContours({call,evaluate,settle}) {
+  await checkTabSurfaceCoverage({call,evaluate,settle});
   const dir='artifacts/panel-tab-hover/web';await mkdir(dir,{recursive:true});
   const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();await evaluate('new Promise(r=>setTimeout(r,260))');};
   const move=async point=>{await call('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await settle();};

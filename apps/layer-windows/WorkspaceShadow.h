@@ -6,6 +6,7 @@
 #include <vector>
 
 namespace CapyUi {
+Microsoft::UI::Composition::CompositionPath CompositionPathFromContours(std::vector<std::vector<winrt::Windows::Foundation::Point>> const& contours);
 void ClipOutside(UIElement const&,float width,float height,std::array<float,4> radii,bool squircle);
 void ClipSurface(UIElement const&,float width,float height,std::array<float,4> radii,bool squircle);
 // A retained compositor shadow beside the clipped panel. The padded root allows

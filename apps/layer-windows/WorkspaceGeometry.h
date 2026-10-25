@@ -131,16 +131,15 @@ inline void squircleCorner(PointCollection const& points,Point center,Point star
         points.Append({float(center.X+start.X*along+end.X*across),float(center.Y+start.Y*along+end.Y*across)});
     }
 }
-inline PathGeometry squircleRectangle(float width,float height,std::array<float,4> radii){
+inline std::vector<Point> squircleOutline(float width,float height,std::array<float,4> radii){
     for(auto& radius:radii)radius=std::min(radius,std::max(0.f,std::min(width,height)*.5f));
     auto [tl,tr,br,bl]=radii;
-    PathFigure figure;figure.StartPoint({tl,0});figure.IsClosed(true);figure.IsFilled(true);
-    PolyLineSegment outline;auto points=outline.Points();
+    PointCollection points;
     squircleCorner(points,{width-tr,tr},{0,-tr},{tr,0});
     squircleCorner(points,{width-br,height-br},{br,0},{0,br});
     squircleCorner(points,{bl,height-bl},{0,bl},{-bl,0});
     squircleCorner(points,{tl,tl},{-tl,0},{0,-tl});
-    figure.Segments().Append(outline);PathGeometry geometry;geometry.Figures().Append(figure);return geometry;
+    std::vector<Point> outline(points.Size());points.GetMany(0,outline);return outline;
 }
 inline PathGeometry polygon(std::vector<Point> const& points){
     PathGeometry geometry;if(points.empty())return geometry;
@@ -148,6 +147,7 @@ inline PathGeometry polygon(std::vector<Point> const& points){
     PolyLineSegment outline;auto line=outline.Points();for(auto point=points.begin()+1;point!=points.end();++point)line.Append(*point);
     figure.Segments().Append(outline);geometry.Figures().Append(figure);return geometry;
 }
+inline PathGeometry squircleRectangle(float width,float height,std::array<float,4> radii){return polygon(squircleOutline(width,height,radii));}
 inline std::vector<Point> clipColumns(std::vector<Point> points,float left,float right){
     for(auto [edge,side]:{std::pair{left,1.f},std::pair{right,-1.f}}){
         std::vector<Point> kept;

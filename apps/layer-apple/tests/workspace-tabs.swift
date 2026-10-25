@@ -9,11 +9,80 @@ import SwiftUI
     @MainActor static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        for theme in ["light", "dark"] {
+            for (stripAlpha, panelAlpha) in [(1.0, 1.0), (0.55, 0.55), (0.3, 0.55)] {
+                for offset in [0.0, 0.25, 0.5, 0.75] {
+                    try await contour(theme: theme, stripAlpha: stripAlpha, panelAlpha: panelAlpha, offset: offset)
+                }
+            }
+        }
         for platform: UInt32 in [0, 1] {
             for theme in ["light", "dark"] {
                 for collapsed in [false, true] { try await check(platform, collapsed: collapsed, theme: theme) }
             }
         }
+    }
+    @MainActor private static func contour(theme: String, stripAlpha: Double, panelAlpha: Double, offset: Double) async throws {
+        let stripShade = theme == "light" ? 0.64 : 0.15, panelShade = theme == "light" ? 0.82 : 0.31
+        let strip = Color(.sRGB, red: stripShade, green: stripShade, blue: stripShade, opacity: stripAlpha)
+        let panel = Color(.sRGB, red: panelShade, green: panelShade, blue: panelShade, opacity: panelAlpha)
+        let bounds = CGRect(x: 54 + offset, y: 0, width: 80.5, height: 36)
+        let tab = WorkspaceTabFrame(bounds: bounds, clip: CGRect(x: 0, y: 0, width: 200, height: 36))
+        let host = NSHostingView(rootView: VStack(spacing: 0) {
+            WorkspaceTabStrip(shape: .surface, tab: tab, strip: strip, panel: panel).frame(width: 200, height: 36)
+            HStack(spacing: 0) { strip; panel }.frame(width: 200, height: 12)
+        }.coordinateSpace(name: "editor-workspace")
+            .background(Color(.sRGB, red: 0.95, green: 0.05, blue: 0.75, opacity: 1)))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 200, height: 48),
+                              styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        window.contentView = host
+        for _ in 0..<40 {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let sx = Double(bitmap.pixelsWide) / 200, sy = Double(bitmap.pixelsHigh) / 48
+        func rgb(_ x: Int, _ y: Int) -> [Double] {
+            let color = bitmap.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+            return [Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent)]
+        }
+        let a = rgb(Int(50 * sx), Int(42 * sy)), b = rgb(Int(150 * sx), Int(42 * sy))
+        let delta = zip(a, b).map { $1 - $0 }, length = delta.reduce(0) { $0 + $1 * $1 }
+        precondition(length > 0.01, "The contour fixture needs distinct panel and strip colors")
+        for (point, expected) in [(CGPoint(x: bounds.midX, y: 18), b),
+                                  (CGPoint(x: bounds.minX + 1, y: 1), a),
+                                  (CGPoint(x: bounds.minX, y: 35.5), b)] {
+            let actual = rgb(Int(point.x * sx), Int(point.y * sy))
+            precondition(zip(actual, expected).allSatisfy { abs($0 - $1) <= 2.5 / 255 },
+                "The selected body, excluded upper corner and concave foot must retain their surface roles: \(point), \(actual), expected \(expected)")
+        }
+        var upper = 0, feet = 0
+        for y in 0..<Int(36 * sy) {
+            let py = (Double(y) + 0.5) / sy
+            let left: Double
+            if py < 18 {
+                left = bounds.minX + 18 * (1 - pow(1 - pow((18 - py) / 18, 4), 0.25))
+            } else if py > 30 {
+                left = bounds.minX - 6 + 6 * pow(1 - pow((py - 30) / 6, 4), 0.25)
+            } else { left = bounds.minX }
+            let right = bounds.maxX + bounds.minX - left
+            for x in 0..<bitmap.pixelsWide {
+                let px = (Double(x) + 0.5) / sx
+                guard min(abs(px - left), abs(px - right)) <= 1.5 / sx else { continue }
+                let actual = rgb(x, y), relative = zip(actual, a).map { $0 - $1 }
+                let projection = min(1, max(0, zip(relative, delta).reduce(0) { $0 + $1.0 * $1.1 } / length))
+                let expected = zip(a, delta).map { $0 + projection * $1 }
+                precondition(zip(actual, expected).allSatisfy { abs($0 - $1) <= 2.5 / 255 },
+                    "A tab contour must contain exactly one surface: \(theme), alpha \(stripAlpha)/\(panelAlpha), offset \(offset), pixel \(x),\(y): \(actual), role segment \(a)...\(b)")
+                if py < 18 { upper += 1 }
+                if py > 30 { feet += 1 }
+            }
+        }
+        precondition(upper > 50 && feet > 15, "Both upper squircles and concave lower feet must be sampled")
+        print("PASS: \(theme), alpha \(stripAlpha)/\(panelAlpha), offset \(offset): absolute tab contour colors, \(upper) upper and \(feet) foot pixels")
     }
     @MainActor private static func check(_ platform: UInt32, collapsed: Bool, theme: String) async throws {
         let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))

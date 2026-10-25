@@ -265,7 +265,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                                 Box(Modifier.weight(1f).clipToBounds().onGloballyPositioned {
                                     tabClip = it.boundsInRoot().translate(-dock.origin); dock.tabClips[group] = tabClip
                                     strip = it.size.width / dock.density
-                                }.tabStrip(cutout, LocalPalette.current.strip)) {
+                                }.tabStrip(cutout, LocalPalette.current.strip, LocalPalette.current.panelFill)) {
                                     Row(Modifier.horizontalScroll(rememberScrollState()).testTag("column-drawer-tabs-$id")) {
                                         tabs.array("panels").values().forEachIndexed { tabIndex, panelId ->
                                             val panel = bodies[panelId.toString()] ?: return@forEachIndexed

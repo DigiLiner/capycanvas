@@ -50,6 +50,17 @@ winrt::com_ptr<ID2D1Geometry> outside(float width,float height,ShadowCut const& 
     winrt::check_hresult(sink->Close());return path;
 }
 }
+CompositionPath CompositionPathFromContours(std::vector<std::vector<Windows::Foundation::Point>> const& contours){
+    winrt::com_ptr<ID2D1PathGeometry> path;winrt::check_hresult(factory()->CreatePathGeometry(path.put()));
+    winrt::com_ptr<ID2D1GeometrySink> sink;winrt::check_hresult(path->Open(sink.put()));sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
+    for(auto const& contour:contours)if(!contour.empty()){
+        sink->BeginFigure({contour.front().X,contour.front().Y},D2D1_FIGURE_BEGIN_FILLED);
+        for(auto const& point:contour)sink->AddLine({point.X,point.Y});
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    }
+    winrt::check_hresult(sink->Close());
+    return CompositionPath(winrt::make<GeometrySource>(path));
+}
 void ClipOutside(UIElement const& element,float width,float height,std::array<float,4> radii,bool squircle){
     auto visual=ElementCompositionPreview::GetElementVisual(element);auto compositor=visual.Compositor();
     visual.Clip(compositor.CreateGeometricClip(compositor.CreatePathGeometry(CompositionPath(winrt::make<GeometrySource>(outside(width,height,{radii,{},squircle}))))));

@@ -190,7 +190,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Attached filter drag inside a clipping run | 120 | **Not met.** 93.24–102.71 native UI fps; moving-frame gap p99 25.00–33.33 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
-| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; current short tab probe gives 110.79–120.02 presents/s, with one touch trial below that floor. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-24 |
+| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; current short tab probe gives 110.79–120.02 presents/s, with one touch trial below that floor. Other continuous-tab revisions remain unqualified | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic), [tab-hover diagnostic](#gtk-tab-hover-diagnostic) and [panel-tab compositing](#panel-tab-compositing), 2026-10-24–25 |
 | Android palette pill opening at the work-area edge | 120 | **FPS unqualified.** Instant clamp; two actual presents per opening, all neighbors stationary in the diagnostic | [Native palette opening](#native-palette-opening), 2026-10-23 |
 | Android tool bubble drag through four neighbours | 120 | **Unqualified after the bubble release fixes.** Previous parity build: 115.00–116.55 actual app-window presents/s; p99 ≤16.667447 ms, default glass, 61 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-24 |
 | Web tool bubble drag through four neighbours | 120 | Unmeasured after the bubble release fixes; desktop browser journeys do not qualify the reference tablet | [Web checks](../development/web.md#tests), 2026-10-24 |
@@ -4446,6 +4446,38 @@ establish a sustained before/after comparison or qualify reference hardware.
 [source and executable hashes](../../artifacts/tab-gap-candidate/source-binary.sha256)
 and [the failed trial log](../../artifacts/tab-gap-candidate/motion/trial-1-test.log)
 identify the measured build and retained failure.
+
+## Panel-tab compositing
+
+The Android, Apple, Web and Windows continuous-tab backgrounds based on
+`9baca504f` remain unqualified on reference hardware. The GTK measurements above
+cover its separate revision. Native pixel checks and drag journeys establish
+visual and input behaviour only on the hosts where they run; they do not
+establish sustained frame rate.
+
+Desktop headless Chrome's matched baseline/candidate mouse and touch tab probes
+use 1440 × 913 CSS pixels at scale 1, Off glass and one 2.2-second input window
+per contact. Both preserve the DOM and model with zero full state or layout
+refreshes. The candidate records 133 animation callbacks per
+contact at 60.00 Hz, with dispatch p95 0.50/0.40 ms for mouse/touch. These are
+callbacks rather than presentation timestamps. An earlier touch serialization
+failure did not recur in this comparison; the broader workspace journey still
+fails its zero-GPU-rendering assertion for Navigator. These runs do not qualify
+performance. [Comparison and provenance](../../artifacts/panel-tab-hover/web-touch-matched-baseline.local.log)
+identify the frozen sources and matching browser, package and settings.
+Windows software-adapter checks do not measure hardware presentation, and Apple
+native timing is unavailable without a Mac.
+
+Android's matched Huion Kamvas Pad 12 (Mali-G57) baseline/candidate
+`continuousDragFrameTiming` runs use the same debug APK configuration, optimized
+`dev-perf` Rust, private application
+ID, default Low glass and blank fixture. Both stop after the first five-second
+mouse/attached gesture at the existing retained-model assertion: one full model
+publication, expected zero. That assertion precedes timing output, so neither
+run supplies frame rates or interval distributions. This is not a timing
+comparison or reference-tier qualification. [Android results](../../artifacts/tab-seams-android/results.json)
+and [build hashes](../../artifacts/tab-seams-android/hashes.json) identify both
+executables and the failed retention gate.
 
 ## Web Navigator layout
 

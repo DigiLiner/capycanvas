@@ -21,7 +21,7 @@ import { createZoomReadout } from "./zoom-readout.js";
 import { createScreenStatus } from "./screen-status.js";
 import { screenInfo } from "./new-drawing.js";
 import { createEditorPanels } from "./editor-panels.js";
-import { createWorkspaceChrome, tabHover } from "./workspace-chrome.js";
+import { createWorkspaceChrome, tabHover, releaseTabSurfaces, prepareTabPreview } from "./workspace-chrome.js";
 import { createGlass } from "./glass.js";
 import { createBubbles } from "./bubbles.js";
 import { createDocuments } from "./documents.js";
@@ -526,7 +526,7 @@ const tabFit = new ResizeObserver(entries => {
   tabFitFrame ||= requestAnimationFrame(fitTabs);
 });
 function automaticTabs(list) { list.dataset.automatic = "true"; tabFit.observe(list); pendingTabFits.add(list); tabFitFrame ||= requestAnimationFrame(fitTabs); }
-function releaseTabs(root) { for (const list of root.querySelectorAll("[data-automatic]")) tabFit.unobserve(list); }
+function releaseTabs(root) { releaseTabSurfaces(root); for (const list of root.querySelectorAll("[data-automatic]")) tabFit.unobserve(list); }
 function fitTabs() {
   tabFitFrame = 0;
   const lists = [...pendingTabFits].filter(list => list.isConnected && list.dataset.automatic); pendingTabFits.clear();
@@ -726,7 +726,8 @@ const measurementStyle = new CSSStyleSheet();
 measurementStyle.replaceSync([...$("workspace-style").sheet.cssRules].map(rule=>rule.cssText).join("\n"));
 measurementRoot.adoptedStyleSheets = [measurementStyle];
 function invalidatePanelMeasurement(id) {
-  panelMeasurements.get(id)?.root.remove();
+  const cached=panelMeasurements.get(id);
+  if(cached){releaseTabs(cached.root);cached.root.remove();}
   panelMeasurements.delete(id);
 }
 function panelContentChanged(id) {
@@ -1025,6 +1026,7 @@ function startTabSlide(drag) {
   // Freeze insertion geometry; only these noninteractive copies move.
   const tabs = grabbed.map(({ source, hit }) => {
     const bounds = hit.bounds, preview = source.cloneNode(true);
+    prepareTabPreview(preview);
     for (const name of [...preview.attributes].map(a => a.name)) {
       if (name.startsWith("data-") || name === "id") preview.removeAttribute(name);
     }
@@ -1032,9 +1034,9 @@ function startTabSlide(drag) {
     preview.classList.add(dragged ? "dragged-tab-preview" : "neighbor-tab-preview", ...(hole ? ["docked-tab-preview"] : []));
     Object.assign(preview.style, { left: `${bounds.x - clip.x}px`, top: `${bounds.y - clip.y}px`,
       width: `${bounds.width}px`, height: `${bounds.height}px`, font: getComputedStyle(source).font, transform: "translateX(0px)" });
-    source.classList.add("dragged-tab-source", ...(hole && !dragged ? ["neighbor-tab-source"] : []));
+    source.classList.add("dragged-tab-source");
     overlay.append(preview);
-    return { source, preview, hit, hole };
+    return { source, preview, hit };
   });
   workspace.append(overlay);
   overlay.getBoundingClientRect(); // Establish the neighbors' transition starting positions.
@@ -1043,8 +1045,7 @@ function startTabSlide(drag) {
 function clearTabSlide(drag) {
   if (!drag.tabSlide) return;
   for (const { source } of drag.tabSlide.tabs) {
-    source.classList.remove("dragged-tab-source", "neighbor-tab-source");
-    source.style.removeProperty("--slide");
+    source.classList.remove("dragged-tab-source");
   }
   drag.tabSlide.overlay.remove();
   drag.tabSlide = null;
@@ -1059,7 +1060,6 @@ function updateTabSlide(drag, presentation) {
       : preview.offsets.find(o => Number(o.index) === tab.hit.index)?.x || 0;
     const x = `${deviceAligned(offset)}px`;
     tab.preview.style.transform = `translateX(${x})`;
-    if (tab.hole) tab.source.style.setProperty("--slide", x);
   }
 }
 function workspaceCursor(cursor) {
