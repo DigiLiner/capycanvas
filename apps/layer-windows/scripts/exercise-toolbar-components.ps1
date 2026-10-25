@@ -237,6 +237,7 @@ try {
     }
     $center=Control 'toolbar-action-center_zoom_clicks'
     if($center.Current.ControlType -ne [System.Windows.Automation.ControlType]::CheckBox){throw 'Iconless Tool Options action is not a native checkbox'}
+    if([Math]::Abs((Box 'toolbar-action-center_zoom_clicks').Height/$scale-26) -gt 1){throw 'The Tool Options checkbox is not 26 DIP tall'}
     $center.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     Wait-Until {(Model).state.settings.zoom_tool.center_clicked_point} 'Tool Options checkbox did not reach shared settings'
     Capture "photo-zoom-options-$Theme" -WithModel -Composed

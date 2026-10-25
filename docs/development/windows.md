@@ -1757,7 +1757,9 @@ the selectors, axis, Log counts and footer retain their height; the preferred gr
 remains the natural sizing input. Histogram axis labels stay with their graph,
 4 pixels below the plot.
 The plot uses its panel surface without a separate input-field backplate.
-Log counts retains the shared 24-pixel target around its native checkbox.
+Log counts, Tool Settings, Tool Options, Properties and Proof checkboxes share
+`compactCheck`: at least the 26-pixel panel control height, with the 4-pixel
+control gap between the native box and its caption, as on GTK and Web.
 Scope status and scale labels, including Curves axes, use the secondary text
 role at 55% opacity.
 Tool Set rows use the defined text line height and preserve fractional layout coordinates

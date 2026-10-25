@@ -359,6 +359,11 @@ inline TextBlock label(std::shared_ptr<WorkspaceData> const& data,hstring const&
     if(bold)result.FontWeight(Windows::UI::Text::FontWeights::Bold());
     return result;
 }
+inline CheckBox compactCheck(std::shared_ptr<WorkspaceData> const& data,winrt::Windows::Foundation::IInspectable const& content){
+    CheckBox check;check.Content(content);check.MinWidth(0);check.MinHeight(data->controlHeight());
+    check.Padding({data->panelMetric(L"control_spacing"),0,0,0});check.VerticalContentAlignment(VerticalAlignment::Center);
+    return check;
+}
 inline void twoLines(TextBlock const& text){
     text.TextWrapping(TextWrapping::Wrap);text.MaxLines(2);text.TextTrimming(TextTrimming::CharacterEllipsis);
 }

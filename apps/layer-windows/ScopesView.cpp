@@ -210,9 +210,8 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
             Grid::SetRow(graph,tonal?0:1);root.Children().Append(graph);
         }
         if(!tonal){
-            logarithmic=CheckBox();logarithmic.MinWidth(0);logarithmic.MinHeight(data->controlHeight());logarithmic.Height(data->controlHeight());logarithmic.Padding({0});
+            auto text=label(data,L"");text.TextWrapping(TextWrapping::Wrap);logarithmic=compactCheck(data,text);
             AutomationProperties::SetAutomationId(logarithmic,prefix+L"-log");
-            auto text=label(data,L"");text.TextWrapping(TextWrapping::Wrap);logarithmic.Content(text);
             logarithmic.HorizontalContentAlignment(HorizontalAlignment::Stretch);Grid::SetRow(logarithmic,2);root.Children().Append(logarithmic);
             logarithmic.Click([weak](auto&&,auto&&){if(auto self=weak.lock())
                 sendHistogram(self->data,O({{L"type",S(self->waveform?L"waveform_logarithmic":L"logarithmic")},{L"enabled",B(self->logarithmic.IsChecked().Value())}}));});

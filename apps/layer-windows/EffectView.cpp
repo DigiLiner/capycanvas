@@ -182,7 +182,7 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
             return propertyRow(property,choices,bindings);
         }
         if(type==L"toggle"){
-            CheckBox check;auto caption=label(data,name);check.Content(caption);check.MinHeight(data->controlHeight());check.Height(data->controlHeight());check.Padding({0});check.MinWidth(0);
+            auto caption=label(data,name);auto check=compactCheck(data,caption);
             AutomationProperties::SetName(check,name);AutomationProperties::SetAutomationId(check,property->id());
             check.Click([property,weak=make_weak(check)](auto&&,auto&&){if(auto c=weak.get())property->set(B(c.IsChecked().Value()));});
             bindings.emplace_back([property,check,caption]{auto model=property->model();auto title=str(model,L"label");caption.Text(title);AutomationProperties::SetName(check,title);check.IsChecked(flag(object(model,L"value"),L"value"));});return check;

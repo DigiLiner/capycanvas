@@ -785,7 +785,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto weak=weak_from_this();
         auto state=object(action,L"state");auto command=str(state,L"id");bool checkable=flag(action,L"checkable");
         if(checkable&&str(state,L"icon").empty()){
-            CheckBox check;check.MinWidth(0);check.MinHeight(0);check.Padding({0,0,0,0});auto checkboxLabel=label(data,str(state,L"label"),false);checkboxLabel.Margin({6,0,0,0});check.Content(checkboxLabel);
+            auto check=compactCheck(data,label(data,str(state,L"label"),false));
             AutomationProperties::SetAutomationId(check,L"toolbar-action-"+command);
             check.Click([weak,command](auto&&,auto&&){if(auto self=weak.lock())self->send(O({{L"type",S(L"invoke")},{L"command",S(command)}}));});
             auto host=explainable(check);Field result;result.row=host;result.action=true;result.intrinsic=true;result.worded=true;

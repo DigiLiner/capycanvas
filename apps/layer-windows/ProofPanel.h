@@ -59,7 +59,7 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
     StackPanel printControls;ContentControl printGate;printGate.IsTabStop(false);printGate.Content(printControls);print.Children().Append(printGate);
     auto printKey=std::make_shared<hstring>();
     auto printForm=std::make_shared<std::shared_ptr<ProofFormView>>();
-    CheckBox gamut;gamut.Content(box_value(copy(L"gamut_warning")));gamut.MinWidth(0);gamut.MinHeight(data->controlHeight());gamut.Height(data->controlHeight());gamut.Padding({0});AutomationProperties::SetName(gamut,copy(L"gamut_warning"));AutomationProperties::SetAutomationId(gamut,L"proof-panel-gamut");
+    auto gamut=compactCheck(data,box_value(copy(L"gamut_warning")));AutomationProperties::SetName(gamut,copy(L"gamut_warning"));AutomationProperties::SetAutomationId(gamut,L"proof-panel-gamut");
     gamut.Click([data](auto&&,auto&&){if(!data->updating)data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"gamut_warning")}}));});print.Children().Append(gamut);
     auto status=label(data,L"");status.TextWrapping(TextWrapping::Wrap);status.Visibility(Visibility::Collapsed);root.Children().Append(status);
     bindings.emplace_back([data,form,copy,mode,modes,arrangeModes,modeHdr,pages,sdrGate,print,printControls,printGate,printKey,printForm,gamut,status]{

@@ -157,7 +157,7 @@ try {
         Check-Modes $expected
         $setting=if($brush){'selection_brush_size'}elseif($tonal){'selection_feather'}else{'selection_feather'}
         $null=Control ('tool-setting-'+$setting) -Type $ControlType::Edit
-        if(!$brush -and !$tonal){$null=Control 'tool-action-selection_antialias' -Type $ControlType::CheckBox}
+        if(!$brush -and !$tonal -and [Math]::Abs((Dip (Control 'tool-action-selection_antialias' -Type $ControlType::CheckBox -Arranged))-26) -gt .5){throw 'Anti-aliasing is not the 26-pixel panel control height'}
         if($tonal){
             $null=Control 'tool-choice-tonal-tones'
             if(Find 'selection-actions-menu'){throw 'Tonal range showed Selection Actions'}

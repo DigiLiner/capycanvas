@@ -426,7 +426,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                 }else if(!group.empty()){
                     if(std::find(groups.begin(),groups.end(),group)==groups.end()){groups.push_back(group);actionChoice(group,context);}
                 }else if(flag(item,L"checkable")){
-                    CheckBox check;auto text=label(data,str(command,L"label"));check.Content(text);check.MinWidth(0);check.MinHeight(data->controlHeight());check.Height(data->controlHeight());check.Padding({0});check.HorizontalAlignment(HorizontalAlignment::Stretch);check.VerticalContentAlignment(VerticalAlignment::Center);
+                    auto text=label(data,str(command,L"label"));auto check=compactCheck(data,text);check.HorizontalAlignment(HorizontalAlignment::Stretch);
                     AutomationProperties::SetName(check,str(command,L"label"));AutomationProperties::SetAutomationId(check,L"tool-action-"+id);check.Click([invoke](auto&&,auto&&){invoke();});
                     body.Children().Append(check);
                     fields.emplace_back([weak,id,check,text]{if(auto self=weak.lock()){auto command=find(array(self->data->state,L"commands"),L"id",id);text.Text(str(command,L"label"));AutomationProperties::SetName(check,str(command,L"label"));check.IsEnabled(flag(command,L"enabled"));check.IsChecked(flag(command,L"selected"));tooltip(check,str(command,L"tooltip"));}});
