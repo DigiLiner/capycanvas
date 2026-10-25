@@ -74,3 +74,9 @@ and how parity is checked.
   presets, export, masking, retouching and host qualification work. Current
   measurements and remaining targets belong in the
   [performance tier tables](../PERFORMANCE_TARGETS.md).
+
+## Deferred until after the next release
+
+- [Incremental build plan](incremental-build-plan.md) defines the stable Rust
+  investigation for halving Linux incremental app builds. Profiling, harness
+  changes and architectural experiments wait until after the next release.
