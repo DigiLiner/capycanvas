@@ -511,8 +511,8 @@ def motion_windows(header, events, windows, target_hz):
         during = [e for e in events if e[0] == 9 and begin <= e[1] <= end]
         memory = [e for e in events if e[0] == 5 and begin <= e[1] <= end]
         intervals = distribution(b - a for a, b in zip(times, times[1:]))
-        full_ready = bool(prior and prior[3] & 11 == 11 and not prior[4])
-        readiness_losses = sum(e[3] & 11 != 11 for e in during)
+        full_ready = bool(prior and prior[3] & 9 == 9 and not prior[4])
+        readiness_losses = sum(e[3] & 9 != 9 for e in during)
         errors = sum(bool(e[4]) for e in during)
         thermal_zero = bool(memory) and all(e[4] == 0 and e[5] == 0 for e in memory)
         hz = len(times) * 1e9 / (end - begin)

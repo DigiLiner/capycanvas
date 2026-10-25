@@ -179,6 +179,32 @@ class ReportChecks(unittest.TestCase):
         self.assertFalse(result["instrumentation_eligible"])
         self.assertEqual(analyze(header(), events)["counts"]["presented_drawables"], 3)
 
+    def test_motion_window_readiness_ignores_retired_catalog_bit(self):
+        for flags in [9, 11, 13, 15]:
+            with self.subTest(flags=flags):
+                events, window = self.window_fixture()
+                events[0][3] = flags
+                events.append(record(9, window["begin_ns"] + 1_000_000, 0, flags ^ 2, 0))
+                result = motion_windows(header(), events, [window], 90)[0]
+                self.assertTrue(result["fully_ready_at_begin"])
+                self.assertEqual(result["readiness_loss_records"], 0)
+                self.assertTrue(result["instrumentation_eligible"])
+
+    def test_motion_window_requires_canvas_and_shaders_at_start_and_during_motion(self):
+        for flags in [0, 1, 2, 3, 8, 10]:
+            with self.subTest(flags=flags):
+                events, window = self.window_fixture()
+                events[0][3] = flags
+                result = motion_windows(header(), events, [window], 90)[0]
+                self.assertFalse(result["fully_ready_at_begin"])
+                self.assertFalse(result["instrumentation_eligible"])
+                events[0][3] = 9
+                events.append(record(9, window["begin_ns"] + 1_000_000, 0, flags, 0))
+                result = motion_windows(header(), events, [window], 90)[0]
+                self.assertTrue(result["fully_ready_at_begin"])
+                self.assertEqual(result["readiness_loss_records"], 1)
+                self.assertFalse(result["instrumentation_eligible"])
+
     def test_gpu_clocks_translate_epochs_rates_and_preserve_target_uncertainty(self):
         clocks = [record(14, 0, 500_000_000, 100, 2_000_000),
                   record(14, 100_000_000, 600_000_000, 300, 102_000_000)]
