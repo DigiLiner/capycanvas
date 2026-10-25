@@ -207,7 +207,7 @@ choice labels invalidate their intrinsic measurement copy when they change;
 plot publications and control values retain that copy. Scope graphs use the
 available panel space while their controls keep their measured height. Their
 raster follows the actual graph bounds; intrinsic copies keep the natural plot
-height. Log counts keeps a 24-pixel label target. Secondary status, axis and
+height. Log counts keeps a label target at the panel control height. Secondary status, axis and
 layer metadata use one color derived from the published text at 55% opacity.
 Toolbar and canvas bar fitting round widget widths up to whole pixels, so text never truncates and the tiles after it stay on the pixel grid. `histogram.js` retains
 the native canvases; Properties updates their embedded plots without replacing
@@ -447,6 +447,11 @@ the prior scroll viewport height must not prevent a drawer from shrinking.
 ordinary and reduced motion. `--drawer-style` checks that toolbar and column-group
 dividers draw the shared `divider_metrics` line, centred in its slot.
 
+The Layers list runs edge to edge in the panel, drawers and the Layers bubble,
+with 6-pixel side padding on rows, the header, the footer and the properties
+disclosure, so their first icons line up with the eye. `--layer-properties-drawer`
+and `--tool-bubbles` check those slots.
+
 `--enclose-fill` checks real pointer contacts in both themes against transparent
 reference ink. Two fully enclosed holes fill a separate paint layer; a hole
 crossed by the lasso stays empty. Shared export previews check actual GPU pixels,
@@ -492,8 +497,9 @@ including after a language change; other objects use deterministic JSON.
 
 `--panel-controls` captures Tool Settings, Properties, Histogram, Waveform, Proof and Palettes
 in light and dark themes at 242- and 320-pixel panel widths. It checks 8-pixel
-content edges, shared dropdown columns, 4-pixel peer gaps on both axes, 24-pixel
-controls, 36-pixel sliders, editor focus and squircle radii. Panel captions start
+content edges, shared dropdown columns, 4-pixel peer gaps on both axes, controls
+and radii at the shared panel control metrics, 36-pixel slider rows, editor focus
+and squircle radii. Panel captions start
 at the row top and end above the slider hit area. Properties checks the 4-pixel
 gap after its heading and the 6-pixel gap before the parameter group.
 

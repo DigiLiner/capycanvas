@@ -18,7 +18,8 @@ export async function checkLayerPropertiesDrawer({call,evaluate,settle}) {
     await capture(`footer-${theme}-${width}-${summary?'summary':'plain'}`);
     assert.ok(Math.abs(geometry.first_slot.center-geometry.first_action.center)<1,'Footer icon centers on the first Layers action');
     assert.ok(Math.abs(geometry.last_slot.center-geometry.last_action.center)<1,'Footer chevron centers on the last Layers action');
-    assert.equal(geometry.first_slot.width,24);assert.equal(geometry.last_slot.width,24);
+    const slot=await evaluate('layerApp.app.catalog().panel_metrics.control_height');
+    assert.equal(geometry.first_slot.width,slot);assert.equal(geometry.last_slot.width,slot);
     assert.equal(geometry.first_icon.width,16);assert.equal(geometry.last_icon.width,16);
     assert.equal(geometry.text_gap,1,'Footer label and summary use one pixel gap');
     assert.ok(Math.abs(geometry.label.x-geometry.text.x)<1,'Label aligns with the text block');

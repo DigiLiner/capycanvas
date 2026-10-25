@@ -20,6 +20,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/ui/panel-controls-all-platforms/web';
   await mkdir(directory,{recursive:true});
   const reports=[];
+  const metrics=await evaluate('layerApp.app.catalog().panel_metrics');
   const wait=condition=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+120000;function poll(){if(${condition})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,30)}poll()})`);
   const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();};
   const invoke=async command=>{await wait(`layerApp.state().commands.find(c=>c.id===${JSON.stringify(command)})?.enabled`);await send({type:'invoke',command});};
@@ -42,17 +43,17 @@ export async function checkPanelControls({call,evaluate,settle}) {
     for(const label of geometry.labels)near(label.x,geometry.panel.x+8,`${name} plain label leading inset`);
     for(const control of geometry.controls){
       assert.ok(control.rect.left>=geometry.panel.left+8-.1&&control.rect.right<=geometry.panel.right-8+.1,`${name} control containment: ${JSON.stringify(control)}`);
-      if(control.tag==='SELECT')near(control.rect.height,24,`${name} select height`);
-      if(control.tag==='BUTTON'&&!control.special)near(control.rect.height,24,`${name} ${control.classes} button height`);
+      if(control.tag==='SELECT')near(control.rect.height,metrics.control_height,`${name} select height`);
+      if(control.tag==='BUTTON'&&!control.special)near(control.rect.height,metrics.control_height,`${name} ${control.classes} button height`);
       if(control.classes.split(' ').includes('number-labels'))near(Number.parseFloat(control.paddingLeft),0,`${name} plain numeric label padding`);
       if(control.classes.split(' ').some(c=>['number-value','number-entry'].includes(c))){near(Number.parseFloat(control.paddingLeft),6,`${name} numeric left padding`);near(Number.parseFloat(control.paddingRight),6,`${name} numeric right padding`);}
-      if(control.tag==='SELECT'||control.classes.includes('number-entry')||control.classes.includes('palette-entry'))near(Number.parseFloat(control.radius),12*geometry.fit,`${name} control radius`);
+      if(control.tag==='SELECT'||control.classes.includes('number-entry')||control.classes.includes('palette-entry'))near(Number.parseFloat(control.radius),metrics.control_radius*geometry.fit,`${name} control radius`);
       if(control.tag==='SELECT'&&geometry.fit===1)assert.ok(['squircle','superellipse(2)'].includes(control.shape),`${name} squircle shape: ${control.shape}`);
     }
     for(const row of geometry.rows)for(let i=1;i<row.children.length;i++)near(row.children[i].left-row.children[i-1].right,4,`${name} ${row.classes} peer gap`);
     if(selector.startsWith('[data-scope=')){
       const target=await evaluate(`document.querySelector(${JSON.stringify(selector)}).querySelector('.scope-log').getBoundingClientRect().height`);
-      near(target,24,`${name} Log counts target`);
+      near(target,metrics.control_height,`${name} Log counts target`);
     }
     if(selector==='.effect-properties'){
       const gaps=await evaluate(`(()=>{const root=document.querySelector('.effect-properties'),heading=root.querySelector('h3'),metadata=root.querySelector('.properties-header'),following=[...root.children].find(n=>n!==heading&&n!==metadata&&n.checkVisibility()&&n.getBoundingClientRect().height>0);return metadata.checkVisibility()?{afterHeading:metadata.getBoundingClientRect().top-heading.getBoundingClientRect().bottom,beforeControls:following?.getBoundingClientRect().top-metadata.getBoundingClientRect().bottom}:null})()`);
@@ -61,7 +62,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
     if(selector==='.tool-settings-control'){
       const booleans=await evaluate(`(()=>{const root=document.querySelector('.tool-settings-control');return layerApp.state().tool_actions.filter(a=>a.checkable&&!a.group).map(a=>{const row=root.querySelector('[data-tool-action="'+a.command+'"]'),input=row?.querySelector('input[type=checkbox]'),command=layerApp.state().commands.find(c=>c.id===a.command);return{id:a.command,checkbox:!!input,visible:input?.checkVisibility()??false,checked:input?.checked,selected:command.selected,disabled:input?.disabled,enabled:command.enabled,height:row?.getBoundingClientRect().height}})})()`);
       record.booleans=booleans;
-      for(const field of booleans){assert.equal(field.checkbox,true,`${name} ${field.id} uses a native checkbox`);assert.equal(field.visible,true,`${name} ${field.id} checkbox is visible`);assert.equal(field.checked,field.selected,`${name} ${field.id} checked state`);assert.equal(field.disabled,!field.enabled,`${name} ${field.id} enabled state`);near(field.height,24,`${name} ${field.id} checkbox row height`);}
+      for(const field of booleans){assert.equal(field.checkbox,true,`${name} ${field.id} uses a native checkbox`);assert.equal(field.visible,true,`${name} ${field.id} checkbox is visible`);assert.equal(field.checked,field.selected,`${name} ${field.id} checked state`);assert.equal(field.disabled,!field.enabled,`${name} ${field.id} enabled state`);near(field.height,metrics.control_height,`${name} ${field.id} checkbox row height`);}
     }
     return geometry;
   };
@@ -73,7 +74,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
   const editor=async(name,selector)=>{
     await click(`${selector} .number-value`);
     const bounds=await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),e=n.querySelector('.number-entry'),r=e.getBoundingClientRect(),t=n.querySelector('.number-slider')?.getBoundingClientRect();return{width:r.width,height:r.height,bottom:r.bottom,right:r.right,field:n.getBoundingClientRect().toJSON(),gap:t?r.left-t.right:null,focused:document.activeElement===e}})()`);
-    near(bounds.width,68,`${name} editor width`);near(bounds.bottom,bounds.field.bottom,`${name} editor bottom`);near(bounds.right,bounds.field.right,`${name} editor right`);near(bounds.height,24,`${name} editor height`);assert.equal(bounds.focused,true,`${name} native editor focus`);if(bounds.gap!==null)assert.ok(bounds.gap>=8-.1,`${name} editor/slider clearance`);
+    near(bounds.width,68,`${name} editor width`);near(bounds.bottom,bounds.field.bottom,`${name} editor bottom`);near(bounds.right,bounds.field.right,`${name} editor right`);near(bounds.height,metrics.control_height,`${name} editor height`);assert.equal(bounds.focused,true,`${name} native editor focus`);if(bounds.gap!==null)assert.ok(bounds.gap>=8-.1,`${name} editor/slider clearance`);
     await capture(`${name}-editing`,selector.startsWith('.tool')?'.tool-settings-control':'.effect-properties');await key('Escape',27);
   };
   const dryPrimary=['size','flow','grain_depth','material_hardness'];
@@ -243,7 +244,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
       near(print.body.top-print.modes.bottom,4,'Proof modes/body peer gap');
       for(let i=1;i<print.rows.length;i++)near(print.rows[i].top-print.rows[i-1].bottom,4,'Proof print vertical peer gap');
       for(const select of print.selects){near(select.left,print.selects[0].left,'Proof shared label column');near(select.right,print.selects[0].right,'Proof aligned field ends');}
-      for(const check of print.checks)near(check.row.height,24,'Proof checkbox row');
+      for(const check of print.checks)near(check.row.height,metrics.control_height,'Proof checkbox row');
       const bpc='.proof-print input[aria-label="Black point compensation"]',before=await evaluate(`document.querySelector(${JSON.stringify(bpc)}).checked`);
       await click(bpc);assert.equal(await evaluate(`document.querySelector(${JSON.stringify(bpc)}).checked`),!before,'Proof native checkbox activation');
       await click(bpc);assert.equal(await evaluate(`document.querySelector(${JSON.stringify(bpc)}).checked`),before,'Proof native checkbox restoration');
@@ -262,7 +263,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
       await capture(`palette-name-${current}-${width}-editing`,'.palettes-panel');
       const edit=await evaluate(`(()=>{const n=document.querySelector('.palettes-panel .palette-editor'),s=getComputedStyle(n),r=n.getBoundingClientRect();return{right:r.right,height:r.height,value:n.value,padding:Number.parseFloat(s.paddingRight),align:s.textAlign,font:['fontSize','fontFamily','fontWeight','fontStyle','letterSpacing'].map(k=>s[k]),focused:document.activeElement===n}})()`);
       reports.at(-1).paletteNameAlignment={normal,edit};
-      near(edit.height,24,'Palette editor height');near(edit.padding,6,'Palette editor horizontal padding');near(edit.right-edit.padding,normal.glyph.right,'Palette readout/editor glyph edge');assert.equal(edit.align,'right');assert.deepEqual(edit.font,normal.font);assert.equal(edit.value,normal.text);assert.equal(edit.focused,true);
+      near(edit.height,metrics.control_height,'Palette editor height');near(edit.padding,6,'Palette editor horizontal padding');near(edit.right-edit.padding,normal.glyph.right,'Palette readout/editor glyph edge');assert.equal(edit.align,'right');assert.deepEqual(edit.font,normal.font);assert.equal(edit.value,normal.text);assert.equal(edit.focused,true);
       await key('Escape',27);assert.equal(await evaluate(`document.querySelector('.palettes-panel .palette-name>span').textContent`),normal.text,'Palette native name cancellation');
       await click('.palettes-panel .palette-selector');await capture(`palette-chooser-${current}-${width}`,'.palettes-panel');
       await key('Escape',27);await send({type:'customize',action:{type:'set_panel_visible',panel:'palettes',visible:false}});
