@@ -31,7 +31,6 @@ pub const STROKE_FADE: f32 = 48.;
 pub const FADED_BUBBLE: f32 = 0.2;
 pub const SECOND_FINGER_REACH: f32 = 90.;
 const BRUSH_COLUMN: f32 = 170.;
-const BRUSH_FAN: f32 = 96.;
 const PILL_PITCH: f32 = BRUSH_PILL[1] + 4.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -804,7 +803,7 @@ pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], 
             if room(side, near) < 0. && room(-side, far) > room(side, near) { (far, -side, item[1]) } else { (near, side, item[1]) }
         }
         None => {
-            let radius = (n * PILL_PITCH * 0.5 + 18.).max(BRUSH_FAN);
+            let radius = (n * PILL_PITCH * 0.5 + 18.).max(TOOL_BUBBLE * 0.5 + BRUSH_PILL[0].hypot(BRUSH_PILL[1]) * 0.5 + WORKSPACE_SPACING);
             let room = |right: bool| {
                 if right { bounds.x + bounds.width - (center[0] + radius + BRUSH_PILL[0] * 0.5) } else { center[0] - radius - BRUSH_PILL[0] * 0.5 - bounds.x }
             };

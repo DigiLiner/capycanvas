@@ -894,6 +894,26 @@ fn medium_bubbles_select_their_brushes_and_fan_only_them() {
 }
 
 #[test]
+fn watercolor_pills_leave_the_material_face_available_on_every_platform() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        s.set_viewport(VIEW, [1200, 900]).unwrap();
+        let id = take_source(&mut s, BubbleSource::Medium { group: ToolGroup::Watercolor });
+        tap(&mut s, id);
+        let open = view(&s, id);
+        assert_eq!(open.chooser.len(), tools::group_presets(ToolGroup::Watercolor).count());
+        for y in -13..=13 {
+            for x in -13..=13 {
+                let point = [x as f32 * 2., y as f32 * 2.];
+                if point[0].hypot(point[1]) < TOOL_BUBBLE * 0.5 {
+                    assert_eq!(open.hit(point), Some(BubbleHit::Face), "{platform:?}: a Watercolor pill covers the material face at {point:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn chooser_picks_open_the_selected_tool_halo_on_every_platform() {
     for platform in Platform::ALL {
         for source in [

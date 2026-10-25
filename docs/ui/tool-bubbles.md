@@ -141,7 +141,8 @@ everything rests.
   onto one of its brushes. Picking a brush or tool closes the chooser and opens
   its settings halo when **Show Sliders** is checked and it has sliders; letting
   go on nothing keeps the chooser.
-  A medium bubble fans its own brushes. Near a window edge
+  A medium bubble fans its own brushes, with space for the full pill bounds
+  around its face, including short fans such as Watercolor's. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
   Their layout uses the saved bubble position, so wall displacement cannot
   repeatedly switch the chooser between gathered and circular arrangements.
@@ -493,6 +494,9 @@ panels are absent from the dock.
 
 ## Validation
 
+- Material spacing: `bash tools/performance/workspace-motion.sh gtk --native-test=native_watercolor_chooser_spacing`
+  checks Watercolor's pills at the center and a window corner, including clicking
+  the material face beside a pill, with mouse and touch in both themes.
 - Chooser picks: `bash tools/performance/workspace-motion.sh gtk --native-test=native_bubble_chooser_sliders`
   selects group and medium bubbles with one click, picks their brushes, then
   adjusts their newly shown sliders, toggles **Show Sliders** in the hold menu

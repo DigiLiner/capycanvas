@@ -653,6 +653,43 @@ fn pinch(d: &mut Driver, name: &str) {
 }
 
 #[test]
+#[ignore = "private display: workspace-motion.sh gtk --native-test=native_watercolor_chooser_spacing"]
+fn native_watercolor_chooser_spacing() {
+    let mut d = Driver::new("art.capycanvas.WatercolorChooserSpacing");
+    for theme in [Theme::Light, Theme::Dark] {
+        for device in ["mouse", "touch"] {
+            for (place, fraction) in [("center", [0.45, 0.5]), ("corner", [0.96, 0.96])] {
+                d.w.dispatch(UiAction::RestoreWorkspace {
+                    workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default() }),
+                });
+                d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+                pump(300);
+                let spot = canvas_spot(&d, fraction[0], fraction[1]);
+                let id = take(&mut d, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Watercolor } }, spot);
+                let at = center(&d, id);
+                tap(&mut d, device, at);
+                let open = find_id(&d, id).unwrap();
+                assert!(!open.chooser.is_empty());
+                assert_eq!(open.chooser.len(), open.dots.len());
+                for pill in &open.chooser {
+                    let gap = [(pill.center[0].abs() - BRUSH_PILL[0] * 0.5).max(0.), (pill.center[1].abs() - BRUSH_PILL[1] * 0.5).max(0.)];
+                    assert!(gap[0].hypot(gap[1]) >= TOOL_BUBBLE * 0.5 + WORKSPACE_SPACING, "{theme:?}/{device}/{fraction:?}: {} overlaps the material face", pill.label);
+                }
+                let name = format!("{theme:?}-{device}-{place}-chooser").to_lowercase();
+                capture(&mut d, &name);
+                let before = state(&d.w).brush.preset;
+                let at = center(&d, id);
+                tap(&mut d, device, [at[0] + open.chooser[0].center[0].signum() * 24., at[1] + 12.]);
+                let closed = find_id(&d, id).unwrap();
+                assert_eq!(state(&d.w).brush.preset, before, "tapping the material face must not pick an overlapping brush");
+                assert!(closed.chooser.is_empty() && closed.rings.is_empty(), "tapping the material face closes its chooser");
+            }
+        }
+    }
+    d.finish();
+}
+
+#[test]
 #[ignore = "private display: workspace-motion.sh gtk --native-test=native_bubble_chooser_sliders"]
 fn native_bubble_chooser_sliders() {
     let mut d = Driver::new("art.capycanvas.BubbleChooserSliders");

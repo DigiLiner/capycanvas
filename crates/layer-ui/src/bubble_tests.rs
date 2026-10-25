@@ -377,6 +377,29 @@ fn brushes_curve_beside_their_medium_and_stay_on_screen() {
 }
 
 #[test]
+fn watercolor_and_short_medium_fans_keep_pills_clear_of_the_material_button() {
+    let watercolor = tools::group_presets(ToolGroup::Watercolor).count();
+    assert!(watercolor > 0);
+    for count in std::iter::once(watercolor).chain(1..=16) {
+        for center in [[600., 450.], [AREA.x + 40., AREA.y + 40.], [AREA.x + AREA.width - 40., AREA.y + 40.],
+            [AREA.x + 40., AREA.y + AREA.height - 40.], [AREA.x + AREA.width - 40., AREA.y + AREA.height - 40.]] {
+            let column = chooser_column(count, center, None, AREA);
+            for point in &column {
+                for scale in [1., 1.06] {
+                    let gap = [(point[0].abs() - BRUSH_PILL[0] * scale * 0.5).max(0.),
+                        (point[1].abs() - BRUSH_PILL[1] * scale * 0.5).max(0.)];
+                    let clearance = TOOL_BUBBLE * 0.5 + if scale == 1. { WORKSPACE_SPACING } else { 0. };
+                    assert!(gap[0].hypot(gap[1]) >= clearance, "{count} brushes at {center:?}: {point:?} at {scale} overlaps the material button");
+                }
+            }
+            assert!(column.windows(2).all(|pair| pair[1][1] - pair[0][1] >= BRUSH_PILL[1] * 1.06));
+            assert!(column.iter().all(|point| center[1] + point[1] - BRUSH_PILL[1] * 0.5 >= AREA.y
+                && center[1] + point[1] + BRUSH_PILL[1] * 0.5 <= AREA.y + AREA.height));
+        }
+    }
+}
+
+#[test]
 fn the_layers_card_takes_the_layers_drawer_size() {
     let viewport = [1600., 1000.];
     assert_eq!(layers_card(viewport, 3, None, false)[0], Panel::Layers.default_width(1600.));
