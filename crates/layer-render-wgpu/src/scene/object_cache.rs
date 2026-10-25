@@ -264,11 +264,8 @@ impl ObjectCache {
             if !task.accumulation.as_ref().unwrap().nearest_coordinates_ready() { return Ok(steps); }
         }
         if !recorded { track_batch(encoder, &flight); }
-        let external = {
-            #[cfg(target_arch = "wasm32")] { r.browser_image_decoder.is_some() }
-            #[cfg(not(target_arch = "wasm32"))] { false }
-        };
-        if task.phase == 1 && (task.job.live || external) {
+        let deferred = !objects::inline_sampling(r);
+        if task.phase == 1 && deferred {
             for &coordinate in task.tiles.iter().skip(task.tile).take(PREFETCH) {
                 if r.source_tiles.borrow().prepared_view(&task.job.source, coordinate).is_none()
                     && !r.request_image_decode(task.key.object.image, task.job.source.clone(), coordinate)? { break; }
@@ -280,7 +277,7 @@ impl ObjectCache {
                 0 => sampler.encode_step(&r.device, encoder, &mut r.uploads, acc, &SamplingPhase::Denominator { extent: task.job.source.extent }, task.step)?,
                 1 if task.tile < task.tiles.len() => {
                     let coordinate = task.tiles[task.tile];
-                    let input = if task.job.live || external {
+                    let input = if deferred {
                         let Some(input) = objects::decode_live(r, task.key.object.image, &task.job.source, coordinate)? else { break; };
                         input
                     } else { objects::decode(r, encoder, &task.job.source, coordinate)? };

@@ -373,6 +373,8 @@ pub fn software_adapter_tests() -> bool {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GpuRasterError {
     Color(String),
+    Memory(layer_core::memory::MemoryError),
+    Busy,
     CaptureBudget { required: u64, limit: u64 },
     SourceWorkingSetExceeded,
     DeferredObjectWork,
@@ -400,6 +402,8 @@ impl fmt::Display for GpuRasterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Color(message) => write!(formatter, "color: {message}"),
+            Self::Memory(error) => error.fmt(formatter),
+            Self::Busy => layer_core::raster::TileError::Busy.fmt(formatter),
             Self::DeferredObjectWork => formatter.write_str("Canonical image sampling is pending"),
             Self::SourceWorkingSetExceeded => formatter.write_str("Source working set exceeds the decoded tile budget"),
             Self::CaptureBudget { required, limit } => write!(formatter,
@@ -444,6 +448,15 @@ impl fmt::Display for GpuRasterError {
 }
 
 impl std::error::Error for GpuRasterError {}
+impl From<layer_core::raster::TileError> for GpuRasterError {
+    fn from(error:layer_core::raster::TileError)->Self {
+        match error {
+            layer_core::raster::TileError::Invalid(message)=>Self::Color(message),
+            layer_core::raster::TileError::Memory(error)=>Self::Memory(error),
+            layer_core::raster::TileError::Busy=>Self::Busy,
+        }
+    }
+}
 
 struct PaintLayer {
     id: SourceTarget,
@@ -3319,9 +3332,9 @@ impl WgpuRasterizer {
             },
             object_image_mips::PreparedImageWork::Raster(prepared) => {
                 if prepared.destination!=self.device.working_space() {return Ok(None);}
-                if let Err(layer_core::raster::TileError::Memory(_))=&prepared.pixels {
-                    self.decode_pressure.raster_failed(&prepared,layer_core::memory::generation(),self.snapshot_worker)
-                        .map_err(|error|GpuRasterError::Color(error.to_string()))?;
+                if prepared.pixels.as_ref().is_err_and(|error|error.is_retryable()) {
+                    if self.snapshot_worker {return Err(prepared.pixels.err().unwrap().into());}
+                    self.decode_pressure.raster_failed(&prepared,layer_core::memory::generation());
                     return Ok(None);
                 }
                 let pixels=match prepared.pixels {
@@ -3338,13 +3351,13 @@ impl WgpuRasterizer {
                 return Ok(None);
             },
         };
-        if let Err(layer_core::raster::TileError::Memory(_))=&prepared.pixels {
-            self.decode_pressure.image_failed(&prepared,self.device.working_space(),layer_core::memory::generation(),self.snapshot_worker)
-                .map_err(|error|GpuRasterError::Color(error.to_string()))?;
+        if prepared.pixels.as_ref().is_err_and(|error|error.is_retryable()) {
+            if self.snapshot_worker {return Err(prepared.pixels.err().unwrap().into());}
+            self.decode_pressure.image_failed(&prepared,self.device.working_space(),layer_core::memory::generation());
             return Ok(None);
         }
         if !object_image_mips::retain_image_decode(&prepared,self.device.working_space(),&mut self.failed_image_tiles) {return Ok(None);}
-        let pixels=prepared.pixels.map_err(|error|GpuRasterError::Color(error.to_string()))?;
+        let pixels=prepared.pixels.map_err(GpuRasterError::from)?;
         let tile = scene::Scene::decode_prepared(self, encoder, &prepared.source, prepared.coordinate, pixels)?;
         Ok(Some(PreparedImageUpload {id:prepared.id, source:prepared.source, coordinate:prepared.coordinate, tile}))
     }

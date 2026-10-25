@@ -1633,6 +1633,9 @@ impl Scene {
             let result=objects.advance(r,self,&mut encoder,false);
             self.exact_object_results=objects;
             let idle=result? == 0 && encoder.pass_count() == 0;
+            if let Some(error)=r.decode_pressure.error(layer_core::memory::generation(),r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())) {
+                return Err(error);
+            }
             r.uploads.finish(&encoder);
             encoder.submit(&r.queue);
             if idle && r.image_decode_waiting() { r.await_image_decode().await?; continue; }

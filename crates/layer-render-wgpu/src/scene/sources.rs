@@ -462,7 +462,7 @@ impl DecodedTiles {
             let decoded = match &pending.prepared_pixels {
                 Some(PreparedSourcePixels::NativeSamples(samples)) => samples.clone(),
                 Some(PreparedSourcePixels::PremultipliedWorkingPixels(_)) => return Err(GpuRasterError::Color("Working source pixels have native decode settings".into())),
-                None => device.source_samples.decode(samples.tile).map_err(|error|GpuRasterError::Color(error.to_string()))?,
+                None => device.source_samples.decode(samples.tile).map_err(GpuRasterError::from)?,
             };
             let step = samples.depth.bytes();
             let prepared = pending.prepared_pixels.is_some();
@@ -548,7 +548,7 @@ impl DecodedTiles {
         decoder
             .1
             .decode_tile_cached(source, coordinate, &mut self.pixels, &device.source_samples)
-            .map_err(|error|GpuRasterError::Color(error.to_string()))?;
+            .map_err(GpuRasterError::from)?;
         self.decoders.push_back(decoder);
         upload_working_pixels(uploads, encoder, texture, &self.pixels)
     }

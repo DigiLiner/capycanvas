@@ -302,6 +302,72 @@ fn nearest_reduced_object_display_keeps_level_zero_aliases_after_idle() {
 }
 
 #[test]
+fn exact_interactive_objects_read_parked_samples_on_decode_workers() {
+    use layer_core::raster_storage::{TileChunk,prepare_external_spill};
+    struct Chunk {bytes:Arc<[u8]>,readers:Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>}
+    impl TileChunk for Chunk {
+        fn len(&self)->usize {self.bytes.len()}
+        fn poll(&self)->Result<Option<Arc<[u8]>>,layer_core::raster::TileError> {
+            self.readers.lock().unwrap().push(std::thread::current().id());Ok(Some(self.bytes.clone()))
+        }
+        fn resident_bytes(&self)->usize {self.bytes.len()}
+        fn evict(&self) {}
+    }
+    let (doc,owner,_)=document([32;2],vec![ImageObject::new(image([32;2],[255,0,0,255]))]);
+    let readers=Arc::new(std::sync::Mutex::new(Vec::new()));
+    let spill=prepare_external_spill(&layer_core::Editor::new(doc.clone()).retained_tiles()).unwrap().unwrap();
+    let bytes=Arc::from(spill.bytes.to_vec());spill.commit(Arc::new(Chunk {bytes,readers:readers.clone()})).unwrap();
+    let mut r=crate::test_support::private_sample_renderer(doc.composition().color);
+    let mut compositor=Scene::new(&r).unwrap();compositor.object_spatial.prepare(doc.scene());
+    let request=canonical_request(&r,&mut compositor,&doc,owner,ObjectWindow {origin:[0.;2],side:1.,size:[32;2]});
+    assert!(!request.live && !r.snapshot_worker);
+    let mut cache=super::super::object_cache::ObjectCache::default();
+    assert!(cache.resolve_collection(&r,doc.scene(),&request).unwrap().is_none());
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+    let result=loop {
+        let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+        r.drain_image_decodes(&mut encoder).unwrap();cache.advance(&mut r,&mut compositor,&mut encoder,false).unwrap();
+        r.uploads.finish(&encoder);encoder.submit(&r.queue);r.wait_idle().unwrap();
+        if let Some(view)=cache.resolve_collection(&r,doc.scene(),&request).unwrap() {break view;}
+        assert!(std::time::Instant::now()<deadline,"exact samples must finish through the decode queue");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    };
+    let readers=readers.lock().unwrap();assert!(!readers.is_empty());
+    assert!(readers.iter().all(|thread|*thread!=std::thread::current().id()),"the renderer owner must not read/decode parked source samples");
+    assert!(float_pixels(&r,result.texture()).iter().all(|pixel|*pixel==[1.,0.,0.,1.]));
+}
+
+#[test]
+fn exact_queries_return_typed_worker_refusals_without_empty_submission_loops() {
+    use layer_core::{raster::TileError,raster_storage::{TileChunk,prepare_external_spill}};
+    struct Refused {length:usize,busy:bool}
+    impl TileChunk for Refused {
+        fn len(&self)->usize {self.length}
+        fn poll(&self)->Result<Option<Arc<[u8]>>,TileError> {Err(if self.busy {TileError::Busy}else {layer_core::memory::MemoryError.into()})}
+        fn resident_bytes(&self)->usize {0}
+        fn evict(&self) {}
+    }
+    for busy in [false,true] {
+        let (doc,owner,_)=document([32;2],vec![ImageObject::new(image([32;2],[255,0,0,255]))]);
+        let spill=prepare_external_spill(&layer_core::Editor::new(doc.clone()).retained_tiles()).unwrap().unwrap();
+        let length=spill.bytes.len();spill.commit(Arc::new(Refused {length,busy})).unwrap();
+        let mut r=crate::test_support::private_sample_renderer(doc.composition().color);
+        let mut compositor=Scene::new(&r).unwrap();compositor.object_spatial.prepare(doc.scene());
+        let request=canonical_request(&r,&mut compositor,&doc,owner,ObjectWindow {origin:[0.;2],side:1.,size:[32;2]});
+        assert!(!request.live && !r.snapshot_worker);
+        assert!(compositor.exact_object_results.resolve_collection(&r,doc.scene(),&request).unwrap().is_none());
+        let cancelled=Arc::new(std::sync::atomic::AtomicBool::new(false));r.snapshot_cancelled=Some(cancelled.clone());
+        let (done,wait)=std::sync::mpsc::channel();
+        let watchdog=std::thread::spawn(move||if wait.recv_timeout(std::time::Duration::from_secs(5)).is_err() {cancelled.store(true,std::sync::atomic::Ordering::Release);});
+        let result=pollster::block_on(compositor.drain_exact_objects_async(&mut r));
+        let _=done.send(());watchdog.join().unwrap();
+        let expected=if busy {GpuRasterError::Busy}else {GpuRasterError::Memory(layer_core::memory::MemoryError)};
+        assert_eq!(result,Err(expected));assert!(r.metrics.object_drain_submissions<4);
+        assert!(r.failed_image_tiles.is_empty());
+    }
+}
+
+#[test]
 fn simultaneous_photo_results_bound_batches_and_survive_deferred_retries() {
     let shared = image([4000, 3000], [255, 0, 0, 255]);
     let mut objects = vec![ImageObject::new(shared.clone()), ImageObject::new(shared),

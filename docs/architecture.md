@@ -66,6 +66,9 @@ windows, bounded separately, and evicted before refusing work under pressure.
 Owner retirement advances the preparation retry generation after payload fields
 drop; the worker reclaims dead ledger entries before admitting the next allocation.
 The render owner reads that generation without scanning owners or querying memory.
+Interactive exact image preparation also decodes parked samples on workers.
+Memory and worker-capacity refusals preserve their typed result: interactive work
+pauses without marking the source corrupt, while snapshot jobs return the refusal.
 
 These limits cover instrumented payloads and scratch, including imported
 selections, profiles, lookup tables, previews, vector encoding buffers and

@@ -318,22 +318,28 @@ impl DecodeKey {
     }
 }
 #[derive(Default)]
-pub(crate) struct DecodePressure {entries:Vec<(DecodeKey,RgbSpace,u64)>,paused:Option<(DecodeKey,u64)>}
+pub(crate) struct DecodePressure {entries:Vec<(DecodeKey,RgbSpace,u64,DecodeRefusal)>,paused:Option<(DecodeKey,u64,DecodeRefusal)>}
+#[derive(Clone,Copy)]
+enum DecodeRefusal {Memory,Busy}
+impl DecodeRefusal {
+    fn new(error:&TileError)->Option<Self> {match error {TileError::Memory(_)=>Some(Self::Memory),TileError::Busy=>Some(Self::Busy),TileError::Invalid(_)=>None}}
+    fn error(self)->GpuRasterError {match self {Self::Memory=>GpuRasterError::Memory(layer_core::memory::MemoryError),Self::Busy=>GpuRasterError::Busy}}
+}
 impl DecodePressure {
     fn retain(&mut self,generation:u64) {
-        self.entries.retain(|(key,_,epoch)|*epoch==generation && match key {
+        self.entries.retain(|(key,_,epoch,_)|*epoch==generation && match key {
             DecodeKey::Image(_,source,_)=>source.strong_count()!=0,
             DecodeKey::Raster(source,_,_)=>source.strong_count()!=0,
         });
     }
-    fn remember(&mut self,key:DecodeKey,space:RgbSpace,generation:u64) {
+    fn remember(&mut self,key:DecodeKey,space:RgbSpace,generation:u64,refusal:DecodeRefusal) {
         self.retain(generation);
-        if !self.entries.iter().any(|(stored,context,_)|stored.matches(&key) && *context==space) {self.entries.push((key,space,generation));}
+        if !self.entries.iter().any(|(stored,context,_,_)|stored.matches(&key) && *context==space) {self.entries.push((key,space,generation,refusal));}
     }
     fn blocked(&mut self,key:DecodeKey,space:RgbSpace,generation:u64)->bool {
         self.retain(generation);
-        let blocked=self.entries.iter().any(|(stored,context,_)|stored.matches(&key) && *context==space);
-        self.paused=blocked.then_some((key,generation));blocked
+        let refusal=self.entries.iter().find(|(stored,context,_,_)|stored.matches(&key) && *context==space).map(|(_,_,_,refusal)|*refusal);
+        self.paused=refusal.map(|refusal|(key,generation,refusal));refusal.is_some()
     }
     pub fn image(&mut self,id:PortableId,source:&Arc<SourceImage>,coordinate:[u32;2],space:RgbSpace,generation:u64)->bool {
         self.blocked(DecodeKey::Image(id,Arc::downgrade(source),coordinate),space,generation)
@@ -341,19 +347,24 @@ impl DecodePressure {
     pub fn raster(&mut self,source:&Arc<layer_core::raster::TileBlob>,from:RgbSpace,to:RgbSpace,generation:u64)->bool {
         self.blocked(DecodeKey::Raster(Arc::downgrade(source),from,to),to,generation)
     }
-    pub fn image_failed(&mut self,tile:&PreparedMipTile,space:RgbSpace,generation:u64,snapshot:bool)->Result<(),layer_core::memory::MemoryError> {
-        if snapshot {return Err(layer_core::memory::MemoryError);}
-        self.remember(DecodeKey::Image(tile.id,Arc::downgrade(&tile.source),tile.coordinate),space,generation);Ok(())
+    pub fn image_failed(&mut self,tile:&PreparedMipTile,space:RgbSpace,generation:u64) {
+        if let Some(refusal)=tile.pixels.as_ref().err().and_then(DecodeRefusal::new) {
+            self.remember(DecodeKey::Image(tile.id,Arc::downgrade(&tile.source),tile.coordinate),space,generation,refusal);
+        }
     }
-    pub fn raster_failed(&mut self,tile:&PreparedRasterTile,generation:u64,snapshot:bool)->Result<(),layer_core::memory::MemoryError> {
-        if snapshot {return Err(layer_core::memory::MemoryError);}
-        self.remember(DecodeKey::Raster(Arc::downgrade(&tile.blob),tile.space,tile.destination),tile.destination,generation);Ok(())
+    pub fn raster_failed(&mut self,tile:&PreparedRasterTile,generation:u64) {
+        if let Some(refusal)=tile.pixels.as_ref().err().and_then(DecodeRefusal::new) {
+            self.remember(DecodeKey::Raster(Arc::downgrade(&tile.blob),tile.space,tile.destination),tile.destination,generation,refusal);
+        }
     }
     pub fn blocks_background(&self,generation:u64,outstanding:bool)->bool {
-        !outstanding && self.paused.as_ref().is_some_and(|(key,epoch)|*epoch==generation && match key {
+        !outstanding && self.paused.as_ref().is_some_and(|(key,epoch,_)|*epoch==generation && match key {
             DecodeKey::Image(_,source,_)=>source.strong_count()!=0,
             DecodeKey::Raster(source,_,_)=>source.strong_count()!=0,
         })
+    }
+    pub fn error(&self,generation:u64,outstanding:bool)->Option<GpuRasterError> {
+        self.blocks_background(generation,outstanding).then(||self.paused.as_ref().unwrap().2.error())
     }
 }
 
@@ -487,6 +498,7 @@ impl MipDecodeQueue {
 mod tests {
     use super::*;
     use crate::test_support::{page_texture,upload_page};
+    use layer_render::CanvasRenderer;
     #[test]
     fn pressure_pauses_decode_without_poisoning_sources_and_release_retries() {
         let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
@@ -497,7 +509,7 @@ mod tests {
         let mut failures=Vec::new();let mut pressure=DecodePressure::default();
         assert!(!retain_image_decode(&prepared,RgbSpace::Srgb,&mut failures));
         assert!(failures.is_empty());
-        pressure.image_failed(&prepared,RgbSpace::Srgb,generation,false).unwrap();
+        pressure.image_failed(&prepared,RgbSpace::Srgb,generation);
         assert!(!pressure.blocks_background(generation,false),"an unsolicited obsolete result must not pause current work");
         assert!(pressure.image(id,&source,[0;2],RgbSpace::Srgb,generation));
         assert!(pressure.blocks_background(generation,false));
@@ -514,19 +526,18 @@ mod tests {
         assert_eq!(image_decode_failure(&failures,id,&source,[0;2],RgbSpace::Srgb),Some("Corrupt tile"));
     }
     #[test]
-    fn pressure_is_scoped_to_raster_owner_context_and_snapshots_stop() {
+    fn pressure_is_scoped_to_raster_owner_context() {
         let blob=Arc::new(layer_core::raster::TileBlob::encode(layer_core::color::PixelDescriptor::COVERAGE8,&vec![0;65536]).unwrap());
         let raster=PreparedRasterTile {blob:blob.clone(),space:RgbSpace::Srgb,destination:RgbSpace::Srgb,pixels:Err(layer_core::memory::MemoryError.into())};
         let mut pressure=DecodePressure::default();
-        assert!(pressure.raster_failed(&raster,7,true).is_err());assert!(pressure.entries.is_empty());
-        pressure.raster_failed(&raster,7,false).unwrap();
+        assert!(pressure.entries.is_empty());
+        pressure.raster_failed(&raster,7);
         assert!(pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::Srgb,7));
         assert!(!pressure.raster(&blob,RgbSpace::Srgb,RgbSpace::DisplayP3,7));
         assert!(!pressure.blocks_background(7,false),"a different explicit context must remain runnable");
         let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
         let image=PreparedMipTile {id:PortableId::random(),source,coordinate:[0;2],pixels:Err(layer_core::memory::MemoryError.into())};
-        assert!(pressure.image_failed(&image,RgbSpace::Srgb,7,true).is_err());
-        pressure.image_failed(&image,RgbSpace::Srgb,7,false).unwrap();
+        pressure.image_failed(&image,RgbSpace::Srgb,7);
         assert!(pressure.image(image.id,&image.source,[0;2],RgbSpace::Srgb,7));
         assert!(!pressure.image(image.id,&image.source,[0;2],RgbSpace::DisplayP3,7));
         assert!(!pressure.blocks_background(7,false));
@@ -535,6 +546,39 @@ mod tests {
         assert!(!pressure.blocks_background(7,false),"another retained failed source must not prolong a closed owner's pause");
         drop(raster);drop(blob);
         assert!(!pressure.blocks_background(7,false),"closed sources must not pause unrelated work");
+    }
+    #[cfg(not(target_arch="wasm32"))]
+    #[test]
+    fn retryable_decode_results_pause_interactive_work_and_preserve_snapshot_errors() {
+        let mut r=crate::test_support::private_sample_renderer(Default::default());
+        let space=r.device.working_space();let can_submit=r.can_submit();
+        let source=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);let id=PortableId::random();
+        let blob=Arc::new(layer_core::raster::TileBlob::encode(layer_core::color::PixelDescriptor::COVERAGE8,&vec![0;65536]).unwrap());
+        for snapshot in [false,true] {for busy in [false,true] {for raster in [false,true] {
+            let error=if busy {TileError::Busy}else {layer_core::memory::MemoryError.into()};
+            let (prepared,key)=if raster {
+                (PreparedImageWork::Raster(PreparedRasterTile {blob:blob.clone(),space,destination:space,pixels:Err(error)}),DecodeKey::Raster(Arc::downgrade(&blob),space,space))
+            } else {
+                (PreparedImageWork::Image(PreparedMipTile {id,source:source.clone(),coordinate:[0;2],pixels:Err(error)}),DecodeKey::Image(id,Arc::downgrade(&source),[0;2]))
+            };
+            let (send,results)=std::sync::mpsc::sync_channel(1);assert!(send.send(prepared).is_ok());
+            let (requests,_receive)=std::sync::mpsc::sync_channel(1);
+            r.snapshot_worker=snapshot;r.decode_pressure=Default::default();
+            r.moving_decode=Some((space,MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(1)),outstanding:vec![Some(key)],capacity:1}));
+            let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+            let result=r.drain_image_decode(&mut encoder);
+            if snapshot {
+                let expected=if busy {GpuRasterError::Busy}else {GpuRasterError::Memory(layer_core::memory::MemoryError)};
+                assert!(matches!(result,Err(error) if error==expected));assert!(r.decode_pressure.entries.is_empty());
+            } else {
+                assert!(matches!(result,Ok(None)));
+                let generation=layer_core::memory::generation();
+                assert!(if raster {r.decode_pressure.raster(&blob,space,space,generation)}else {r.decode_pressure.image(id,&source,[0;2],space,generation)});
+                assert!(!r.has_pending_work(),"a refused decode must not spin background frames");
+                assert_eq!(r.can_submit(),can_submit,"decode pressure must leave input submission available");
+            }
+            assert!(r.failed_image_tiles.is_empty() && r.failed_raster_tiles.is_empty());
+        }}}
     }
     #[test]
     fn obsolete_image_decode_failure_is_visible_only_to_its_requested_source_and_context() {
