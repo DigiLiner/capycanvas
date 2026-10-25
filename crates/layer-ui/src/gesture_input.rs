@@ -66,7 +66,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             TouchGesture::Tap(fingers) => {
                 let trigger = match fingers { 2 => "touch.tap.2", 3 => "touch.tap.3", 4 => "touch.tap.4", _ => return Ok(()) };
-                let Some(definition) = self.state.settings.gesture_definition(&trigger, self.state.platform) else { return Ok(()); };
+                let Some(definition) = self.state.settings.gesture_definition(trigger, self.state.platform) else { return Ok(()); };
                 let ShortcutAction::Action { action } = definition.action else { return Ok(()); };
                 *action
             }
