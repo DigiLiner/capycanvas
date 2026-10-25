@@ -62,6 +62,9 @@ pub use view_color::SdrSurfaceColor;
 mod raster;
 mod deferred;
 mod paint_transform;
+mod upload_capacity;
+#[cfg(all(test,not(target_arch="wasm32")))]
+mod upload_capacity_tests;
 mod pixel_transform;
 mod object_sampling;
 mod vector;
@@ -392,6 +395,8 @@ pub enum GpuRasterError {
     InvalidTransform(&'static str),
     MultiplePreviewLayers,
     SizeOverflow,
+    UploadLimit {required:u64,limit:u64},
+    UploadAllocationFailed,
     MapFailed(String),
     WaitFailed(String),
     FilterPreviewCancelled,
@@ -440,6 +445,8 @@ impl fmt::Display for GpuRasterError {
             Self::MultiplePreviewLayers => {
                 formatter.write_str("one frame cannot preview strokes on multiple layers")
             }
+            Self::UploadLimit {required,limit}=>write!(formatter,"Canvas upload requires {required} bytes; device limit is {limit}"),
+            Self::UploadAllocationFailed=>formatter.write_str("Could not allocate canvas upload memory"),
             Self::SizeOverflow => formatter.write_str("GPU buffer size overflow"),
             Self::MapFailed(message) => write!(formatter, "GPU readback mapping failed: {message}"),
             Self::WaitFailed(message) => write!(formatter, "GPU completion wait failed: {message}"),
@@ -2473,44 +2480,65 @@ impl WgpuRasterizer {
     }
 
     fn ensure_upload_capacity(&mut self, dabs: usize, styles: usize) -> Result<(), GpuRasterError> {
-        let dab_bytes = (dabs as u64)
-            .checked_mul(mem::size_of::<DabGpu>() as u64)
-            .ok_or(GpuRasterError::SizeOverflow)?;
-        if dab_bytes > self.dab_capacity_bytes {
-            self.dab_capacity_bytes = dab_bytes.next_power_of_two();
-            self.dab_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("layer dab instances"),
-                size: self.dab_capacity_bytes,
-                usage: wgpu::BufferUsages::VERTEX
-                    | wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+        let capacity=upload_capacity::plan(&self.device.limits(),self.dab_capacity_bytes,self.style_capacity,self.style_stride,dabs,styles)?;
+        if self.style_upload.capacity()<capacity.style_bytes {
+            self.style_upload.try_reserve_exact(capacity.style_bytes.saturating_sub(self.style_upload.len()))
+                .map_err(|_|GpuRasterError::UploadAllocationFailed)?;
         }
-        if styles > self.style_capacity {
-            self.style_capacity = styles.next_power_of_two();
-            self.style_upload_valid.store(false, std::sync::atomic::Ordering::Release);
-            self.style_buffer =
-                create_style_buffer(&self.device, self.style_stride, self.style_capacity);
-            self.style_bind_group =
-                create_style_bind_group(&self.device, &self.style_layout, &self.style_buffer);
-            self.style_upload.reserve(
-                self.style_stride as usize * self.style_capacity - self.style_upload.capacity(),
-            );
+        if dabs>self.dab_upload.capacity() {
+            let maximum=usize::try_from(capacity.dab_bytes/mem::size_of::<DabGpu>() as u64)
+                .map_err(|_|GpuRasterError::SizeOverflow)?;
+            let records=dabs.checked_next_power_of_two().unwrap_or(maximum).min(maximum);
+            self.dab_upload.try_reserve_exact(records.saturating_sub(self.dab_upload.len()))
+                .map_err(|_|GpuRasterError::UploadAllocationFailed)?;
+        }
+        if capacity.dab_bytes!=self.dab_capacity_bytes {
+            self.dab_buffer=self.device.create_buffer(&wgpu::BufferDescriptor {
+                label:Some("layer dab instances"),size:capacity.dab_bytes,
+                usage:wgpu::BufferUsages::VERTEX|wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation:false,
+            });
+            self.dab_capacity_bytes=capacity.dab_bytes;
+        }
+        if capacity.style_records!=self.style_capacity {
+            self.style_upload_valid.store(false,std::sync::atomic::Ordering::Release);
+            self.style_buffer=create_style_buffer(&self.device,self.style_stride,capacity.style_records);
+            self.style_bind_group=create_style_bind_group(&self.device,&self.style_layout,&self.style_buffer);
+            self.style_capacity=capacity.style_records;
         }
         Ok(())
     }
 
+    fn reorders_dabs(&self,batch:&DabBatch)->bool {
+        batch.dab_count!=0 && (pointwise(&batch.style)||ordered_dither(&batch.style))
+            && BrushPassPlan::for_device(&batch.style,&self.device).direct.is_none()
+    }
     fn prepare_uploads(
         &mut self,
         packet: FramePacket<'_>,
         batch_tiles: &mut [Vec<BrushTile>],
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(), GpuRasterError> {
+        if batch_tiles.len()!=packet.dab_batches.len() {return Err(GpuRasterError::InvalidDabRange);}
         let removed_members: Vec<_> = source_access::pending_bakes(packet.scene)
             .flat_map(|(snapshot, scope, _)| snapshot.with_scope(scope).order().iter().copied().filter(|h| packet.scene.occurrence(*h).is_none()).map(move |h| (h, snapshot)))
             .collect();
-        let records = packet.dab_batches.len() + packet.scene.order().len() + removed_members.len();
+        let records=packet.dab_batches.len().checked_add(packet.scene.order().len())
+            .and_then(|count|count.checked_add(removed_members.len())).ok_or(GpuRasterError::SizeOverflow)?;
+        let mut dabs=packet.dabs.len();
+        for (batch,tiles) in packet.dab_batches.iter().zip(batch_tiles.iter()) {
+            let end=batch.first_dab.checked_add(batch.dab_count).ok_or(GpuRasterError::InvalidDabRange)?;
+            if packet.dabs.get(batch.first_dab as usize..end as usize).is_none() {return Err(GpuRasterError::InvalidDabRange);}
+            if !self.reorders_dabs(batch) {continue;}
+            for tile in tiles {
+                if !tile.indices.is_empty() && tile.indices.len()!=tile.dabs.len() {
+                    if tile.indices.iter().any(|&index|index as usize>=packet.dabs.len()) {return Err(GpuRasterError::InvalidDabRange);}
+                    dabs=dabs.checked_add(tile.indices.len()).ok_or(GpuRasterError::SizeOverflow)?;
+                }
+            }
+        }
+        u32::try_from(dabs).map_err(|_|GpuRasterError::SizeOverflow)?;
+        self.ensure_upload_capacity(dabs,records)?;
         self.material_records.restart();
         self.transport_records.restart();
         self.dab_upload.clear();
@@ -2521,20 +2549,18 @@ impl WgpuRasterizer {
             dry_material::prepare_colors(&batch.style, self.device.working_space(), &mut self.dab_upload[range.clone()]);
         }
         for (batch, tiles) in packet.dab_batches.iter().zip(batch_tiles) {
-            if batch.dab_count == 0 || (!pointwise(&batch.style) && !ordered_dither(&batch.style))
-                || BrushPassPlan::for_device(&batch.style, &self.device).direct.is_some() { continue; }
+            if !self.reorders_dabs(batch) {continue;}
             for tile in tiles {
                 if tile.indices.is_empty() || tile.indices.len() == tile.dabs.len() { continue; }
                 let start = u32::try_from(self.dab_upload.len()).map_err(|_| GpuRasterError::SizeOverflow)?;
                 for &index in &tile.indices {
-                    let dab = self.dab_upload[index as usize];
+                    let dab=*self.dab_upload.get(index as usize).ok_or(GpuRasterError::InvalidDabRange)?;
                     self.dab_upload.push(dab);
                 }
                 let end = u32::try_from(self.dab_upload.len()).map_err(|_| GpuRasterError::SizeOverflow)?;
                 tile.dabs = start..end;
             }
         }
-        self.ensure_upload_capacity(self.dab_upload.len(), records)?;
         if !packet.dabs.is_empty() {
             self.uploads.write(
                 encoder,

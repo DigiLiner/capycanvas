@@ -205,6 +205,13 @@ work; its separate diagnostics accessor records only bounded timestamp work.
 Empty or diagnostic submissions can overlap viewport frames without hiding real
 artwork dependencies from native presentation.
 
+Dab and style upload growth checks the device's buffer, storage-binding and
+dynamic-offset limits before replacing either GPU buffer. The preflight includes
+reordered duplicate dabs and validates batch ranges and source indices before
+staging changes. CPU staging reserves bounded geometric capacity before GPU
+replacement; a limit or CPU allocation refusal preserves existing GPU buffers
+and the style cache. GPU allocation failure follows renderer recovery.
+
 When the view is reduced, each screen pixel spans one to two texels of the
 display level and reads only that level, bilinearly. A bilinear sample of the
 finer level stays closer to the pixel's area average than a blend with the

@@ -27,6 +27,12 @@ The Web `--heal-portability` journey checks Spot Healing's real direct and
 indirect dispatches against its explicit bind-group layouts. It waits for
 healing and raster publication before checking mouse/pen pixels and Undo.
 
+`upload_capacity_tests` uses actual device limits to reject oversized dab/style
+growth, counts reordered duplicates, and checks malformed batch/index refusal
+before GPU buffer, style-cache or tile-range changes. Pure capacity tests cover
+capped geometric growth and arithmetic overflow. The sparse Dither contact
+oracle compares healthy reordered uploads with rectangular exact pixels.
+
 `shader_limits::tests` checks per-entry workgroup storage reachability, WGSL
 layout and WebGPU's per-variable padding without a GPU. The preparation tests
 exercise exact-limit acceptance and padded overflow refusal before pipeline
