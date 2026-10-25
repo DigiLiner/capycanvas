@@ -22,8 +22,29 @@ function fixture(module) {
     close(){for(const [k,v]of Object.entries(original))globalThis[k]=v;}};
 }
 async function withFixture(body){const f=fixture();try{await body(f);}finally{f.close();}}
-const request=(operation='snapshot',extra={})=>({operation,metadata:'{}',buffers:[],...extra});
+const request=(operation='snapshot',extra={})=>({operation,metadata:'{}',buffers:[],...(operation==='read'?{file:new Blob(['input'])}:{}),...extra});
 const transfer=(kind='artwork',metadata='descriptor',buffers=[new Uint8Array([3,7,11])])=>({transfer_kind:kind,metadata,buffers});
+
+test('encoded inputs clone their Blob without a whole-input buffer transfer',()=>withFixture(async f=>{
+  const file=new Blob([new Uint8Array(9*1024*1024)]);
+  file.arrayBuffer=()=>{throw Error('Whole file read');};
+  const pending=f.run(request('read',{file})),parent=f.workers[0];
+  assert.equal(parent.messages[0].request.file,file);
+  assert.deepEqual(parent.messages[0].request.buffers,[]);
+  assert.deepEqual(parent.transfers[0],[]);
+  parent.reply(transfer());await f.flush();f.workers[1].reply(transfer());
+  const result=await pending;assert.ok(f.run.consume('artwork','descriptor',result.buffers));
+  assert.equal(parent.terminated,true);
+}));
+
+test('invalid Blob inputs fail before a file worker is created',()=>withFixture(async f=>{
+  for(const size of [NaN,-1,1.5,1024*1024*1024+1]) {
+    const file=new Blob();Object.defineProperty(file,'size',{value:size});
+    await assert.rejects(f.run(request('read',{file})),/Invalid file read input/);
+  }
+  await assert.rejects(f.run(request('read',{file:{size:4}})),/Invalid file read input/);
+  assert.equal(f.workers.length,0);
+}));
 
 test('each worker receives the shared compiled module once, including idle replacements',async()=>{
   const module=new WebAssembly.Module(new Uint8Array([0,97,115,109,1,0,0,0])),f=fixture(module);

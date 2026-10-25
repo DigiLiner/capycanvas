@@ -101,9 +101,14 @@ pub(super) async fn save(capture:ArtworkCapture)->Result<JsValue,JsValue>{let wi
 pub(super) struct OpenOptions {pub dimension:u32,pub photo_policy:layer_ui::PhotoOpenPolicy,pub names:layer_core::DocumentNames,pub intent:layer_ui::ImportIntent,#[serde(default)]pub source_bytes:Option<usize>}
 pub(super) type Preserved = (layer_ui::PackagePresentation,Option<js_sys::Object>);
 pub(super) enum Opened {Editable {document:layer_ui::ImportedDocument,fallback:Option<Preserved>},Package {presentation:layer_ui::PackagePresentation,preview:Option<js_sys::Object>}}
-pub(super) async fn open(bytes:js_sys::Uint8Array,options:OpenOptions)->Result<Opened,JsValue>{
-    let buffers=js_sys::Array::new();buffers.push(&bytes);
-    let wire=JsFuture::from(raster_worker::call("read",&serde_json::to_string(&options).map_err(js)?,&buffers)?).await?;
+pub(super) async fn open(file:web_sys::Blob,options:OpenOptions,cancelled:Option<js_sys::Function>)->Result<Opened,JsValue>{
+    let request=js_sys::Object::new();
+    js_sys::Reflect::set(&request,&js("operation"),&js("read"))?;
+    js_sys::Reflect::set(&request,&js("metadata"),&js(serde_json::to_string(&options).map_err(js)?))?;
+    js_sys::Reflect::set(&request,&js("buffers"),&js_sys::Array::new())?;
+    js_sys::Reflect::set(&request,&js("file"),&file)?;
+    if let Some(cancelled)=cancelled {js_sys::Reflect::set(&request,&js("cancelled"),&cancelled)?;}
+    let wire=JsFuture::from(raster_worker::request(&request)?).await?;
     let presentation=js_sys::Reflect::get(&wire,&js("package"))?;
     if !presentation.is_undefined(){
         let presentation=serde_wasm_bindgen::from_value(presentation).map_err(js)?;
@@ -122,11 +127,13 @@ pub(super) async fn open(bytes:js_sys::Uint8Array,options:OpenOptions)->Result<O
     Ok(Opened::Editable {document:layer_ui::ImportedDocument::new(document,source),fallback})
 }
 #[wasm_bindgen]
-pub async fn raster_worker_read(options:&str,bytes:Vec<u8>)->Result<JsValue,JsValue>{
+pub async fn raster_worker_read(options:&str,file:web_sys::Blob)->Result<JsValue,JsValue>{
+    if options.len()>64*1024 {return Err(js("Oversized file read options"));}
     let options:OpenOptions=serde_json::from_str(options).map_err(js)?;
+    let backing=blob::Backing::new(file)?;
     let mut photo_limits=layer_color::photo::DecodeLimits::from_memory_budget(photo_memory_budget());
     if let Some(remaining)=options.source_bytes{photo_limits.source_bytes=photo_limits.source_bytes.min(remaining);}
-    let imported=layer_ui::read_import(std::io::Cursor::new(&bytes),options.intent,options.photo_policy,options.names,limits(options.dimension),photo_limits,&Default::default()).map_err(js)?;
+    let imported=layer_ui::read_import_backing(backing.source.clone(),options.intent,options.photo_policy,options.names,limits(options.dimension),photo_limits,&Default::default()).map_err(js)?;
     match imported {
         layer_ui::ImportOutcome::Editable(imported)=>{
             if let Err(reason)=hdr::admit_document(&imported.project){

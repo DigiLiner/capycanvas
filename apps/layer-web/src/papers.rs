@@ -62,12 +62,15 @@ fn library_error(error: PaperLibraryError) -> JsValue {
 
 /// Library policy for the worker store: one request in, metadata and buffers out.
 #[wasm_bindgen]
-pub fn raster_worker_paper(metadata: &str, buffers: js_sys::Array) -> Result<js_sys::Object, JsValue> {
+pub fn raster_worker_paper(metadata: &str, buffers: js_sys::Array,file:Option<web_sys::Blob>) -> Result<js_sys::Object, JsValue> {
     let (metadata, buffers) = match serde_json::from_str(metadata).map_err(js)? {
         WorkerPaper::Import { name, stored } => {
-            let bytes = buffers.get(0).dyn_into::<js_sys::Uint8Array>()?.to_vec();
+            let input=blob::Backing::new(file.ok_or_else(||js(UNSUPPORTED))?)?;
+            if input.source.byte_len()>MAX_IMAGE_BYTES as u64 {return Err(js(UNSUPPORTED));}
+            let cancelled=Default::default();
+            let reader=layer_core::package::transport::BackingReader::new(&input.source,&cancelled);
             let mut images = layer_ui::ImageImportBatch::new(Default::default(), layer_core::color::RgbSpace::ProPhoto, Default::default());
-            images.read(std::io::Cursor::new(bytes), &name, &Default::default()).map_err(js)?;
+            images.read(reader, &name, &cancelled).map_err(js)?;
             let (_, source) = images.take_sources(false).map_err(js)?.into_iter().next().ok_or_else(|| js(UNSUPPORTED))?;
             let paper = layer_ui::paper_library::library_paper(&source, &|| false).map_err(library_error)?;
             prepared(&paper, &name, &stored)?
@@ -152,8 +155,13 @@ async fn paper(reply: &JsValue) -> Result<SourceImage, String> {
     let transfer:Transfer=serde_json::from_str(&metadata).map_err(|e|e.to_string())?;transfer.receive(&tiles,0,validated)
 }
 
-async fn library(request: serde_json::Value, buffers: js_sys::Array, localization: &layer_ui::Localizer) -> Result<JsValue, String> {
-    JsFuture::from(raster_worker::call("paper-library", &request.to_string(), &buffers).map_err(|e| format!("{e:?}"))?).await.map_err(|error| {
+async fn library(request: serde_json::Value, buffers: js_sys::Array,file:Option<web_sys::Blob>, localization: &layer_ui::Localizer) -> Result<JsValue, String> {
+    let packet=js_sys::Object::new();
+    js_sys::Reflect::set(&packet,&js("operation"),&js("paper-library")).map_err(|error|format!("{error:?}"))?;
+    js_sys::Reflect::set(&packet,&js("metadata"),&js(request.to_string())).map_err(|error|format!("{error:?}"))?;
+    js_sys::Reflect::set(&packet,&js("buffers"),&buffers).map_err(|error|format!("{error:?}"))?;
+    if let Some(file)=file {js_sys::Reflect::set(&packet,&js("file"),&file).map_err(|error|format!("{error:?}"))?;}
+    JsFuture::from(raster_worker::request(&packet).map_err(|e|format!("{e:?}"))?).await.map_err(|error| {
         let text = color_preferences::diagnostic_text(&error);
         match text.as_str() {
             FULL => PaperLibraryError::Full.message(localization),
@@ -168,7 +176,7 @@ async fn load(id: &str, retained: &[layer_core::Image], localization: &layer_ui:
     let parent = layer_ui::paper_library::paper_image_id(id).ok_or("Unknown paper")?;
     let retained = retained.iter().find(|image| image.id() == parent);
     let transfer = retained.map(|image| Transfer::send(image.storage(), &buffers)).transpose()?;
-    let reply = library(serde_json::json!({"operation": "load", "id": id, "retained": transfer}), buffers, localization).await?;
+    let reply = library(serde_json::json!({"operation": "load", "id": id, "retained": transfer}), buffers,None, localization).await?;
     let kept = js_sys::Reflect::get(&reply, &js("metadata")).ok().and_then(|m| js_sys::Reflect::get(&m, &js("retained")).ok()).and_then(|v| v.as_bool()).unwrap_or(false);
     match retained.filter(|_| kept) { Some(image) => Ok(image.storage().as_ref().clone()), None => paper(&reply).await }
 }
@@ -185,18 +193,16 @@ pub(super) async fn texture(material: &PaperMaterial, retained: &[layer_core::Im
 async fn run(capture: &PaperCapture, file: JsValue, localization: &layer_ui::Localizer) -> Result<PaperResult, String> {
     let none = js_sys::Array::new;
     Ok(match &capture.action {
-        None => PaperResult::Entries(entries(&library(serde_json::json!({"operation": "list"}), none(), localization).await?)?),
+        None => PaperResult::Entries(entries(&library(serde_json::json!({"operation": "list"}), none(),None, localization).await?)?),
         Some(PaperRequest::Load { id }) => PaperResult::Loaded(id.clone(), load(id, &capture.retained, localization).await?),
         Some(PaperRequest::Import { layer }) => {
             let failed = || PaperLibraryError::Unsupported.message(localization);
             if file.is_null() || file.is_undefined() { return Err(failed()); }
             let name = js_sys::Reflect::get(&file, &js("name")).ok().and_then(|n| n.as_string()).unwrap_or_default();
             let name = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).to_string();
-            let size = js_sys::Reflect::get(&file, &js("size")).ok().and_then(|s| s.as_f64()).ok_or_else(failed)?;
-            if size > MAX_IMAGE_BYTES { return Err(failed()); }
-            let read = js_sys::Reflect::get(&file, &js("arrayBuffer")).map_err(|_| failed())?.dyn_into::<js_sys::Function>().map_err(|_| failed())?;
-            let bytes = JsFuture::from(js_sys::Promise::resolve(&read.call0(&file).map_err(|e| format!("{e:?}"))?)).await.map_err(|e| format!("{e:?}"))?;
-            let reply = library(serde_json::json!({"operation": "import", "name": name}), js_sys::Array::of1(&js_sys::Uint8Array::new(&bytes)), localization).await?;
+            let file=file.dyn_into::<web_sys::Blob>().map_err(|_|failed())?;
+            let size=file.size();if !size.is_finite() || size<0. || size>MAX_IMAGE_BYTES {return Err(failed());}
+            let reply=library(serde_json::json!({"operation":"import","name":name}),none(),Some(file),localization).await?;
             let metadata = js_sys::Reflect::get(&reply, &js("metadata")).map_err(|_| failed())?;
             let id = js_sys::Reflect::get(&metadata, &js("id")).ok().and_then(|id| id.as_string()).ok_or_else(failed)?;
             let image = layer_ui::paper_library::canonical_source(&id, paper(&reply).await?, &capture.retained)?;
@@ -206,10 +212,10 @@ async fn run(capture: &PaperCapture, file: JsValue, localization: &layer_ui::Loc
             let image = capture.image.as_ref().ok_or_else(|| PaperLibraryError::Unsupported.message(localization))?;
             let buffers = none();
             let transfer = Transfer::send(image, &buffers)?;
-            PaperResult::Entries(entries(&library(serde_json::json!({"operation": "store", "name": name, "paper": transfer}), buffers, localization).await?)?)
+            PaperResult::Entries(entries(&library(serde_json::json!({"operation": "store", "name": name, "paper": transfer}), buffers,None, localization).await?)?)
         }
-        Some(PaperRequest::Rename { id, name }) => PaperResult::Entries(entries(&library(serde_json::json!({"operation": "rename", "id": id, "name": name}), none(), localization).await?)?),
-        Some(PaperRequest::Delete { id }) => PaperResult::Entries(entries(&library(serde_json::json!({"operation": "delete", "id": id}), none(), localization).await?)?),
+        Some(PaperRequest::Rename { id, name }) => PaperResult::Entries(entries(&library(serde_json::json!({"operation": "rename", "id": id, "name": name}), none(),None, localization).await?)?),
+        Some(PaperRequest::Delete { id }) => PaperResult::Entries(entries(&library(serde_json::json!({"operation": "delete", "id": id}), none(),None, localization).await?)?),
     })
 }
 

@@ -224,7 +224,7 @@ impl WebApp {
     pub fn prepare_document(
         &self,
         id: u32,
-        bytes: Option<js_sys::Uint8Array>,
+        file: Option<web_sys::Blob>,
         epoch: u64,
         revision: u64,
         source_name: Option<String>,
@@ -232,9 +232,6 @@ impl WebApp {
         cancelled: Option<js_sys::Function>,
     ) -> Result<js_sys::Promise, JsValue> {
         self.session.require_document_idle().map_err(js)?;
-        if let Some(bytes) = &bytes {
-            self.admit_document_input(bytes.length() as u64, bytes.subarray(0, 4))?;
-        }
         if self.session.state().document_file.epoch != epoch
             || self.session.engine().document().revision != revision
         {
@@ -256,7 +253,7 @@ impl WebApp {
             })
         .ok_or_else(|| js("The document request is no longer active"))?;
         if !matches!(
-            (&request, &bytes),
+            (&request, &file),
             (
                 DocumentRequest::Open | DocumentRequest::Place | DocumentRequest::Paste { .. },
                 Some(_)
@@ -308,17 +305,17 @@ impl WebApp {
             };
             let source_name = source_name.unwrap_or_default();
             let mut warning = None;
-            let imported = match bytes {
-                Some(bytes) => {
+            let imported = match file {
+                Some(file) => {
                     artwork_transfer::open(
-                        bytes,
+                        file,
                         artwork_transfer::OpenOptions {
                             dimension: limits.dimension,
                             photo_policy,
                             names: layer_ui::photo_document_names(&source_name, &localization),
                             intent: if placing { layer_ui::ImportIntent::Place } else { layer_ui::ImportIntent::Open },
                             source_bytes: None,
-                        },
+                        },cancelled.clone(),
                     )
                     .await?
                 }

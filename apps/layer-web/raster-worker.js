@@ -63,7 +63,7 @@ async function execute({id,request}) {
       case "nearest-coordinates": result = wasm.raster_worker_nearest_coordinates(request.metadata); break;
       case "lookup": result = wasm.raster_worker_lookup(request.metadata,request.buffers[0]); break;
       case "profile-library": result=await navigator.locks.request("capy-profile-library",()=>profileLibrary(JSON.parse(request.metadata),request.buffers[0]));break;
-      case "paper-library": result=await navigator.locks.request("capy-paper-library",()=>paperLibrary(JSON.parse(request.metadata),request.buffers));break;
+      case "paper-library": result=await navigator.locks.request("capy-paper-library",()=>paperLibrary(JSON.parse(request.metadata),request.buffers,request.file));break;
       case "export-presets": result=await navigator.locks.request("capy-export-presets",async()=>{
         const bytes=await colorPreferences("readonly",store=>store.get("export-presets"));
         const prepared=wasm.raster_worker_export_presets(request.metadata,bytes instanceof Uint8Array?bytes:new Uint8Array());
@@ -76,7 +76,7 @@ async function execute({id,request}) {
       case "source-profile": result = wasm.raster_worker_source_profile(request.metadata); break;
       case "source-rasterize": result = await wasm.raster_worker_source_rasterize(request.metadata,request.buffers); break;
       case "color-convert": result = await wasm.raster_worker_color(request.metadata,request.buffers); break;
-      case "read": result = await wasm.raster_worker_read(request.metadata,request.buffers[0]); break;
+      case "read": result = await wasm.raster_worker_read(request.metadata,request.file); break;
       case "output-begin": result = await beginOutput(); break;
       case "output-band": {
         const job=outputJob(request.metadata),bytes=request.buffers[0];
@@ -181,8 +181,8 @@ async function paperStore(mode,operation) {
   });}finally{database.close();}
 }
 
-async function paperLibrary(request,buffers) {
-  const policy=(action,data=[])=>wasm.raster_worker_paper(JSON.stringify(action),data);
+async function paperLibrary(request,buffers,file) {
+  const policy=(action,data=[])=>wasm.raster_worker_paper(JSON.stringify(action),data,file);
   const listed=async()=>{
     const ids=await paperStore("readonly",store=>store.getAllKeys()),records=await paperStore("readonly",store=>store.getAll());
     return {entries:records.map((record,i)=>({id:ids[i],name:record.name,bytes:record.png.length})),previews:records.map(record=>record.preview)};

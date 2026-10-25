@@ -101,10 +101,17 @@ preview export retains the verified original PNG and refuses the original file h
 manual-save worker retains its output job and storage lock until publication
 finishes and the host closes the job.
 
-Before a selected document is read into an ArrayBuffer, the host reads its four-byte
-prefix and asks shared Rust to admit its size against the package or photo input
-budget. Admitted files are still acquired in full; range-based Blob transport
-and a budget across concurrent jobs remain separate work.
+The host reads a selected document's four-byte prefix and asks shared Rust to
+admit its size against the package or photo input budget. It passes the original
+Blob to a file worker. That worker repeats admission and reads slices of at most
+8 MiB through FileReaderSync; opening, image placement and paper import never
+materialize the entire encoded input on the page. Native packages use that
+backing directly instead of spooling a second copy. The worker owns the Blob
+registration until decoding and result transfer finish, and rejects stale or
+cross-thread reads. Unsupported files retain the original Blob for Copy Original.
+This relies on the browser's [immutable Blob contract](https://www.w3.org/TR/FileAPI/);
+it does not verify the browser implementation or impose an aggregate memory quota.
+
 
 Clipboard output carries the full-depth source transfer and a separate PNG for
 other applications. The PNG is a separate reply field, so it cannot change the source transfer

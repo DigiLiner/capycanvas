@@ -193,6 +193,30 @@ pub fn read_import(
     input: impl Read + Seek,
     intent: ImportIntent,
     policy: PhotoOpenPolicy,
+    names: DocumentNames,
+    project_limits: ProjectLimits,
+    photo_limits: layer_color::photo::DecodeLimits,
+    cancelled: &AtomicBool,
+) -> Result<ImportOutcome, String> {
+    read_import_input(ImportInput {reader:input,backing:None},intent,policy,names,project_limits,photo_limits,cancelled)
+}
+pub fn read_import_backing(
+    backing: layer_core::package::ImmutableBacking,
+    intent: ImportIntent,
+    policy: PhotoOpenPolicy,
+    names: DocumentNames,
+    project_limits: ProjectLimits,
+    photo_limits: layer_color::photo::DecodeLimits,
+    cancelled: &AtomicBool,
+) -> Result<ImportOutcome, String> {
+    let reader=layer_core::package::transport::BackingReader::new(&backing,cancelled);
+    read_import_input(ImportInput {reader,backing:Some(backing.clone())},intent,policy,names,project_limits,photo_limits,cancelled)
+}
+struct ImportInput<R> {reader:R,backing:Option<layer_core::package::ImmutableBacking>}
+fn read_import_input(
+    input: ImportInput<impl Read+Seek>,
+    intent: ImportIntent,
+    policy: PhotoOpenPolicy,
     mut names: DocumentNames,
     project_limits: ProjectLimits,
     photo_limits: layer_color::photo::DecodeLimits,
@@ -201,13 +225,14 @@ pub fn read_import(
     if cancelled.load(std::sync::atomic::Ordering::Acquire) {
         return Err("Image import cancelled".into());
     }
-    let mut reader = BufReader::new(input);
+    let mut reader = BufReader::new(input.reader);
     let source = ImportSource::identify(reader.fill_buf().map_err(|e| e.to_string())?, intent)?;
+    if let Some(backing)=&input.backing {source.admit_input_bytes(backing.byte_len(),project_limits,photo_limits)?;}
     let mut native = None;
     let project = match source {
         ImportSource::Master => {
             let limit = source.input_bytes_limit(project_limits, photo_limits);
-            let backing = package_backing(&mut reader, limit, cancelled)?;
+            let backing = match input.backing {Some(backing)=>backing,None=>package_backing(&mut reader,limit,cancelled)?};
             let outcome = layer_core::package::codec::open(backing, project_limits, cancelled)?;
             match outcome {
                 layer_core::package::codec::OpenOutcome::Candidate { artwork, source, preview } => {
@@ -458,6 +483,42 @@ mod tests {
             ImportOutcome::Editable(document) => Ok(document),
             ImportOutcome::Package(outcome) => Err(format!("Expected editable artwork: {outcome:?}")),
         }
+    }
+
+    #[test]
+    fn immutable_import_keeps_the_original_backing_instead_of_spooling_it_again() {
+        let names=photo_document_names("Immutable",&crate::Localizer::shared(crate::UiLanguage::English));
+        let document=PhotoOpenPolicy::default().photo_project(source(),Default::default(),names.clone()).unwrap();
+        let bytes:std::sync::Arc<[u8]>=native_bytes(&document).into();
+        let backing=layer_core::package::ImmutableBacking::new(std::sync::Arc::new(bytes)).unwrap();
+        let imported=read_import_backing(backing.clone(),ImportIntent::Open,Default::default(),names,Default::default(),Default::default(),&Default::default()).unwrap();
+        let ImportOutcome::Editable(imported)=imported else {panic!("Editable native package");};
+        assert_eq!(imported.native.as_ref().unwrap().source.identity(),backing.identity());
+        assert_eq!(imported.project.composition().color,document.composition().color);
+        assert_eq!(photo_source(&imported.project),photo_source(&document));
+    }
+
+    #[test]
+    fn immutable_import_checks_length_and_cancellation_before_decoding() {
+        use layer_core::package::{ByteSource,ByteRange,RangeState,ImmutableBacking};
+        use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+        struct Source(Arc<AtomicUsize>);
+        impl ByteSource for Source {
+            fn byte_len(&self)->u64 {1024}
+            fn poll(&self,_offset:u64,length:usize)->Result<RangeState,String> {
+                self.0.fetch_add(1,Ordering::Relaxed);
+                Ok(RangeState::Ready(ByteRange::new(vec![0;length].into(),0..length).unwrap()))
+            }
+        }
+        let calls=Arc::new(AtomicUsize::new(0));
+        let names=photo_document_names("Immutable",&crate::Localizer::shared(crate::UiLanguage::English));
+        let backing=ImmutableBacking::new(Arc::new(Source(calls.clone()))).unwrap();
+        let result=read_import_backing(backing.clone(),ImportIntent::Open,Default::default(),names.clone(),Default::default(),Default::default(),&AtomicBool::new(true));
+        assert!(result.is_err());assert_eq!(calls.load(Ordering::Relaxed),0);
+        let limits=layer_color::photo::DecodeLimits {codec_bytes:1000,..Default::default()};
+        let result=read_import_backing(backing,ImportIntent::Open,Default::default(),names,Default::default(),limits,&Default::default());
+        assert!(result.err().unwrap().contains("encoded image exceeds"));
+        assert_eq!(calls.load(Ordering::Relaxed),1);
     }
     fn native_with_preview(document: &Document, preview: layer_core::package::preview::Preview) -> Vec<u8> {
         layer_core::temp_files::set_directory(std::env::temp_dir()).unwrap();

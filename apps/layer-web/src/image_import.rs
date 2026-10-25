@@ -41,26 +41,19 @@ async fn read_source(file: JsValue, photo_policy: layer_ui::PhotoOpenPolicy, sou
     let name = js_sys::Reflect::get(&file, &js("name"))?
         .as_string()
         .unwrap_or_else(|| "Image".into());
-    let size = js_sys::Reflect::get(&file, &js("size"))?
-        .as_f64()
-        .ok_or_else(|| js("Invalid image file"))?;
-    if size > 512. * 1024. * 1024. {
-        return Err(js("Image file exceeds 512 MiB"));
-    }
-    let read = js_sys::Reflect::get(&file, &js("arrayBuffer"))?
-        .dyn_into::<js_sys::Function>()?;
-    let buffer = JsFuture::from(js_sys::Promise::resolve(&read.call0(&file)?)).await?;
+    let file=file.dyn_into::<web_sys::Blob>().map_err(|_|js("Invalid image file"))?;
+    let active=control.clone();
+    let cancelled=wasm_bindgen::closure::Closure::<dyn Fn()->bool>::new(move||active.is_cancelled());
     output::cancelled(control)?;
-    let bytes = js_sys::Uint8Array::new(&buffer);
     let imported = artwork_transfer::open(
-        bytes,
+        file,
         artwork_transfer::OpenOptions {
             dimension: layer_core::ProjectLimits::default().dimension,
             photo_policy,
             names: layer_ui::photo_document_names(&name, localization),
             intent: layer_ui::ImportIntent::Place,
             source_bytes: Some(source_bytes),
-        },
+        },Some(cancelled.as_ref().unchecked_ref::<js_sys::Function>().clone()),
     )
     .await?;
     let project=match imported {

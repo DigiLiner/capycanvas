@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {measurePlacedPhotos,placementSave} from './image-placement-motion.test.mjs';
 import {createDrawing} from './new-drawing-fixture.mjs';
+import {checkBlobReads} from './blob-read-fixture.mjs';
 
 const map=([a,b,c,d,e,f],x,y)=>[a*x+c*y+e,b*x+d*y+f];
 const unmap=([a,b,c,d,e,f],[x,y])=>{const det=a*d-b*c;return[(d*(x-e)-c*(y-f))/det,(-b*(x-e)+a*(y-f))/det];};
@@ -82,18 +83,24 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     await evaluate(`layerApp.dispatch({type:'select_layer',id:${row.id}n})`);await settle();
     assert.deepEqual(await selectedImages(),[row.id]);
   };
-  let files;
+  let files,blobReads;
   try {
     await call('Page.setInterceptFileChooserDialog',{enabled:true});
+    blobReads=await checkBlobReads(evaluate);
     await evaluate(`window.placementTest={open:window.showOpenFilePicker,save:window.showSaveFilePicker};window.showOpenFilePicker=undefined;
-      window.showSaveFilePicker=async o=>({name:o.suggestedName,async createWritable(){return{async write(b){placementTest.saved=new Uint8Array(b instanceof Blob?await b.arrayBuffer():b)},async close(){},async abort(){}}}});
+      window.showSaveFilePicker=async o=>({name:o.suggestedName,async createWritable(){return{async write(b){placementTest.saved=new Uint8Array(b instanceof Blob?await blobReadChecks.read(b):b)},async close(){},async abort(){}}}});
       layerApp.dispatch({type:'preferences',action:{type:'edit',id:'missing_profile',value:0}});`);
     if(process.env.LAYER_PHOTO_FILES)files=JSON.parse(process.env.LAYER_PHOTO_FILES);
     else {
       files=[];
       for(const [i,w,h] of [[0,3000,2400],[1,800,600]]){
-        const bytes=png(w,h,(x,y)=>{const t=(x/w+y/h)/2;return [Math.round(255*(1-t)),0,Math.round(255*t),x===0||y===0||x===w-1||y===h-1?0:255];},4);
+        const bytes=png(w,h,(x,y)=>{
+          const alpha=x===0||y===0||x===w-1||y===h-1?0:255;
+          if(i===0){let hash=Math.imul(x+1,0x9e3779b1)^Math.imul(y+1,0x85ebca77);hash=Math.imul(hash^hash>>>16,0x7feb352d);hash=Math.imul(hash^hash>>>15,0x846ca68b);hash^=hash>>>16;return[32+(hash>>>0)%224,0,16+(hash>>>8)%240,alpha];}
+          const t=(x/w+y/h)/2;return[Math.round(255*(1-t)),0,Math.round(255*t),alpha];
+        },4);
         assert.equal(bytes[25],6,'Photo fixture retains transparent RGBA edges');
+        if(i===0){assert.ok(bytes.length>8*1024*1024,'The valid deterministic-noise photo exceeds one Blob range');console.log('Blob photo fixture bytes:',bytes.length);}
         const path=join(root,`photo-${i}.png`);await writeFile(path,new Uint8Array(bytes));files.push(path);
       }
     }
@@ -137,12 +144,30 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     }
     await invoke('undo');assert.equal((await state()).layers.length,baseCount,'Placement is one undo step');
     await invoke('redo');assert.equal((await state()).layers.length,baseCount+files.length);
-    await evaluate(`window.showOpenFilePicker=async()=>[{async getFile(){return new File([placementTest.saved],'placed.capy')}}]`);
-    await invoke('open_document');await idle();await wait('layerApp.app.brush_ready()');
-    await evaluate('window.showOpenFilePicker=undefined');
-    assert.deepEqual(imageIdentity(await save()),sources,'Reopen keeps image identity and samples');
-    await evaluate('layerApp.restartGpu()');await wait('layerApp.app.brush_ready()');
-    assert.deepEqual(imageIdentity(await save()),sources,'GPU replacement retains placed images');
+    const archiveBytes=await evaluate('placementTest.saved.byteLength');
+    if(!process.env.LAYER_PHOTO_FILES)assert.ok(archiveBytes>8*1024*1024,'The native drawing exceeds one Blob range');
+    await evaluate('placementTest.blobMaster=placementTest.saved.slice();void 0');
+    for(const theme of ['light','dark']){
+      await evaluate(`layerApp.dispatch({type:'set_theme',theme:${JSON.stringify(theme)}});window.showOpenFilePicker=async()=>[{async getFile(){return new File([placementTest.blobMaster],'placed.capy')}}]`);await settle();
+      await invoke('open_document');await idle();await wait('layerApp.app.brush_ready()');
+      await evaluate('window.showOpenFilePicker=undefined');
+      assert.deepEqual(imageIdentity(await save()),sources,'Reopen keeps image identity and exact immutable source bytes');
+      await evaluate('layerApp.restartGpu()');await wait('layerApp.app.brush_ready()');
+      assert.deepEqual(imageIdentity(await save()),sources,'GPU replacement retains placed images');
+
+      await evaluate(`placementTest.post=Worker.prototype.postMessage;Worker.prototype.postMessage=function(message,transfers){if(message.request?.operation==='read'){const owner=this;placementTest.release=()=>placementTest.post.call(owner,message,transfers);}else placementTest.post.call(this,message,transfers);}`);
+      const pendingLayers=(await state()).layers.length;
+      await invoke('import_image');await choose([files[0]]);await wait('placementTest.release');
+      await click('.file-progress button');await evaluate('Worker.prototype.postMessage=placementTest.post;placementTest.release();delete placementTest.release');await idle();
+      assert.equal((await state()).layers.length,pendingLayers,'A cancelled read publishes nothing');
+      await evaluate(`Worker.prototype.postMessage=function(message,transfers){if(message.request?.operation==='read'){const owner=this;placementTest.release=()=>placementTest.post.call(owner,message,transfers);}else placementTest.post.call(this,message,transfers);}`);
+      await invoke('import_image');await choose([files[0]]);await wait('placementTest.release');
+      await evaluate('layerApp.restartGpu()');await wait('layerApp.app.brush_ready()');
+      await evaluate('Worker.prototype.postMessage=placementTest.post;placementTest.release();delete placementTest.release');await idle();
+      assert.equal((await state()).layers.length,pendingLayers,'A read from the retired GPU cannot publish layers');
+      assert.deepEqual(imageIdentity(await save()),sources,'Cancellation and stale completion preserve every source byte');
+      console.log('PASS bounded Blob input:',theme,{archive_bytes:archiveBytes,...await blobReads.verify()},'native reopen, exact source identity, cancellation and stale owner');
+    }
     if(!process.env.LAYER_PHOTO_FILES) {
       let photoPixel;
       for(const end=Date.now()+60000;Date.now()<end;await new Promise(r=>setTimeout(r,200))){photoPixel=await pixelAt(400,300);if(photoPixel[0]>20&&photoPixel[1]<60&&photoPixel[2]>10)break;}
@@ -150,7 +175,7 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     }
     console.log('Image placement: batch, Cancel, fit, one-step history, reopen and GPU replacement passed');
 
-    await evaluate('placementTest.placedMaster=placementTest.saved.slice()');
+    await evaluate('placementTest.placedMaster=placementTest.saved.slice();void 0');
     const reopened=await save(),large=objectsIn(reopened).find(o=>extent(reopened,o)[0]===Math.max(...objectsIn(reopened).map(o=>extent(reopened,o)[0]))),largeExtent=extent(reopened,large);
     const objectAffine=async()=>affine(packageObject(await save(),large.id));
     const start=affine(large),largeCentre=map(start,largeExtent[0]/2,largeExtent[1]/2);
@@ -277,17 +302,6 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     assert.ok(pasted.some(image=>originalContents.some(original=>JSON.stringify(image)===JSON.stringify(original))),'Clipboard retains original source samples');
     await invoke('undo');assert.equal((await state()).layers.length,countBefore);
 
-    await evaluate(`placementTest.read=File.prototype.arrayBuffer;File.prototype.arrayBuffer=function(){const file=this;return new Promise(resolve=>{placementTest.release=()=>placementTest.read.call(file).then(resolve)})}`);
-    const pendingLayers=(await state()).layers.length;
-    await invoke('import_image');await choose([files[0]]);await wait('placementTest.release');
-    await click('.file-progress button');await evaluate('File.prototype.arrayBuffer=placementTest.read;placementTest.release();delete placementTest.release');await idle();
-    assert.equal((await state()).layers.length,pendingLayers,'A cancelled read publishes nothing');
-    await evaluate(`File.prototype.arrayBuffer=function(){const file=this;return new Promise(resolve=>{placementTest.release=()=>placementTest.read.call(file).then(resolve)})}`);
-    await invoke('import_image');await choose([files[0]]);await wait('placementTest.release');
-    await evaluate('layerApp.restartGpu()');await wait('layerApp.app.brush_ready()');
-    await evaluate('File.prototype.arrayBuffer=placementTest.read;placementTest.release();delete placementTest.release');await idle();
-    assert.equal((await state()).layers.length,pendingLayers,'A read from the retired GPU cannot publish layers');
-
     await evaluate(`layerApp.dispatch({type:'layer',action:{op:'new',group:true,clipped:false}})`);await settle();
     const group=(await state()).layers.find(l=>l.group),groupCount=(await state()).layers.length;
     const rowPoint=await evaluate(`(()=>{const r=document.querySelector('.layer-row[data-layer="${group.id}"]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
@@ -383,11 +397,13 @@ export async function checkImagePlacement({call,evaluate,settle}) {
       }
       await call('Emulation.clearDeviceMetricsOverride');
     }
-    console.log('Image placement: Open, batches, image layers, transforms, rasterize, mask, malformed/stale/cancelled requests, canvas/row/group/locked drops, clipboard and compact controls passed');
+    await blobReads.verify();
+    console.log('Image placement: Open, batches, image layers, transforms, rasterize, mask, malformed/stale/cancelled requests, canvas/row/group/locked drops, clipboard, compact controls and bounded Blob reads passed');
   } finally {
     await call('Page.setInterceptFileChooserDialog',{enabled:false});
-    await evaluate('if(placementTest.read)File.prototype.arrayBuffer=placementTest.read');
+    await evaluate('if(placementTest.post)Worker.prototype.postMessage=placementTest.post');
     await evaluate('window.showOpenFilePicker=placementTest.open;window.showSaveFilePicker=placementTest.save;delete window.placementTest');
+    await blobReads?.close();
     await rm(root,{recursive:true,force:true});
   }
 }

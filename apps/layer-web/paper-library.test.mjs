@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {checkBlobReads} from './blob-read-fixture.mjs';
 
 export async function checkPaperLibrary({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/texture-dialog/web';
   await mkdir(directory,{recursive:true});
+  const blobReads=await checkBlobReads(evaluate);
+  try{
   const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
   const wait=(condition,timeout=30000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
   const texture="layerApp.state().layer_properties.controls.find(c=>c.key==='texture')";
@@ -106,5 +109,6 @@ export async function checkPaperLibrary({call,evaluate,settle}) {
     await press(select(`${dialog} #texture-cancel`));await wait(closed);
     assert.equal(await evaluate('layerApp.state().host_error??null'),null);
   }
-  console.log('PASS: paper library Import… from Choose Texture, tile-menu Rename and relist in the open dialog, tile-menu Delete and Add to Library, in both themes');
+  console.log('PASS: paper library Import… from Choose Texture, tile-menu Rename and relist in the open dialog, tile-menu Delete and Add to Library, bounded Blob reads in both themes',await blobReads.verify());
+  }finally{await blobReads.close();}
 }

@@ -128,6 +128,11 @@ export function createRasterWorker(module,reportGpu=()=>{}) {
       catch(error){state.fail(error);throw error;}
     }
     if(['restart-begin','restart-write','restart-retain'].includes(op))return checkedSend(owner('checkpoint'),request,cancelled);
+    if((op==='read'||request.file!==undefined)&&(!(request.file instanceof Blob)||!Number.isSafeInteger(request.file.size)||request.file.size<0||request.file.size>limits.total))throw Error('Invalid file read input');
+    if(op==='paper-library'&&request.file!==undefined){
+      const state=owner(`paper-read:${identity()}`);
+      try{return await checkedSend(state,request,cancelled);}finally{state.fail(new DOMException('Reading finished','AbortError'));}
+    }
     if(op==='read'||op==='restart-open'){
       const state=owner(`read:${identity()}`);reads.add(state);
       try{return await checkedSend(state,request,cancelled);}finally{reads.delete(state);state.fail(new DOMException('Reading finished','AbortError'));}

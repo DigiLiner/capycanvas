@@ -54,7 +54,7 @@ mod package_view;
 pub use package_view::{PackageView, PackagePresentation, PackageViewSummary, PackageCapabilities, PackageDisposition, PackageAction, PackageOutput};
 
 mod import_policy;
-pub use import_policy::{FileDropRefusal, ImageImportBatch, ImportIntent, ImportSource, ImportOutcome, ImportedDocument, photo_document_names, read_import};
+pub use import_policy::{FileDropRefusal, ImageImportBatch, ImportIntent, ImportSource, ImportOutcome, ImportedDocument, photo_document_names, read_import,read_import_backing};
 
 pub mod recovery;
 pub use session::session_recovery;

@@ -18,6 +18,7 @@ mod editor;
 mod bubbles;
 mod header;
 mod artwork_transfer;
+mod blob;
 mod raster_worker;
 mod scopes;
 mod workspaces;
