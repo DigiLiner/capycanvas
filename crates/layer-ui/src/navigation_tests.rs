@@ -110,27 +110,56 @@ mod navigation_controls {
 
     #[test]
     fn rotate_tool_uses_snapping_and_rebases_between_contacts() {
-        let mut s = session(Platform::Gtk);
-        invoke(&mut s, CommandId::RotateView);
-        let center = s.state.camera.work_area_center();
-        let at = |degrees: f32| {
-            let (sin, cos) = degrees.to_radians().sin_cos();
-            [center[0] + 300. * cos, center[1] + 300. * sin]
-        };
-        let point = anchor(&s, center);
-        for _ in 0..2 {
-            pointer(&mut s, ContactPhase::Down, at(0.));
-            pointer(&mut s, ContactPhase::Move, at(2.));
-            assert_eq!(s.state.camera.rotation, 0.);
-            pointer(&mut s, ContactPhase::Up, at(2.));
-            assert_eq!(s.state.camera.rotation, 0.);
+        for platform in Platform::ALL {
+            for kind in [PointerKind::Mouse, PointerKind::Pen, PointerKind::Touch] {
+                for held in [None, Some("r"), Some(" ")] {
+                    let mut s = session(platform);
+                    let tool = s.layer_interaction.tool;
+                    let checkpoint = s.engine.checkpoint();
+                    if held.is_none() { invoke(&mut s, CommandId::RotateView); }
+                    let center = s.state.camera.work_area_center();
+                    let at = |degrees: f32| {
+                        let (sin, cos) = degrees.to_radians().sin_cos();
+                        [center[0] + 300. * cos, center[1] + 300. * sin]
+                    };
+                    let point = anchor(&s, center);
+                    let pointer = |s: &mut UiSession<Recorder>, phase, degrees| {
+                        let reply = s.input(test_support::pointer_input(71, phase, kind,
+                            PointerButton::Primary, at(degrees), 0)).unwrap();
+                        assert!(reply.handled && !reply.paint, "{platform:?} {kind:?} {held:?}");
+                    };
+                    for enabled in [true, true, false] {
+                        if s.state.settings.snap_rotation != enabled {
+                            s.dispatch(UiAction::SetRotationSnapping { enabled }).unwrap();
+                        }
+                        let modifiers = Modifiers { shift: held == Some(" "), ..Modifiers::default() };
+                        if let Some(name) = held {
+                            modifier_keys(&mut s, modifiers, true);
+                            key(&mut s, name, true, modifiers);
+                        }
+                        pointer(&mut s, ContactPhase::Down, 0.);
+                        if let Some(name) = held {
+                            key(&mut s, name, false, Modifiers::default());
+                            modifier_keys(&mut s, modifiers, false);
+                        }
+                        pointer(&mut s, ContactPhase::Move, 2.);
+                        if enabled {
+                            assert_eq!(s.state.camera.rotation, 0., "{platform:?} {kind:?} {held:?}");
+                        } else {
+                            assert!((s.state.camera.rotation.to_degrees() - 2.).abs() < 0.001,
+                                "{platform:?} {kind:?} {held:?}");
+                        }
+                        let moved = s.state.camera.clone();
+                        pointer(&mut s, ContactPhase::Up, 2.);
+                        same_view(&s.state.camera, &moved);
+                        same_point(anchor(&s, center), point);
+                        if held.is_some() { assert_eq!(s.layer_interaction.tool, tool); }
+                    }
+                    assert_eq!(s.engine.checkpoint(), checkpoint);
+                    assert_eq!(s.engine.backend().dabs, 0);
+                }
+            }
         }
-        s.dispatch(UiAction::SetRotationSnapping { enabled: false }).unwrap();
-        pointer(&mut s, ContactPhase::Down, at(0.));
-        pointer(&mut s, ContactPhase::Move, at(2.));
-        pointer(&mut s, ContactPhase::Up, at(2.));
-        assert!((s.state.camera.rotation.to_degrees() - 2.).abs() < 0.001);
-        same_point(anchor(&s, center), point);
     }
 
     #[test]

@@ -551,9 +551,10 @@ horizontal/vertical. These buttons keep the menu open and follow live command
 availability.
 
 Snap rotation is on by default and saved in application settings across drawings.
-It applies to two-finger and trackpad rotation and Rotate View drags. Turning it
-on or off leaves the current view still; explicit angles and rotation commands
-keep their requested values. A shared `layer-core::RotationSnap` retains the raw
+It applies to two-finger and trackpad rotation and Rotate View drags with mouse,
+pen or one finger, including temporary rotation with held R or Shift+Space.
+Turning it on or off leaves the current view still. Explicit angles and rotation
+commands keep their requested values. A shared `layer-core::RotationSnap` retains the raw
 angle while holding exactly at quarter turns within 3°. Between 3° and 10°,
 a continuous cubic response eases back to free rotation with matching endpoint
 slopes. Pan and pinch retain their midpoint anchor. Gesture starts rebase to the
