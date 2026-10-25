@@ -4609,3 +4609,55 @@ pending-stroke Undo/Redo run in light and dark. Initial fixture compilation and
 private-socket setup failures remain in the logs. Raw joined frame IDs, pointer
 cadence, CPU/GPU distributions, variance, snap-hold reconstruction limits and
 provenance are under `artifacts/nav-rebase-qualification-20261025/gtk/`.
+
+## Web navigation comparison
+
+Measured 2026-10-25 in Chrome 155 on the MovinkPad Pro 14, using hardware
+WebGPU on Adreno 735. Baseline `b25c628ec` and fix `d7d827671` use release Wasm,
+the same collector and matched camera, paper, layout and display geometry.
+Each row has three eight-second contacts after priming. The fresh Sketch
+workspace has a 2401 × 1801 default document and closed Navigator; fullscreen
+is 2880 × 1800 at factory density 280 and font scale 1. Photo rows use the exact
+9504 × 6336 tier JPEG plus an empty paint layer at Fit.
+
+The table counts presentations from Chrome's content surface over the entire
+Java input contact, including onset, tail and intentional rotation snap holds.
+It reports the median of three contacts. Canvas submissions are observed
+separately but are not joined to individual displayed frames, so these rates
+do not establish fresh-canvas FPS or qualify the 120 fps target.
+
+| Workload | Baseline content presents/s | Fixed content presents/s | Change |
+| --- | --- | --- | --- |
+| default-rotate | 118.20 | 118.47 | +0.23% |
+| default-pinch | 117.91 | 118.21 | +0.26% |
+| photo-closed-pan | 118.20 | 118.19 | -0.01% |
+| photo-closed-rotate | 117.71 | 117.33 | -0.32% |
+| photo-closed-pinch | 63.60 | 62.85 | -1.18% |
+| photo-open-pan | 118.18 | 118.08 | -0.08% |
+| photo-open-rotate | 117.83 | 117.72 | -0.10% |
+| photo-open-pinch | 65.73 | 67.10 | +2.07% |
+
+Seven paired run ranges overlap. Open-Navigator pinch ranges are 64.840–66.592
+and 66.599–68.102 presents/s; this small separation in three contacts does not
+establish a sustained improvement. No material Web speedup is demonstrated.
+Photo zoom stalls on both builds: closed-Navigator `app.frame` maxima are
+266–363 ms before and 426–445 ms after. One fixed contact has a 664 ms prefix
+before its first presentation in the analyzed motion window. Full-contact
+rates retain that stall; first-to-last presentation cadence would conceal it.
+GPU completion callback timings include callback-delivery delay.
+
+All 48 contacts retain matched source, lifecycle, geometry, input, canvas and
+thermal checks and equal SurfaceFlinger-ring/Perfetto presentation counts.
+Ten contacts have corroboration flags: six exceed the frozen 20 µs timestamp
+agreement bound, and four contain vendor trace-parser warnings. They remain
+in the table; no contacts are selected by passing the timing check. No trace
+data-loss counters or ring rollover are reported. Earlier batches with stacked
+observers are excluded diagnostics. Raw traces, full-contact and motion-window
+rates, onset/tail coverage, flags and build hashes are under
+`artifacts/nav-rebase-20261025/`.
+
+The hardware Web pen/cursor, G-Pen pixels and Undo/Redo journey passes in light
+and dark. The broader editor journey fails in both themes at its pure-white
+paper expectation, reading `[245,242,233,255]` from the default Naturalwhite
+paper. The same failure reproduces on the baseline; no runtime errors occur.
+Its later save/open/export checks are not reached.
