@@ -1011,6 +1011,7 @@ fn selection_bar_menus_list_their_commands_and_refuse_stale_edits() {
         menu_labels(&mask),
         [vec!["Mask: reveal selection", "Mask: hide selection"], vec!["Quick Mask"], vec!["Save as Selection Layer"]]
     );
+    assert!(mask.sections.concat().iter().all(|i| i.selected.is_none()), "the selection bar never shows during Quick Mask, so Mask has no check column");
     let refine = s.canvas_bar_choice_menu(bar.context, "refine").unwrap();
     assert_eq!(
         menu_labels(&refine),

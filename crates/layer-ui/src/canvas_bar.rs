@@ -601,7 +601,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let replace = self.replace_selection_menu_items();
         vec![
             masks.unwrap_or_default(),
-            vec![self.bar_command_item(CommandId::QuickMask)],
+            vec![ContextMenuItem { selected: None, ..self.bar_command_item(CommandId::QuickMask) }],
             std::iter::once(self.bar_command_item(CommandId::SaveSelectionLayer))
                 .chain((!saved.is_empty()).then(|| ContextMenuItem::submenu(l.text(MessageId::MENU_LOAD_SELECTION).as_ref(), vec![saved])))
                 .chain((!replace.is_empty()).then(|| {
