@@ -15,10 +15,10 @@ $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $run=Join-Path $repo ('artifacts/windows/script-encoding/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $records=@([pscustomobject]@{tag='ja';title=([string][char]0x65e5+[char]0x672c+[char]0x8a9e);hint=([char]::ConvertFromUtf32(0x1f3a8)+[char]0x2026)})
-$Name='captions';$layout=$records[0];$model=$records[0]
+$Name='captions';$layout=$records[0];$model=$records[0];$result=$records[0]|ConvertTo-Json -Depth 8
 $OutputDirectory=$run;$layoutEvidence=$records[0];$elements=$records[0];$manifest=$records[0]
 $sources=@(
-    @{file='exercise-localization.ps1';needles=@('configuration-captions.json');outputs=@('configuration-captions.json')},
+    @{file='exercise-localization.ps1';needles=@('configuration-captions.json',"'-layout.json'","'-model.json'","Join-Path `$run 'results.json'");outputs=@('configuration-captions.json','captions-layout.json','captions-model.json','results.json')},
     @{file='CapyUia.ps1';needles=@("'-layout.json'","'-model.json'");outputs=@('captions-layout.json','captions-model.json')},
     @{file='capture-editor.ps1';needles=@('layout-$name.json','model-$name.json','elements-$name.json','fixtures.json');outputs=@('layout-captions.json','model-captions.json','elements-captions.json','fixtures.json')}
 )

@@ -51,6 +51,8 @@ inline void NativeMenuItems(winrt::Windows::Foundation::Collections::IVector<Men
                         kind==L"show_in_switcher"?L"workspace-switcher-show-"+str(command,L"id"):menuSlug(text);
                 }
                 if(str(action,L"type")==L"choose_tool_variant"||str(action,L"type")==L"bubble")identifier=menuSlug(text);
+                if(str(action,L"type")==L"color_slot_menu")identifier=flag(action,L"library")?L"color-swatch-palettes":L"color-swatch-edit";
+                if(str(action,L"type")==L"color"&&str(object(action,L"action"),L"op")==L"swap")identifier=L"color-swatch-swap";
                 auto checked=spec.GetNamedValue(L"selected",JsonValue::CreateNullValue());
                 auto add=[&](auto fresh){
                     auto [item,added]=retain(fresh);

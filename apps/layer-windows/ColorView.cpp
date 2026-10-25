@@ -168,6 +168,7 @@ struct View:std::enable_shared_from_this<View>{
     uint32_t part=0;
     double side=0,panelSize=0,layoutScale=0;
     J layout;
+    MenuFlyout slotMenu{nullptr};OwnedPopup slotMenuOwner;
     XamlRoot::Changed_revoker scaleChanged;
     CompositionTarget::SurfaceContentsLost_revoker contentsLost;
     explicit View(std::shared_ptr<WorkspaceData> source,bool fit):data(std::move(source)),fitHeight(fit){}
@@ -204,6 +205,17 @@ struct View:std::enable_shared_from_this<View>{
     hstring intensityContext()const{return object(data->model,L"color_edit_context").Stringify();}
     void sendEdit(J const& action,hstring const& expected){data->dispatch(O({{L"type",S(L"color_edit")},{L"context",J::Parse(expected)},{L"action",action}}));}
     void send(J const& action){data->dispatch(O({{L"type",S(L"color")},{L"action",action}}));}
+    void showSlotMenu(Button const& anchor,hstring const& slot,Point at){
+        if(data->externalPopup||data->popupCount)return;
+        slotMenu=MenuFlyout();auto ticket=slotMenuOwner.Begin(data,anchor,slotMenu);
+        if(!QueryWorkspace(data->query,O({{L"type",S(L"context")},{L"target",O({{L"kind",S(L"color_slot")},{L"slot",S(slot)}})}}),
+            [weak=weak_from_this(),ticket,anchor=make_weak(anchor),at](J reply){if(auto self=weak.lock()){
+                auto source=anchor.get();auto sections=array(object(reply,L"result"),L"sections");
+                if(!source||!ticket.Current()||!sections.Size()){ticket.Cancel();return;}
+                NativeMenuItems(self->slotMenu.Items(),sections,self->data,[weak](J action){if(auto self=weak.lock())self->data->dispatch(action);});
+                Primitives::FlyoutShowOptions options;options.Position(at);ticket.Show(source,options);
+            }}))ticket.Cancel();
+    }
     void cancel(){pointer.reset();part=0;root.ReleasePointerCaptures();AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));}
     void pick(Point position){
         if(!pointer||context!=editingContext()||side<1)return;
@@ -223,14 +235,19 @@ struct View:std::enable_shared_from_this<View>{
     }
     void init(){
         auto weak=weak_from_this();
-        root.UseLayoutRounding(false);root.Background(clear());root.MinWidth(128);root.MinHeight(128);AutomationProperties::SetName(root,data->caption(L"color",L"controls"));AutomationProperties::SetAutomationId(root,L"color-controls");AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));
+        root.UseLayoutRounding(false);root.Background(clear());root.MinWidth(128);root.MinHeight(128);copyName(data,root,data->copyCaption(L"color",L"controls"));AutomationProperties::SetAutomationId(root,L"color-controls");AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));
         root.Children().Append(stage);stage.HorizontalAlignment(HorizontalAlignment::Center);stage.VerticalAlignment(VerticalAlignment::Center);
-        AutomationProperties::SetAutomationId(stage,L"color-panel");AutomationProperties::SetName(stage,data->caption(L"color",L"picker"));
-        wheel.Background(clear());AutomationProperties::SetName(image,data->caption(L"color",L"wheel"));
+        AutomationProperties::SetAutomationId(stage,L"color-panel");copyName(data,stage,data->copyCaption(L"color",L"picker"));
+        wheel.Background(clear());copyName(data,image,data->copyCaption(L"color",L"wheel"));
         AutomationProperties::SetAutomationId(image,L"color-wheel");
         image.IsHitTestVisible(false);image.Stretch(Stretch::Fill);wheel.Children().Append(image);stage.Children().Append(wheel);
         drawError.Text(data->caption(L"color",L"wheel_unavailable"));drawError.TextWrapping(TextWrapping::Wrap);drawError.FontSize(12);
+        data->copyView([target=make_weak(drawError),resolve=data->copyCaption(L"color",L"wheel_unavailable").current]{if(auto text=target.get()){text.Text(resolve());return true;}return false;});
         drawError.Foreground(data->brush(L"text"));drawError.IsHitTestVisible(false);drawError.Visibility(Visibility::Collapsed);wheel.Children().Append(drawError);
+        data->copyView([weak]{if(auto self=weak.lock()){
+            AutomationProperties::SetItemStatus(self->root,self->pointer?self->data->caption(L"color",L"picking"):self->data->caption(L"header",L"ready"));
+            AutomationProperties::SetItemStatus(self->image,self->drawError.Visibility()==Visibility::Visible?self->data->caption(L"color",L"wheel_failed"):self->data->caption(L"header",L"ready"));return true;
+        }return false;});
         root.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->refresh();});
         // The host owns capture; shared geometry limits it to wheel contacts.
         // Native buttons consume their own presses before this bubbles here.
@@ -260,7 +277,7 @@ struct View:std::enable_shared_from_this<View>{
         edit=control(data->caption(L"color",L"edit"),[weak]{if(auto self=weak.lock();self&&!self->transparentSlot())self->editColor();});
         Grid editContent;auto pencil=icon(L"pencil",data->theme());pencil.HorizontalAlignment(HorizontalAlignment::Center);pencil.VerticalAlignment(VerticalAlignment::Center);
         editContent.Children().Append(editFill);editContent.Children().Append(pencil);edit.Content(editContent);
-        tooltip(edit,data->caption(L"color",L"edit"));AutomationProperties::SetAutomationId(edit,L"color-edit");
+        copyName(data,edit,data->copyCaption(L"color",L"edit"),true);AutomationProperties::SetAutomationId(edit,L"color-edit");
         edit.PointerEntered([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){self->editHovered=e.Pointer().PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse;self->refresh();}});
         edit.PointerExited([weak](auto&&,auto&&){if(auto self=weak.lock()){self->editHovered=false;self->refresh();}});
         stage.Children().Append(edit);
@@ -271,22 +288,17 @@ struct View:std::enable_shared_from_this<View>{
                 self->send(O({{L"op",S(L"select")},{L"slot",S(slot)}}));self->editColor(slot);
             }});
             Grid sample;sample.Background(nullptr);
+            Shapes::Ellipse hit;hit.Fill(clear());sample.Children().Append(hit);
             sample.Children().Append(swatchFaces[i].root);
             pick.Content(sample);swatches[i]=pick;stage.Children().Append(pick);
             if(i<2){
-                MenuFlyout menu;
-                auto add=[&](hstring text,hstring id,std::function<void(View&)> run){
-                    MenuFlyoutItem item;item.Text(text);AutomationProperties::SetAutomationId(item,id);
-                    item.Click([weak,run](auto&&,auto&&){if(auto self=weak.lock())run(*self);});menu.Items().Append(item);
-                };
-                add(data->caption(L"color",L"edit_menu"),L"color-swatch-edit",[slot](View& self){self.send(O({{L"op",S(L"select")},{L"slot",S(slot)}}));self.editColor(slot);});
-                add(data->caption(L"color",L"palettes"),L"color-swatch-palettes",[slot](View& self){
-                    self.send(O({{L"op",S(L"select")},{L"slot",S(slot)}}));
-                    QueryWorkspace(self.data->query,O({{L"type",S(L"reveal_panel")},{L"panel",S(L"palettes")}}),[](J){});
+                pick.ContextRequested([weak,slot](auto&& sender,ContextRequestedEventArgs const& e){
+                    e.Handled(true);if(auto self=weak.lock()){
+                        auto source=sender.template as<Button>();Point at{};if(!e.TryGetPosition(source,at))at={0,float(source.ActualHeight())};
+                        self->showSlotMenu(source,slot,at);
+                    }
                 });
-                menu.Items().Append(MenuFlyoutSeparator());
-                add(data->caption(L"color",L"swap"),L"color-swatch-swap",[](View& self){self.send(O({{L"op",S(L"swap")}}));});
-                TrackPopup(menu,data);pick.ContextFlyout(menu);
+                pick.ContextCanceled([weak](auto&&,auto&&){if(auto self=weak.lock())self->slotMenuOwner.Cancel();});
             }
             AutomationProperties::SetAutomationId(pick,L"color-"+slot);
             pick.PointerEntered([weak,i](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
@@ -303,6 +315,7 @@ struct View:std::enable_shared_from_this<View>{
             shapes[i].PointerExited([weak,i](auto&&,auto&&){if(auto self=weak.lock()){self->shapeHovered[i]=false;self->refresh();}});
         }
         swap=control(data->caption(L"color",L"swap"),[weak]{if(auto self=weak.lock())self->send(O({{L"op",S(L"swap")}}));});
+        copyName(data,swap,data->copyCaption(L"color",L"swap"));
         stage.Children().Append(swap);AutomationProperties::SetAutomationId(swap,L"color-swap");
         Grid swapContent;swapGlyph=icon(L"color-swap",data->theme());swapGlyph.HorizontalAlignment(HorizontalAlignment::Center);swapGlyph.VerticalAlignment(VerticalAlignment::Center);
         swapContent.Children().Append(swapFill);swapContent.Children().Append(swapGlyph);swap.Content(swapContent);
@@ -330,12 +343,13 @@ struct View:std::enable_shared_from_this<View>{
         arcTrack.DoubleTapped([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->transparentSlot())self->setIntensity(0);});
         intensity.Minimum(-2);intensity.Maximum(6);intensity.StepFrequency(.01);intensity.SmallChange(.1);intensity.LargeChange(1);
         intensity.Width(1);intensity.Height(1);intensity.Opacity(0);intensity.IsHitTestVisible(false);intensity.Visibility(Visibility::Collapsed);
-        AutomationProperties::SetName(intensity,data->caption(L"color",L"intensity"));AutomationProperties::SetAutomationId(intensity,L"color-intensity");
+        copyName(data,intensity,data->copyCaption(L"color",L"intensity"));AutomationProperties::SetAutomationId(intensity,L"color-intensity");
         intensity.ValueChanged([weak](auto&&,Primitives::RangeBaseValueChangedEventArgs const& e){if(auto self=weak.lock();self&&!self->syncingIntensity&&!self->transparentSlot())self->setIntensity(e.NewValue());});
         intensity.PreviewKeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&e.Key()==winrt::Windows::System::VirtualKey::Home){self->setIntensity(0);e.Handled(true);}});
         stage.Children().Append(arc);stage.Children().Append(intensity);
         readout=control(data->caption(L"color",L"switch_readout"),[weak]{if(auto self=weak.lock())self->send(O({{L"op",S(L"toggle_readout")}}));});
         MenuFlyout editMenu;MenuFlyoutItem editItem;editItem.Text(data->caption(L"color",L"edit_menu"));
+        data->copyView([target=make_weak(editItem),resolve=data->copyCaption(L"color",L"edit_menu").current]{if(auto item=target.get()){item.Text(resolve());return true;}return false;});
         AutomationProperties::SetAutomationId(editItem,L"edit-color");editItem.Click([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->transparentSlot())self->editColor();});
         editMenu.Items().Append(editItem);TrackPopup(editMenu,data);readout.ContextFlyout(editMenu);
         AutomationProperties::SetAutomationId(readout,L"color-readout");stage.Children().Append(readout);
@@ -516,7 +530,7 @@ struct View:std::enable_shared_from_this<View>{
                 auto swatchBox=array(layout,slots[i]);placeBox(swatches[i],swatchBox);
             }
         }
-        auto icons=data->theme()+array(view,L"other_shapes").Stringify();
+        auto icons=data->theme()+data->language()+array(view,L"other_shapes").Stringify();
         if(icons!=iconKey){
             iconKey=icons;swapGlyph.Source(icon(L"color-swap",data->theme()).Source());
             for(int i=0;i<2;i++){

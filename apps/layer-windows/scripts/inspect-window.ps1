@@ -14,6 +14,8 @@ public static class CapyWindowCapture {
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
 }
 '@
+$captureDpi=[CapyWindowCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))
+try {
 $p=Get-Process -Id $ProcessId
 $p.Refresh()
 $handle=if($WindowHandle){[IntPtr]$WindowHandle}else{$p.MainWindowHandle}
@@ -34,7 +36,6 @@ for($attempt=1;;$attempt++){
 $details=[ordered]@{title=$root.Current.Name;responding=$p.Responding}
 if(!$CaptureOnly){$details.elements=@($names)}
 [pscustomobject]$details | ConvertTo-Json -Depth 4
-[CapyWindowCapture]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
 $rect=New-Object CapyWindowCapture+Rect
 if($ClientOnly){[CapyWindowCapture]::GetClientRect($handle,[ref]$rect)|Out-Null}else{[CapyWindowCapture]::GetWindowRect($handle,[ref]$rect)|Out-Null}
 $bitmap=New-Object System.Drawing.Bitmap(($rect.right-$rect.left),($rect.bottom-$rect.top))
@@ -54,3 +55,4 @@ try {
     if(![IO.Path]::IsPathRooted($Output)){$Output=Join-Path (Get-Location) $Output}
     $bitmap.Save($Output,[System.Drawing.Imaging.ImageFormat]::Png)
 } finally {$graphics.Dispose();$bitmap.Dispose()}
+} finally {[CapyWindowCapture]::SetThreadDpiAwarenessContext($captureDpi)|Out-Null}

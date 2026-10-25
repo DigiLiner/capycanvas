@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light','profiles-dark','profiles-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly,[switch]$ProfilesOnly,[switch]$ConfigurationOnly,[switch]$ZenThemeOnly)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light','profiles-dark','profiles-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly,[switch]$ProfilesOnly,[switch]$ConfigurationOnly,[switch]$ZenThemeOnly,[switch]$ColorOnly)
 $ErrorActionPreference='Stop'
 if($Theme.StartsWith('profiles-')){$Theme=$Theme.Substring(9);$ProfilesOnly=$true}
 if($Theme -eq 'light-large'){$Theme='light';$LargeText=$true}
@@ -86,7 +86,7 @@ function Use-Window($Window){
 }
 function Focus-Canvas{
  Wait-Until {
-  $canvas=Find 'drawing-canvas' -Visible
+  $canvas=Find 'drawing-canvas' -Visible -NoPopups
   if(!$canvas -or !$canvas.Current.IsEnabled -or !$canvas.Current.IsKeyboardFocusable){return $false}
   try{$canvas.SetFocus()}catch [System.Management.Automation.MethodInvocationException]{return $false}
   [System.Windows.Automation.AutomationElement]::FocusedElement.Current.AutomationId -eq 'drawing-canvas'
@@ -138,8 +138,12 @@ function Capture-Window($Window,[string]$Name){
  Use-Window $Window;Start-Sleep -Milliseconds 250
  & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $Window.hwnd -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed -CaptureOnly:($Name -ne 'failure') *> (Join-Path $run ($Name+'-capture.json'))
  $workspace=Workspace-Root
- if($workspace){@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow([IntPtr]$Window.hwnd)}|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run ($Name+'-layout.json'))}
- (Fresh-Model $Window)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run ($Name+'-model.json'))
+ if($workspace){
+  $layout=@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow([IntPtr]$Window.hwnd)}
+  [IO.File]::WriteAllText((Join-Path $run ($Name+'-layout.json')),($layout|ConvertTo-Json -Depth 15))
+ }
+ $model=Fresh-Model $Window
+ [IO.File]::WriteAllText((Join-Path $run ($Name+'-model.json')),($model|ConvertTo-Json -Depth 80))
 }
 function Application-Menu([string]$Menu){
  $caption=@((Fresh-Model).application_menus|Where-Object id -eq $Menu)[0].label
@@ -172,7 +176,7 @@ function Draw([int]$Stroke,[string]$Tag){
  Menu-Command 'view' 'fit_canvas'
  Focus-Canvas
  $before=(Fresh-Model $script:current $Tag).state.document_file.revision
- $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle
+ $bounds=(Control 'drawing-canvas' -Arranged -NoPopups).Current.BoundingRectangle
  $camera=Camera
  $x=[int]($bounds.X+$camera.translation[0]+$camera.zoom*(12+8*($Stroke%5)))
  $y=[int]($bounds.Y+$camera.translation[1]+$camera.zoom*(12+16*[Math]::Floor($Stroke/5)))
@@ -181,24 +185,60 @@ function Draw([int]$Stroke,[string]$Tag){
  [CapyRowPointer]::Up()
  Wait-Until {$view=Model;$view -and $view.windows_active_tag -eq $Tag -and $null -ne $view.state.document_file.revision -and $view.state.document_file.modified -and $view.state.document_file.revision -gt $before -and ($view.state.commands|Where-Object id -eq 'undo').enabled} 'Drawing after language publication did not finish its committed frame' 45
 }
-function Canvas-Pixels([string]$Name){
- $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle
+function Canvas-Projection{
+ if($root.Current.ProcessId -ne $review.Id -or $root.Current.NativeWindowHandle -ne $script:current.hwnd){throw 'Pixel projection does not belong to the current owned drawing'}
+ $bounds=(Control 'drawing-canvas' -Arranged -NoPopups).Current.BoundingRectangle
+ $camera=Camera
+ if(!$camera -or $camera.rotation -ne 0 -or $camera.flipped[0] -or $camera.flipped[1]){throw 'Pixel comparison requires the unrotated controlled canvas'}
+ [ordered]@{window_id=$script:current.id;hwnd=$script:current.hwnd;bounds=$bounds;camera=$camera}
+}
+function Prepare-CanvasPixels{
+ Focus-Canvas
  $window=$root.Current.BoundingRectangle
  [CapyRowPointer]::Hover([int]($window.X+20),[int]($window.Y+20))
  Start-Sleep -Milliseconds 250
+ Canvas-Projection
+}
+function Canvas-Pixels([string]$Name,$Projection){
  $dpi=[CapyWindowApi]::SetThreadDpiAwarenessContext([IntPtr](-4))
- $camera=Camera
- if($camera.rotation -ne 0 -or $camera.flipped[0] -or $camera.flipped[1]){throw 'Pixel comparison requires the unrotated controlled canvas'}
+ try{
+ if(!$Projection){$Projection=Prepare-CanvasPixels}
+ $bounds=$Projection.bounds;$camera=$Projection.camera
  $left=[int]($bounds.X+$camera.translation[0]+2*$camera.zoom);$top=[int]($bounds.Y+$camera.translation[1]+2*$camera.zoom)
  $bitmap=[Drawing.Bitmap]::new([int](60*$camera.zoom),[int](60*$camera.zoom))
- $graphics=[Drawing.Graphics]::FromImage($bitmap);$encoded=[IO.MemoryStream]::new()
+ $graphics=[Drawing.Graphics]::FromImage($bitmap);$encoded=[IO.MemoryStream]::new();$sha=[Security.Cryptography.SHA256]::Create()
  try{
   $graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size)
   if($Name){$bitmap.Save((Join-Path $run ($Name+'.png')),[Drawing.Imaging.ImageFormat]::Png)}
   $bitmap.Save($encoded,[Drawing.Imaging.ImageFormat]::Png)
-  $hash=[Security.Cryptography.SHA256]::Create()
-  try{[BitConverter]::ToString($hash.ComputeHash($encoded.ToArray())).Replace('-','')}finally{$hash.Dispose()}
- }finally{$encoded.Dispose();$graphics.Dispose();$bitmap.Dispose();[CapyWindowApi]::SetThreadDpiAwarenessContext($dpi)|Out-Null}
+  [BitConverter]::ToString($sha.ComputeHash($encoded.ToArray())).Replace('-','')
+ }finally{$sha.Dispose();$encoded.Dispose();$graphics.Dispose();$bitmap.Dispose()}
+ }finally{[CapyWindowApi]::SetThreadDpiAwarenessContext($dpi)|Out-Null}
+}
+function Stable-CanvasPixels([string]$Name){
+ $phaseDpi=[CapyWindowApi]::SetThreadDpiAwarenessContext([IntPtr](-4))
+ try{
+ $phase=[Diagnostics.Stopwatch]::StartNew();$preparationMs=$null;$pollMs=$null;$projection=$null;$after=$null;$hash=$null;$failure=$null
+ $samples=[Collections.Generic.List[object]]::new()
+ try{
+  $projection=Prepare-CanvasPixels;$preparationMs=$phase.Elapsed.TotalMilliseconds
+  $signature=$projection|ConvertTo-Json -Depth 20 -Compress
+  $poll=[Diagnostics.Stopwatch]::StartNew();$samplingFailure=$null
+  try{
+   $hash=Wait-StablePixels {
+    $capture=[Diagnostics.Stopwatch]::StartNew();$value=Canvas-Pixels $Name $projection
+    $samples.Add(@{hash=$value;capture_ms=$capture.Elapsed.TotalMilliseconds});$value
+   }
+  }catch{$samplingFailure=$_}finally{$pollMs=$poll.Elapsed.TotalMilliseconds}
+  $after=Canvas-Projection
+  if(($after|ConvertTo-Json -Depth 20 -Compress) -cne $signature){throw 'Canvas projection changed during exact pixel stability sampling'}
+  if($samplingFailure){throw $samplingFailure}
+  $hash
+ }catch{$failure=$_.Exception.Message;throw}finally{
+  $observation=[ordered]@{name=$Name;preparation_ms=$preparationMs;poll_ms=$pollMs;elapsed_ms=$phase.Elapsed.TotalMilliseconds;projection=$projection;projection_after=$after;samples=$samples.ToArray();hash=$hash;error=$failure}
+  [IO.File]::AppendAllText((Join-Path $run 'canvas-pixel-phases.jsonl'),($observation|ConvertTo-Json -Depth 25 -Compress)+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+ }
+ }finally{[CapyWindowApi]::SetThreadDpiAwarenessContext($phaseDpi)|Out-Null}
 }
 function Open-Search{
  Focus-Canvas
@@ -286,6 +326,98 @@ function Configuration-CaptionSurface{
  Wait-Until {$null -eq (Model).state.customization.expanded -and !(Find 'panel-configuration-sizes')} 'Escape did not close the retained configuration'
  Use-Window $second;Invoke 'CloseButton'
  Wait-Until {!(Model).preferences} 'Preferences did not close after configuration localization'
+}
+function Color-CaptionSurface{
+ $english=[Array]::IndexOf($shippedTags,'en')+1;$japanese=[Array]::IndexOf($shippedTags,'ja')+1
+ if($english -lt 1 -or $japanese -lt 1){throw 'Color localization requires shipped English and Japanese'}
+ Use-Window $second;Menu-Command 'edit' 'settings';Invoke-Id 'preference-page-appearance'
+ Language-Choice $english|Out-Null
+ Wait-Until {(Model $first).windows_active_tag -eq 'en'} 'Color baseline did not adopt English' 30
+ Use-Window $first;Menu-Command 'file' 'new_document';New-DrawingPixels 64 64;Invoke-Id 'new-drawing-create';Idle
+ Wait-Until {$view=Model;$view -and $view.brush_ready -and $view.state.tabs[-1].width -eq 64 -and $view.state.tabs[-1].height -eq 64} 'Color localization drawing did not prepare' 60
+ if(!(Find 'color-controls' -Visible)){
+  $tab=@('panel-tab-color','column-icon-color','drawer-tab-color')|Where-Object {Find $_ -Visible}|Select-Object -First 1
+  if(!$tab){throw 'No native Color panel source is available'};Invoke-Id $tab
+ }
+ $null=Control 'color-controls' -Arranged
+ Invoke-Id 'color-foreground';Wait-Until {(Model).state.colors.slot -eq 'foreground'} 'Color baseline did not select foreground paint'
+ Menu-Command 'view' 'fit_canvas';$empty=Stable-CanvasPixels
+ Draw 0 'en';$pixels=Stable-CanvasPixels 'color-artwork-baseline'
+ if($pixels -eq $empty){throw 'Color localization requires nonempty presented artwork'}
+ $ids=@('color-controls','color-panel','color-wheel','color-edit','color-swap','color-shape-0','color-shape-1','color-readout','color-foreground','color-background','color-transparent')
+ $identities=Native-Identities $ids;$baseline=Fresh-Model
+ $document=$baseline.state.document_file|ConvertTo-Json -Depth 20 -Compress
+ $layout=$baseline.state.workspace.layout|ConvertTo-Json -Depth 90 -Compress
+ $brush=$baseline.state.brush|ConvertTo-Json -Depth 30 -Compress;$colors=$baseline.state.colors|ConvertTo-Json -Depth 30 -Compress
+ $history=@($baseline.state.commands|Where-Object {$_.id -in @('undo','redo')}|Select-Object id,enabled)|ConvertTo-Json -Compress
+ $camera=Camera|ConvertTo-Json -Depth 15 -Compress;$gpu=$baseline.windows_gpu_generation
+ $records=[Collections.Generic.List[object]]::new();$previousShapeNames=$null
+ function Color-Context([string]$Id){
+  $source=Control $Id -Arranged;$source.SetFocus()
+  Wait-Until {$source.Current.HasKeyboardFocus} "Native color source did not take keyboard focus: $Id" 10
+  Key 0x5D
+ }
+ function Close-ColorContext([string]$Id){
+  Key 27;Wait-Until {!(Find $Id -Visible)} 'Native color context menu did not close' 15
+  Focus-Canvas
+ }
+ foreach($index in @($english,$japanese,$english)){
+  Use-Window $second;$choice=Language-Choice $index
+  Wait-Until {(Model $first).windows_active_tag -eq $choice.tag} 'Retained Color panel did not adopt the selected language' 30
+  Use-Window $first;$view=Fresh-Model $first $choice.tag;Check-Identities $identities
+  $captions=@{}
+  $static=@{
+   'color-controls'=@('common','native-color-controls');'color-panel'=@('common','native-color-picker')
+   'color-wheel'=@('workspace','workspace-control-color-wheel');'color-edit'=@('common','native-color-edit')
+   'color-swap'=@('commands','commands-swap-foreground-and-background')
+  }
+  foreach($id in $static.Keys){
+   $expected=Catalog-Text $choice.tag $static[$id][1] $static[$id][0];$native=Control $id -Arranged
+   Wait-Until {$native.Current.Name -eq $expected} "Retained color caption stayed stale: $id" 15
+   $captions[$id]=$native.Current.Name
+  }
+  $ready=Catalog-Text $choice.tag 'native-header-ready' 'common'
+  Wait-Until {(Control 'color-controls').Current.ItemStatus -eq $ready -and (Control 'color-wheel').Current.ItemStatus -eq $ready} 'Retained color ready status stayed in an earlier language' 15
+  $shapeNames=@(foreach($i in 0..1){
+   $shape=$view.color_panel.other_shapes[$i];$expected=Catalog-Text $choice.tag ('native-color-use-'+$shape) 'common';$native=Control ('color-shape-'+$i) -Arranged
+   Wait-Until {$native.Current.Name -eq $expected} 'Retained shape control kept an earlier language' 15
+   $native.Current.Name
+  })
+  if($previousShapeNames -and ($shapeNames -join '|') -eq ($previousShapeNames -join '|')){throw 'English/Japanese publication did not change native shape captions'}
+  $previousShapeNames=$shapeNames
+  Wait-Until {(Control 'color-readout').Current.Name -eq $view.color_panel.readout_description} 'Retained color readout caption differs from the current shared description' 15
+  foreach($swatch in $view.color_panel.swatches){
+   $native=Control ('color-'+$swatch.slot) -Arranged;$status=if($swatch.selected){Catalog-Text $choice.tag 'native-search-selected' 'common'}else{''}
+   Wait-Until {$native.Current.Name -eq $swatch.label -and $native.Current.ItemStatus -eq $status} 'Retained paint swatch caption or selected status stayed stale' 15
+  }
+  $away=$root.Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($away.X+20),[int]($away.Y+20))
+  Wait-Until {!(Numeric-Tooltip)} 'Previous native tooltip did not dismiss' 10
+  $edit=(Control 'color-edit' -Arranged).Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($edit.X+$edit.Width/2),[int]($edit.Y+$edit.Height/2))
+  Wait-Until {$tip=Numeric-Tooltip;$tip -and $tip.Current.Name -eq $captions['color-edit']} 'Retained Edit Color tooltip kept an earlier language' 10
+  $editCaption=Catalog-Text $choice.tag 'native-color-edit-menu' 'common'
+  Color-Context 'color-readout';$readoutEdit=Control 'edit-color' -Arranged
+  if($readoutEdit.Current.Name -ne $editCaption -or !$readoutEdit.Current.IsEnabled){throw 'Native readout context Edit caption differs from the current shared copy'}
+  $readoutCaption=$readoutEdit.Current.Name
+  Capture-Window $first ('color-'+$records.Count+'-'+$choice.tag+'-readout-menu');Close-ColorContext 'edit-color'
+  $menuCaptions=@{}
+  foreach($slot in @('foreground','background')){
+   Color-Context ('color-'+$slot)
+   foreach($action in @('edit','palettes','swap')){
+    $expected=if($action -eq 'edit'){$editCaption}elseif($action -eq 'palettes'){Catalog-Text $choice.tag 'native-color-palettes' 'common'}else{$captions['color-swap']}
+    $native=Control ('color-swatch-'+$action) -Arranged
+    if($native.Current.Name -ne $expected -or !$native.Current.IsEnabled){throw 'Native paint-slot context caption differs from the current shared copy'}
+    $menuCaptions[$slot+'-'+$action]=$native.Current.Name
+   }
+   Capture-Window $first ('color-'+$records.Count+'-'+$choice.tag+'-'+$slot+'-menu');Close-ColorContext 'color-swatch-edit'
+  }
+  $view=Fresh-Model $first $choice.tag;Check-Identities $identities
+  if(($view.state.document_file|ConvertTo-Json -Depth 20 -Compress) -ne $document -or ($view.state.workspace.layout|ConvertTo-Json -Depth 90 -Compress) -ne $layout -or ($view.state.brush|ConvertTo-Json -Depth 30 -Compress) -ne $brush -or ($view.state.colors|ConvertTo-Json -Depth 30 -Compress) -ne $colors -or (@($view.state.commands|Where-Object {$_.id -in @('undo','redo')}|Select-Object id,enabled)|ConvertTo-Json -Compress) -ne $history -or (Camera|ConvertTo-Json -Depth 15 -Compress) -ne $camera -or $view.windows_gpu_generation -ne $gpu){throw 'Color language publication changed layout, camera, paints, brush, artwork, history or GPU ownership'}
+  if((Stable-CanvasPixels ('color-artwork-'+$records.Count+'-'+$choice.tag)) -ne $pixels){throw 'Color language publication changed exact composed artwork pixels'}
+  $records.Add(@{tag=$choice.tag;captions=$captions;ready=$ready;shapes=$shapeNames;readout=$view.color_panel.readout_description;readout_context_edit=$readoutCaption;swatch_menus=$menuCaptions})
+  Capture-Window $first ('color-'+$records.Count+'-'+$choice.tag+'-controls')
+ }
+ Use-Window $second;Invoke 'CloseButton';Wait-Until {!(Model).preferences} 'Preferences did not close after retained Color localization'
+ @{theme=$Theme;languages=$records;retained_color_control_identity='passed';layout_camera_brush_paints_artwork_history_and_gpu='unchanged';artwork_sha256=$pixels;renderer_error_copy='source binding inspected; no failure injected';picking_and_hdr_intensity='outside focused runtime scope; existing color/HDR fixtures';evidence=$run}
 }
 function Zen-ThemeSurface{
  $animations=[bool]::Parse((& powershell.exe -NoProfile -NonInteractive -Command '[Windows.UI.ViewManagement.UISettings,Windows.UI.ViewManagement,ContentType=WindowsRuntime]::new().AnimationsEnabled'|Out-String).Trim())
@@ -381,7 +513,15 @@ try{
  Menu-Command 'file' 'new_window'
  Wait-Until {@(Windows).Count -eq 2} 'Second window did not register' 45
  $second=@(Windows|Where-Object id -ne $first.id)[0];Ready $second
- if(@($NoticeOnly,$HeaderOnly,$BlendOnly,$GroupedToolsOnly,$ConfigurationOnly,$ProfilesOnly,$ZenThemeOnly|Where-Object {$_}).Count -gt 1){throw 'Choose one focused localization mode'}
+ if(@($NoticeOnly,$HeaderOnly,$BlendOnly,$GroupedToolsOnly,$ConfigurationOnly,$ProfilesOnly,$ZenThemeOnly,$ColorOnly|Where-Object {$_}).Count -gt 1){throw 'Choose one focused localization mode'}
+ if($ColorOnly){
+  $CapyPopups=$true
+  [CapyRowPointer]::Initialize([uint32]$review.Id)
+  $result=Color-CaptionSurface|ConvertTo-Json -Depth 8
+  [IO.File]::WriteAllText((Join-Path $run 'results.json'),$result)
+  Write-Output $result
+  $completed=$true;return
+ }
  if($ZenThemeOnly){
   [CapyRowPointer]::Initialize([uint32]$review.Id)
   Zen-ThemeSurface|ConvertTo-Json -Depth 6|Tee-Object -FilePath (Join-Path $run 'results.json')
@@ -635,9 +775,9 @@ try{
   Application-Menu 'view'
   Capture-Window $textWindow ($choice.tag+'-view-menu');Key 27
   Menu-Command 'view' 'fit_canvas'
-  $pixelsBefore=Wait-StablePixels {Canvas-Pixels ($choice.tag+'-pixels-before')}
+  $pixelsBefore=Stable-CanvasPixels ($choice.tag+'-pixels-before')
   Draw $journeys.Count $choice.tag
-  $pixelsDrawn=Wait-StablePixels {Canvas-Pixels ($choice.tag+'-pixels-drawn')}
+  $pixelsDrawn=Stable-CanvasPixels ($choice.tag+'-pixels-drawn')
   if($pixelsDrawn -eq $pixelsBefore){throw 'Continued drawing did not change presented canvas pixels'}
   $drawn=(Fresh-Model $script:current $choice.tag).state.document_file.revision
   [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),90)

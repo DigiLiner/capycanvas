@@ -21,6 +21,7 @@
 #include "CollapsedColumns.h"
 #include "WorkspaceGestures.h"
 #include "ColorView.h"
+#include "ColorEditor.h"
 #include "ColorStrip.h"
 #include "ToolView.h"
 #include "NavigatorView.h"
@@ -113,6 +114,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     std::shared_ptr<CanvasActionBar> canvasBar=std::make_shared<CanvasActionBar>();
     std::shared_ptr<CanvasNotice> notice=std::make_shared<CanvasNotice>();
     std::shared_ptr<ColorStrip> colorStrip=std::make_shared<ColorStrip>();
+    std::set<uint32_t> handledColorRequests;
     std::array<std::shared_ptr<PreviewPanel>,2> previewPanels{std::make_shared<PreviewPanel>(),std::make_shared<PreviewPanel>()};
     std::shared_ptr<ResponseCalibration> pressure=std::make_shared<ResponseCalibration>();
     double cameraRevision=-1;
@@ -159,6 +161,22 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         bubbles=std::make_unique<WorkspaceBubbles>(data,root,[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->glassChanged)self->glassChanged();});
         measureHost.IsHitTestVisible(false);measureHost.Opacity(0);Canvas::SetLeft(measureHost,-100000);root.Children().Append(measureHost);
         root.LayoutUpdated([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
+    }
+    void colorRequests(){
+        if(!root.XamlRoot())return;
+        auto requests=array(data->state,L"requests");
+        std::erase_if(handledColorRequests,[&](uint32_t id){return !findId(requests,id).Size();});
+        for(auto value:requests){
+            auto request=value.GetObject();auto kind=object(request,L"kind");auto id=uint32_t(num(request,L"id"));
+            if(str(kind,L"type")!=L"color_slot"||!handledColorRequests.insert(id).second)continue;
+            auto slot=str(kind,L"slot");
+            EditColor(data,root,O({{L"slot",S(slot)}}),false,[data=data,slot](J color,std::optional<double> stops){
+                auto action=O({{L"op",S(stops?L"set_slot_intensity":L"set_slot")},{L"slot",S(slot)},{L"color",color}});
+                if(stops)action.Insert(L"stops",N(*stops));
+                data->dispatch(O({{L"type",S(L"color")},{L"action",action}}));
+            });
+            data->dispatch(O({{L"type",S(L"complete_request")},{L"id",N(id)},{L"error",JsonValue::CreateNullValue()}}));
+        }
     }
     void removeGroup(Group const& group){
         uint32_t index;if(root.Children().IndexOf(group.frame,index))root.Children().RemoveAt(index);
@@ -460,7 +478,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         zoom->text.Foreground(data->brush(L"text"));
         updateCamera(object(data->state,L"camera"));
         updatePopup();publishOverviews();reportTitlebar();queueMeasurements();
-        applyMotion(object(update,L"drag"));tracePresentation();return true;
+        applyMotion(object(update,L"drag"));tracePresentation();colorRequests();return true;
     }
 
     Rect placement(Group const& group)const{

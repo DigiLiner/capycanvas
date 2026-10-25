@@ -172,16 +172,20 @@ function Wait-StablePixels([scriptblock]$Sample){
     }while($watch.Elapsed.TotalSeconds -lt 5)
     throw "Canvas pixels did not settle for comparison ($comparisons comparisons, $stable consecutive matches, $([Math]::Round($watch.Elapsed.TotalSeconds,3)) seconds)"
 }
-function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible){
+function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible,[switch]$NoPopups){
     $property=if($Name){[System.Windows.Automation.AutomationElement]::NameProperty}else{[System.Windows.Automation.AutomationElement]::AutomationIdProperty}
     $condition=[System.Windows.Automation.PropertyCondition]::new($property,$Value)
     if($Type){$condition=[System.Windows.Automation.AndCondition]::new($condition,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$Type))}
+    if($NoPopups){$condition=[System.Windows.Automation.AndCondition]::new($condition,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$root.Current.ProcessId))}
     if(!$Within){$Within=$root}
     $searchScope=$Within
     if(!$Name -and $Within -eq $root -and $Value -match '^layer-(?:row-)?\d+(?:-|$)'){
         $parent=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'layer-list'))
         $bounds=if($parent){$parent.Current.BoundingRectangle}else{$null}
-        if(!$parent -or $parent.Current.IsOffscreen -or !$bounds -or $bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){$parent=Find 'layer-list' -Visible -Within $root}
+        if(!$parent -or $parent.Current.IsOffscreen -or !$bounds -or $bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){
+            if($NoPopups){$parent=Find 'layer-list' -Visible -Within $root -NoPopups}
+            else{$parent=Find 'layer-list' -Visible -Within $root}
+        }
         if($parent){$searchScope=$parent}
     }
     $found=$null
@@ -193,7 +197,7 @@ function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible)
         foreach($item in $items){if(!$item.Current.IsOffscreen){return $item}}
         if(!$Visible -and 'prefer-visible' -eq $script:CapyFind -and $items.Count){$found=$items[0]}
     }
-    if(!$found -and $script:CapyPopups -and $Within -eq $root){
+    if(!$found -and $script:CapyPopups -and !$NoPopups -and $Within -eq $root){
         $owned=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id)
         foreach($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,$owned)){
             if($window -eq $root){continue}
@@ -204,10 +208,13 @@ function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible)
     }
     $found
 }
-function Control([string]$Value,[switch]$Name,$Within=$root,$Type,[int]$Seconds=$script:CapyWaitSeconds,[switch]$Arranged){
+function Control([string]$Value,[switch]$Name,$Within=$root,$Type,[int]$Seconds=$script:CapyWaitSeconds,[switch]$Arranged,[switch]$NoPopups){
     $hit=@{item=$null;bounds=$null;stable=0}
     Wait-Until {
-        if(!$Arranged -or !$hit.item){$hit.item=Find $Value -Name:$Name -Within $Within -Type $Type -Visible:$Arranged}
+        if(!$Arranged -or !$hit.item){
+            if($NoPopups){$hit.item=Find $Value -Name:$Name -Within $Within -Type $Type -Visible:$Arranged -NoPopups}
+            else{$hit.item=Find $Value -Name:$Name -Within $Within -Type $Type -Visible:$Arranged}
+        }
         if(!$hit.item){return $false}
         if(!$Arranged){return $true}
         try{$bounds=$hit.item.Current.BoundingRectangle;$offscreen=$hit.item.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$hit.item=$null;$hit.bounds=$null;$hit.stable=0;return $false}

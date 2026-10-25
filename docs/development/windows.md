@@ -330,6 +330,19 @@ in Zen. It checks hidden native controls, unchanged drawing and workspace state,
 normal restoration and exact header pixels after reentering Zen in the same theme.
 Run both themes; its recorded Windows animation setting does not qualify frame pacing.
 
+`-ColorOnly` retains Color controls through English, Japanese and English from
+another window's Preferences. It checks names, status, shape captions, the Edit
+tooltip and native readout/swatch menu captions, retaining control identities
+and exact seeded artwork pixels, camera, layout, paints, brush, history and GPU
+ownership. Run both themes. Renderer-error text has source coverage only;
+HDR intensity remains in the existing HDR journeys.
+Composed captures restore the caller's DPI context. Pixel phases measure bounds,
+capture and verify the full projection in one physical DPI context.
+Run `./apps/layer-windows/tests/capture-dpi.ps1` for the windowless capture DPI
+scope regression.
+Run `./apps/layer-windows/tests/uia-owned-search.ps1` for current-drawing canvas
+lookup and ordinary context-menu popup lookup.
+
 Activating Preferences deliberately sends shared Blur, restoring the tool used
 before temporary eyedropping. The sampler journey checks that restoration, then
 reenters the picker and checks current captions and unchanged sample choices.
@@ -635,6 +648,9 @@ It also checks that capture manifests, models, layout and localized caption
 evidence retain Unicode in UTF-8 JSON without a BOM.
 Windowless checks execute the fixtures' PNG, SHA-256 and nested JSON expressions
 on known bytes and recursive clipboard data using Windows PowerShell 5.1 APIs.
+Sort arrays of hashtables with an explicit key expression, such as
+`Sort-Object { $_.difference }`, so selection agrees in Windows PowerShell 5.1
+and PowerShell 7.
 
 `tests/renderer-health.ps1` checks the shared fixture assertion against native
 renderer failures and foreign window ownership in a fresh same-version PowerShell
@@ -1322,6 +1338,10 @@ focus and retained control identities. The default `compact-color` also runs its
 wheel, readout, menu and drawer journeys. Use both themes when changing swatch
 presentation.
 `compact-color:input` isolates overlap routing and focus from border pixel checks.
+`exercise-compact-color.ps1 -Journey slot-menu-dark` and `slot-menu-light` walk
+the shared paint-slot menu through mouse, keyboard, pen and touch. They check
+editing another slot without changing selection on Cancel, targeted Apply,
+Palettes and Swap, with exact seeded artwork pixels and history.
 `color-editor` (dark) and `color-editor:light` walk Edit Color: format rows, paste
 and copy, typing and refusal, value scrubbing and arrow steps, Current, the
 swatch sheet and its search, remembered formats, canvas picking through the

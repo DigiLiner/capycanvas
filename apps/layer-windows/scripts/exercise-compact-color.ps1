@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('full','dark','light','input','pair-dark','pair-light')][string]$Journey='full')
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('full','dark','light','input','pair-dark','pair-light','slot-menu-dark','slot-menu-light')][string]$Journey='full')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true
@@ -6,10 +6,10 @@ $CapyFind='visible'
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
 Add-Type -AssemblyName System.Drawing,System.Windows.Forms
 $CapyCaptureDelay=250
-$theme=if($Journey -in @('light','pair-light')){'light'}else{'dark'}
+$slotMenuOnly=$Journey.StartsWith('slot-menu-')
+$theme=if($Journey -in @('light','pair-light','slot-menu-light')){'light'}else{'dark'}
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
-$directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/compact-color/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory((Join-Path $run 'profile'))|Out-Null
 function Paint { (Model).state.colors.foreground|ConvertTo-Json -Compress }
@@ -48,17 +48,24 @@ function Park-Pointer{
     $at=Point .5 .5;[CapyRowPointer]::Hover($at[0],$at[1])
     Start-Sleep -Milliseconds 250
 }
-function Hit-Id($At){
+function Hit-Path($At){
     $hit=[System.Windows.Automation.AutomationElement]::FromPoint([System.Windows.Point]::new($At[0],$At[1]))
     if($hit.Current.ProcessId -ne $review.Id){throw 'Swatch hit is outside the owned review'}
+    $path=[Collections.Generic.List[object]]::new();$seen=[Collections.Generic.HashSet[string]]::new()
     while($hit){
-        if($hit.Current.AutomationId -like 'color-*'){return $hit.Current.AutomationId}
-        $hit=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($hit)
+        $current=$hit.Current;$runtime=$hit.GetRuntimeId() -join ':';$bounds=$current.BoundingRectangle
+        if(!$seen.Add($runtime)){throw 'The native hit ancestor path contains a cycle'}
+        $path.Add([pscustomobject]@{id=$current.AutomationId;name=$current.Name;process=$current.ProcessId;runtime_id=$runtime;type=$current.ControlType.ProgrammaticName;class=$current.ClassName;enabled=$current.IsEnabled;offscreen=$current.IsOffscreen;bounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)})
+        $hit=[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($hit)
     }
+    $path.ToArray()
 }
-function Circle-Contains($Bounds,$At){
+function Hit-Id($At){
+    @((Hit-Path $At)|Where-Object {$_.id -like 'color-*'})[0].id
+}
+function Circle-Contains($Bounds,$At,[double]$Inset=-1){
     $dx=$At[0]-$Bounds.X-$Bounds.Width/2;$dy=$At[1]-$Bounds.Y-$Bounds.Height/2
-    $dx*$dx+$dy*$dy -le [Math]::Pow($Bounds.Width/2+1,2)
+    $dx*$dx+$dy*$dy -le [Math]::Pow($Bounds.Width/2-$Inset,2)
 }
 function Rim-Points($Bounds,[double]$Scale,[double]$Angle){
     $cx=$Bounds.X+$Bounds.Width/2;$cy=$Bounds.Y+$Bounds.Height/2;$outer=$Bounds.Width/2;$inner=$outer-2*$Scale
@@ -83,7 +90,7 @@ function Overlap-Point{
 }
 function Swatch-Pixel($Bitmap,$At){
     $origin=[CapyRowPointer+Point]::new()
-    if(![CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$origin)){throw 'Swatch capture origin is unavailable'}
+    if(![CapyRowPointer]::ClientToScreen([IntPtr]$root.Current.NativeWindowHandle,[ref]$origin)){throw 'Swatch capture origin is unavailable'}
     $pixel=$Bitmap.GetPixel($At[0]-$origin.x,$At[1]-$origin.y)
     @([int]$pixel.R,[int]$pixel.G,[int]$pixel.B)
 }
@@ -94,6 +101,11 @@ function Assert-Front([string]$Slot,[string]$Name){
     $bitmap=[Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')))
     try{
         $actual=Swatch-Pixel $bitmap $at
+        $origin=[CapyRowPointer+Point]::new()
+        $handle=[IntPtr]$root.Current.NativeWindowHandle
+        [CapyRowPointer]::ClientToScreen($handle,[ref]$origin)|Out-Null
+        $geometry=[ordered]@{point=$at;rgb=$actual;drawing_hwnd=$handle.ToInt64();drawing_origin=@($origin.x,$origin.y);swatches=@(foreach($id in @('color-foreground','color-background')){$b=(Control $id -Arranged).Current.BoundingRectangle;@{id=$id;bounds=@($b.X,$b.Y,$b.Width,$b.Height)}})}
+        [IO.File]::WriteAllText((Join-Path $run ($Name+'-sample.json')),($geometry|ConvertTo-Json -Depth 5))
         $rgba=($snapshot.color_panel.swatches|Where-Object slot -eq $Slot).rgba
         for($i=0;$i -lt 3;$i++){if([Math]::Abs($actual[$i]-$rgba[$i]*255) -gt 8){throw "$Name overlap shows $($actual -join ',') instead of $Slot paint"}}
     }finally{$bitmap.Dispose()}
@@ -102,7 +114,7 @@ function Assert-Front([string]$Slot,[string]$Name){
 function Assert-Rim([string]$Id,[string]$Name){
     if($Journey -eq 'input'){return}
     $bounds=(Control $Id -Arranged).Current.BoundingRectangle
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $scale=[CapyRowPointer]::GetDpiForWindow([IntPtr]$root.Current.NativeWindowHandle)/96.
     $snapshot=Model
     $front='color-'+$snapshot.color_panel.front_swatch
     $order=@('color-background','color-foreground','color-transparent')|Where-Object {$_ -ne $front}
@@ -122,7 +134,7 @@ function Assert-Rim([string]$Id,[string]$Name){
                 $sector+=@{point=$at;rgb=$pixel;difference=$difference}
             }
             if(!$sector.Count){continue}
-            $best=$sector|Sort-Object difference|Select-Object -First 1;$samples+=,@{angle=$angle;pixels=$sector}
+            $best=$sector|Sort-Object {$_.difference}|Select-Object -First 1;$samples+=,@{angle=$angle;pixels=$sector}
             if($best.difference -gt 40){throw "$Name has no visible outline in rim sector ${i}: $($best.rgb -join ',')"}
         }
         if($samples.Count -lt 6){throw "$Name has too few visible rim samples"}
@@ -177,14 +189,14 @@ function Pair-Controls{
         @{kind='tab';button=$tab;size=16;center=$null;title=$(if($named -and !$named.Current.IsOffscreen){$named}else{$null})})
 }
 function Pair-Setup{
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1800 -Height 1300
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $root.Current.NativeWindowHandle -StateDirectory $run -Action Resize -Width 1800 -Height 1300
     Pair-Command 'customize_workspace_ui'
     Wait-Until {(Model).header.editing} 'Header editor did not open for color icon fixture'
     $from=(Control 'header-component-tools' -Arranged).Current.BoundingRectangle
     $presentation=(Control 'title-bar').Current.ItemStatus|ConvertFrom-Json;$zone=$presentation.geometry.zones[1]
     $origin=[CapyRowPointer+Point]::new()
-    if(![CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$origin)){throw 'Header fixture origin is unavailable'}
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    if(![CapyRowPointer]::ClientToScreen([IntPtr]$root.Current.NativeWindowHandle,[ref]$origin)){throw 'Header fixture origin is unavailable'}
+    $scale=[CapyRowPointer]::GetDpiForWindow([IntPtr]$root.Current.NativeWindowHandle)/96.
     [CapyRowPointer]::Down('mouse',[int]($from.X+$from.Width/2),[int]($from.Y+$from.Height/2))
     [CapyRowPointer]::Move([int]($origin.x+($zone.x+$zone.width/2)*$scale),[int]($origin.y+($zone.y+$zone.height/2)*$scale))
     Wait-Until {try{$gesture=(Control 'title-bar').Current.HelpText|ConvertFrom-Json;$gesture.phase -eq 'dragging' -and $gesture.preview.target}catch{$false}} 'Header color insertion has no target'
@@ -239,7 +251,7 @@ function Assert-Pair([string]$Name){
         foreach($control in $controls){
             if($script:pairIdentities.ContainsKey($control.kind) -and ($control.button.GetRuntimeId() -join ':') -ne $script:pairIdentities[$control.kind]){throw "$Name replaced retained $($control.kind) color button"}
             $bounds=$control.button.Current.BoundingRectangle
-            $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.;$unit=$control.size*$scale/16.
+            $scale=[CapyRowPointer]::GetDpiForWindow([IntPtr]$root.Current.NativeWindowHandle)/96.;$unit=$control.size*$scale/16.
             if($unit -le 0){throw "Missing canonical icon size for $($control.kind)"}
             $left=if($null -ne $control.center){$bounds.X+$control.center*$scale-8*$unit}else{$bounds.X+$bounds.Width/2-8*$unit}
             $top=$bounds.Y+$bounds.Height/2-8*$unit;$slack=0
@@ -271,6 +283,153 @@ function Pair-SetPaint([string[]]$Channels,[string]$Intensity=''){
     Invoke 'edit-color-apply'
     Wait-Until {$pair=(Model).paint_pair;$pair -and $pair.definition.rgba -and (($pair.definition|ConvertTo-Json -Compress) -ne $before)} 'Paint definition did not publish'
     Wait-Until {!(Find 'edit-color-apply')} 'Edit Color did not close'
+}
+function Slot-Colors{
+    $colors=(Model).state.colors
+    [ordered]@{foreground=$colors.foreground;background=$colors.background;temporary=$colors.temporary;slot=$colors.slot;paint_slot=$colors.paint_slot}|ConvertTo-Json -Depth 8 -Compress
+}
+function Slot-Checkpoint{
+    $state=(Model).state
+    [ordered]@{document=($state.document_file|Select-Object epoch,revision,modified);layers=@($state.layers|Select-Object id,paint_revision,mask_revision,visible,locked,opacity,blend);history=@($state.commands|Where-Object {$_.id -in @('undo','redo')}|Select-Object id,label,enabled)}|ConvertTo-Json -Depth 12 -Compress
+}
+function Slot-Park{
+    $box=(Control 'color-readout' -Arranged).Current.BoundingRectangle
+    [CapyRowPointer]::Hover([int]($box.X+$box.Width/2),[int]($box.Y+$box.Height/2))
+}
+function Slot-Pixels{Screen-Pixels $script:slotPixelPoint[0] $script:slotPixelPoint[1]}
+function Slot-ColorPanel{
+    if(!(Find 'color-foreground' -Visible)){
+        Invoke $(if(Find 'column-icon-color' -Visible){'column-icon-color'}elseif(Find 'drawer-tab-color' -Visible){'drawer-tab-color'}else{'panel-tab-color'})
+    }
+    $null=Control 'color-foreground' -Arranged
+    $null=Control 'color-background' -Arranged
+}
+function Slot-OpenMenu([string]$Device,[string]$Slot){
+    $before=Slot-Colors;$button=Control ('color-'+$Slot) -Arranged;$bounds=$button.Current.BoundingRectangle
+    $expected=$button.GetRuntimeId() -join ':'
+    $front=(Model).color_panel.front_swatch
+    $cover=if($front -ne $Slot){(Control ('color-'+$front) -Arranged).Current.BoundingRectangle}else{$null}
+    $trace=[ordered]@{device=$Device;slot=$Slot;expected_id=('color-'+$Slot);expected_runtime_id=$expected;expected_bounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height);front_swatch=$front;covering_circle=$(if($cover){@($cover.X,$cover.Y,$cover.Width,$cover.Height)}else{$null});candidates=@();chosen_owner=$null;chosen_point=$null;provider_limitation=$null;native_point_guard='RowPointerDriver foreground and Win32 point/process ownership'}
+    foreach($fraction in @(@(.5,.5),@(.8,.8),@(.2,.8),@(.8,.2))){
+        $at=@([int]($bounds.X+$bounds.Width*$fraction[0]),[int]($bounds.Y+$bounds.Height*$fraction[1]))
+        $path=Hit-Path $at
+        $owner=@($path|Where-Object {$_.process -eq $review.Id -and $_.id -eq $trace.expected_id -and $_.runtime_id -eq $expected})[0]
+        $inside=Circle-Contains $bounds $at 2
+        $covered=$cover -and (Circle-Contains $cover $at)
+        $trace.candidates+=@{point=$at;fraction=$fraction;inside_requested_circle=$inside;covered_by_front_circle=[bool]$covered;ancestors=$path;uia_expected_owner=$owner}
+        if(!$trace.chosen_point -and $inside -and !$covered){
+            $trace.chosen_point=$at
+            $trace.chosen_owner=@{id=$trace.expected_id;runtime_id=$expected;process=$button.Current.ProcessId;bounds=$trace.expected_bounds;source='Arranged swatch circle outside the shared front swatch'}
+        }
+    }
+    if(!@($trace.candidates|Where-Object uia_expected_owner).Count){$trace.provider_limitation='FromPoint exposes the owned content bridge/window, without the arranged XAML swatch peer; raw ancestry is diagnostic'}
+    [IO.File]::WriteAllText((Join-Path $run ("slot-hit-$($script:slotMenuCases.Count)-$Device-$Slot.json")),($trace|ConvertTo-Json -Depth 12))
+    $point=$trace.chosen_point
+    if(!$point){throw "No exposed native point targets the $Slot swatch"}
+    if($Device -eq 'mouse'){[CapyRowPointer]::RightClick($point[0],$point[1])}
+    elseif($Device -eq 'keyboard'){$button.SetFocus();Wait-Until {$button.Current.HasKeyboardFocus} 'The swatch did not take keyboard focus';[CapyRowPointer]::Key([uint32]$review.Id,0x5D)}
+    else{[CapyRowPointer]::Down($Device,$point[0],$point[1]);try{Start-Sleep -Milliseconds 1100}finally{[CapyRowPointer]::Up()}}
+    $messages=[ordered]@{edit=@('common.ftl','native-color-edit-menu');palettes=@('common.ftl','native-color-palettes');swap=@('commands.ftl','commands-swap-foreground-and-background')}
+    $items=@()
+    foreach($action in $messages.Keys){
+        $source=[IO.File]::ReadAllText((Join-Path $repo ('assets/locales/en/'+$messages[$action][0])))
+        $caption=[regex]::Match($source,('(?m)^'+[regex]::Escape($messages[$action][1])+' = ([^\r\n]+)')).Groups[1].Value
+        if(!$caption -or $caption.Contains('{')){throw 'The fixed English slot-menu caption is not a plain shared message'}
+        $id='color-swatch-'+$action;$native=Control $id -Arranged
+        if($native.Current.Name -ne $caption -or !$native.Current.IsEnabled){throw "The native $Device $Slot menu differs from the shared $action command"}
+        $items+=@{id=$id;label=$native.Current.Name;message=$messages[$action][1];enabled=$native.Current.IsEnabled}
+    }
+    $presenter=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent((Control 'color-swatch-edit'))
+    $nativeItems=@($presenter.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))|Where-Object {!$_.Current.IsOffscreen})
+    if((($nativeItems|ForEach-Object {$_.Current.AutomationId}) -join ',') -ne 'color-swatch-edit,color-swatch-palettes,color-swatch-swap'){throw 'The native paint menu does not contain exactly the three shared actions in order'}
+    if(@($presenter.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Separator))|Where-Object {!$_.Current.IsOffscreen}).Count){throw 'The native paint menu added a local separator'}
+    if((Slot-Colors) -ne $before){throw "$Device context opening selected or changed the $Slot paint"}
+    $script:slotMenuCases.Add(@{device=$Device;slot=$Slot;point=$point;items=$items})
+    [IO.File]::WriteAllText((Join-Path $run 'slot-menu-cases.json'),($script:slotMenuCases|ConvertTo-Json -Depth 8))
+}
+function Slot-Closed{
+    Wait-Until {!(Find 'edit-color-apply' -Visible) -and !(Find 'color-swatch-edit' -Visible) -and !(Find 'color-swatch-palettes' -Visible) -and !(Find 'color-swatch-swap' -Visible)} 'The native slot menu or editor did not close'
+}
+function Slot-Editor([string]$Slot){
+    $null=Control 'edit-color-apply' -Arranged
+    $pick=Control 'edit-color-pick' -Arranged
+    if(!$pick.Current.IsEnabled){throw 'Slot Edit Color lost its enabled native canvas picker'}
+    $frame=Control 'edit-color-dialog-frame' -Arranged;$source=(Model).state.colors.($Slot)
+    if($source.space -ne 'Srgb' -or $source.rgba[3] -ne 1){throw 'The slot-menu fixture requires opaque sRGB paints for its initial Hex oracle'}
+    $expected='#'+(@(0..2|ForEach-Object {([int][Math]::Round(255*[double]$source.rgba[$_])).ToString('X2')}) -join '')
+    $record=[ordered]@{slot=$Slot;source_color=$source;expected_hex=$expected;native_name=$null;initial_hex=$null;current_control=(Control 'edit-color-current' -Within $frame).Current.Name}
+    try{
+        Wait-Until {$record.native_name=(Control 'edit-color-hex' -Within $frame).Current.Name;$record.initial_hex=$record.native_name.Substring($record.native_name.LastIndexOf(' ')+1);$record.initial_hex -eq $expected} 'Initial Edit Color Hex does not match the requested paint slot'
+    }finally{[IO.File]::WriteAllText((Join-Path $run ("slot-editor-initial-$($script:slotMenuCases.Count)-$Slot.json")),($record|ConvertTo-Json -Depth 8))}
+}
+function Slot-Intact([string]$Name,[string]$Checkpoint,[string]$Pixels){
+    if((Slot-Checkpoint) -ne $Checkpoint){throw "$Name changed artwork or Undo/Redo history"}
+    Slot-Park
+    if((Wait-StablePixels {Slot-Pixels}) -ne $Pixels){throw "$Name changed exact composed artwork pixels"}
+}
+function Slot-MenuJourney{
+    $script:slotMenuCases=[Collections.Generic.List[object]]::new()
+    Fit-Canvas
+    $canvas=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$camera=(Model).state.camera;$area=$camera.work_area
+    $script:slotPixelPoint=@([int]($canvas.X+($area[0]+$area[2]/2)*$canvas.Width/$camera.viewport[0]),[int]($canvas.Y+($area[1]+$area[3]/2)*$canvas.Height/$camera.viewport[1]))
+    Slot-Park;$empty=Wait-StablePixels {Slot-Pixels};$before=Slot-Checkpoint
+    [CapyRowPointer]::Down('mouse',($script:slotPixelPoint[0]-30),$script:slotPixelPoint[1])
+    try{for($step=1;$step -le 12;$step++){[CapyRowPointer]::Move(($script:slotPixelPoint[0]-30+$step*5),$script:slotPixelPoint[1]);Start-Sleep -Milliseconds 12}}finally{[CapyRowPointer]::Up()}
+    Slot-Park
+    Wait-Until {(Slot-Checkpoint) -ne $before -and ((Model).state.commands|Where-Object id -eq 'undo').enabled -and (Slot-Pixels) -ne $empty} 'The native slot-menu seed did not establish artwork and Undo history' 45
+    $artwork=Wait-StablePixels {Slot-Pixels};$checkpoint=Slot-Checkpoint
+    foreach($device in @('mouse','keyboard','pen','touch')){
+        $active=if($device -in @('mouse','pen')){'transparent'}else{'foreground'}
+        Invoke 'color-foreground';Wait-Until {(Model).state.colors.slot -eq 'foreground'} 'Foreground did not select before the slot context'
+        if($active -eq 'transparent'){Invoke 'color-transparent';Wait-Until {(Model).state.colors.slot -eq 'transparent'} 'Transparent did not select before the slot context'}
+        $colors=Slot-Colors
+        Slot-OpenMenu $device 'background';Invoke 'color-swatch-edit'
+        Slot-Editor 'background'
+        if((Slot-Colors) -ne $colors){throw "$device Edit Color changed the active $active slot before Apply"}
+        Pair-Value 'edit-color-hex' '#B53177'
+        if((Slot-Colors) -ne $colors){throw "$device Edit Color published an unaccepted draft"}
+        Capture ("slot-menu-$device-cancel") -WithModel -Composed
+        Invoke 'edit-color-cancel';Slot-Closed
+        Wait-Until {(Slot-Colors) -eq $colors} "$device Cancel did not preserve the exact colors and active $active slot"
+        Slot-Intact "$device Cancel" $checkpoint $artwork
+    }
+    foreach($case in @(@{target='background';active='foreground';hex='#38A6C9'},@{target='foreground';active='background';hex='#C94E38'})){
+        Invoke ('color-'+$case.active);Wait-Until {(Model).state.colors.slot -eq $case.active} 'The other paint did not select before Apply'
+        $other=(Model).state.colors.($case.active)|ConvertTo-Json -Compress
+        Slot-OpenMenu 'mouse' $case.target;Invoke 'color-swatch-edit';Slot-Editor $case.target
+        Pair-Value 'edit-color-hex' $case.hex;Invoke 'edit-color-apply';Slot-Closed
+        $expected=@(1,3,5|ForEach-Object {[Convert]::ToInt32($case.hex.Substring($_,2),16)/255.})
+        Wait-Until {$colors=(Model).state.colors;$color=$colors.($case.target);$colors.slot -eq $case.target -and $colors.paint_slot -eq $case.target -and $color.space -eq 'Srgb' -and [Math]::Abs($color.rgba[0]-$expected[0]) -lt .000001 -and [Math]::Abs($color.rgba[1]-$expected[1]) -lt .000001 -and [Math]::Abs($color.rgba[2]-$expected[2]) -lt .000001 -and $color.rgba[3] -eq 1} 'Apply did not edit and select the requested paint slot'
+        if(((Model).state.colors.($case.active)|ConvertTo-Json -Compress) -ne $other){throw 'Apply changed the other paint slot'}
+        Slot-Intact ('Apply '+$case.target) $checkpoint $artwork
+        Capture ('slot-menu-apply-'+$case.target) -WithModel -Composed
+    }
+    $colors=Slot-Colors
+    (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x5A);Slot-Park
+    Wait-Until {(Slot-Pixels) -eq $empty} 'One Undo after slot menus did not remove only the seed stroke'
+    (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x59);Slot-Park
+    Wait-Until {(Slot-Pixels) -eq $artwork} 'One Redo after slot menus did not restore exact seed artwork'
+    if((Slot-Colors) -ne $colors){throw 'Artwork Undo/Redo changed the accepted slot paints'}
+    $checkpoint=Slot-Checkpoint
+    Invoke 'color-foreground';Wait-Until {(Model).state.colors.slot -eq 'foreground'} 'Foreground did not select before Palettes'
+    $foreground=(Model).state.colors.foreground|ConvertTo-Json -Compress
+    Slot-OpenMenu 'keyboard' 'background';Invoke 'color-swatch-palettes'
+    Wait-Until {(Model).state.colors.slot -eq 'background' -and (Model).state.colors.paint_slot -eq 'background' -and @((Model).layout.groups|Where-Object active -eq 'palettes').Count -gt 0 -and (Find 'palettes-panel' -Visible)} 'Palettes did not select the requested slot and reveal its native panel'
+    if(Find 'edit-color-apply' -Visible){throw 'Palettes opened an Edit Color dialog'}
+    $swatch=@((Model).palette_panel.swatches|Where-Object {!$_.current})[0]
+    if(!$swatch){throw 'The shared Palettes view has no different paint to select'}
+    Invoke ('palette-swatch-'+$swatch.id)
+    Wait-Until {(Control ('palette-swatch-'+$swatch.id)).Current.ItemStatus -eq 'Selected' -and (((Model).state.colors.background|ConvertTo-Json -Compress) -eq ($swatch.color|ConvertTo-Json -Compress))} 'The native palette swatch did not edit the requested background paint'
+    if(((Model).state.colors.foreground|ConvertTo-Json -Compress) -ne $foreground -or (Slot-Checkpoint) -ne $checkpoint){throw 'Palettes changed the other paint, artwork or history'}
+    Capture 'slot-menu-palettes' -WithModel -Composed
+    Slot-ColorPanel
+    Invoke 'color-transparent';Wait-Until {(Model).state.colors.slot -eq 'transparent'} 'Transparent did not select before Swap'
+    $foreground=(Model).state.colors.foreground|ConvertTo-Json -Compress;$background=(Model).state.colors.background|ConvertTo-Json -Compress;$paintSlot=(Model).state.colors.paint_slot
+    Slot-Park;$pixels=Wait-StablePixels {Slot-Pixels}
+    Slot-OpenMenu 'mouse' 'background';Invoke 'color-swatch-swap';Slot-Closed
+    Wait-Until {$colors=(Model).state.colors;$colors.slot -eq 'transparent' -and $colors.paint_slot -eq $paintSlot -and ($colors.foreground|ConvertTo-Json -Compress) -eq $background -and ($colors.background|ConvertTo-Json -Compress) -eq $foreground} 'The shared Swap menu action did not preserve Transparent and exchange the exact paints'
+    Slot-Intact 'Swap' $checkpoint $pixels
+    Capture 'slot-menu-swap' -WithModel -Composed
 }
 function Pair-Journey{
     Pair-Setup
@@ -363,7 +522,8 @@ function Swatch-Journey{
     }
     foreach($slot in @('background','foreground')){
         Invoke 'color-transparent';Wait-Until {(Model).state.colors.slot -eq 'transparent'} 'Transparent did not select before keyboard input'
-        $button=Control "color-$slot";$button.SetFocus();[CapyRowPointer]::Key(0x20)
+        $button=Control "color-$slot";Focus-Keyboard $button
+        [CapyRowPointer]::Key([uint32]$review.Id,0x20)
         Wait-Until {(Model).state.colors.slot -eq $slot} "Keyboard did not select $slot"
         if(!$button.Current.HasKeyboardFocus){throw 'Raising the focused swatch lost keyboard focus'}
         Park-Pointer;Assert-Front $slot "keyboard-$slot-front"
@@ -383,19 +543,24 @@ try{
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
     [IO.File]::WriteAllText((Settings-File),(@{theme=$theme;language=@{Explicit='en'}}|ConvertTo-Json -Depth 4))
     $env:CAPY_TRACE_UI='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
+    $CapyTraceDirectory=$run
+    if($slotMenuOnly){$CapyPopups=$true}
     # The smoke command strip covers the bottom swatches at this window size.
     # This fixture uses native controls only; keep the isolated profile and all
     # foreground/point ownership checks, without the unrelated overlay.
     Remove-Item Env:CAPY_SMOKE_TEST -ErrorAction SilentlyContinue
-    $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
+    $workingDirectory=$run
+    $review=Start-Process -FilePath $Executable -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
     $null=$review.Handle
     [IO.File]::WriteAllText((Join-Path $run 'pid.txt'),[string]$review.Id)
     Write-Output "Compact color review $($review.Id), $run"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Color fixture did not start' 60
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $owned=@{window=$null}
+    Wait-Until {$m=Model;if(!$m.brush_ready -or !$m.windows_workspace.ready){return $false};$owned.window=Owned-DrawingWindow $review -TraceDirectory $run;$null -ne $owned.window} 'Color fixture did not start' 60
+    $root=$owned.window.Root
     [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
-    [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+    [CapyRowPointer]::SetForegroundWindow([IntPtr]$root.Current.NativeWindowHandle)|Out-Null
     [CapyRowPointer]::Initialize([uint32]$review.Id)
+    Use-PaintWorkspace
     $panel=(Control 'color-panel').Current.BoundingRectangle
     foreach($id in @('color-background','color-foreground','color-transparent','color-swap','color-shape-0','color-shape-1','color-readout')){
         $bounds=(Control $id).Current.BoundingRectangle
@@ -403,7 +568,8 @@ try{
             throw "Compact color control is clipped: $id"
         }
     }
-    if($Journey -notin @('pair-dark','pair-light')){Swatch-Journey}
+    if($slotMenuOnly){Slot-MenuJourney}
+    if(!$slotMenuOnly -and $Journey -notin @('pair-dark','pair-light')){Swatch-Journey}
     if($Journey -eq 'full'){
     $document=(Model).state.document_file|ConvertTo-Json -Compress
     $retained=(Control 'color-shape-0').GetRuntimeId() -join ':'
@@ -490,23 +656,25 @@ try{
     }
     if($Journey -in @('full','pair-dark','pair-light')){Pair-Journey}
     [CapyRowPointer]::Dispose()
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $root.Current.NativeWindowHandle -StateDirectory $workingDirectory -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath (Join-Path $run 'stderr.log')).Length){throw 'Native color stderr requires inspection'}
     $result=[ordered]@{
         theme=$theme;compact_bounds='passed'
         scope='Composed UI pixels and synthetic native input; physical digitizer and hardware performance acceptance remain separate'
     }
-    if($Journey -notin @('pair-dark','pair-light')){
+    if(!$slotMenuOnly -and $Journey -notin @('pair-dark','pair-light')){
         foreach($check in @('swatch_overlap_and_transparent_memory','retained_swatch_focus','circular_swatch_hits','keyboard_activation','document_unchanged')){$result[$check]='passed'}
         if($Journey -ne 'input'){$result['selected_and_hover_rims']='passed'}
     }
     if($Journey -in @('full','pair-dark','pair-light')){$result['retained_header_toolbar_and_tab_pair_pixels']='passed';$result['temporary_active_preview']='passed';$result['mask_alpha_and_rendition']='passed'}
+    if($slotMenuOnly){$result['slot_menu_native_context_devices']='mouse, keyboard, pen, touch';$result['slot_menu_exact_shared_captions']='passed';$result['other_slot_cancel_and_apply']='passed';$result['palettes_select_reveal_and_paint']='passed';$result['swap_while_transparent']='passed';$result['artwork_pixels_and_history']='exact';$result['evidence']=$run}
     if($Journey -eq 'full'){
         foreach($check in @('shapes_and_readouts','mouse_pen_touch_fields_and_ring','cancellation','retained_controls','paint_slots_and_swap','native_context_menus','mouse_hold_no_menu','retained_drawer_input')){$result[$check]='passed'}
     }
-    $result|ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $run 'results.json'),($result|ConvertTo-Json -Depth 8))
+    $result|ConvertTo-Json -Depth 8
 }catch{
-    if($review -and !$review.HasExited){try{Capture 'failure'}catch{}}
+    if($review -and !$review.HasExited){try{Capture 'failure' -WithModel -Composed}catch{}}
     [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw
 }finally{
     [CapyRowPointer]::Dispose()
