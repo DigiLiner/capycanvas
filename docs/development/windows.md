@@ -339,7 +339,9 @@ HDR intensity remains in the existing HDR journeys.
 Composed captures restore the caller's DPI context. Pixel phases measure bounds,
 capture and verify the full projection in one physical DPI context.
 Run `./apps/layer-windows/tests/capture-dpi.ps1` for the windowless capture DPI
-scope regression.
+scope and clear-paper sample regressions. Paper samples keep their full pixel
+rectangle inside the canvas and visible paper, outside the utility, including
+fractional edges and the complete requested pointer path.
 Run `./apps/layer-windows/tests/uia-owned-search.ps1` for current-drawing canvas
 lookup and ordinary context-menu popup lookup.
 

@@ -118,6 +118,33 @@ function Maximize-DrawingWindow{
         [Math]::Abs($camera.viewport[0]-$bounds.Width) -lt 2 -and [Math]::Abs($camera.viewport[1]-$bounds.Height) -lt 2 -and (Model).state.workspace_ready -and !(Model).windows_workspace.busy
     } 'The maximized native canvas did not receive its viewport and workspace acknowledgement'
 }
+function Find-ClearCanvasSamplePoint([Windows.Rect]$bounds,[Windows.Rect]$paper,[Windows.Rect]$panel,[int]$Dx=0,[int]$Dy=0){
+    foreach($rectangle in @($bounds,$paper,$panel)){
+        if($rectangle.IsEmpty-or$rectangle.Width-le0-or$rectangle.Height-le0){throw 'Canvas sample requires nonempty native rectangles'}
+        foreach($value in @($rectangle.X,$rectangle.Y,$rectangle.Width,$rectangle.Height,$rectangle.Right,$rectangle.Bottom)){
+            if([double]::IsNaN($value)-or[double]::IsInfinity($value)){throw 'Canvas sample requires finite native rectangles'}
+        }
+    }
+    $area=[Windows.Rect]::Intersect($paper,$bounds)
+    if($area.IsEmpty){throw 'No clear visible paper sample fits outside the utility'}
+    $minDx=[Math]::Min(0.,[double]$Dx);$maxDx=[Math]::Max(0.,[double]$Dx)
+    $minDy=[Math]::Min(0.,[double]$Dy);$maxDy=[Math]::Max(0.,[double]$Dy)
+    $left=[Math]::Ceiling($area.Left+48-$minDx);$right=[Math]::Floor($area.Right-48-$maxDx)
+    $top=[Math]::Ceiling($area.Top+48-$minDy);$bottom=[Math]::Floor($area.Bottom-48-$maxDy)
+    $ranges=@(
+        @($left,([Math]::Min($right,[Math]::Ceiling($panel.Left-48-$maxDx)-1)),$top,$bottom),
+        @(([Math]::Max($left,[Math]::Floor($panel.Right+48-$minDx)+1)),$right,$top,$bottom),
+        @($left,$right,$top,([Math]::Min($bottom,[Math]::Ceiling($panel.Top-48-$maxDy)-1))),
+        @($left,$right,([Math]::Max($top,[Math]::Floor($panel.Bottom+48-$minDy)+1)),$bottom)
+    )
+    foreach($range in $ranges){
+        if($range[0]-gt$range[1]-or$range[2]-gt$range[3]){continue}
+        $x=[int]($range[0]+[Math]::Floor(($range[1]-$range[0])/2));$y=[int]($range[2]+[Math]::Floor(($range[3]-$range[2])/2))
+        $sample=[System.Windows.Rect]::new($x-48+[Math]::Min(0,$Dx),$y-48+[Math]::Min(0,$Dy),96+[Math]::Abs([double]$Dx),96+[Math]::Abs([double]$Dy))
+        if($bounds.Contains($sample) -and $paper.Contains($sample) -and !$panel.IntersectsWith($sample)){return @($x,$y)}
+    }
+    throw 'No clear visible paper sample fits outside the utility'
+}
 function Clear-CanvasPoint([string]$Utility,[int]$Dx=0,[int]$Dy=0){
     $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle
     $camera=(Model).state.camera;$tab=@((Model).state.tabs|Where-Object active)[0]
@@ -127,12 +154,7 @@ function Clear-CanvasPoint([string]$Utility,[int]$Dx=0,[int]$Dy=0){
     $sx=$bounds.Width/$camera.viewport[0];$sy=$bounds.Height/$camera.viewport[1]
     $paper=[System.Windows.Rect]::new($bounds.X+$left*$sx,$bounds.Y+$top*$sy,($right-$left)*$sx,($bottom-$top)*$sy)
     $panel=(Control $Utility -Arranged).Current.BoundingRectangle
-    foreach($fy in @(.8,.6,.4)){foreach($fx in @(.25,.5,.75)){
-        $x=[int]($paper.X+$paper.Width*$fx);$y=[int]($paper.Y+$paper.Height*$fy)
-        $sample=[System.Windows.Rect]::new($x-48+[Math]::Min(0,$Dx),$y-48+[Math]::Min(0,$Dy),96+[Math]::Abs($Dx),96+[Math]::Abs($Dy))
-        if($bounds.Contains($sample) -and $paper.Contains($sample) -and !$panel.IntersectsWith($sample)){return @($x,$y)}
-    }}
-    throw 'No clear visible paper sample fits outside the utility'
+    Find-ClearCanvasSamplePoint $bounds $paper $panel $Dx $Dy
 }
 function Assert-RendererHealthy([int]$ProcessId,$Drawing){
     $owner=[uint32]0
