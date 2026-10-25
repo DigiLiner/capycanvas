@@ -170,16 +170,16 @@ TextBlock dim(std::shared_ptr<WorkspaceData> const& data){
 }
 struct ScopeView : std::enable_shared_from_this<ScopeView> {
     std::shared_ptr<WorkspaceData> data;bool waveform=false,tonal=false,flexible=false;hstring prefix;
-    Grid root,chart,toolbar{nullptr},scale{nullptr};ContentControl frame;FrameworkElement footer{nullptr};ComboBox source{nullptr},channel{nullptr};CheckBox logarithmic{nullptr};
+    Grid root,chart,toolbar{nullptr},graph{nullptr},scale{nullptr};ContentControl frame;FrameworkElement footer{nullptr};ComboBox source{nullptr},channel{nullptr};CheckBox logarithmic{nullptr};
     std::array<TextBlock,2> axis{nullptr,nullptr};
     std::shared_ptr<PlotView> plot;std::shared_ptr<WaveformView> trace;
     J view()const{return object(data->state,tonal?L"tonal_histogram":waveform?L"waveform":L"histogram");}
-    double naturalHeight()const{return chart.MaxHeight()+toolbar.DesiredSize().Height+footer.DesiredSize().Height
-        +(scale?scale.DesiredSize().Height:0)+2*root.RowSpacing();}
+    double naturalHeight()const{return chart.MaxHeight()+toolbar.DesiredSize().Height+logarithmic.DesiredSize().Height+footer.DesiredSize().Height
+        +(scale?scale.DesiredSize().Height+graph.RowSpacing():0)+3*root.RowSpacing();}
     void init(Bindings& bindings){
         auto weak=weak_from_this();auto scopes=feed(data);
         root.RowSpacing(data->panelMetric(L"control_spacing"));root.UseLayoutRounding(false);
-        for(int i=0;i<(tonal?2:3);++i){RowDefinition row;row.Height({1,i==(tonal?0:1)?GridUnitType::Star:GridUnitType::Auto});root.RowDefinitions().Append(row);}
+        for(int i=0;i<(tonal?2:4);++i){RowDefinition row;row.Height({1,i==(tonal?0:1)?GridUnitType::Star:GridUnitType::Auto});root.RowDefinitions().Append(row);}
         if(!tonal){
             toolbar=Grid();toolbar.ColumnSpacing(data->panelMetric(L"control_spacing"));
             for(int i=0;i<2;++i){ColumnDefinition column;column.Width({1,GridUnitType::Star});toolbar.ColumnDefinitions().Append(column);}
@@ -203,7 +203,7 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
             }
             Grid::SetRow(frame,1);root.Children().Append(frame);
         }else{
-            plot=plotView(scopes,tonal);chart.Children().Append(plot->canvas);Grid graph;graph.Children().Append(frame);
+            plot=plotView(scopes,tonal);chart.Children().Append(plot->canvas);graph=Grid();graph.RowSpacing(data->panelMetric(L"control_spacing"));graph.Children().Append(frame);
             for(int i=0;i<2;++i){RowDefinition row;row.Height({1,i?GridUnitType::Auto:GridUnitType::Star});graph.RowDefinitions().Append(row);}
             scale=Grid();for(int i=0;i<2;++i){ColumnDefinition column;column.Width({1,i?GridUnitType::Auto:GridUnitType::Star});scale.ColumnDefinitions().Append(column);}
             Grid::SetColumn(axis[1],1);scale.Children().Append(axis[0]);scale.Children().Append(axis[1]);Grid::SetRow(scale,1);graph.Children().Append(scale);
@@ -213,12 +213,12 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
             logarithmic=CheckBox();logarithmic.MinWidth(0);logarithmic.MinHeight(data->controlHeight());logarithmic.Height(data->controlHeight());logarithmic.Padding({0});
             AutomationProperties::SetAutomationId(logarithmic,prefix+L"-log");
             auto text=label(data,L"");text.TextWrapping(TextWrapping::Wrap);logarithmic.Content(text);
-            logarithmic.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+            logarithmic.HorizontalContentAlignment(HorizontalAlignment::Stretch);Grid::SetRow(logarithmic,2);root.Children().Append(logarithmic);
             logarithmic.Click([weak](auto&&,auto&&){if(auto self=weak.lock())
                 sendHistogram(self->data,O({{L"type",S(self->waveform?L"waveform_logarithmic":L"logarithmic")},{L"enabled",B(self->logarithmic.IsChecked().Value())}}));});
         }
-        footer=ScopeFooter(data,prefix,[weak]{if(auto self=weak.lock())return self->view();return J{};},bindings,nullptr,logarithmic);
-        Grid::SetRow(footer,tonal?1:2);root.Children().Append(footer);
+        footer=ScopeFooter(data,prefix,[weak]{if(auto self=weak.lock())return self->view();return J{};},bindings);
+        Grid::SetRow(footer,tonal?1:3);root.Children().Append(footer);
         bindings.emplace_back([self=shared_from_this()]{self->refresh();});
     }
     void refresh(){
@@ -246,12 +246,11 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
 };
 }
 FrameworkElement CapyScopes::ScopeFooter(std::shared_ptr<WorkspaceData> const& data,hstring const& prefix,std::function<J()> view,Bindings& bindings,
-    FrameworkElement const& trailing,FrameworkElement const& leading){
+    FrameworkElement const& trailing){
     Grid footer;footer.ColumnSpacing(data->panelMetric(L"control_spacing"));
     ColumnDefinition statusColumn;statusColumn.Width({1,GridUnitType::Star});footer.ColumnDefinitions().Append(statusColumn);
     auto status=dim(data);status.VerticalAlignment(VerticalAlignment::Center);AutomationProperties::SetAutomationId(status,prefix+L"-status");footer.Children().Append(status);
     auto append=[&footer](FrameworkElement const& control){ColumnDefinition column;column.Width({1,GridUnitType::Auto});Grid::SetColumn(control,int(footer.ColumnDefinitions().Size()));footer.ColumnDefinitions().Append(column);footer.Children().Append(control);};
-    if(leading)append(leading);
     StackPanel clippingRow;clippingRow.Orientation(Orientation::Horizontal);
     std::array<Primitives::ToggleButton,2> clipping{nullptr,nullptr};
     for(int i=0;i<2;++i){

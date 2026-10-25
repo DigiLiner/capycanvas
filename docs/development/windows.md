@@ -977,8 +977,8 @@ the same context may appear while a newer frame is pending. Layer thumbnails
 retire the source for each new revision so retained WinUI fills display the new
 pixels. `exercise-color-editor.ps1` checks the Paper fill in the composed
 thumbnail outside its type badge; Ready alone does not check pixel content.
-Log counts shares the compact footer
-with precision and clipping controls. The `layout-dark` and `layout-light` theme
+Log counts has its own row above the precision and clipping controls,
+as on GTK and Web. The `layout-dark` and `layout-light` theme
 variants check both scope panels in every registered language at 1100 and 1500
 pixels wide.
 
@@ -1749,10 +1749,11 @@ or shared rendering caches. Fixed controls and one complete scroll row reserve
 space before a fitted sibling receives the remaining height.
 Automatic tabs publish cached full-caption widths even when their labels are
 currently hidden; the tab strip reserves the shared 20-pixel member grip.
-Histogram and Waveform keep Log counts beside the status and clipping controls
-in one compact footer. Their graph stretches within the allocated body while
-the selectors, axis and footer retain their height; the preferred graph height
-remains the natural sizing input. Histogram axis labels stay with their graph.
+Histogram and Waveform put Log counts on its own row between the graph and the
+status and clipping controls. Their graph stretches within the allocated body while
+the selectors, axis, Log counts and footer retain their height; the preferred graph height
+remains the natural sizing input. Histogram axis labels stay with their graph,
+4 pixels below the plot.
 The plot uses its panel surface without a separate input-field backplate.
 Log counts retains the shared 24-pixel target around its native checkbox.
 Scope status and scale labels, including Curves axes, use the secondary text

@@ -81,7 +81,7 @@ function Tap($Element,[string]$Device){
     if($Device -eq 'mouse'){[CapyRowPointer]::Hover($at[0],$at[1]);Start-Sleep -Milliseconds 80}
     [CapyRowPointer]::Down($Device,$at[0],$at[1]);Start-Sleep -Milliseconds 45;[CapyRowPointer]::Up();Start-Sleep -Milliseconds 120
 }
-function Tap-Id([string]$Id,[string]$Device){Tap (Control $Id -Arranged) $Device}
+function Tap-Id([string]$Id,[string]$Device){$null=Reveal $Id;Tap (Control $Id -Arranged) $Device}
 function Pick([string]$Id,[string]$Option,[string]$Device){
     Tap-Id $Id $Device
     $item=Control $Option -Name -Type ([System.Windows.Automation.ControlType]::ListItem) -Arranged
@@ -104,9 +104,10 @@ function Reveal([string]$Id){
     $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,0);Start-Sleep -Milliseconds 200
     $view=$node.Current.BoundingRectangle;$target=(Control $Id).Current.BoundingRectangle
     $range=$view.Height*(100/$scroll.Current.VerticalViewSize-1)
-    if($range -gt 0 -and $target.Bottom -gt $view.Bottom){
-        $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,[Math]::Min(100,100*($target.Bottom-$view.Bottom+4)/$range))
-        Wait-Until {(Control $Id).Current.BoundingRectangle.Bottom -le $view.Bottom+1} "$Id did not scroll into view"
+    if($range -gt 0 -and ($target.IsEmpty -or $target.Bottom -gt $view.Bottom)){
+        $offset=if($target.IsEmpty){$range}else{$target.Bottom-$view.Bottom+4}
+        $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,[Math]::Min(100,100*$offset/$range))
+        Wait-Until {$box=(Control $Id).Current.BoundingRectangle;!$box.IsEmpty -and $box.Bottom -le $view.Bottom+1} "$Id did not scroll into view"
     }
     $view
 }
