@@ -37,9 +37,20 @@ async fn pack_prepared(prepared:&PreparedSessionTransfer,indices:&[usize])->Resu
     }
     let result=js_sys::Object::new();
     js_sys::Reflect::set(&result,&js("metadata"),&js(serde_json::to_string(&Envelope{descriptor:prepared.descriptor().clone(),chunks}).map_err(js)?))?;
-    js_sys::Reflect::set(&result,&js("buffers"),&buffers)?;Ok(result.into())
+    js_sys::Reflect::set(&result,&js("buffers"),&buffers)?;js_sys::Reflect::set(&result,&js("transfer_kind"),&js("session"))?;Ok(result.into())
 }
 async fn unpack(metadata:&str,buffers:js_sys::Array)->Result<layer_core::package::session::OpenSession,JsValue> {
+    raster_worker::receive_session(metadata,buffers).await?.adopt_verified(ProjectLimits::default(),&AtomicBool::new(false)).map_err(js)
+}
+#[wasm_bindgen]
+pub async fn raster_worker_validate_session(metadata:&str,buffers:js_sys::Array)->Result<JsValue,JsValue>{
+    if web_sys::window().is_some(){return Err(js("Payload validation requires its worker"));}
+    let transfer=receive(metadata,buffers).await?;
+    transfer.validate_payloads(ProjectLimits::default(),&AtomicBool::new(false)).map_err(js)?;
+    let indices=(0..transfer.payload_count()).collect::<Vec<_>>();pack_prepared(&transfer,&indices).await
+}
+pub(super) async fn receive(metadata:&str,buffers:js_sys::Array)->Result<PreparedSessionTransfer,JsValue> {
+    if metadata.len()>ProjectLimits::default().metadata_bytes as usize{return Err(js("Oversized session metadata"));}
     let envelope:Envelope=serde_json::from_str(metadata).map_err(js)?;
     let mut receiver=SessionTransferReceiver::new(envelope.descriptor,ProjectLimits::default()).map_err(js)?;
     let count=envelope.chunks.iter().try_fold(0usize,|sum,count|sum.checked_add(*count)).ok_or_else(||js("Session transfer count overflow"))?;
@@ -54,7 +65,7 @@ async fn unpack(metadata:&str,buffers:js_sys::Array)->Result<layer_core::package
             documents::yield_browser().await?;
         }
     }
-    receiver.finish().map_err(js)?.adopt_verified(ProjectLimits::default(),&AtomicBool::new(false)).map_err(js)
+    receiver.finish().map_err(js)
 }
 fn parts(value:&JsValue)->Result<(String,js_sys::Array),JsValue> {
     Ok((js_sys::Reflect::get(value,&js("metadata"))?.as_string().ok_or_else(||js("Missing session transfer metadata"))?,js_sys::Reflect::get(value,&js("buffers"))?.dyn_into()?))
@@ -71,7 +82,7 @@ impl WebSessionCapture {
             wait_capture(&capture.editor).await?;
             let prepared=PreparedSessionTransfer::capture(&capture.editor,capture.metadata().map_err(js)?,&AtomicBool::new(false)).map_err(js)?;
             let envelope=serde_json::to_string(&Envelope{descriptor:prepared.descriptor().clone(),chunks:Vec::new()}).map_err(js)?;
-            let beginning=serde_json::to_string(&serde_json::json!({"key":key,"project":envelope})).map_err(js)?;
+            let beginning=serde_json::to_string(&serde_json::json!({"key":key,"generation":generation,"base_generation":base_generation,"project":envelope})).map_err(js)?;
             let missing=JsFuture::from(raster_worker::call("restart-begin",&beginning,&js_sys::Array::new())?).await?;
             let missing:Vec<usize>=serde_wasm_bindgen::from_value(missing).map_err(js)?;
             let wire=pack_prepared(&prepared,&missing).await?;
@@ -152,10 +163,11 @@ impl WebApp {
     }
 }
 
+struct PendingTransfer {receiver:SessionTransferReceiver,generation:u64,base_generation:u64}
 struct CachedTransfer {prepared:PreparedSessionTransfer,bytes:u64}
 thread_local! {
     static TRANSFERS:std::cell::RefCell<BTreeMap<String,CachedTransfer>>=const {std::cell::RefCell::new(BTreeMap::new())};
-    static PENDING_TRANSFER:std::cell::RefCell<BTreeMap<String,SessionTransferReceiver>>=const {std::cell::RefCell::new(BTreeMap::new())};
+    static PENDING_TRANSFER:std::cell::RefCell<BTreeMap<String,PendingTransfer>>=const {std::cell::RefCell::new(BTreeMap::new())};
 }
 fn trim_transfer_cache(current:&str) {
     TRANSFERS.with(|slot|{
@@ -171,7 +183,7 @@ fn trim_transfer_cache(current:&str) {
 }
 #[wasm_bindgen]
 pub fn raster_worker_restart_begin(metadata:&str)->Result<JsValue,JsValue> {
-    #[derive(Deserialize)]struct Begin {key:String,project:String}
+    #[derive(Deserialize)]struct Begin {key:String,generation:u64,base_generation:u64,project:String}
     let begin:Begin=serde_json::from_str(metadata).map_err(js)?;
     let envelope:Envelope=serde_json::from_str(&begin.project).map_err(js)?;
     let receiver=TRANSFERS.with(|cache|{
@@ -182,7 +194,7 @@ pub fn raster_worker_restart_begin(metadata:&str)->Result<JsValue,JsValue> {
         }
     }).map_err(js)?;
     let missing=receiver.missing_payloads();
-    PENDING_TRANSFER.with(|slot|{let mut pending=slot.borrow_mut();pending.clear();pending.insert(begin.key,receiver);});
+    PENDING_TRANSFER.with(|slot|{let mut pending=slot.borrow_mut();pending.clear();pending.insert(begin.key,PendingTransfer{receiver,generation:begin.generation,base_generation:begin.base_generation});});
     serialize(&missing)
 }
 #[wasm_bindgen]
@@ -197,7 +209,11 @@ struct WriteOptions {key:String,generation:u64,base_generation:u64,existing:Vec<
 pub async fn raster_worker_restart_write(metadata:&str,buffers:js_sys::Array)->Result<JsValue,JsValue> {
     let options:WriteOptions=serde_json::from_str(metadata).map_err(js)?;
     let envelope:Envelope=serde_json::from_str(&options.project).map_err(js)?;
-    let mut receiver=PENDING_TRANSFER.with(|slot|slot.borrow_mut().remove(&options.key)).ok_or_else(||js("Checkpoint transfer expired"))?;
+    let pending=PENDING_TRANSFER.with(|slot|slot.borrow_mut().remove(&options.key)).ok_or_else(||js("Checkpoint transfer expired"))?;
+    if pending.generation!=options.generation||pending.base_generation!=options.base_generation{return Err(js("Checkpoint generation changed"));}
+    let mut receiver=pending.receiver;receiver.check_descriptor(&envelope.descriptor).map_err(js)?;
+    let count=envelope.chunks.iter().try_fold(0usize,|sum,count|sum.checked_add(*count)).ok_or_else(||js("Checkpoint block count overflow"))?;
+    if count!=buffers.length() as usize{return Err(js("Incomplete checkpoint resource blocks"));}
     let mut index=0;
     for (payload,count) in envelope.chunks.into_iter().enumerate() {
         for _ in 0..count {

@@ -77,8 +77,14 @@ The session runs on the browser event loop without shared memory. File decoding,
 encoding and color work run in `raster-worker.js` through the shared
 `package::transfer` descriptor and bounded transferable payloads. The descriptor
 uses the final manifest adapters plus private runtime identity and verification
-receipts; Web has no second artwork schema. Main-thread adoption consumes verified
-owners without image decoding or decoded-content hashing. Cold object tiles use a
+receipts; Web has no second artwork schema. Serialized fingerprints and cache
+metadata grant no validation. A CPU worker validates received artwork, session
+and paper payloads; the controller binds the exact buffers and metadata to a
+private, one-use receipt. Main-thread adoption consumes these receipts without
+image decoding or sample scans. Dedicated encoding, lookup and tile preparation
+workers use separate arenas from file decoding and return private job receipts.
+Parked OPFS chunks retain their original length and SHA-256 and verify both on
+each read through asynchronous Web Crypto. Cold object tiles use a
 dedicated worker to decompress native samples or convert ICC samples into working
 pixels. Requests carry one tile and bounded profile chunks; completion wakes the
 canvas instead of polling while the worker is busy. Nearest placement uses the
@@ -101,8 +107,8 @@ budget. Admitted files are still acquired in full; range-based Blob transport
 and a budget across concurrent jobs remain separate work.
 
 Clipboard output carries the full-depth source transfer and a separate PNG for
-other applications. The receiver separates the declared PNG trailer before
-validating and adopting the source transfer.
+other applications. The PNG is a separate reply field, so it cannot change the source transfer
+inventory or consume its validation receipt.
 
 Restart snapshots use the shared session codec, preserving every open drawing,
 tab order, selection, camera, undo/redo and manual-save checkpoint. Browser events
@@ -210,7 +216,7 @@ Pure unit tests need no browser or GPU:
 
 ```bash
 node --test apps/layer-web/{run,package,frame,bubbles,glass,pointer,workspace-client,canvas-bar,notice,zoom-readout,export-controls,size-dialog,text-input,localization}.test.mjs
-node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,pipeline-wait,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
+node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,document-storage,pipeline-wait,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
 ```
 
 The pointer harness runs the app's contact and release registrations in order,

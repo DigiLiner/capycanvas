@@ -143,8 +143,9 @@ impl ResourceInventory {
         let mut data=resource.data.clone();
         let wrapped=WRAPPERS.contains(&resource.encoding.as_ref());
         if wrapped {data.as_object_mut().ok_or("Invalid wrapped resource descriptor")?.remove("decoded_bytes");}
+        let tile=entry.kind=="capy.raster-tile/1" && resource.encoding.as_ref()=="capy.deflate-tile/1";
         if resource.kind.as_ref()!=entry.kind || data!=entry.data || !resource.extra_fields.is_empty()
-            || (resource.encoding.as_ref()!=entry.raw_encoding && !wrapped) {return Err("Opaque resource conflicts with authored resource".into());}
+            || (resource.encoding.as_ref()!=entry.raw_encoding && !wrapped && !tile) {return Err("Opaque resource conflicts with authored resource".into());}
         Ok(true)
     }
     pub fn prepare(&self, cancelled: &AtomicBool) -> Result<PreparedResources, String> {

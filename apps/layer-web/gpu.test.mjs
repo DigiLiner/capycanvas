@@ -20,6 +20,7 @@ export async function checkCallbackBoundaries({call,evaluate,settle,errors}) {
         const device=layerApp.canvas.getContext('webgpu').getConfiguration().device;
         for(const message of ['capy-test: first diagnostic','capy-test: replacement diagnostic'])device.dispatchEvent(new GPUUncapturedErrorEvent('uncapturederror',{error:new GPUValidationError(message)}));
         const worker=request=>{test.wasm.configure_raster_worker(worker);test.requests.push({operation:request.operation,cancellable:typeof request.cancelled==='function'});return test.transport(request).then(value=>{if(request.operation==='write')test.outputs.push(value.token);if(typeof request.cancelled==='function')test.completions.push({operation:request.operation,cancelled:request.cancelled()});return value})};
+        Object.assign(worker,{configure:test.transport.configure,consume:test.transport.consume,consumeResult:test.transport.consumeResult});
         test.wasm.configure_raster_worker(worker);
       })()`);
       const diagnostics=await evaluate('callbackBoundaries.diagnostics');

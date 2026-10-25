@@ -36,6 +36,9 @@ async fn pack_capture(capture:ArtworkCapture)->Result<JsValue,JsValue>{pack_with
 async fn pack_with_selection(capture:ArtworkCapture,selection:Option<layer_core::Selection>)->Result<JsValue,JsValue>{
     wait_backing(&capture.artwork).await?;
     let transfer=PreparedTransfer::capture_with_selection(&capture,&selection,&AtomicBool::new(false)).map_err(js)?;
+    pack_prepared(&transfer).await
+}
+async fn pack_prepared(transfer:&PreparedTransfer)->Result<JsValue,JsValue>{
     let buffers=js_sys::Array::new();let mut chunks=Vec::new();
     for index in 0..transfer.payload_count(){
         let len=usize::try_from(transfer.payload_len(index).map_err(js)?).map_err(js)?;let mut count=0;
@@ -47,13 +50,23 @@ async fn pack_with_selection(capture:ArtworkCapture,selection:Option<layer_core:
         chunks.push(count);
     }
     let metadata=serde_json::to_string(&Envelope{transfer:transfer.descriptor().clone(),chunks}).map_err(js)?;
-    let result=js_sys::Object::new();js_sys::Reflect::set(&result,&js("metadata"),&js(metadata))?;js_sys::Reflect::set(&result,&js("buffers"),&buffers)?;Ok(result.into())
+    let result=js_sys::Object::new();js_sys::Reflect::set(&result,&js("metadata"),&js(metadata))?;js_sys::Reflect::set(&result,&js("buffers"),&buffers)?;js_sys::Reflect::set(&result,&js("transfer_kind"),&js("artwork"))?;Ok(result.into())
 }
 pub(super) async fn unpack(metadata:&str,buffers:js_sys::Array)->Result<Artwork,JsValue>{Ok(unpack_capture(metadata,buffers).await?.artwork.as_ref().clone())}
 pub(super) async fn unpack_scene(metadata:&str,buffers:js_sys::Array)->Result<(Artwork,Option<layer_core::Selection>),JsValue>{let(capture,selection)=unpack_with_selection(metadata,buffers).await?;Ok((capture.artwork.as_ref().clone(),selection))}
 async fn unpack_capture(metadata:&str,buffers:js_sys::Array)->Result<ArtworkCapture,JsValue>{Ok(unpack_with_selection(metadata,buffers).await?.0)}
 async fn unpack_with_selection(metadata:&str,buffers:js_sys::Array)->Result<(ArtworkCapture,Option<layer_core::Selection>),JsValue>{
-    if metadata.len()>64*1024*1024{return Err(js("Oversized artwork metadata"));}
+    raster_worker::receive_artwork(metadata,buffers).await?.adopt_verified_with_selection(limits(ProjectLimits::default().dimension),&AtomicBool::new(false)).map_err(js)
+}
+#[wasm_bindgen]
+pub async fn raster_worker_validate_artwork(metadata:&str,buffers:js_sys::Array)->Result<JsValue,JsValue>{
+    if web_sys::window().is_some(){return Err(js("Payload validation requires its worker"));}
+    let transfer=receive(metadata,buffers).await?;
+    transfer.validate_payloads(limits(ProjectLimits::default().dimension),&AtomicBool::new(false)).map_err(js)?;
+    pack_prepared(&transfer).await
+}
+pub(super) async fn receive(metadata:&str,buffers:js_sys::Array)->Result<PreparedTransfer,JsValue>{
+    if metadata.len()>ProjectLimits::default().metadata_bytes as usize{return Err(js("Oversized artwork metadata"));}
     let envelope:Envelope=serde_json::from_str(metadata).map_err(js)?;
     let count=envelope.chunks.iter().try_fold(0usize,|sum,n|sum.checked_add(*n)).ok_or_else(||js("Transfer chunk count overflow"))?;
     if count!=buffers.length() as usize{return Err(js("Incomplete artwork transfer"));}
@@ -67,7 +80,7 @@ async fn unpack_with_selection(metadata:&str,buffers:js_sys::Array)->Result<(Art
             documents::yield_browser().await?;
         }
     }
-    receiver.finish().map_err(js)?.adopt_verified_with_selection(limits(ProjectLimits::default().dimension),&AtomicBool::new(false)).map_err(js)
+    receiver.finish().map_err(js)
 }
 fn parts(wire:&JsValue)->Result<(String,js_sys::Array),JsValue>{Ok((js_sys::Reflect::get(wire,&js("metadata"))?.as_string().ok_or_else(||js("Missing artwork transfer metadata"))?,js_sys::Reflect::get(wire,&js("buffers"))?.dyn_into()?))}
 pub(super) async fn convert_color(original: &layer_core::Document, change: layer_color::DocumentColorChange, control: &layer_render_wgpu::snapshot::CaptureControl) -> Result<(layer_core::Document, u64), JsValue> {

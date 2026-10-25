@@ -71,7 +71,7 @@ impl Editor {
 }
 fn active(cancel:&AtomicBool)->Result<(),String> {if cancel.load(Ordering::Relaxed) {Err("Session operation cancelled".into())}else{Ok(())}}
 
-#[derive(Clone,Debug,Serialize,Deserialize)]
+#[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkingRecord {
     pub(crate) generation:u64, selection:Option<Value>, selection_overlays:crate::authored::SelectionOverlays,
@@ -91,7 +91,7 @@ impl WorkingRecord {
 }
 const INDEX_CHUNK:usize=64;
 const INDEX_BOUNDARY:u32=8;
-#[derive(Clone,Debug,Serialize,Deserialize)]
+#[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ObjectVersion {pub(crate) record:Value,index:Option<Vec<usize>>,}
 fn indexed_field(record:&Value)->Option<&'static str> {

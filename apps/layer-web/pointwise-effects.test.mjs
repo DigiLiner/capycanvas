@@ -349,7 +349,10 @@ export async function checkLookupTransport({call,evaluate,settle}) {
     }
     const owner=await evaluate('String(layerApp.state().layer_properties.layer)'),other=await evaluate(`String(layerApp.state().layers.find(l=>String(l.id)!==${JSON.stringify(owner)}).id)`),beforeStale=await save();
     await evaluate(`window.showOpenFilePicker=()=>new Promise(resolve=>window.lookupPickerRelease=resolve)`);await click('[data-action="import-lookup"]');await wait('layerApp.state().document_file.busy');
-    await evaluate(`layerApp.dispatch({type:'select_layer',id:BigInt(${JSON.stringify(other)})});lookupPickerRelease([{name:'stale.cube',getFile:async()=>new File([${JSON.stringify(cube)}],'stale.cube')}])`);await idle();
+    await evaluate(`layerApp.app.dispatch({type:'select_layer',id:BigInt(${JSON.stringify(other)})});layerApp.wake()`);
+    assert.equal(await evaluate('String(layerApp.state().layers.find(layer=>layer.selected).id)'),other,'Core selection retires the owner while native picker interaction is blocked');
+    assert.notEqual(await evaluate('String(layerApp.state().layer_properties.layer)'),owner,'Deferred lookup owner is no longer current');
+    await evaluate(`lookupPickerRelease([{name:'stale.cube',getFile:async()=>new File([${JSON.stringify(cube)}],'stale.cube')}])`);await idle();
     assert.deepEqual(authoredIdentity(await save()),authoredIdentity(beforeStale),'Deferred import cannot mutate a retired property owner');
     await evaluate(`layerApp.dispatch({type:'select_layer',id:BigInt(${JSON.stringify(owner)})})`);await settle();
     await evaluate(`window.showOpenFilePicker=async()=>[{name:'inverse.cube',getFile:async()=>new File([${JSON.stringify(cube)}],'inverse.cube')}];`);await click('[data-action="import-lookup"]');await idle();

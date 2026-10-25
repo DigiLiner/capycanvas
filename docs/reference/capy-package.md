@@ -862,11 +862,15 @@ working selection. These execution fields are outside the portable manifest.
 Workers retain compact handle identity, including vacant slots, so returned
 results can be matched to the captured source targets.
 
-Payload chunks are bounded by `MAX_RANGE_BYTES`. `TransferReceiver` adopts
-complete verified payloads into immutable owners; incomplete transfers fail.
-Coverage word storage is shared across aliases. Worker admission verifies external
-bytes before this trusted internal transfer, so main-thread adoption does not
-repeat image decoding, color-profile preparation or decoded-content hashing.
+Payload chunks are bounded by `MAX_RANGE_BYTES`. `TransferReceiver` requires
+every byte to be initialized before producing immutable owners. Received
+descriptors do not establish validation: adoption checks compressed tiles,
+samples, LUT digests and admitted spaces, selection words and cached coverage,
+encoded caches and retained ancillary checksums. Cache bytes must decode to the
+same canonical resource. Coverage word storage is shared across aliases.
+Local capture and unchanged immutable payload reuse retain private validation
+state. Reuse requires every new binding of a payload to match its previous
+identity, descriptor, role and length.
 Tile receipts retain cached fingerprints of descriptors and encoded bytes.
 Worker color results intern the complete immutable image, tile and profile
 closure against the captured artwork; unchanged resources reuse their owners and
@@ -876,6 +880,14 @@ Unchanged encoding receipts and copy-safe ancillary payloads retain their exact
 bytes and resource identities.
 
 The Web host sends bounded transferable buffers and yields between chunks.
+An independent CPU worker checks received artwork, session and paper payloads.
+The controller holds the resulting immutable buffers behind private one-use
+receipts bound to the exact metadata; serialized fields cannot grant validation.
+Dedicated encoder, lookup and tile-preparation workers return private job receipts
+and do not share an arena with file decoders. Main-thread adoption consumes these
+receipts without repeating image decoding or sample scans. Parked browser chunks
+are bound to the original written length and SHA-256, checked asynchronously on
+each read. Checkpoint writes must match their begin descriptor and generations.
 `PreparedSessionTransfer` extends the trusted transport with working targets,
 bounded inverse edits, next edit/stroke identities and host session metadata.
 History uses the same per-record adapters; the UI owner does not replay complete

@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use serde_json::{Value, json};
 use std::{collections::{BTreeMap, BTreeSet}, mem::MaybeUninit, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransferLayout {
     compositions: Vec<PortableId>, stacks: Vec<PortableId>, occurrences: Vec<PortableId>,
@@ -23,9 +23,9 @@ impl TransferLayout {
         slots(&mut art.objects,&self.objects)?;slots(&mut art.vectors,&self.vectors)?;slots(&mut art.selections,&self.selections)?;slots(&mut art.guides,&self.guides)?;slots(&mut art.outputs,&self.outputs)
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct EncodedPayload {encoding:ResourceEncoding,payload:usize}
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag="kind",rename_all="snake_case")]
 enum VerifiedResource {
     Bytes {payload:usize,encoded:Option<EncodedPayload>},
@@ -36,9 +36,9 @@ enum VerifiedResource {
     Vector {payload:usize},
     Opaque {payload:usize},
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct SelectionTransfer {extent:[u32;2],bounds:[u32;4],bytes:bool,chunks:Vec<PortableId>,payload:usize}
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TransferDescriptor {
     pub manifest: Value,
     pub layout: TransferLayout,
@@ -64,8 +64,26 @@ impl TransferPayload {
         })
     }
 }
-pub struct PreparedTransfer {descriptor:TransferDescriptor,payloads:Vec<TransferPayload>,pub(crate) trusted_programs:super::TrustedPrograms}
+pub struct PreparedTransfer {descriptor:TransferDescriptor,payloads:Vec<TransferPayload>,pub(crate) trusted_programs:super::TrustedPrograms,payload_trust:Vec<bool>,validated:AtomicBool}
 fn active(cancel:&AtomicBool)->Result<(),String>{if cancel.load(Ordering::Relaxed){Err("Transfer cancelled".into())}else{Ok(())}}
+fn verify_cache(decoded:&[u8],encoded:&[u8],encoding:ResourceEncoding)->Result<(),String> {
+    match encoding {
+        ResourceEncoding::Raw if encoded!=decoded=>return Err("Encoded cache disagrees with resource bytes".into()),
+        ResourceEncoding::Lz4=>{
+            if encoded.len()>lz4_flex::block::get_maximum_output_size(decoded.len()) {return Err("Oversized encoded resource cache".into());}
+            let mut output=Vec::new();output.try_reserve_exact(decoded.len()).map_err(|_|"Resource validation allocation failed")?;output.resize(decoded.len(),0);
+            let length=lz4_flex::block::decompress_into(encoded,&mut output).map_err(|_|"Invalid encoded resource cache")?;
+            if length!=decoded.len()||output!=decoded {return Err("Encoded cache disagrees with resource bytes".into());}
+        },
+        ResourceEncoding::Raw=>(),
+    }
+    Ok(())
+}
+fn decoded_length(record:&Value)->Result<u64,String> {
+    let length=if matches!(record["encoding"].as_str(),Some("capy.lz4-bytes/1"|"capy.deflate-bytes/1")) {&record["data"]["decoded_bytes"]} else {&record["bytes"]};
+    super::manifest::decimal_u64(length)
+}
+
 fn manifest(descriptor:&TransferDescriptor,limits:ProjectLimits)->Result<Manifest,String>{
     if crate::json_len(descriptor)>limits.metadata_bytes as usize {return Err("Transfer metadata exceeds admission".into());}
     match Manifest::transfer(&descriptor.manifest,ManifestLimits {metadata_bytes:limits.metadata_bytes.min(usize::MAX as u64) as usize,..Default::default()})? {
@@ -123,7 +141,8 @@ impl PreparedTransfer {
                     VerifiedResource::Bytes{payload,encoded}|VerifiedResource::Code{payload,encoded}|VerifiedResource::Lut{payload,encoded,digest:_,spaces:_}=>{
                         match resource.encoding.as_ref() {"capy.lz4-bytes/1"=>encoded.as_ref().filter(|e|e.encoding==ResourceEncoding::Lz4).map(|e|e.payload),"capy.deflate-bytes/1"=>None,_=>Some(*payload)}
                     },
-                    VerifiedResource::Tile{payload,..}|VerifiedResource::Coverage{payload:Some(payload)}=>Some(*payload),
+                    VerifiedResource::Tile{payload,..} if resource.encoding.as_ref()=="capy.lz4-tile/1"=>Some(*payload),
+                    VerifiedResource::Coverage{payload:Some(payload)}=>Some(*payload),
                     _=>None,
                 }.filter(|payload|payloads[*payload].len()==resource.length);
                 let payload=shared.unwrap_or_else(||push(&mut payloads,TransferPayload::Opaque(resource.clone())));
@@ -140,7 +159,7 @@ impl PreparedTransfer {
         if !metadata.is_empty(){value["metadata"]=Value::Object(metadata);}
         let descriptor=TransferDescriptor {manifest:value,layout:TransferLayout::capture(art),checkpoint:capture.checkpoint,working_selection,lengths:payloads.iter().map(TransferPayload::len).collect(),resources:verification,selections,retained_resources,private_resources:BTreeMap::new()};
         manifest(&descriptor,ProjectLimits::default())?;
-        Ok(Self {descriptor,payloads,trusted_programs})
+        Ok(Self {descriptor,payloads,trusted_programs,payload_trust:Vec::new(),validated:AtomicBool::new(true)})
     }
     pub(crate) fn append_private_resource(&mut self,resource:Arc<OpaqueResource>)->Result<(),String>{
         if self.descriptor.private_resources.contains_key(&resource.id){return Err("Duplicate private transfer resource".into());}
@@ -200,7 +219,56 @@ impl PreparedTransfer {
         receiver.finish()
     }
     fn bytes(&self,index:usize)->Result<Arc<[u8]>,String>{match self.payloads.get(index){Some(TransferPayload::Bytes(v)|TransferPayload::Vector(_,v))=>Ok(v.clone()),Some(TransferPayload::Tile(v))=>v.compressed(),Some(TransferPayload::Code(v))=>Ok(v.as_bytes().into()),_=>Err("Wrong transfer byte payload".into())}}
-    fn encoded(&self,payload:&Option<EncodedPayload>)->Result<Option<EncodedBytes>,String>{payload.as_ref().map(|v|Ok(EncodedBytes{encoding:v.encoding,bytes:self.bytes(v.payload)?})).transpose()}
+    fn payload_trusted(&self,index:usize)->bool {self.validated.load(Ordering::Acquire)||self.payload_trust.get(index).copied().unwrap_or(false)}
+    fn bounded_bytes(&self,payload:usize,limit:usize,cancel:&AtomicBool)->Result<Arc<[u8]>,String> {
+        if self.payload_len(payload)?>limit as u64{return Err("Oversized retained resource".into());}
+        let Some(TransferPayload::Opaque(resource))=self.payloads.get(payload) else{return self.bytes(payload);};
+        let length=resource.length as usize;let mut bytes=Vec::new();
+        bytes.try_reserve_exact(length).map_err(|_|"Retained resource allocation failed")?;
+        for offset in (0..length).step_by(MAX_RANGE_BYTES){bytes.extend_from_slice(&resource.read_chunk(offset as u64,(length-offset).min(MAX_RANGE_BYTES),cancel)?);}
+        Ok(bytes.into())
+    }
+    fn verify_opaque_alias(&self,id:PortableId,expected:&Value,record:&Value,payload:usize,cancel:&AtomicBool)->Result<(),String> {
+        let state=self.descriptor.resources.get(&id).ok_or("Missing canonical resource")?;
+        let raw=match state {
+            VerifiedResource::Bytes{payload,..}|VerifiedResource::Code{payload,..}|VerifiedResource::Lut{payload,..}|VerifiedResource::Tile{payload,..}|VerifiedResource::Vector{payload}|VerifiedResource::Coverage{payload:Some(payload)}=>*payload,
+            _=>return Err("Retained alias has no canonical payload".into()),
+        };
+        if self.payload_trusted(raw)&&self.payload_trusted(payload) {return Ok(());}
+        let mut expected_data=expected["data"].clone();let mut stored_data=record["data"].clone();
+        for data in [&mut expected_data,&mut stored_data] {if let Some(fields)=data.as_object_mut(){fields.remove("decoded_bytes");}}
+        if expected["type"]!=record["type"] || expected_data!=stored_data {return Err("Retained resource descriptor mismatch".into());}
+        let canonical=self.bytes(raw)?;
+        if matches!(state,VerifiedResource::Tile{..}) {
+            let descriptor=resources::parse_descriptor(&expected["data"]).map_err(|e|e.to_string())?;
+            let size=descriptor.byte_len([super::RASTER_TILE_SIZE;2]).ok_or("Invalid retained tile descriptor")?;
+            let bytes=self.bounded_bytes(payload,lz4_flex::block::get_maximum_output_size(size),cancel)?;
+            let stored=match record["encoding"].as_str() {
+                Some("capy.deflate-tile/1")=>crate::raster::TileBlob::from_filtered_deflate(id,descriptor,&bytes)?,
+                Some("capy.lz4-tile/1")=>crate::raster::TileBlob::from_package(id,descriptor,bytes)?,
+                _=>return Err("Invalid retained tile encoding".into()),
+            };
+            let source=crate::raster::TileBlob::from_package(id,descriptor,canonical)?;
+            if stored.decode()?!=source.decode()? {return Err("Retained tile disagrees with canonical samples".into());}return Ok(());
+        }
+        if decoded_length(record)?!=canonical.len() as u64 {return Err("Retained resource length mismatch".into());}
+        let bytes=self.bounded_bytes(payload,lz4_flex::block::get_maximum_output_size(canonical.len()),cancel)?;
+        match record["encoding"].as_str() {
+            Some("capy.lz4-bytes/1")=>verify_cache(&canonical,&bytes,ResourceEncoding::Lz4)?,
+            Some("capy.deflate-bytes/1")=>{
+                if super::archive::inflate(&bytes,canonical.len(),true)?!=canonical.as_ref(){return Err("Retained encoding disagrees with resource bytes".into());}
+            },
+            _=>verify_cache(&canonical,&bytes,ResourceEncoding::Raw)?,
+        }
+        Ok(())
+    }
+    fn encoded(&self,payload:&Option<EncodedPayload>,decoded:&[u8],raw:usize)->Result<Option<EncodedBytes>,String>{
+        payload.as_ref().map(|value| {
+            let bytes=self.bytes(value.payload)?;
+            if !self.payload_trusted(value.payload)||!self.payload_trusted(raw) {verify_cache(decoded,&bytes,value.encoding)?;}
+            Ok(EncodedBytes {encoding:value.encoding,bytes})
+        }).transpose()
+    }
     pub fn adopt_verified(&self,limits:ProjectLimits,cancel:&AtomicBool)->Result<ArtworkCapture,String>{
         self.adopt_verified_with_selection(limits,cancel).map(|(capture,_)|capture)
     }
@@ -217,54 +285,7 @@ impl PreparedTransfer {
         active(cancel)?;let manifest=manifest(&self.descriptor,limits)?;
         let empty:Arc<[u8]>=Arc::from([]);let backing=ImmutableBacking::new(Arc::new(empty)).map_err(str::to_string)?;
         let mut reader=ResourceReader::new(&manifest,&backing,cancel,limits);reader.private=true;reader.trusted_programs=programs.clone();reader.require_verified();
-        if manifest.resources.len()!=self.descriptor.resources.len()||self.descriptor.checkpoint.document!=manifest.document{return Err("Transfer identity inventory mismatch".into());}
-        let mut decoded=0u64;
-        let slot_counts:BTreeMap<PortableId,usize>=manifest.objects.values().filter(|record|record["type"]=="capy.vector-object/1").flat_map(|record|{
-            let count=record["data"]["slots"].as_array().map_or(0,Vec::len);
-            record["data"]["items"].as_array().into_iter().flatten().filter_map(move |item|Some((resources::reference_id(item).ok()?,count)))
-        }).collect();
-        for (id,state) in &self.descriptor.resources {
-            active(cancel)?;let record=&manifest.resources.get(id).ok_or("Unknown transfer resource")?.value;
-            let kind=record["type"].as_str().ok_or("Missing transfer resource type")?;
-            let resource=|index,encoded:&Option<EncodedPayload>|->Result<Resource<[u8]>,String>{let bytes=self.bytes(index)?;Ok(match self.encoded(encoded)?{Some(encoded)=>Resource::with_id_and_encoded(*id,bytes,encoded),None=>Resource::with_id(*id,bytes)})};
-            match state {
-                VerifiedResource::Bytes{payload,encoded}=>{let limit=match kind {"capy.icc/1"=>crate::color::source::MAX_PROFILE_BYTES,"capy.photo-metadata/1"=>crate::PhotoMetadata::MAX_BYTES,"capy.vector-items/1"=>super::vector_records::MAX_CHUNK_BYTES,_=>return Err("Transfer byte resource type mismatch".into())};let value=resource(*payload,encoded)?;if value.len()>limit{return Err("Oversized verified byte resource".into());}decoded=decoded.saturating_add(value.len() as u64);reader.bytes.insert(*id,value);},
-                VerifiedResource::Code{payload,encoded}=>{if kind!="capy.wgsl/1"{return Err("Transfer shader type mismatch".into());}let code=match self.payloads.get(*payload){Some(TransferPayload::Code(code))=>code.clone(),_=>{let bytes=self.bytes(*payload)?;let text:Arc<str>=std::str::from_utf8(&bytes).map_err(|_|"Invalid verified shader text")?.into();match self.encoded(encoded)?{Some(encoded)=>Resource::with_id_and_encoded(*id,text,encoded),None=>Resource::with_id(*id,text)}}};if code.len()>4*1024*1024{return Err("Oversized transfer shader".into());}decoded=decoded.saturating_add(code.len() as u64);reader.texts.insert(*id,code);},
-                VerifiedResource::Lut{payload,encoded,digest,spaces}=>{if kind!="capy.lut3d/1"{return Err("Transfer lookup type mismatch".into());}let data=&record["data"];let size=super::values::u32_value(&data["size"]).map_err(|e|e.to_string())?;let domain: [[f32;3];2]=serde_json::from_value(data["domain"].clone()).map_err(|e|e.to_string())?;let bytes=resource(*payload,encoded)?;decoded=decoded.saturating_add(bytes.len() as u64);reader.bytes.insert(*id,bytes.clone());reader.luts.insert(*id,Arc::new(Lut3d::from_verified_resource(size,domain,Arc::from(""),*digest,bytes,*spaces).map_err(str::to_string)?));},
-                VerifiedResource::Coverage{payload}=>{if kind!="capy.selection-coverage/1"{return Err("Transfer selection type mismatch".into());}let bytes=payload.map(|p|self.bytes(p)).transpose()?.unwrap_or_else(||Arc::from([]));reader.bytes.insert(*id,Resource::with_id(*id,bytes));},
-                VerifiedResource::Vector{payload}=>{
-                    if kind!="capy.vector-items/1"{return Err("Transfer vector type mismatch".into());}
-                    let bytes=self.bytes(*payload)?;decoded=decoded.saturating_add(bytes.len() as u64);
-                    if let Some(TransferPayload::Vector(chunk,_))=self.payloads.get(*payload) && chunk.records().iter().all(|r|matches!(r,vector::Record::Path(_))) {reader.vectors.insert(*id,(0,0,slot_counts.get(id).copied().unwrap_or(0),chunk.summary().next_item-1,chunk.clone()));}
-                    reader.bytes.insert(*id,Resource::with_id_and_encoded(*id,bytes.clone(),EncodedBytes{encoding:ResourceEncoding::Raw,bytes}));
-                },
-                VerifiedResource::Tile{..}|VerifiedResource::Opaque{..}=>(),
-            }
-        }
-        for (id,state) in &self.descriptor.resources {if let VerifiedResource::Tile{payload,fingerprint}=state {
-            let record=&manifest.resources[id].value;if record["type"]!="capy.raster-tile/1"{return Err("Transfer tile type mismatch".into());}
-            let descriptor=resources::parse_descriptor(&record["data"]).map_err(|e|e.to_string())?;
-            let raw=descriptor.byte_len([super::RASTER_TILE_SIZE;2]).ok_or("Invalid verified tile descriptor")? as u64;
-            decoded=decoded.saturating_add(if retained {self.payload_len(*payload)?}else{raw});
-            reader.tiles.insert(*id,Arc::new(crate::raster::TileBlob::from_verified_resource_with_encoded_fingerprint(*id,descriptor,self.bytes(*payload)?,*fingerprint)?));
-        }}
-        for selection in &self.descriptor.selections {
-            let words=match self.payloads.get(selection.payload){Some(TransferPayload::Words(words))=>words.clone(),_=>return Err("Missing decoded selection words".into())};decoded=decoded.saturating_add(words.len() as u64*4);
-            let chunks=selection.chunks.iter().map(|id|reader.bytes.get(id).cloned().ok_or("Missing selection chunk identity")).collect::<Result<Vec<_>,_>>()?;
-            let cached=chunks.iter().all(|c|!c.is_empty()).then_some(chunks);
-            let pixels=Arc::new(SelectionPixels::from_verified_words(selection.extent,selection.bounds,selection.bytes,words,selection.chunks.clone(),cached)?);
-            reader.selections.insert((selection.extent,selection.bounds,selection.bytes,selection.chunks.clone()),pixels);
-        }
-        if decoded>limits.raster_bytes.saturating_add(if retained {crate::history_budget::BYTE_BUDGET as u64}else{0}){return Err("Transfer resources exceed decoded memory admission".into());}
-        let opaque=self.descriptor.resources.iter().filter_map(|(id,state)|if let VerifiedResource::Opaque{payload}=state{Some((*id,*payload))}else{None})
-            .chain(self.descriptor.retained_resources.iter().map(|(id,payload)|(*id,*payload)));
-        for (id,payload) in opaque {
-            let record=manifest.resources.get(&id).ok_or("Missing retained transfer resource")?;
-            if self.payloads.get(payload).ok_or("Missing retained payload")?.len()!=record.bytes{return Err("Retained resource length mismatch".into());}
-            if let Some(TransferPayload::Opaque(resource))=self.payloads.get(payload){reader.opaque.insert(id,resource.clone());continue;}
-            let bytes=self.bytes(payload)?;let length=bytes.len() as u64;let backing=ImmutableBacking::new(Arc::new(bytes)).map_err(str::to_string)?;
-            reader.opaque.insert(id,Arc::new(OpaqueResource::from_record(id,&record.value,backing,0,length,record.crc32)?));
-        }
+        self.populate(&manifest,&mut reader,cancel,retained)?;
         let mut artwork=artwork_records::decode_with_layout(&manifest,&mut reader,Some(&self.descriptor.layout)).map_err(|e|e.to_string())?;
         let working_selection=self.descriptor.working_selection.as_ref().map(|value|super::selection_records::decode_selection(value,&mut reader)).transpose().map_err(|e|e.to_string())?;
         let slotted=artwork_records::slot_resources(&artwork);
@@ -276,9 +297,97 @@ impl PreparedTransfer {
         active(cancel)?;
         Ok((ArtworkCapture{artwork:Arc::new(artwork),checkpoint:self.descriptor.checkpoint},working_selection,extra))
     }
+    /// # Safety
+    /// These exact immutable payloads and all descriptor/cache relations were validated.
+    #[cfg(target_arch="wasm32")]
+    pub unsafe fn accept_validated_transport(&self) {self.validated.store(true,Ordering::Release);}
+    pub fn validate_payloads(&self,limits:ProjectLimits,cancel:&AtomicBool)->Result<(),String> {
+        self.validate_payloads_with_retention(limits,cancel,false)
+    }
+    pub(crate) fn validate_payloads_with_retention(&self,limits:ProjectLimits,cancel:&AtomicBool,retained:bool)->Result<(),String> {
+        active(cancel)?;let manifest=manifest(&self.descriptor,limits)?;
+        let backing=ImmutableBacking::new(Arc::new(Arc::<[u8]>::from([]))).map_err(str::to_string)?;
+        let mut reader=ResourceReader::new(&manifest,&backing,cancel,limits);reader.require_verified();
+        self.populate(&manifest,&mut reader,cancel,retained)
+    }
+    fn populate(&self,manifest:&Manifest,reader:&mut ResourceReader<'_>,cancel:&AtomicBool,retained:bool)->Result<(),String> {
+        let limits=reader.limits;
+        if manifest.resources.len()!=self.descriptor.resources.len()||self.descriptor.checkpoint.document!=manifest.document{return Err("Transfer identity inventory mismatch".into());}
+        let mut decoded=0u64;
+        let slot_counts:BTreeMap<PortableId,usize>=manifest.objects.values().filter(|record|record["type"]=="capy.vector-object/1").flat_map(|record|{
+            let count=record["data"]["slots"].as_array().map_or(0,Vec::len);
+            record["data"]["items"].as_array().into_iter().flatten().filter_map(move |item|Some((resources::reference_id(item).ok()?,count)))
+        }).collect();
+        for (id,state) in &self.descriptor.resources {
+            active(cancel)?;let record=&manifest.resources.get(id).ok_or("Unknown transfer resource")?.value;
+            let kind=record["type"].as_str().ok_or("Missing transfer resource type")?;
+            let resource=|index,encoded:&Option<EncodedPayload>,limit:usize|->Result<Resource<[u8]>,String>{let bytes=self.bytes(index)?;if bytes.len()>limit{return Err("Oversized transfer resource".into());}
+                if bytes.len() as u64!=decoded_length(record)?{return Err("Transfer resource length mismatch".into());}Ok(match self.encoded(encoded,&bytes,index)?{Some(encoded)=>Resource::with_id_and_encoded(*id,bytes,encoded),None=>Resource::with_id(*id,bytes)})};
+            match state {
+                VerifiedResource::Bytes{payload,encoded}=>{let limit=match kind {"capy.icc/1"=>crate::color::source::MAX_PROFILE_BYTES,"capy.photo-metadata/1"=>crate::PhotoMetadata::MAX_BYTES,"capy.vector-items/1"=>super::vector_records::MAX_CHUNK_BYTES,_=>return Err("Transfer byte resource type mismatch".into())};let value=resource(*payload,encoded,limit)?;if value.len()>limit{return Err("Oversized verified byte resource".into());}decoded=decoded.saturating_add(value.len() as u64);reader.bytes.insert(*id,value);},
+                VerifiedResource::Code{payload,encoded}=>{if kind!="capy.wgsl/1"{return Err("Transfer shader type mismatch".into());}let code=match self.payloads.get(*payload){Some(TransferPayload::Code(code))=>{self.encoded(encoded,code.as_bytes(),*payload)?;code.clone()},_=>{let bytes=self.bytes(*payload)?;if bytes.len()>4*1024*1024{return Err("Oversized transfer shader".into());}let text:Arc<str>=std::str::from_utf8(&bytes).map_err(|_|"Invalid verified shader text")?.into();match self.encoded(encoded,&bytes,*payload)?{Some(encoded)=>Resource::with_id_and_encoded(*id,text,encoded),None=>Resource::with_id(*id,text)}}};if code.len()>4*1024*1024{return Err("Oversized transfer shader".into());}
+                    if code.len() as u64!=decoded_length(record)?{return Err("Transfer shader length mismatch".into());}decoded=decoded.saturating_add(code.len() as u64);reader.texts.insert(*id,code);},
+                VerifiedResource::Lut{payload,encoded,digest,spaces}=>{if kind!="capy.lut3d/1"{return Err("Transfer lookup type mismatch".into());}let data=&record["data"];let size=super::values::u32_value(&data["size"]).map_err(|e|e.to_string())?;let domain: [[f32;3];2]=serde_json::from_value(data["domain"].clone()).map_err(|e|e.to_string())?;let bytes=resource(*payload,encoded,(Lut3d::MAX_SIZE as usize).pow(3)*12)?;decoded=decoded.saturating_add(bytes.len() as u64);reader.bytes.insert(*id,bytes.clone());
+                    let lut=if self.payload_trusted(*payload) {Lut3d::from_verified_resource(size,domain,Arc::from(""),*digest,bytes,*spaces).map_err(str::to_string)?}
+                        else {let lut=Lut3d::from_resource(size,domain,Arc::from(""),bytes).map_err(str::to_string)?;
+                            if lut.digest()!=*digest||lut.admitted_spaces()!=*spaces{return Err("Transfer lookup verification mismatch".into());}lut};
+                    reader.luts.insert(*id,Arc::new(lut));},
+                VerifiedResource::Coverage{payload}=>{if kind!="capy.selection-coverage/1"{return Err("Transfer selection type mismatch".into());}let bytes=payload.map(|p|self.bytes(p)).transpose()?.unwrap_or_else(||Arc::from([]));reader.bytes.insert(*id,Resource::with_id(*id,bytes));},
+                VerifiedResource::Vector{payload}=>{
+                    if kind!="capy.vector-items/1"{return Err("Transfer vector type mismatch".into());}
+                    let bytes=self.bytes(*payload)?;if bytes.len()>super::vector_records::MAX_CHUNK_BYTES||bytes.len() as u64!=decoded_length(record)?{return Err("Transfer vector length mismatch".into());}decoded=decoded.saturating_add(bytes.len() as u64);
+                    if let Some(TransferPayload::Vector(chunk,_))=self.payloads.get(*payload) && chunk.records().iter().all(|r|matches!(r,vector::Record::Path(_))) {reader.vectors.insert(*id,(0,0,slot_counts.get(id).copied().unwrap_or(0),chunk.summary().next_item-1,chunk.clone()));}
+                    reader.bytes.insert(*id,Resource::with_id_and_encoded(*id,bytes.clone(),EncodedBytes{encoding:ResourceEncoding::Raw,bytes}));
+                },
+                VerifiedResource::Tile{..}|VerifiedResource::Opaque{..}=>(),
+            }
+        }
+        for (id,state) in &self.descriptor.resources {if let VerifiedResource::Tile{payload,fingerprint}=state {
+            let record=&manifest.resources[id].value;if record["type"]!="capy.raster-tile/1"{return Err("Transfer tile type mismatch".into());}
+            let descriptor=resources::parse_descriptor(&record["data"]).map_err(|e|e.to_string())?;
+            let raw=descriptor.byte_len([super::RASTER_TILE_SIZE;2]).ok_or("Invalid verified tile descriptor")? as u64;
+            decoded=decoded.saturating_add(if retained {self.payload_len(*payload)?}else{raw});
+            let bytes=self.bytes(*payload)?;
+            let tile=if self.payload_trusted(*payload) {crate::raster::TileBlob::from_verified_resource_with_encoded_fingerprint(*id,descriptor,bytes,*fingerprint)?}
+                else {let tile=crate::raster::TileBlob::from_package(*id,descriptor,bytes)?;
+                    if fingerprint.is_some() && tile.encoded_fingerprint()!=*fingerprint {return Err("Transfer tile fingerprint mismatch".into());}tile};
+            reader.tiles.insert(*id,Arc::new(tile));
+        }}
+        for selection in &self.descriptor.selections {
+            let words=match self.payloads.get(selection.payload){Some(TransferPayload::Words(words))=>words.clone(),_=>return Err("Missing decoded selection words".into())};decoded=decoded.saturating_add(words.len() as u64*4);
+            let chunks=selection.chunks.iter().map(|id|reader.bytes.get(id).cloned().ok_or("Missing selection chunk identity")).collect::<Result<Vec<_>,_>>()?;
+            let present=chunks.iter().filter(|chunk|!chunk.is_empty()).count();
+            if present!=0 && present!=chunks.len() {return Err("Incomplete selection chunk cache".into());}
+            let cached=(present==chunks.len()).then_some(chunks);
+            let trusted=self.payload_trusted(selection.payload) && selection.chunks.iter().all(|id|match self.descriptor.resources.get(id) {
+                Some(VerifiedResource::Coverage {payload:Some(payload)})=>self.payload_trusted(*payload),Some(VerifiedResource::Coverage {payload:None})=>true,_=>false,
+            });
+            let pixels=Arc::new(if trusted {SelectionPixels::from_verified_words(selection.extent,selection.bounds,selection.bytes,words,selection.chunks.clone(),cached)?}
+                else {SelectionPixels::from_received_words(selection.extent,selection.bounds,selection.bytes,words,selection.chunks.clone(),cached)?});
+            reader.selections.insert((selection.extent,selection.bounds,selection.bytes,selection.chunks.clone()),pixels);
+        }
+        if decoded>limits.raster_bytes.saturating_add(if retained {crate::history_budget::BYTE_BUDGET as u64}else{0}){return Err("Transfer resources exceed decoded memory admission".into());}
+        let opaque=self.descriptor.resources.iter().filter_map(|(id,state)|if let VerifiedResource::Opaque{payload}=state{Some((*id,*payload))}else{None})
+            .chain(self.descriptor.retained_resources.iter().map(|(id,payload)|(*id,*payload)));
+        for (id,payload) in opaque {
+            let record=manifest.resources.get(&id).ok_or("Missing retained transfer resource")?;
+            if self.payloads.get(payload).ok_or("Missing retained payload")?.len()!=record.bytes{return Err("Retained resource length mismatch".into());}
+            if self.descriptor.retained_resources.contains_key(&id) {self.verify_opaque_alias(id,&record.value,&record.value,payload,cancel)?;}
+            if let Some(TransferPayload::Opaque(resource))=self.payloads.get(payload){reader.opaque.insert(id,resource.clone());continue;}
+            let bytes=self.bytes(payload)?;let length=bytes.len() as u64;
+            let backing=ImmutableBacking::new(Arc::new(bytes)).map_err(str::to_string)?;
+            let resource=Arc::new(OpaqueResource::from_record(id,&record.value,backing,0,length,record.crc32)?);if !self.payload_trusted(payload) {resource.verify(cancel)?;}reader.opaque.insert(id,resource);
+        }
+        for (id,(record,payload)) in &self.descriptor.private_resources {
+            if let Some(expected)=manifest.resources.get(id) {self.verify_opaque_alias(*id,&expected.value,record,*payload,cancel)?;}
+            if !self.payload_trusted(*payload) {self.private_resource(*id)?.verify(cancel)?;}
+        }
+        active(cancel)?;self.validated.store(true,Ordering::Release);Ok(())
+    }
+
 }
 enum PayloadBuffer {Bytes(Arc<[MaybeUninit<u8>]>),Words(Arc<[MaybeUninit<u32>]>),Ready(TransferPayload) }
-pub struct TransferReceiver {descriptor:TransferDescriptor,buffers:Vec<PayloadBuffer>,positions:Vec<u64>}
+pub struct TransferReceiver {descriptor:TransferDescriptor,buffers:Vec<PayloadBuffer>,positions:Vec<u64>,payload_trust:Vec<bool>}
 impl TransferReceiver {
     pub fn new(descriptor:TransferDescriptor,limits:ProjectLimits)->Result<Self,String>{
         Self::new_with_reuse(descriptor,limits,None)
@@ -301,9 +410,13 @@ impl TransferReceiver {
             ||bytes.union(&words).any(|index|*index>=descriptor.lengths.len()) {return Err("Unindexed or conflicting transfer payloads".into());}
         let mut reuse=BTreeMap::new();
         if let Some(previous)=previous {
-            let candidate=PreparedTransfer {descriptor:descriptor.clone(),payloads:Vec::new(),trusted_programs:Default::default()};
-            let keys=candidate.payload_keys()?;let old=previous.payload_keys()?;
-            for (key,index) in keys {if let Some(before)=old.get(&key) {reuse.insert(index,previous.payloads[*before].clone());}}
+            let candidate=PreparedTransfer {descriptor:descriptor.clone(),payloads:Vec::new(),trusted_programs:Default::default(),payload_trust:Vec::new(),validated:AtomicBool::new(false)};
+            let keys=candidate.payload_keys()?;let old=previous.payload_keys()?;let mut bindings=BTreeMap::new();
+            for (key,index) in keys {
+                let before=old.get(&key).copied();
+                bindings.entry(index).and_modify(|current|{if *current!=before {*current=None;}}).or_insert(before);
+            }
+            for (index,before) in bindings {if let Some(before)=before {reuse.insert(index,(previous.payloads[before].clone(),previous.payload_trusted(before)));}}
         }
         for (id,(record,payload)) in &descriptor.private_resources {
             if record["id"]!=json!(id)||super::manifest::decimal_u64(&record["bytes"]).map_err(|e|e.to_string())?!=*descriptor.lengths.get(*payload).ok_or("Missing private resource payload")? {return Err("Private transfer inventory mismatch".into());}
@@ -311,13 +424,14 @@ impl TransferReceiver {
         if descriptor.retained_resources.keys().any(|id|!descriptor.resources.contains_key(id)){return Err("Unknown retained transfer resource".into());}
         let total=descriptor.lengths.iter().try_fold(0u64,|a,b|a.checked_add(*b).ok_or("Transfer length overflow"))?;
         if total>limits.raster_bytes.saturating_add(limits.asset_bytes).saturating_mul(2){return Err("Transfer exceeds memory admission".into());}
+        let payload_trust=(0..descriptor.lengths.len()).map(|index|reuse.get(&index).is_some_and(|(_,trusted)|*trusted)).collect();
         let buffers=descriptor.lengths.iter().enumerate().map(|(i,length)|{
-            if let Some(payload)=reuse.remove(&i) {return Ok(PayloadBuffer::Ready(payload));}
+            if let Some((payload,_))=reuse.remove(&i) {return Ok(PayloadBuffer::Ready(payload));}
             let length=usize::try_from(*length).map_err(|_|"Transfer allocation overflow")?;
             if words.contains(&i){if length%4!=0{return Err("Misaligned selection words".into());}Ok(PayloadBuffer::Words(Arc::<[u32]>::new_uninit_slice(length/4)))}
             else{Ok(PayloadBuffer::Bytes(Arc::<[u8]>::new_uninit_slice(length)))}
         }).collect::<Result<Vec<_>,String>>()?;
-        let positions=buffers.iter().enumerate().map(|(i,buffer)|if matches!(buffer,PayloadBuffer::Ready(_)){descriptor.lengths[i]}else{0}).collect();Ok(Self{descriptor,buffers,positions})
+        let positions=buffers.iter().enumerate().map(|(i,buffer)|if matches!(buffer,PayloadBuffer::Ready(_)){descriptor.lengths[i]}else{0}).collect();Ok(Self{descriptor,buffers,positions,payload_trust})
     }
     pub fn missing_payloads(&self)->Vec<usize>{self.positions.iter().zip(&self.descriptor.lengths).enumerate().filter_map(|(i,(position,length))|(position!=length).then_some(i)).collect()}
     pub fn push_chunk(&mut self,index:usize,bytes:&[u8])->Result<(),String>{
@@ -337,7 +451,7 @@ impl TransferReceiver {
             PayloadBuffer::Bytes(bytes)=>TransferPayload::Bytes(unsafe{bytes.assume_init()}),
             PayloadBuffer::Words(words)=>TransferPayload::Words(unsafe{words.assume_init()}),
         }).collect();
-        Ok(PreparedTransfer{descriptor:self.descriptor,payloads,trusted_programs:Default::default()})
+        Ok(PreparedTransfer{descriptor:self.descriptor,payloads,trusted_programs:Default::default(),payload_trust:self.payload_trust,validated:AtomicBool::new(false)})
     }
 }
 
@@ -575,4 +689,6 @@ mod tests {
         let mut wrong=receive(&prepared);wrong.descriptor.checkpoint.document=PortableId::random();assert!(wrong.adopt_verified(ProjectLimits::default(),&cancel).is_err());
         cancel.store(true,Ordering::Relaxed);assert!(PreparedTransfer::capture(&original,&cancel).is_err());
     }
+    include!("transfer_boundary_tests.rs");
+
 }

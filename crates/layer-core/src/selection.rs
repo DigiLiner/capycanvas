@@ -120,6 +120,27 @@ impl PackageWindow {
     pub(crate) fn words(&self) -> usize { self.rows.len() * self.columns.len() }
     pub(crate) fn chunks(&self) -> usize { (self.words() * 4).div_ceil(SELECTION_CHUNK_BYTES) }
 }
+fn visit_package_words(window:&PackageWindow,chunks:&[Resource<[u8]>],mut visit:impl FnMut(usize,u32)->Result<(),String>)->Result<(),String> {
+    if window.chunks()!=chunks.len() {return Err("Invalid selection chunk index".into());}
+        let mut stored = window.rows.clone().flat_map(|y| (window.columns.start..window.columns.end).map(move |x| y * window.stride + x));
+        let mut remaining = window.words();
+        let mut decoded = Vec::new();
+        decoded.try_reserve_exact(SELECTION_CHUNK_BYTES).map_err(|_|"Selection allocation failed")?;
+        decoded.resize(SELECTION_CHUNK_BYTES,0);
+        for chunk in chunks {
+            if chunk.len() > lz4_flex::block::get_maximum_output_size(SELECTION_CHUNK_BYTES) {
+                return Err("Oversized selection chunk".into());
+            }
+            let length = lz4_flex::block::decompress_into(chunk, &mut decoded).map_err(|e| e.to_string())?;
+            if length != SELECTION_CHUNK_BYTES { return Err("Invalid selection chunk length".into()); }
+            let used = remaining.min(SELECTION_CHUNK_BYTES / 4) * 4;
+            if decoded[used..].iter().any(|v| *v != 0) { return Err("Nonzero selection chunk padding".into()); }
+            for (bytes, index) in decoded[..used].as_chunks::<4>().0.iter().zip(stored.by_ref()) { visit(index,u32::from_le_bytes(*bytes))?; }
+            remaining -= used / 4;
+        }
+    if remaining!=0 {return Err("Incomplete selection chunks".into());}
+    Ok(())
+}
 impl SelectionPixels {
     pub fn new(
         extent: [u32; 2],
@@ -224,20 +245,7 @@ impl SelectionPixels {
         let mut words = Vec::new();
         words.try_reserve_exact(count).map_err(|_| "Selection allocation failed")?;
         words.resize(count, 0);
-        let mut stored = window.rows.clone().flat_map(|y| (window.columns.start..window.columns.end).map(move |x| y * window.stride + x));
-        let mut remaining = window.words();
-        let mut decoded = vec![0; SELECTION_CHUNK_BYTES];
-        for chunk in &chunks {
-            if chunk.len() > lz4_flex::block::get_maximum_output_size(SELECTION_CHUNK_BYTES) {
-                return Err("Oversized selection chunk".into());
-            }
-            let length = lz4_flex::block::decompress_into(chunk, &mut decoded).map_err(|e| e.to_string())?;
-            if length != SELECTION_CHUNK_BYTES { return Err("Invalid selection chunk length".into()); }
-            let used = remaining.min(SELECTION_CHUNK_BYTES / 4) * 4;
-            if decoded[used..].iter().any(|v| *v != 0) { return Err("Nonzero selection chunk padding".into()); }
-            for (bytes, index) in decoded[..used].as_chunks::<4>().0.iter().zip(stored.by_ref()) { words[index] = u32::from_le_bytes(*bytes); }
-            remaining -= used / 4;
-        }
+        visit_package_words(&window,&chunks,|index,value| {words[index]=value;Ok(())})?;
         let value = Self::with_coverage(extent, bounds, words.into(), byte_coverage).map_err(|e| e.to_string())?;
         value.validate_package()?;
         value.package_chunks.set(chunks.into()).map_err(|_| "Selection chunk cache already initialized")?;
@@ -250,6 +258,19 @@ impl SelectionPixels {
             if let Some(chunks) = self.package_chunks.get() { return chunks.iter().map(Resource::id).collect::<Vec<_>>().into(); }
             (0..PackageWindow::new(self.extent, self.bounds, self.byte_coverage).chunks()).map(|_| crate::authored::PortableId::random()).collect::<Vec<_>>().into()
         })
+    }
+    pub(crate) fn from_received_words(
+        extent:[u32;2],bounds:[u32;4],byte_coverage:bool,words:Arc<[u32]>,
+        ids:Vec<crate::authored::PortableId>,chunks:Option<Vec<Resource<[u8]>>>,
+    )->Result<Self,String> {
+        let value=Self::with_coverage(extent,bounds,words.clone(),byte_coverage).map_err(|error|error.to_string())?;
+        value.validate_package()?;
+        if let Some(chunks)=&chunks {
+            visit_package_words(&PackageWindow::new(extent,bounds,byte_coverage),chunks,|index,stored| {
+                if words[index]!=stored {return Err("Selection cache disagrees with coverage words".into());}Ok(())
+            })?;
+        }
+        Self::from_verified_words(extent,bounds,byte_coverage,words,ids,chunks)
     }
     pub(crate) fn from_verified_words(
         extent: [u32; 2], bounds: [u32; 4], byte_coverage: bool, words: Arc<[u32]>,

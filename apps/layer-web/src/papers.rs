@@ -24,13 +24,22 @@ impl Transfer {
         for tile in source.tiles.values() { buffers.push(&js_sys::Uint8Array::from(tile.compressed()?.as_ref())); }
         Ok(Self { extent: source.extent, resolution: source.resolution, interpretation: source.interpretation.clone(), tiles: source.tiles.keys().copied().collect() })
     }
-    fn receive(self, buffers: &js_sys::Array, first: u32) -> Result<SourceImage, String> {
+    fn receive(self, buffers: &js_sys::Array, first: u32, validated: bool) -> Result<SourceImage, String> {
+        if buffers.length() as usize!=first as usize+self.tiles.len(){return Err("Invalid paper tile count".into());}
+        let count=self.tiles.len();
+        let [width,height]=self.extent;
+        if width==0||height==0||width>32768||height>32768{return Err("Unsupported paper extent".into());}
+        let columns=width.div_ceil(layer_core::raster::TILE_SIZE);let rows=height.div_ceil(layer_core::raster::TILE_SIZE);
+        if count!=columns as usize*rows as usize||self.tiles.iter().any(|[x,y]|*x>=columns||*y>=rows){return Err("Invalid paper tile inventory".into());}
         let descriptor = self.interpretation.descriptor();
         let tiles = self.tiles.into_iter().zip(first..).map(|(coordinate, index)| {
             let bytes = buffers.get(index).dyn_into::<js_sys::Uint8Array>().map_err(|_| "Missing paper tile".to_string())?.to_vec();
-            Ok((coordinate, Arc::new(TileBlob::from_verified_resource(PortableId::random(), descriptor, bytes.into())?)))
+            let tile=if validated {TileBlob::from_verified_resource(PortableId::random(),descriptor,bytes.into())?}else{TileBlob::from_package(PortableId::random(),descriptor,bytes.into())?};
+            Ok((coordinate, Arc::new(tile)))
         }).collect::<Result<_, String>>()?;
-        Ok(SourceImage { extent: self.extent, resolution: self.resolution, interpretation: self.interpretation, tiles })
+        let source=SourceImage { extent: self.extent, resolution: self.resolution, interpretation: self.interpretation, tiles };
+        if source.tiles.len()!=count{return Err("Duplicate paper tile coordinate".into());}
+        source.validate()?;Ok(source)
     }
 }
 
@@ -63,11 +72,11 @@ pub fn raster_worker_paper(metadata: &str, buffers: js_sys::Array) -> Result<js_
             let paper = layer_ui::paper_library::library_paper(&source, &|| false).map_err(library_error)?;
             prepared(&paper, &name, &stored)?
         }
-        WorkerPaper::Store { name, stored, paper } => prepared(&paper.receive(&buffers, 0).map_err(js)?, &name, &stored)?,
+        WorkerPaper::Store { name, stored, paper } => prepared(&paper.receive(&buffers, 0, false).map_err(js)?, &name, &stored)?,
         WorkerPaper::Load { id, retained } => {
             let png = buffers.get(0).dyn_into::<js_sys::Uint8Array>()?.to_vec();
             let paper = layer_ui::paper_library::stored_paper(&id, &png).map_err(js)?;
-            let retained = retained.map(|transfer| transfer.receive(&buffers, 1)).transpose().map_err(js)?;
+            let retained = retained.map(|transfer| transfer.receive(&buffers, 1, false)).transpose().map_err(js)?;
             let kept = retained.as_ref().map(|image| layer_core::Image::with_id(layer_ui::paper_library::paper_image_id(&id).unwrap_or_else(PortableId::random), Arc::new(image.clone())));
             let canonical = layer_ui::paper_library::canonical_source(&id, paper, kept.as_slice()).map_err(js)?;
             let out = js_sys::Array::new();
@@ -97,6 +106,19 @@ fn prepared(paper: &SourceImage, name: &str, stored: &[PaperEntry]) -> Result<(s
 }
 
 #[wasm_bindgen]
+pub fn raster_worker_validate_paper(metadata:&str,buffers:js_sys::Array)->Result<JsValue,JsValue> {
+    if web_sys::window().is_some(){return Err(js("Paper validation requires its worker"));}
+    if metadata.len()>layer_core::ProjectLimits::default().metadata_bytes as usize{return Err(js("Oversized paper metadata"));}
+    let transfer:Transfer=serde_json::from_str(metadata).map_err(js)?;
+    let source=transfer.receive(&buffers,0,false).map_err(js)?;
+    let buffers=js_sys::Array::new();let transfer=Transfer::send(&source,&buffers).map_err(js)?;
+    let result=js_sys::Object::new();
+    js_sys::Reflect::set(&result,&js("metadata"),&js(serde_json::to_string(&transfer).map_err(js)?))?;
+    js_sys::Reflect::set(&result,&js("buffers"),&buffers)?;
+    js_sys::Reflect::set(&result,&js("transfer_kind"),&js("paper"))?;Ok(result.into())
+}
+
+#[wasm_bindgen]
 pub struct WebPaperTask {
     capture: Rc<PaperCapture>,
     localization: Arc<layer_ui::Localizer>,
@@ -121,11 +143,13 @@ fn entries(reply: &JsValue) -> Result<Vec<PaperEntry>, String> {
     }).collect())
 }
 
-fn paper(reply: &JsValue) -> Result<SourceImage, String> {
+async fn paper(reply: &JsValue) -> Result<SourceImage, String> {
     let metadata = js_sys::Reflect::get(reply, &js("metadata")).map_err(|_| "Missing paper")?;
-    let transfer: Transfer = serde_wasm_bindgen::from_value(js_sys::Reflect::get(&metadata, &js("paper")).map_err(|_| "Missing paper")?).map_err(|e| e.to_string())?;
+    let transfer=js_sys::Reflect::get(&metadata, &js("paper")).map_err(|_| "Missing paper")?;
+    let metadata=js_sys::JSON::stringify(&transfer).map_err(|e|format!("{e:?}"))?.as_string().ok_or("Missing paper metadata")?;
     let tiles = js_sys::Reflect::get(reply, &js("tiles")).map_err(|_| "Missing paper")?.dyn_into::<js_sys::Array>().map_err(|_| "Missing paper")?;
-    transfer.receive(&tiles, 0)
+    let (metadata,tiles,validated)=raster_worker::checked_buffers("paper",&metadata,tiles).await.map_err(|e|format!("{e:?}"))?;
+    let transfer:Transfer=serde_json::from_str(&metadata).map_err(|e|e.to_string())?;transfer.receive(&tiles,0,validated)
 }
 
 async fn library(request: serde_json::Value, buffers: js_sys::Array, localization: &layer_ui::Localizer) -> Result<JsValue, String> {
@@ -146,7 +170,7 @@ async fn load(id: &str, retained: &[layer_core::Image], localization: &layer_ui:
     let transfer = retained.map(|image| Transfer::send(image.storage(), &buffers)).transpose()?;
     let reply = library(serde_json::json!({"operation": "load", "id": id, "retained": transfer}), buffers, localization).await?;
     let kept = js_sys::Reflect::get(&reply, &js("metadata")).ok().and_then(|m| js_sys::Reflect::get(&m, &js("retained")).ok()).and_then(|v| v.as_bool()).unwrap_or(false);
-    match retained.filter(|_| kept) { Some(image) => Ok(image.storage().as_ref().clone()), None => paper(&reply) }
+    match retained.filter(|_| kept) { Some(image) => Ok(image.storage().as_ref().clone()), None => paper(&reply).await }
 }
 
 /// The texture New chose; a stored paper the library cannot read falls back with a warning.
@@ -175,7 +199,7 @@ async fn run(capture: &PaperCapture, file: JsValue, localization: &layer_ui::Loc
             let reply = library(serde_json::json!({"operation": "import", "name": name}), js_sys::Array::of1(&js_sys::Uint8Array::new(&bytes)), localization).await?;
             let metadata = js_sys::Reflect::get(&reply, &js("metadata")).map_err(|_| failed())?;
             let id = js_sys::Reflect::get(&metadata, &js("id")).ok().and_then(|id| id.as_string()).ok_or_else(failed)?;
-            let image = layer_ui::paper_library::canonical_source(&id, paper(&reply)?, &capture.retained)?;
+            let image = layer_ui::paper_library::canonical_source(&id, paper(&reply).await?, &capture.retained)?;
             PaperResult::Imported(*layer, id, image, entries(&reply)?)
         }
         Some(PaperRequest::Add { name, .. }) => {

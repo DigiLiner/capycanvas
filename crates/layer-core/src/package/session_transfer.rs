@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::{BTreeMap, BTreeSet}, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ChangeRecord {kind:String,handle:u32,id:PortableId,value:Option<ObjectVersion>}
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EntryRecord {changes:Vec<ChangeRecord>,working:Option<WorkingRecord>,checkpoint:u64}
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionTransferDescriptor {
     artwork:TransferDescriptor,working:WorkingRecord,undo:Vec<EntryRecord>,redo:Vec<EntryRecord>,
@@ -89,6 +89,13 @@ impl PreparedSessionTransfer {
         validate(&descriptor,ProjectLimits::default())?;active(cancel)?;
         Ok(Self {descriptor,artwork:prepared})
     }
+    pub fn validate_payloads(&self,limits:ProjectLimits,cancel:&AtomicBool)->Result<(),String> {
+        validate(&self.descriptor,limits)?;self.artwork.validate_payloads_with_retention(limits,cancel,true)
+    }
+    /// # Safety
+    /// These exact immutable payloads and all descriptor/cache relations were validated.
+    #[cfg(target_arch="wasm32")]
+    pub unsafe fn accept_validated_transport(&self) {unsafe {self.artwork.accept_validated_transport()};}
     pub fn descriptor(&self)->&SessionTransferDescriptor {&self.descriptor}
     pub fn payload_count(&self)->usize {self.artwork.payload_count()}
     pub fn payload_len(&self,index:usize)->Result<u64,String> {self.artwork.payload_len(index)}
@@ -188,6 +195,9 @@ impl SessionTransferReceiver {
     }
     pub fn missing_payloads(&self)->Vec<usize> {self.artwork.missing_payloads()}
     pub fn push_chunk(&mut self,index:usize,bytes:&[u8])->Result<(),String> {self.artwork.push_chunk(index,bytes)}
+    pub fn check_descriptor(&self,descriptor:&SessionTransferDescriptor)->Result<(),String> {
+        if &self.descriptor!=descriptor {return Err("Session transfer descriptor changed".into());}Ok(())
+    }
     pub fn finish(self)->Result<PreparedSessionTransfer,String> {Ok(PreparedSessionTransfer {descriptor:self.descriptor,artwork:self.artwork.finish()?})}
 }
 
@@ -380,6 +390,24 @@ mod tests {
         assert!(invalid.adopt_verified(ProjectLimits::default(),&AtomicBool::new(false)).err().unwrap().contains("Artwork history changed without a new checkpoint"));
         let mut capture=original.capture_session(original.capture(1,Default::default()).unwrap()).unwrap();capture.artwork_mut().checkpoint.owner+=1;
         assert!(PreparedSessionTransfer::capture(&capture,Value::Null,&AtomicBool::new(false)).is_err());
+    }
+    #[test]
+    fn receiver_binds_every_checkpoint_descriptor_field() {
+        let mut original=editor();rename(&mut original,"edited");let prepared=transfer(&original);
+        let receiver=SessionTransferReceiver::new(prepared.descriptor().clone(),ProjectLimits::default()).unwrap();
+        assert!(receiver.check_descriptor(prepared.descriptor()).is_ok());
+        for field in 0..5 {
+            let mut changed=prepared.descriptor().clone();
+            match field {
+                0=>changed.artwork.checkpoint.owner+=1,
+                1=>changed.metadata=serde_json::json!({"altered":true}),
+                2=>changed.next_checkpoint+=1,
+                3=>changed.undo[0].checkpoint+=1,
+                _=>changed.index_chunks.push(vec![Value::Null]),
+            }
+            assert!(receiver.check_descriptor(&changed).is_err());
+        }
+        assert!(receiver.check_descriptor(prepared.descriptor()).is_ok());
     }
     #[test]
     fn receiver_rejects_incomplete_invalid_and_cancelled_transfers() {

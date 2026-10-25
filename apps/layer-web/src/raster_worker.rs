@@ -11,8 +11,41 @@ use wasm_bindgen_futures::JsFuture;
 thread_local! { static WORKER: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) }; }
 
 #[wasm_bindgen]
-pub fn configure_raster_worker(worker: js_sys::Function) {
-    WORKER.with(|slot| *slot.borrow_mut() = Some(worker));
+pub fn configure_raster_worker(worker: js_sys::Function)->Result<(),JsValue> {
+    if let Ok(configure)=js_sys::Reflect::get(&worker,&js("configure"))?.dyn_into::<js_sys::Function>() {
+        let limits=layer_core::ProjectLimits::default();
+        configure.call1(&worker,&js_sys::JSON::parse(&serde_json::json!({"metadata":limits.metadata_bytes,"range":layer_core::package::MAX_RANGE_BYTES,"total":limits.raster_bytes}).to_string())?)?;
+    }
+    WORKER.with(|slot| *slot.borrow_mut() = Some(worker));Ok(())
+}
+pub(super) async fn checked_buffers(kind:&str,metadata:&str,buffers:js_sys::Array)->Result<(String,js_sys::Array,bool),JsValue> {
+    if web_sys::window().is_none() {return Ok((metadata.into(),buffers,false));}
+    let worker=WORKER.with(|slot|slot.borrow().clone()).ok_or_else(||js("Raster worker unavailable"))?;
+    let consume=js_sys::Reflect::get(&worker,&js("consume"))?.dyn_into::<js_sys::Function>().map_err(|_|js("Worker validation receipts unavailable"))?;
+    let claim=|metadata:&str,buffers:&js_sys::Array|consume.call3(&worker,&js(kind),&js(metadata),buffers);
+    let mut receipt=claim(metadata,&buffers)?;
+    if receipt.is_null() {
+        let result=JsFuture::from(call(&format!("validate-{kind}"),metadata,&buffers)?).await?;
+        let metadata=js_sys::Reflect::get(&result,&js("metadata"))?.as_string().ok_or_else(||js("Missing validated metadata"))?;
+        let buffers=js_sys::Reflect::get(&result,&js("buffers"))?.dyn_into::<js_sys::Array>()?;
+        receipt=claim(&metadata,&buffers)?;
+    }
+    if receipt.is_null(){return Err(js("Unvalidated worker transfer"));}
+    let metadata=js_sys::Reflect::get(&receipt,&js("metadata"))?.as_string().ok_or_else(||js("Missing validated metadata"))?;
+    let buffers=js_sys::Reflect::get(&receipt,&js("buffers"))?.dyn_into::<js_sys::Array>()?;
+    Ok((metadata,buffers,true))
+}
+pub(super) async fn receive_artwork(metadata:&str,buffers:js_sys::Array)->Result<layer_core::package::transfer::PreparedTransfer,JsValue> {
+    let (metadata,buffers,validated)=checked_buffers("artwork",metadata,buffers).await?;
+    let transfer=artwork_transfer::receive(&metadata,buffers).await?;
+    if validated {unsafe {transfer.accept_validated_transport()};}
+    Ok(transfer)
+}
+pub(super) async fn receive_session(metadata:&str,buffers:js_sys::Array)->Result<layer_core::package::session_transfer::PreparedSessionTransfer,JsValue> {
+    let (metadata,buffers,validated)=checked_buffers("session",metadata,buffers).await?;
+    let transfer=session_restart::receive(&metadata,buffers).await?;
+    if validated {unsafe {transfer.accept_validated_transport()};}
+    Ok(transfer)
 }
 
 #[wasm_bindgen]
@@ -58,6 +91,13 @@ pub(super) async fn call_cancellable(
     result
 }
 
+pub(super) fn prepared_result(operation:&str,key:&JsValue)->Result<JsValue,JsValue> {
+    let worker=WORKER.with(|slot|slot.borrow().clone()).ok_or_else(||js("Raster worker unavailable"))?;
+    let consume=js_sys::Reflect::get(&worker,&js("consumeResult"))?.dyn_into::<js_sys::Function>()?;
+    let result=consume.call2(&worker,&js(operation),key)?;
+    if result.is_null(){return Err(js("Unvalidated worker result"));}Ok(result)
+}
+
 pub(super) fn install(renderer: &mut WgpuRasterizer) {
     renderer.set_complete_display_allowance(artwork_transfer::photo_memory_budget().encode_bytes as u64);
     renderer.set_analysis_backing_waiter(Rc::new(|scene, control| Box::pin(async move {
@@ -90,7 +130,7 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
         }
         let metadata=serde_json::to_string(&ImageDecode::Image {interpretation,destination,extent:source.extent,coordinate,profiles:chunks}).map_err(|e|e.to_string())?;
         let result=JsFuture::from(call("image-decode",&metadata,&buffers).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
-        let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
+        let bytes=prepared_result("image-decode",&result).map_err(|e|format!("{e:?}"))?.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
         if matches!(source.interpretation.profile,layer_core::color::ColorProfile::Builtin(_)) {
             if bytes.len()!=(TILE_SIZE*TILE_SIZE) as usize*4*source.interpretation.depth.bytes() {return Err("Invalid prepared source tile extent".into());}
             Ok(layer_render_wgpu::PreparedImagePixels::NativeSamples(std::sync::Arc::new(bytes)))
@@ -110,7 +150,7 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
         buffers.push(&js_sys::Uint8Array::from(blob.compressed()?.as_ref()));
         let metadata=serde_json::to_string(&ImageDecode::Raster {descriptor:blob.descriptor,space}).map_err(|e|e.to_string())?;
         let result=JsFuture::from(call("image-decode",&metadata,&buffers).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
-        let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
+        let bytes=prepared_result("image-decode",&result).map_err(|e|format!("{e:?}"))?.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
         if bytes.len()!=(TILE_SIZE*TILE_SIZE) as usize*4*blob.descriptor.depth().bytes() {return Err("Invalid prepared source tile extent".into());}
         Ok(layer_render_wgpu::PreparedImagePixels::NativeSamples(std::sync::Arc::new(bytes)))
     })));
@@ -118,7 +158,7 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
         if count>65536 {return Err("Oversized Nearest coordinate request".into());}
         let metadata=serde_json::to_string(&NearestCoordinates {inverse,size,first,count}).map_err(|e|e.to_string())?;
         let result=JsFuture::from(call("nearest-coordinates",&metadata,&js_sys::Array::new()).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
-        let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing Nearest coordinates")?;
+        let bytes=prepared_result("nearest-coordinates",&result).map_err(|e|format!("{e:?}"))?.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing Nearest coordinates")?;
         if bytes.length() as usize!=count as usize*8 {return Err("Invalid prepared Nearest coordinate extent".into());}
         Ok(std::sync::Arc::new(bytes.to_vec()))
     })));
@@ -223,7 +263,8 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
             let result = JsFuture::from(promise)
                 .await
                 .map_err(|e| format!("{e:?}"))?;
-            let bytes = js_sys::Uint8Array::new(&result).to_vec();
+            let result=prepared_result("encode",&result).map_err(|e|format!("{e:?}"))?;
+            let bytes = result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Invalid raster worker result")?.to_vec();
             let mut offset = 0;
             let mut blobs = Vec::with_capacity(descriptors.len());
             for descriptor in descriptors {

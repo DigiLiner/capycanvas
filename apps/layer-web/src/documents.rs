@@ -84,7 +84,7 @@ impl WebApp {
         let buffers=js_sys::Array::of1(&bytes);
         let pending=raster_worker::call("lookup",&name,&buffers)?;
         Ok(future_to_promise(async move {
-            let result=JsFuture::from(pending).await?;
+            let result=raster_worker::prepared_result("lookup",&JsFuture::from(pending).await?)?;
             let metadata=js_sys::Reflect::get(&result,&js("metadata"))?.as_string().ok_or_else(||js("Invalid lookup metadata"))?;
             let (descriptor,spaces):(layer_core::Lut3d,u8)=serde_json::from_str(&metadata).map_err(js)?;
             let bytes=js_sys::Uint8Array::new(&js_sys::Reflect::get(&result,&js("bytes"))?).to_vec();

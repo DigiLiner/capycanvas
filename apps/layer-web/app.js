@@ -1776,6 +1776,7 @@ try {
     try{return await(request.operation.startsWith('tab-')?documentStorage(request):fileWorker(request));}
     finally{if(request.operation==='image-decode'||request.operation==='nearest-coordinates')wake();}
   };
+  Object.assign(rasterWorker,{configure:fileWorker.configure,consume:fileWorker.consume,consumeResult:fileWorker.consumeResult});
   configure_raster_worker(rasterWorker);
   canvas.width = 800;
   canvas.height = 600;
@@ -1832,8 +1833,8 @@ try {
     element,button,numberField,workspace,layout:()=>layout,bar:()=>canvasBar?.bounds()??null});
   canvasSizeUi = createCanvasSizeUi({state:()=>state,element,button,icon,numberField,resolve:request=>app.number_input(request),dispatch});
   imageSizeUi = createImageSizeUi({state:()=>state,element,button,numberField,resolve:request=>app.number_input(request),dispatch});
-  configureColorEditor({dispatch,icon,wasmModule});
-  editor = createEditorPanels({selectionUi,app,wasmModule,state:()=>state,workspace,canvas,element,button,icon,numberField,dispatch,asset,wake,applyChange,contentChanged:panelContentChanged});
+  configureColorEditor({dispatch,icon,rasterWorker});
+  editor = createEditorPanels({selectionUi,app,rasterWorker,state:()=>state,workspace,canvas,element,button,icon,numberField,dispatch,asset,wake,applyChange,contentChanged:panelContentChanged});
   palettes = createPalettes({ app, state: () => state, workspace, element, button, icon, panelFrame, applyChange, rasterWorker,
     dismissContext: () => customization?.dismissContext(), contentChanged: panelContentChanged });
   buildHeader();

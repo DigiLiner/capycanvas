@@ -405,9 +405,7 @@ pub async fn raster_worker_output(
                 empty.into()
             }
         };
-        let buffers: js_sys::Array = js_sys::Reflect::get(&result, &js("buffers"))?.dyn_into()?;
-        js_sys::Reflect::set(&result, &js("png"), &JsValue::from(buffers.length()))?;
-        buffers.push(&js_sys::Uint8Array::from(png.as_slice()));
+        js_sys::Reflect::set(&result, &js("png"), &js_sys::Uint8Array::from(png.as_slice()))?;
         return Ok(result);
     }
     let before = if metadata.preview && metadata.rendition.is_some() {
