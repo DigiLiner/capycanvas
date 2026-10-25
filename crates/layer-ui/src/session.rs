@@ -1216,7 +1216,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if let ChromeEvent::Contact { position, .. } = event
                     && !position.into_iter().all(f32::is_finite)
                 {
-                    return Err("Invalid chrome position".into());
+                    return Ok(InputReply::default());
                 }
                 let was_hidden = self.interaction.hidden;
                 self.interaction.facts = facts;

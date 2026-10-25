@@ -223,6 +223,11 @@ preview bytes through checked ranges of at most 8 MiB. Packet copies are shared
 across preview readers and acquired on the image worker. Caller-owned input and
 output buffers must remain readable or writable and exclusive during each call.
 
+Pointer batches validate structure and chronology before routing. Numerical
+sample refusals use shared admission so valid neighbors still reach the canvas.
+Damaged real releases cancel from the last valid pose; the native recovery cache
+keeps valid real samples and retires matching releases.
+
 The render owner routes snapshots using ranges in the exact copied UTF-8. The UI
 parses retained models; full model parsing on the owner is limited to opt-in
 UI traces. Presentation and overview pipelines are prepared on the shader workers;

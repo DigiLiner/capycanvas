@@ -1,3 +1,16 @@
+#[test]
+fn malformed_chrome_contact_is_dropped_without_side_effects() {
+    for platform in Platform::ALL {
+        let mut s=session(platform);
+        let before=serde_json::to_value(&s.state).unwrap();let checkpoint=s.engine.checkpoint();
+        for position in [[f32::NAN,300.],[300.,f32::INFINITY]] {
+            let reply=s.input(UiInput::Chrome {event:ChromeEvent::Contact{position,canvas:true},
+                facts:ChromeFacts{popup_open:true,..Default::default()},viewport:[1200.,900.]}).unwrap();
+            assert!(!reply.handled && !reply.dismiss_popups);
+            assert_eq!(serde_json::to_value(&s.state).unwrap(),before);assert_eq!(s.engine.checkpoint(),checkpoint);
+        }
+    }
+}
 fn picker_pointer(
     s: &mut UiSession<Recorder>,
     id: u64,

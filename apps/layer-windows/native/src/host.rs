@@ -730,8 +730,9 @@ pub unsafe extern "C" fn capy_pointer(
                         continue;
                     }
                 }
-                host.native.pointer_event(sample.event(), pointer_button(sample))?;
-                if sample.flags & 1 == 0 {
+                let event=sample.event();
+                host.native.pointer_event(event, pointer_button(sample))?;
+                if sample.flags & 1 == 0 && (event.is_finite() || terminal) {
                     delivered = Some(*sample);
                 }
             }

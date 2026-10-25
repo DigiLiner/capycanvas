@@ -32,10 +32,10 @@ impl CapyPointer {
                 x: self.x,
                 y: self.y,
             },
-            pressure: self.pressure,
+            pressure: if (0.0..=1.0).contains(&self.pressure) {self.pressure} else {f32::NAN},
             tilt_radians: [self.tilt_x, self.tilt_y],
             twist_radians: self.twist,
-            distance: self.distance,
+            distance: if (0.0..=1.0).contains(&self.distance) {self.distance} else {f32::NAN},
             phase: self.phase(),
             tool: self.tool(),
             flags: SampleFlags(self.flags as u16),
@@ -46,23 +46,6 @@ impl CapyPointer {
         if self.phase > 4 || self.tool > 3 || self.button > 2
             || self.flags & !(0x0f | u32::from(SampleFlags::INDIRECT_POINTER.0 | SampleFlags::BARREL_TWIST.0)) != 0 {
             return Err("Invalid pointer enum or flags");
-        }
-        if ![
-            self.x,
-            self.y,
-            self.pressure,
-            self.tilt_x,
-            self.tilt_y,
-            self.twist,
-            self.distance,
-        ]
-        .iter()
-        .all(|v| v.is_finite())
-        {
-            return Err("Nonfinite pointer record");
-        }
-        if !(0.0..=1.0).contains(&self.pressure) || !(0.0..=1.0).contains(&self.distance) {
-            return Err("Pointer axes are not normalized");
         }
         if self.sequence == 0 {
             return Err("Pointer sequence must be nonzero");
@@ -131,10 +114,10 @@ mod tests {
         assert!(!point(3).event().flags.contains(SampleFlags::PREDICTED));
     }
     #[test]
-    fn invalid_tail_rejects_entire_batch_before_consumption() {
+    fn malformed_structure_rejects_the_batch_but_numeric_samples_reach_admission() {
         let mut batch = [point(1), point(2), point(3)];
         batch[2].pressure = f32::NAN;
-        assert!(validate_batch(&batch).is_err());
+        validate_batch(&batch).unwrap();
         batch[2].pressure = 0.4;
         batch[2].phase = 900;
         assert!(validate_batch(&batch).is_err());
@@ -203,4 +186,63 @@ mod tests {
         assert_eq!(record.phase(), PenPhase::Cancel);
         assert_eq!(std::mem::size_of::<CapyPointer>(), 80);
     }
+
+    fn route_typed(host:&mut layer_host::NativeHost,records:&[CapyPointer]) {
+        validate_batch(records).unwrap();
+        for record in records {host.pointer_event(record.event(),layer_ui::PointerButton::Primary).unwrap();}
+    }
+
+    fn typed_host()->layer_host::NativeHost {
+        let mut host=layer_host::NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        host.resize(800,600,1.).unwrap();host
+    }
+
+    #[test]
+    fn typed_numeric_damage_keeps_valid_hover_siblings() {
+        for axis in 0..7 {
+            let mut host=typed_host();let mut control=typed_host();
+            let mut records=[point(1),point(2),point(3)];
+            for record in &mut records {record.phase=0;record.view_revision=host.session.state().camera.revision;}
+            records[2].x=180.;
+            match axis {0=>records[1].x=f32::NAN,1=>records[1].y=f32::INFINITY,2=>records[1].pressure=f32::NAN,
+                3=>records[1].tilt_x=f32::NAN,4=>records[1].tilt_y=f32::INFINITY,5=>records[1].twist=f32::NAN,_=>records[1].distance=f32::NAN}
+            route_typed(&mut host,&records);route_typed(&mut control,&records[2..]);
+            let actual=host.session.canvas_cursor().unwrap();let expected=control.session.canvas_cursor().unwrap();
+            assert_eq!(actual.center,expected.center);assert_eq!(actual.mode,expected.mode);assert!(host.error.is_none());
+        }
+    }
+
+    #[test]
+    fn typed_damaged_release_retires_only_the_matching_contact() {
+        for axis in 0..9 {
+            let mut host=typed_host();let revision=host.session.state().camera.revision;
+            let mut records=[point(1),point(2),point(3)];
+            for record in &mut records {record.view_revision=revision;}
+            records[0].phase=1;records[1].x=140.;records[2].phase=3;
+            match axis {0=>records[2].x=f32::NAN,1=>records[2].y=f32::INFINITY,2=>records[2].pressure=f32::NAN,
+                3=>records[2].tilt_x=f32::NAN,4=>records[2].tilt_y=f32::INFINITY,5=>records[2].twist=f32::NAN,
+                6=>records[2].distance=f32::NAN,7=>records[2].pressure=1.5,_=>records[2].distance = -1.}
+            let mut other=point(4);other.id=81;other.phase=1;other.view_revision=revision;
+            route_typed(&mut host,&[other]);route_typed(&mut host,&records);
+            assert!(host.session.take_pen_cancel(17,ToolKind::Pen).is_none());
+            assert!(host.session.take_pen_cancel(81,ToolKind::Pen).is_some());
+            let mut next=point(5);next.phase=1;next.view_revision=revision;
+            route_typed(&mut host,&[next]);
+            let cancel=host.session.take_pen_cancel(17,ToolKind::Pen).expect("a new real contact remains admissible");
+            assert_eq!(cancel.phase,PenPhase::Cancel);assert_eq!(cancel.surface_position,next.event().surface_position);
+            host.pointer_event(cancel,layer_ui::PointerButton::Primary).unwrap();assert!(host.error.is_none());
+        }
+    }
+
+    #[test]
+    fn typed_damaged_prediction_cannot_retire_a_real_contact() {
+        let mut host=typed_host();let revision=host.session.state().camera.revision;
+        let mut down=point(1);down.phase=1;down.view_revision=revision;
+        let mut predicted=down;predicted.phase=3;predicted.sequence=2;predicted.timestamp_ns+=1;predicted.flags|=1;predicted.x=f32::NAN;
+        route_typed(&mut host,&[down,predicted]);
+        let cancel=host.session.take_pen_cancel(17,ToolKind::Pen).expect("invalid optional data keeps the real contact");
+        assert_eq!(cancel.surface_position,down.event().surface_position);
+        host.pointer_event(cancel,layer_ui::PointerButton::Primary).unwrap();assert!(host.error.is_none());
+    }
+
 }
