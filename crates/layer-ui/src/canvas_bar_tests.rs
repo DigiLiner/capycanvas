@@ -359,15 +359,13 @@ fn image_placement_bar_offers_object_commands_and_counts_a_batch() {
     let [x0, y0, x1, y1] = bar.anchor.expect("the bar is anchored to the placed image");
     assert_eq!([x1 - x0, y1 - y0], [20., 10.]);
     assert_ne!(s.canvas_bar_layout(&measure(&bar, 40.)).unwrap().side, CanvasBarSide::BottomEdge, "the bar sits beside the image");
+    assert_eq!(bar_commands(&bar.items), [CommandId::TransformFlipHorizontal, CommandId::PlacementOriginalSize]);
+    assert!(bar.items.iter().all(|item| item.icon_only));
+    let more = s.canvas_bar_menu(bar.context, bar.items.len()).unwrap();
     assert_eq!(
-        bar_commands(&bar.items),
-        [
-            CommandId::TransformFlipHorizontal,
-            CommandId::TransformFlipVertical,
-            CommandId::TransformRotateLeft,
-            CommandId::TransformRotateRight,
-            CommandId::PlacementOriginalSize,
-        ]
+        menu_labels(&more).into_iter().filter(|section| !section.is_empty()).take(2).collect::<Vec<_>>(),
+        [vec!["Flip vertically", "Rotate 90° left", "Rotate 90° right"], vec!["Interpolation"]],
+        "the rest of the image transform is in More"
     );
     assert_eq!(bar.label, None);
     assert_eq!(bar_commands(&bar.completion), [CommandId::CancelTransform, CommandId::ApplyTransform]);
@@ -1133,11 +1131,11 @@ fn quick_mask_bar_offers_its_actions_and_exit_under_painting_tools() {
     assert_eq!(
         bar_items(&bar.items),
         [
-            (CommandId::InvertSelection, "Invert", false),
-            (CommandId::FillSelectionMask, "Fill", false),
-            (CommandId::ClearSelectionMask, "Clear", false),
+            (CommandId::InvertSelection, "", false),
+            (CommandId::FillSelectionMask, "", false),
+            (CommandId::ClearSelectionMask, "", false),
             (CommandId::FeatherSelection, "Refine", false),
-            (CommandId::SaveSelectionLayer, "Save", false),
+            (CommandId::SaveSelectionLayer, "", false),
         ]
     );
     assert_eq!(bar.items[3].menu, Some(CanvasBarMenu::Refine));
@@ -1206,7 +1204,7 @@ fn selection_layer_bar_inverts_loads_and_returns_to_artwork() {
     assert_eq!(renamed.context, bar.context);
     assert_eq!(
         bar_items(&bar.items),
-        [(CommandId::LoadSelectionLayer, "Load", false), (CommandId::InvertSelectionLayer, "Invert", false)]
+        [(CommandId::LoadSelectionLayer, "Load", false), (CommandId::InvertSelectionLayer, "", false)]
     );
     assert_eq!(bar_items(&bar.completion), [(CommandId::ReturnToArtwork, "Return to Artwork", false)]);
     let menu = s.layer_menu(occurrence_token(id), false).unwrap();
@@ -1262,8 +1260,8 @@ fn layer_mask_bar_inverts_disables_applies_and_edits_content() {
     assert_eq!(
         bar_items(&bar.items),
         [
-            (CommandId::InvertLayerMask, "Invert", false),
-            (CommandId::LayerMaskEnabled, "Disable", false),
+            (CommandId::InvertLayerMask, "", false),
+            (CommandId::LayerMaskEnabled, "", true),
             (CommandId::ApplyLayerMask, "Apply Mask", false),
         ]
     );
@@ -1291,7 +1289,7 @@ fn layer_mask_bar_inverts_disables_applies_and_edits_content() {
     assert!(!mask(&s).unwrap().enabled);
     let disabled = s.state.canvas_bar.clone().unwrap();
     assert_eq!(disabled.context, bar.context);
-    assert_eq!(disabled.items[1].label.as_ref(), "Enable");
+    assert!(matches!(&disabled.items[1].option, ToolOption::Action { state, checkable: true } if !state.selected), "the eye shows the mask is off");
     assert_eq!(s.command_disabled_reason(CommandId::ApplyLayerMask).as_deref(), Some("Enable the mask before applying it"));
     invoke(&mut s, CommandId::Undo);
     assert!(mask(&s).unwrap().enabled, "Disable is one undo step");
@@ -1386,13 +1384,14 @@ fn guide_bar_anchors_to_the_selected_guide_under_ruler_and_move() {
     assert_eq!(
         bar_items(&bar.items),
         [
-            (CommandId::DeleteRuler, "Delete", false),
-            (CommandId::SnapRulers, "Snap", true),
-            (CommandId::ShowRulers, "Guides", true),
+            (CommandId::DeleteRuler, "", false),
+            (CommandId::SnapRulers, "", true),
             (CommandId::StraightenToGuide, "Straighten", false),
         ]
     );
     assert!(bar.completion.is_empty());
+    let more = s.canvas_bar_menu(bar.context, bar.items.len()).unwrap();
+    assert!(more.sections.concat().iter().any(|i| i.action == Some(UiAction::Invoke { command: CommandId::ShowRulers })), "Guides is in More");
     let layout = s.canvas_bar_layout(&CanvasBarMeasure { completion: Vec::new(), ..measure(&bar, 80.) }).unwrap();
     let (a, b) = s.engine.document().rulers().next().unwrap().geometry.handles();
     let lowest = [a, b.unwrap()].map(|p| s.document_to_logical()(p)[1]).into_iter().fold(f32::NEG_INFINITY, f32::max);

@@ -98,6 +98,8 @@ impl CanvasBarMenu {
 }
 
 const WARP_GRIDS: [CommandId; 3] = [CommandId::WarpGridThree, CommandId::WarpGridFour, CommandId::WarpGridFive];
+const TURNS: [CommandId; 3] = [CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight];
+const CLONE_MORE: [CommandId; 2] = [CommandId::CloneFlipVertical, CommandId::CloneResetOffset];
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CanvasBarItem {
@@ -147,9 +149,6 @@ impl CanvasBarView {
 /// Short labels for commands that appear on the bar; empty shows the icon alone.
 pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::sync::Arc<str> {
     localizer.text(match command {
-        CommandId::CancelSelection | CommandId::CancelPath => MessageId::TOOLBAR_CANCEL,
-        CommandId::PlacementOriginalSize => MessageId::TOOLBAR_ORIGINAL_SIZE,
-        CommandId::TransformNearest => MessageId::TOOLBAR_NEAREST,
         CommandId::WarpGridThree => MessageId::TOOLBAR_3_3,
         CommandId::WarpGridFour => MessageId::TOOLBAR_4_4,
         CommandId::WarpGridFive => MessageId::TOOLBAR_5_5,
@@ -167,19 +166,23 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
         | CommandId::FillSelection
         | CommandId::ClearSelected
         | CommandId::InvertSelection
-        | CommandId::Deselect => return "".into(),
-        CommandId::ResetTransform => MessageId::TOOLBAR_RESET,
-        CommandId::RemoveSelectionPoint => MessageId::TOOLBAR_REMOVE_POINT,
-        CommandId::SaveSelectionLayer => MessageId::TOOLBAR_SAVE,
-        CommandId::CompleteSelection | CommandId::FinishPath => MessageId::TOOLBAR_FINISH,
-        CommandId::FillSelectionMask => MessageId::TOOLBAR_FILL,
-        CommandId::ClearSelectionMask => MessageId::TOOLBAR_CLEAR,
+        | CommandId::Deselect
+        | CommandId::FillSelectionMask
+        | CommandId::ClearSelectionMask
+        | CommandId::SaveSelectionLayer
+        | CommandId::InvertSelectionLayer
+        | CommandId::InvertLayerMask
+        | CommandId::LayerMaskEnabled
+        | CommandId::RemoveSelectionPoint
+        | CommandId::CancelSelection
+        | CommandId::CancelPath
+        | CommandId::CompleteSelection
+        | CommandId::FinishPath
+        | CommandId::DeleteRuler
+        | CommandId::SnapRulers
+        | CommandId::PlacementOriginalSize => return "".into(),
         CommandId::LoadSelectionLayer => MessageId::TOOLBAR_LOAD,
-        CommandId::InvertSelectionLayer | CommandId::InvertLayerMask => MessageId::TOOLBAR_INVERT,
         CommandId::ApplyLayerMask => MessageId::TOOLBAR_APPLY_MASK,
-        CommandId::DeleteRuler => MessageId::TOOLBAR_DELETE,
-        CommandId::SnapRulers => MessageId::TOOLBAR_SNAP,
-        CommandId::ShowRulers => MessageId::TOOLBAR_GUIDES,
         CommandId::GrowSelection => MessageId::TOOLBAR_GROW,
         CommandId::ShrinkSelection => MessageId::TOOLBAR_SHRINK,
         CommandId::FeatherSelection => MessageId::TOOLBAR_FEATHER,
@@ -194,16 +197,10 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
         CommandId::CropRatioFiveSeven => MessageId::TOOLBAR_5_7,
         CommandId::CropRatioSixteenNine => MessageId::TOOLBAR_16_9,
         CommandId::CropSwapOrientation => return "".into(),
-        CommandId::CropOverlayThirds => MessageId::TOOLBAR_THIRDS,
-        CommandId::CropOverlayGrid => MessageId::TOOLBAR_GRID,
-        CommandId::CropOverlayDiagonal => MessageId::TOOLBAR_DIAGONAL,
-        CommandId::CropOverlayGolden => MessageId::TOOLBAR_GOLDEN_RATIO,
-        CommandId::CropDeleteCroppedPixels => MessageId::TOOLBAR_DELETE_CROPPED,
         CommandId::CropFitContent => MessageId::TOOLBAR_FIT_CONTENT,
         CommandId::StraightenToGuide => MessageId::TOOLBAR_STRAIGHTEN,
         CommandId::CloneAligned => MessageId::TOOLBAR_ALIGNED,
         CommandId::CloneFlipHorizontal | CommandId::CloneFlipVertical => return "".into(),
-        CommandId::CloneResetOffset => MessageId::TOOLBAR_RESET_OFFSET,
         _ => return command.localized_label(localizer),
     })
 }
@@ -364,7 +361,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 CanvasBarKind::QuickMask,
                 CanvasBarCaption::Message(MessageId::TOOLBAR_QUICK_MASK),
                 vec![
-                    PlanItem::Button(CommandId::InvertSelection, MessageId::TOOLBAR_INVERT),
+                    command(CommandId::InvertSelection),
                     command(CommandId::FillSelectionMask),
                     command(CommandId::ClearSelectionMask),
                     PlanItem::Menu(CanvasBarMenu::Refine),
@@ -380,15 +377,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             ),
             None if matches!(doc.working.target, Some(SourceTarget::Coverage(_))) => {
                 let layer = doc.scene().occurrence(doc.working.occurrence?)?;
-                let enabled = layer.mask.as_ref()?.enabled;
+                layer.mask.as_ref()?;
                 (
                     CanvasBarKind::LayerMask,
                     CanvasBarCaption::Editing { message: MessageId::TOOLBAR_EDITING_MASK, name: layer.name.clone() },
-                    vec![
-                        command(CommandId::InvertLayerMask),
-                        PlanItem::Button(CommandId::LayerMaskEnabled, if enabled { MessageId::TOOLBAR_DISABLE } else { MessageId::TOOLBAR_ENABLE }),
-                        command(CommandId::ApplyLayerMask),
-                    ],
+                    vec![command(CommandId::InvertLayerMask), command(CommandId::LayerMaskEnabled), command(CommandId::ApplyLayerMask)],
                     PlanItem::Button(CommandId::EditLayerContent, MessageId::TOOLBAR_EDIT_CONTENT),
                 )
             }
@@ -408,7 +401,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         (self.retouch.bar && self.clone_disc().is_some()).then(|| Plan {
             kind: CanvasBarKind::CloneSource,
             label: None,
-            items: self.clone_actions().into_iter().map(|a| PlanItem::Command(a.command)).collect(),
+            items: self.clone_actions().into_iter().map(|a| a.command).filter(|id| !CLONE_MORE.contains(id)).map(PlanItem::Command).collect(),
             completion: Vec::new(),
             placement: None,
         })
@@ -425,7 +418,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         Some(Plan {
             kind: CanvasBarKind::Guide,
             label: None,
-            items: [CommandId::DeleteRuler, CommandId::SnapRulers, CommandId::ShowRulers]
+            items: [CommandId::DeleteRuler, CommandId::SnapRulers]
                 .into_iter()
                 .chain(straight.then_some(CommandId::StraightenToGuide))
                 .map(PlanItem::Command)
@@ -439,8 +432,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let placing = self.objects.placing();
         if self.object_target().is_none() || !matches!(self.layer_interaction.tool, LayerCanvasTool::Move | LayerCanvasTool::Transform)
             || (!placing && self.engine.document().selected_objects().is_empty()) { return None; }
-        let transforms = [CommandId::TransformFlipHorizontal, CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight,
-            CommandId::PlacementOriginalSize, CommandId::TransformNearest, CommandId::TransformBilinear];
+        let transforms = [CommandId::TransformFlipHorizontal, CommandId::PlacementOriginalSize];
         Some(Plan {
             kind: if placing { CanvasBarKind::Placement } else { CanvasBarKind::Transform },
             label: (self.engine.document().selected_objects().len() > 1).then(|| CanvasBarCaption::Layers(self.engine.document().selected_objects().len())),
@@ -471,13 +463,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Some(Plan {
                 kind: CanvasBarKind::Crop,
                 label: None,
-                items: self
-                    .state
-                    .tool_actions
+                items: ToolActionGroup::CropRatio
+                    .commands()
                     .iter()
-                    .map(|a| a.command)
-                    .filter(|id| !completion.contains(id))
-                    .map(PlanItem::Command)
+                    .chain(&[CommandId::CropSwapOrientation, CommandId::CropFitContent, CommandId::CropStraighten])
+                    .map(|&id| PlanItem::Command(id))
                     .collect(),
                 completion: completion.map(PlanItem::Command).into(),
                 placement: Some(CanvasBarPlacement::BottomEdge),
@@ -557,20 +547,26 @@ impl<R: CanvasRenderer> UiSession<R> {
             ],
             CanvasBarKind::Transform | CanvasBarKind::Placement if self.operation.active() => {
                 let interpolation: Vec<_> = ToolActionGroup::TransformInterpolation.commands().iter().filter(|id| offered(id)).map(item).collect();
-                vec![
-                    [CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight]
-                        .iter()
-                        .filter(|id| offered(id))
-                        .map(item)
-                        .collect(),
-                    (!interpolation.is_empty())
-                        .then(|| ContextMenuItem::submenu(&ToolActionGroup::TransformInterpolation.localized_label(self.localization()), vec![interpolation]))
-                        .into_iter()
-                        .collect(),
-                ]
+                vec![TURNS.iter().filter(|id| offered(id)).map(item).collect(), self.bar_submenu(ToolActionGroup::TransformInterpolation, interpolation)]
+            }
+            CanvasBarKind::Transform | CanvasBarKind::Placement if self.object_target().is_some() => vec![
+                TURNS.iter().map(item).collect(),
+                self.bar_submenu(ToolActionGroup::TransformInterpolation, [CommandId::TransformNearest, CommandId::TransformBilinear].iter().map(item).collect()),
+            ],
+            CanvasBarKind::Crop => vec![
+                self.bar_submenu(ToolActionGroup::CropOverlay, ToolActionGroup::CropOverlay.commands().iter().map(item).collect()),
+                [CommandId::CropDeleteCroppedPixels, CommandId::ResetTransform].iter().map(item).collect(),
+            ],
+            CanvasBarKind::Guide => vec![vec![item(&CommandId::ShowRulers)]],
+            CanvasBarKind::CloneSource => {
+                vec![self.clone_actions().iter().map(|a| a.command).filter(|id| CLONE_MORE.contains(id)).map(|id| self.bar_command_item(id)).collect()]
             }
             _ => Vec::new(),
         }
+    }
+
+    fn bar_submenu(&self, group: ToolActionGroup, items: Vec<ContextMenuItem>) -> Vec<ContextMenuItem> {
+        (!items.is_empty()).then(|| ContextMenuItem::submenu(&group.localized_label(self.localization()), vec![items])).into_iter().collect()
     }
 
     fn bar_command_item(&self, id: CommandId) -> ContextMenuItem {
@@ -763,7 +759,11 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     fn bar_label(&self, id: CommandId) -> std::sync::Arc<str> {
-        self.object_command_label(id).unwrap_or_else(|| short_label(id, self.localization()))
+        let short = short_label(id, self.localization());
+        if short.is_empty() {
+            return short;
+        }
+        self.object_command_label(id).unwrap_or(short)
     }
 
     /// Mode choices collapse into a dropdown where the work area is narrow.
@@ -787,7 +787,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             },
             accent: matches!(
                 id,
-                CommandId::ApplyTransform | CommandId::CompleteSelection | CommandId::ReturnToArtwork | CommandId::EditLayerContent
+                CommandId::ApplyTransform | CommandId::CompleteSelection | CommandId::FinishPath | CommandId::ReturnToArtwork | CommandId::EditLayerContent
             ),
             menu: None,
             icon: matches!(item, PlanItem::Button(_, MessageId::TOOLBAR_CANCEL)).then_some("close"),

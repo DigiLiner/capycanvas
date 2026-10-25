@@ -237,8 +237,8 @@ fn native_crop_deleting_cropped_pixels_leaves_nothing_to_reveal() {
     let (_app, w, mut input) = crop_ready("art.capycanvas.CropDelete");
     let before = document(&w);
     let [width, height] = [before.composition().size[0] as f32, before.composition().size[1] as f32];
-    tap(&mut input, Device::Mouse, center(&w, &bar_widget(&w, "canvas-bar-CropDeleteCroppedPixels")));
-    until(|| selected(&w, CommandId::CropDeleteCroppedPixels), "Delete Cropped Pixels turns on");
+    super::canvas_bar_tests::choose_from_more(&w, &mut input, super::canvas_bar_tests::Device::Mouse, &["Delete Cropped Paint Pixels"]);
+    until(|| selected(&w, CommandId::CropDeleteCroppedPixels), "Delete Cropped Pixels in More turns on");
     drag(&mut input, Device::Mouse, window_point(&w, [0., 0.]), window_point(&w, [width * 0.4, height * 0.4]));
     until(|| setting(&w, "crop_width") < width * 0.7, "the top-left handle moves");
     tap(&mut input, Device::Mouse, center(&w, &bar_widget(&w, "canvas-bar-ApplyTransform")));

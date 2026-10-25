@@ -10,24 +10,24 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 
 | Context | Shown when | Items | Placement |
 | --- | --- | --- | --- |
-| Placement | Images are placed or pasted, or whole layers and groups are being moved | For images: flips, quarter turns, Original Size and Nearest or Linear; for layers, the transform's Tool Options · Cancel, Apply | Beside the images or layers |
+| Placement | Images are placed or pasted, or whole layers and groups are being moved | For images: Flip Horizontal and Original Size, with Flip Vertical, the quarter turns and Interpolation ▸ (Nearest, Linear) in More; for layers, the transform bar · Cancel, Apply | Beside the images or layers |
 | Transform | Transform is open on paint, a mask or selected pixels, or images are selected with Move | Mode (Scale, Distort, Warp), Keep proportions in Scale, Perspective while distorting, Grid ▾ and Select Points while warping │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical, the quarter turns and Interpolation ▸. For selected images: flips, quarter turns, Original Size, Nearest or Linear, with no Cancel or Apply because each change is already one undo step | Beside the transform box or images |
 | Transform, labelled **Transform Outline** | Transform Outline is moving the selection outline | Keep proportions │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical and the quarter turns | Beside the outline's box |
-| Polygon | A polygon selection is under construction | Remove Last Point · Cancel, Finish | Bottom edge |
-| Crop | The Crop tool is active | Ratio ▾ (Free, Original, 1:1, 4:5, 2:3, 5:7, 16:9), Swap Orientation, Fit Content, Overlay ▾ (Thirds, Grid, Diagonal, Golden Ratio), Straighten, Delete Cropped Paint Pixels, Reset · Cancel, Apply | Bottom edge |
-| Guide | A guide is selected with the Ruler or Move tool and guides are shown | Delete, Snap, Guides, and Straighten for a straight guide | Beside the guide's handles |
-| Clone source | The Clone Stamp's or Healing Brush's source disc was tapped | Aligned, Source ▾ (Reference layers, Editing layer), Flip H/V, Reset Offset, Set Source | Beside the disc |
-| Quick Mask | Quick Mask is on | "Quick Mask" · Invert, Fill, Clear, Refine ▾, Save as Selection Layer · Exit | Bottom edge |
-| Selection Layer | A Selection Layer is being edited | "Editing *name*" · Load, Invert · Return to Artwork | Bottom edge |
-| Layer mask | A layer's mask is being edited | "Editing *layer* mask" · Invert, Disable, Apply Mask · Edit Content | Bottom edge |
+| Polygon | A polygon selection or vector path is under construction | Remove Last Point │ Cancel, Finish, all icons | Bottom edge |
+| Crop | The Crop tool is active | Ratio ▾ (Free, Original, 1:1, 4:5, 2:3, 5:7, 16:9), Swap Orientation, Fit Content, Straighten │ Cancel, Apply. More adds Overlay ▸ (Thirds, Grid, Diagonal, Golden Ratio), Delete Cropped Paint Pixels and Reset | Bottom edge |
+| Guide | A guide is selected with the Ruler or Move tool and guides are shown | Delete, Snap, and Straighten for a straight guide. More adds Show rulers | Beside the guide's handles |
+| Clone source | The Clone Stamp's or Healing Brush's source disc was tapped | Aligned, Source ▾ (Reference layers, Editing layer), Flip Horizontal, Set Source. More adds Flip Vertical and Reset Offset | Beside the disc |
+| Quick Mask | Quick Mask is on | "Quick Mask" · Invert, Fill, Clear, Refine ▾, Save as Selection Layer, all icons │ Exit | Bottom edge |
+| Selection Layer | A Selection Layer is being edited | "Editing *name*" · Load, Invert │ Return to Artwork | Bottom edge |
+| Layer mask | A layer's mask is being edited | "Editing *layer* mask" · Invert, Enable (an eye toggle), Apply Mask │ Edit Content | Bottom edge |
 | Selection | A selection exists and a selection tool or Move is active, or a command such as Select All just made it | Transform, Copy ▾, Fill, Clear, Adjust ▾, Mask ▾ │ Invert, Refine ▾ │ Deselect. More adds Clear Outside Selection, Crop Canvas to Selection and, while Move is active, Leave Copy | Beside the selection |
 
 - **Precedence:** a crop, transform or placement, then a polygon under construction, then a tapped source disc, then a selected guide, then a mode, then the selection.
-- **Clone source bar:** a tap on the Clone Stamp's or Healing Brush's source disc shows it, and another tap or a change of tool closes it. Like every bar beside an object it hides during any canvas contact, including painting, and returns afterwards. Its items are those tools' Tool Options; Source ▾ chooses what retouching copies, independently of Wand and Fill. The Spot Healing Brush has no disc and no bar: its Tool Options hold only the source choices.
-- **Modes** (Quick Mask, Selection Layer and layer-mask editing) have no object to sit beside, so they use the bottom edge with a label, their actions and an accented exit. They show under every tool, including the painting tools these modes choose. Their exits keep every edit; there is no Apply.
+- **Clone source bar:** a tap on the Clone Stamp's or Healing Brush's source disc shows it, and another tap or a change of tool closes it. Like every bar beside an object it hides during any canvas contact, including painting, and returns afterwards. Its items are those tools' Tool Options, with Flip Vertical and Reset Offset in More; Source ▾ chooses what retouching copies, independently of Wand and Fill. The Spot Healing Brush has no disc and no bar: its Tool Options hold only the source choices.
+- **Modes** (Quick Mask, Selection Layer and layer-mask editing) have no object to sit beside, so they use the bottom edge with a label, their actions and an accented exit. Their actions use the selection bar's icons; Load and Apply Mask keep their words, and the exits read as words because they are not plain Cancel or Apply. They show under every tool, including the painting tools these modes choose. Their exits keep every edit; there is no Apply.
   - Quick Mask's Invert, Fill and Clear act on the working mask and stay in the mode. Refine ▾ is the selection bar's menu.
   - A Selection Layer's Invert (`InvertSelectionLayer`) inverts its stored coverage and stays in the mode; Load (`LoadSelectionLayer`) makes it the selection and returns to the artwork.
-  - Disable (`LayerMaskEnabled`) reads Enable while the mask is off. Apply Mask (`ApplyLayerMask`) is unavailable, with a reason, on groups, effect layers and disabled masks. Edit Content (`EditLayerContent`) returns to the layer's pixels.
+  - Enable (`LayerMaskEnabled`) is an eye toggle, on while the mask applies. Apply Mask (`ApplyLayerMask`) is unavailable, with a reason, on groups, effect layers and disabled masks. Edit Content (`EditLayerContent`) returns to the layer's pixels.
   - More adds the mode's Layer menu: the Quick Mask menu, the Selection Layer's menu or the mask's menu.
 - **Guide bar:** it anchors to the bounds of the guide's handles and keeps clear of them. A Move click that misses every guide deselects it, and the selected guide is highlighted under Move as under Ruler. On a straight guide, Straighten (Straighten Image to Guide) opens the Crop tool turned level with the guide.
 
@@ -134,7 +134,7 @@ Grow…, Shrink…, Feather…, Border… and Smooth… open one dialog, over th
 
 ## Crop
 
-The Crop tool (C; Shift+C in the GIMP keys) is in the Tools toolbar of the Photo workspace and in Image. It is a canvas operation like a transform: until it is applied or cancelled, commands that edit the document are unavailable with the reason "Apply or cancel the crop first", and Tool Options shows the bar's items with the frame's width, height and Straighten angle.
+The Crop tool (C; Shift+C in the GIMP keys) is in the Tools toolbar of the Photo workspace and in Image. It is a canvas operation like a transform: until it is applied or cancelled, commands that edit the document are unavailable with the reason "Apply or cancel the crop first", and Tool Options shows every crop command, including those in More, with the frame's width, height and Straighten angle.
 
 - **Frame:** it starts as the whole canvas. Its eight handles drag immediately with every device; a finger on a handle drags it, and a finger elsewhere navigates. The mouse or pen inside the frame moves it. Shift keeps the frame's proportions and Alt resizes about its centre.
 - **Ratio ▾:** a ratio fits the largest frame of that shape in the canvas, in the frame's current orientation. Original is the canvas's own ratio. Swap Orientation turns landscape into portrait and back.

@@ -87,11 +87,11 @@ fn crop_starts_at_the_canvas_with_its_bar_and_blocks_other_edits() {
         ("crop-ratio", "Free Original 1:1 4:5 2:3 5:7 16:9".to_string()),
         ("Swap crop orientation", String::new()),
         ("Fit Crop to Content", "Fit Content".into()),
-        ("crop-overlay", "Thirds Grid Diagonal Golden Ratio".to_string()),
         ("Straighten", "Straighten".into()),
-        ("Delete Cropped Paint Pixels", "Delete Cropped Paint".into()),
-        ("Reset crop", "Reset".into()),
     ]);
+    let more = s.canvas_bar_menu(bar.context, bar.items.len()).unwrap();
+    let labels: Vec<&str> = more.sections.iter().flatten().map(|i| i.label.as_str()).collect();
+    assert!(["Overlay", "Delete Cropped Paint Pixels", "Reset crop"].iter().all(|l| labels.contains(l)), "the rest of the crop is in More: {labels:?}");
     assert_eq!(bar_items(&bar.completion), [
         (CommandId::CancelTransform, "", false),
         (CommandId::ApplyTransform, "", false),

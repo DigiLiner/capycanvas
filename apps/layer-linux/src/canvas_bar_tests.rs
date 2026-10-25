@@ -807,12 +807,12 @@ fn native_canvas_bar_modes() {
         assert_mode_bar(&w, layer_ui::CanvasBarKind::LayerMask, &format!("Editing {name} mask"));
         let enabled = || document(&w).scene().occurrence(paint).unwrap().mask.as_ref().is_some_and(|m| m.enabled);
         tap_bar(&w, &mut native, device, CommandId::LayerMaskEnabled, || !enabled(), "Disable turns the mask off");
-        let offers_enable = || {
+        let shows_off = || {
             find_named(w.canvas_bar.root.upcast_ref(), "canvas-bar-LayerMaskEnabled")
-                .and_then(|b| mapped_label(&b, "Enable"))
-                .is_some()
+                .and_downcast::<gtk::ToggleButton>()
+                .is_some_and(|b| !b.is_active())
         };
-        until(offers_enable, "the button now offers Enable");
+        until(shows_off, "the eye toggle shows the mask is off");
         tap_bar(
             &w,
             &mut native,

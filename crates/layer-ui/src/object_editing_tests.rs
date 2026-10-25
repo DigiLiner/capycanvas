@@ -352,14 +352,16 @@ fn the_object_canvas_bar_names_image_commands() {
     s.select_objects(layer, [front].into()).unwrap();
     s.frame(1, 1).unwrap();
     let bar = s.state.canvas_bar.clone().expect("an image canvas bar");
-    let labels: Vec<String> = bar.items.iter().flat_map(|item| match &item.option {
-        ToolOption::Choice { items, .. } => items.iter().map(|choice| choice.label.to_string()).collect(),
-        _ => vec![item.label.to_string()],
-    }).collect();
     let l = s.localization();
-    for expected in [MessageId::OBJECTS_INTERPOLATION_LINEAR, MessageId::OBJECTS_ORIGINAL_SIZE] {
-        assert!(labels.iter().any(|label| *label == *l.text(expected)), "{expected:?} in {labels:?}");
-    }
+    let original = bar.items.iter().find_map(|item| match &item.option {
+        ToolOption::Action { state, .. } if state.id == CommandId::PlacementOriginalSize => Some((item.icon_only, state.label.clone())),
+        _ => None,
+    });
+    assert_eq!(original, Some((true, l.text(MessageId::OBJECTS_ORIGINAL_SIZE))), "an icon named in its tooltip");
+    let more = s.canvas_bar_menu(bar.context, bar.items.len()).unwrap();
+    let interpolation = more.sections.iter().flatten().find(|item| !item.sections.is_empty()).expect("Interpolation in More");
+    let labels: Vec<&str> = interpolation.sections.iter().flatten().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&l.text(MessageId::OBJECTS_INTERPOLATION_LINEAR).as_ref()), "{labels:?}");
 }
 
 #[test]
