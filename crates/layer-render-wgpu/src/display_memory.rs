@@ -10,6 +10,14 @@ fn allowance(headroom: Option<u64>, divisor: u64, retained: u64) -> u64 {
     headroom.map_or(0, |bytes| bytes.saturating_add(retained) / divisor)
 }
 
+fn resource_allowance(gpu: Option<u64>, system: Option<u64>, retained: u64) -> u64 {
+    let headroom = match (gpu, system) {
+        (Some(gpu), Some(system)) => Some(gpu.min(system)),
+        (gpu, system) => gpu.or(system),
+    };
+    allowance(headroom, 4, retained).min(512 * 1024 * 1024)
+}
+
 /// Exact filter dependencies can use available unified memory when the driver
 /// budget is unavailable. This must not enlarge optional display/source caches:
 /// system capacity alone does not establish their fast-residency budget.
@@ -121,6 +129,20 @@ fn vulkan_headroom(device: &wgpu::Device) -> Option<u64> {
 mod tests {
     use super::*;
     #[test]
+    fn essential_resource_admission_preserves_reported_limits_and_optional_cache_policy() {
+        assert_eq!(resource_allowance(None, Some(4096), 0), 1024);
+        assert_eq!(resource_allowance(Some(8192), Some(4096), 0), 1024);
+        assert_eq!(resource_allowance(Some(1024), Some(4096), 0), 256);
+        assert_eq!(resource_allowance(Some(0), Some(4096), 0), 0);
+        assert_eq!(resource_allowance(Some(4096), Some(0), 0), 0);
+        assert_eq!(resource_allowance(None, Some(0), 0), 0);
+        assert_eq!(resource_allowance(None, None, 0), 0);
+        assert_eq!(resource_allowance(Some(4096), None, 0), 1024);
+        assert_eq!(resource_allowance(None, Some(4096), 128), 1056);
+        assert_eq!(resource_allowance(None, Some(u64::MAX), 0), 512 * 1024 * 1024);
+        assert_eq!(allowance(None, 4, 0), 0);
+    }
+    #[test]
     #[cfg(target_vendor = "apple")]
     fn metal_admission_respects_existing_allocations_and_process_headroom() {
         assert_eq!(metal_headroom(4096, 1024, Some(8192)), Some(3072));
@@ -217,14 +239,8 @@ fn windows_admission_respects_usage_and_available_memory() {
 
 pub(super) fn resource_budget(device: &wgpu::Device, retained: u64) -> u64 {
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    {
-        let system = layer_color::photo::PhotoMemoryBudget::available_memory();
-        let headroom = match (vulkan_headroom(device), system) {
-            (Some(gpu), Some(system)) => Some(gpu.min(system)),
-            (gpu, system) => gpu.or(system),
-        };
-        allowance(headroom, 4, retained).min(512 * 1024 * 1024)
-    }
+    let gpu = vulkan_headroom(device);
     #[cfg(any(target_vendor = "apple", target_os = "windows"))]
-    { complete_budget(device, retained).min(512 * 1024 * 1024) }
+    let gpu = device_headroom(device);
+    resource_allowance(gpu, layer_color::photo::PhotoMemoryBudget::available_memory(), retained)
 }

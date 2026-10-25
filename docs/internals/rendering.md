@@ -1137,6 +1137,12 @@ are rejected before a frame changes the document. See
 [display composition](../rendering/display-composition.md) for admission, moving
 previews and exact idle refinement.
 
+Analysis reservations use measured GPU and process headroom, taking the smaller
+when both are available. An unreported GPU allowance uses measured process or
+system headroom. Retained guides count toward the quarter-share allowance and
+512 MiB ceiling; reported zero headroom refuses new allocations. Display caches
+use their own device-residency admission.
+
 Native filter windows admit output sections up to 2048 pixels per side against
 the complete halo and image-storage bound, falling back to smaller page-aligned
 sections when needed. Each section retires its temporary images after queue
