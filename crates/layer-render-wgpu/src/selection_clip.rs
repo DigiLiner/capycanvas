@@ -227,8 +227,9 @@ impl SelectionClip {
             .next_multiple_of(16),
             _ => edges.len() as u64 * 4,
         };
+        let columns = device.limits().max_compute_workgroups_per_dimension;
         if bytes.max(source_bytes) > device.limits().max_storage_buffer_binding_size
-            || edges.len() as u32 / 4 > device.limits().max_compute_workgroups_per_dimension
+            || (edges.len() / 4).div_ceil(columns as usize) > columns as usize
             || bounds.height() > device.limits().max_compute_workgroups_per_dimension
             || bounds.width().div_ceil(512) > device.limits().max_compute_workgroups_per_dimension
         {
@@ -322,7 +323,7 @@ impl SelectionClip {
         pass.set_bind_group(0, &binding, &[]);
         if edge_count > 0 {
             pass.set_pipeline(&self.crossings);
-            pass.dispatch_workgroups(edge_count, 1, 1);
+            pass.dispatch_workgroups(edge_count.min(columns), edge_count.div_ceil(columns), 1);
         }
         if bounds.height() > 0 {
             pass.set_pipeline(&self.fill);

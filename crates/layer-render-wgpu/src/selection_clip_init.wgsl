@@ -7,8 +7,10 @@ struct PackedSelection { rect: vec4<u32>, info: vec4<u32>, values: array<atomic<
 // Mark even/odd crossing events for each of the four coverage samples. Work
 // scales with edge height, not with every pixel times every polygon edge.
 @compute @workgroup_size(64)
-fn crossings(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
-    let e = edges[group.x];
+fn crossings(@builtin(workgroup_id) group: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    let index = group.y * groups.x + group.x;
+    if index >= arrayLength(&edges) { return; }
+    let e = edges[index];
     let first = u32(clamp(floor(min(e.y, e.w) - f32(params.rect.y)), 0., f32(params.rect.w)));
     let end = u32(clamp(ceil(max(e.y, e.w) - f32(params.rect.y)), 0., f32(params.rect.w)));
     let stride = (params.rect.z + 7u) / 8u;

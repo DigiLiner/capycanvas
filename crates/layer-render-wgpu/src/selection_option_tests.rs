@@ -65,6 +65,24 @@ fn receive_refined(r: &mut WgpuRasterizer, incoming: Selection, options: Selecti
 }
 
 #[test]
+fn lassos_with_more_edges_than_one_dispatch_dimension_select_like_a_coarser_outline() {
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    submit(&mut r, paint_document([128; 2], "lasso").scene(), &[], &[], true);
+    let circle = |points: usize| Selection::polygon((0..points).map(|i| {
+        let angle = i as f32 / points as f32 * std::f32::consts::TAU;
+        Point { x: 64. + 50. * angle.cos(), y: 64. + 50. * angle.sin() }
+    }).collect()).unwrap();
+    let edges = r.device.limits().max_compute_workgroups_per_dimension as usize + 4465;
+    let fine = receive(&mut r, circle(edges), None, SelectionMode::New, 0., true);
+    let coarse = receive(&mut r, circle(4096), None, SelectionMode::New, 0., true);
+    assert_eq!(coverage(&fine, 64, 64), 255);
+    assert_eq!(coverage(&fine, 4, 4), 0);
+    let differing = (0..128).flat_map(|y| (0..128).map(move |x| (x, y)))
+        .filter(|&(x, y)| coverage(&fine, x, y).abs_diff(coverage(&coarse, x, y)) > 2).count();
+    assert_eq!(differing, 0, "{edges}-edge and 4096-edge circles select the same pixels");
+}
+
+#[test]
 fn selection_options_boolean_modes_antialias_and_gaussian_feather() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     submit(
