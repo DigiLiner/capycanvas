@@ -114,7 +114,7 @@ import { checkAdjustments, checkCurves } from "./effects.test.mjs";
 import { checkPreferences, checkSettingsParity, checkLiveLanguage } from "./preferences.test.mjs";
 import {checkLiveHistogramLanguage,checkLiveWorkspaceLanguage,checkLiveDeliveryLanguage,checkLiveProofLanguage,checkLiveColorFormLanguage,checkLiveToolbarLanguage,checkLiveEffectLanguage,checkLiveToolLanguage} from "./localization-journey.test.mjs";
 import { checkPwa, servePackage } from "./pwa.test.mjs";
-import { checkGpuStartup, checkGpuCompatibility, checkGpuFailureLifecycle, checkCallbackBoundaries, checkOutdatedBrowser } from "./gpu.test.mjs";
+import { checkGpuStartup, checkGpuCompatibility, checkGpuFailureLifecycle, checkCallbackBoundaries, checkWorkerCapacity, checkOutdatedBrowser } from "./gpu.test.mjs";
 import { checkStagedStartup, checkWorkspaceStartup } from "./startup.test.mjs";
 import { checkMediumTiles } from "./tiles.test.mjs";
 import { checkCustomization, checkWorkspace, checkTabStyles, checkToolbarManager, checkToolPicker } from "./customization.test.mjs";
@@ -414,6 +414,7 @@ try {
     [process.argv.includes("--tool-picker"), () => checkToolPicker({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--customization"), () => checkCustomization({ call, evaluate, settle, canvasPixels }), checkErrors],
     [process.argv.includes("--callback-boundaries"), () => checkCallbackBoundaries({call,evaluate,settle,errors}), checkErrors],
+    [process.argv.includes("--worker-capacity"), () => checkWorkerCapacity({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--gpu-failure-lifecycle"), () => checkGpuFailureLifecycle({call,evaluate,settle,errors}), checkErrors],
     [process.argv.includes("--gpu-compatibility"), async () => {
       assert.ok(packageHost, "Use --package --gpu-compatibility to test the built distribution");

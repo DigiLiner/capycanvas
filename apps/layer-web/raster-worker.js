@@ -113,7 +113,7 @@ async function execute({id,request}) {
       default: throw new Error("Unknown raster worker operation");
     }
     self.postMessage({id,result,retire:retire()},result instanceof Uint8Array ? [result.buffer] : [...(result?.bytes instanceof Uint8Array ? [result.bytes] : result?.waveform_counts ? [result.waveform_counts] : result?.buffers || []),...(result?.preview instanceof Uint8Array ? [result.preview] : []),...(result?.png instanceof Uint8Array ? [result.png] : [])].map(bytes=>bytes.buffer));
-  } catch(error) { self.postMessage({id,error:String(error),color_feature_error:error?.color_feature_error,memory_error:error?.memory_error===true,retire:retire()}); }
+  } catch(error) { self.postMessage({id,error:String(error),color_feature_error:error?.color_feature_error,memory_error:error?.memory_error===true,worker_busy:error?.worker_busy===true,retire:retire()}); }
 }
 
 const outputs=new Map();

@@ -130,6 +130,19 @@ image owners and instrumented decode/preparation scratch with a ceiling below
 memory. Native decoder execution limits are separate. See the
 [shared memory policy](../architecture.md) for allocation lifetimes and limits.
 
+Temporary coordinator saturation returns a busy error bound to private capacity
+requirements. Image and raster tile preparation wait for usable request, decoder,
+payload and arena capacity, then rebuild transferred arrays from retained charged
+sources. Further contention waits again under the same absolute three-minute
+deadline; it cannot reset that deadline or spin on its own releases. Main-Wasm
+output bytes are charged before dispatch.
+Waiters are bounded by the request limit, honor cancellation and expire within
+three minutes. Releases are coalesced outside the initiating call; a failed
+attempt cannot signal its own retry capacity. Invalid or individually oversized
+inputs remain validation errors. `--worker-capacity` holds aggregate payload
+capacity through a real detached decode, then checks waiting, exact source-byte
+reconstruction and visible image pixels after release in both themes.
+
 Clipboard output carries the full-depth source transfer and a separate PNG for
 other applications. The PNG is a separate reply field, so it cannot change the source transfer
 inventory or consume its validation receipt.

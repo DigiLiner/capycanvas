@@ -25,7 +25,7 @@ impl WebProof {
     ) -> Result<(), JsValue> {
         if !matches!(edge, 65 | 129)
             || bytes.length() as usize != (edge as usize).pow(3) * 20
-            || bytes.byte_offset() % 4 != 0
+            || !bytes.byte_offset().is_multiple_of(4)
         {
             return Err(js("Invalid proof worker sample dimensions"));
         }

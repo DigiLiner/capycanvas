@@ -37,6 +37,12 @@ export async function checkImagePlacement({call,evaluate,settle}) {
   const command=id=>evaluate(`(c=>c&&{enabled:c.enabled,reason:c.disabled_reason??null,selected:c.selected})(layerApp.state().commands.find(c=>c.id===${JSON.stringify(id)}))`);
   const state=()=>evaluate('JSON.parse(JSON.stringify(layerApp.state(),(_,v)=>typeof v==="bigint"?String(v):v))');
   const idle=()=>wait('!layerApp.state().document_file.busy');
+  const historyCheckpoint=async label=>{
+    const diagnostic=()=>evaluate(`JSON.stringify({park:layerApp.app.document_park_ready(),file:layerApp.state().document_file,gpu:layerApp.app.gpu_diagnostics(),error:layerApp.state().host_error,worker_events:placementTest.workerEvents},(_,value)=>typeof value==='bigint'?String(value):value)`);
+    console.log(`Image placement ${label}: before history checkpoint`,await diagnostic());
+    await wait('layerApp.app.document_park_ready()');
+    console.log(`Image placement ${label}: after history checkpoint`,await diagnostic());
+  };
   const placed=()=>wait("layerApp.state().canvas_bar?.context.kind==='placement'&&layerApp.state().commands.find(c=>c.id==='apply_transform').enabled");
   const click=async selector=>{
     await wait(`(n=>n && !n.disabled && n.getAttribute('aria-disabled')!=='true' && !n.closest('.canvas-action-bar.suppressed'))(document.querySelector(${JSON.stringify(selector)}))`);
@@ -56,7 +62,10 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     await wait('layerApp.state().commands.find(c=>c.id==="import_image").enabled');
     for(const type of ['dragEnter','dragOver','drop'])await call('Input.dispatchDragEvent',{type,...p,data:{items:[],files,dragOperationsMask:1}});
   };
-  const save=placementSave({evaluate,invoke,idle});
+  const save=placementSave({evaluate,invoke:async command=>{
+    await evaluate('placementTest.saved=null');
+    await invoke(command);
+  },idle:()=>wait('placementTest.saved instanceof Uint8Array&&!layerApp.state().document_file.busy')});
   const imageLayers=m=>packageOccurrences(m).filter(o=>o.data.content.object);
   const objectsIn=m=>imageLayers(m).map(o=>packageObject(m,o.data.content.object));
   const extent=(m,object)=>packageObject(m,object.data.image).data.extent;
@@ -119,7 +128,11 @@ export async function checkImagePlacement({call,evaluate,settle}) {
       await invoke('undo');await invoke('undo');await invoke('deselect');
     }
     console.log('Image placement: paint Warp preview and Cancel passed');
+    const baselineReady=await evaluate('JSON.parse(JSON.stringify({park:layerApp.app.document_park_ready(),file:layerApp.state().document_file},(_,value)=>typeof value==="bigint"?String(value):value))');
+    console.log('Image placement: Undo baseline readiness',baselineReady);
+    if(!baselineReady.park)await wait('layerApp.app.document_park_ready()');
     const base=await state(),baseCount=base.layers.length;
+    console.log('Image placement: settled Undo baseline',base.document_file);
     assert.deepEqual(await evaluate('layerApp.app.photo_formats().map(f=>f.name)'),['OpenEXR','TIFF','PNG','WebP','BMP','JPEG','GIF','HEIF','AVIF']);
 
     await importFiles(files);
@@ -144,7 +157,7 @@ export async function checkImagePlacement({call,evaluate,settle}) {
       assert.equal(object.data.interpolation??'linear','linear');
     }
     await invoke('undo');assert.equal((await state()).layers.length,baseCount,'Placement is one undo step');
-    await invoke('redo');assert.equal((await state()).layers.length,baseCount+files.length);
+    await invoke('redo');await historyCheckpoint('placement Redo');assert.equal((await state()).layers.length,baseCount+files.length);
     const archiveBytes=await evaluate('placementTest.saved.byteLength');
     if(!process.env.LAYER_PHOTO_FILES)assert.ok(archiveBytes>8*1024*1024,'The native drawing exceeds one Blob range');
     await evaluate('placementTest.blobMaster=placementTest.saved.slice();void 0');
@@ -200,7 +213,7 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     const again=await objectAffine();
     assert.ok(near([again[4]-moved[4],again[5]-moved[5]],delta,1e-6),'Transform Again repeats the last image move');
     await invoke('undo');assert.ok(near(await objectAffine(),moved,1e-9),'Transform Again is one undo step');
-    await invoke('redo');assert.ok(near(await objectAffine(),again,1e-9));
+    await invoke('redo');await historyCheckpoint('transform Redo');assert.ok(near(await objectAffine(),again,1e-9));
     await invoke('undo');await invoke('undo');assert.ok(near(await objectAffine(),start,1e-9),'The drag is one undo step');
 
     const zoom=(await state()).camera.zoom;
@@ -253,7 +266,9 @@ export async function checkImagePlacement({call,evaluate,settle}) {
       await stroke();
       try {assert.notDeepEqual(rasterIdentity(await save()),rasterIdentity(painted),'Liquify edits the rasterized layer');}
       catch(error){console.error('Image placement Liquify diagnostic:',await evaluate(`JSON.stringify({state:layerApp.state(),gpu:layerApp.app.gpu_diagnostics(),worker_events:placementTest.workerEvents,status:document.querySelector('#status')?.textContent},(_,value)=>typeof value==='bigint'?String(value):value)`));throw error;}
-      await invoke('undo');await invoke('undo');assert.deepEqual(rasterIdentity(await save()),rasterIdentity(rasterized));
+      await invoke('undo');await invoke('undo');
+      await historyCheckpoint(`${theme} Liquify and paint Undo`);
+      assert.deepEqual(rasterIdentity(await save()),rasterIdentity(rasterized));
       await invoke('undo');
       const restored=await save();
       assert.equal(imageLayers(restored).length,files.length,'One Undo restores the selected Object beside its unchanged siblings');

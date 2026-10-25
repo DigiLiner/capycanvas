@@ -45,12 +45,8 @@ export async function checkFilterPreviews({call,evaluate,settle}) {
   const imported=await histogram();
   assert.notDeepEqual(imported,blank,'The imported checker changes document pixels');
   await evaluate(`(()=>{
-    const app=layerApp.app,original=app.poll_filter_previews,step=app.compile_startup_step;
-    window.previewCheck={optionalAdmissions:0,restore(){app.poll_filter_previews=original;app.compile_startup_step=step;}};
-    app.compile_startup_step=function(optional){
-      if(optional)previewCheck.optionalAdmissions++;
-      return step.call(this,optional);
-    };
+    const app=layerApp.app,original=app.poll_filter_previews;
+    window.previewCheck={restore(){app.poll_filter_previews=original;}};
     document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:987,pointerType:'pen'}));
     app.poll_filter_previews=function(...args){
       const result=original.apply(this,args);
@@ -67,12 +63,14 @@ export async function checkFilterPreviews({call,evaluate,settle}) {
   const status=()=>evaluate(`(()=>{const {atlas,bytes,...status}=previewCheck.status;return JSON.parse(JSON.stringify(status,(_,v)=>typeof v==='bigint'?Number(v):v));})()`);
   try {
     await settle();await show();
-    await wait('layerApp.app.shader_work_pending(true)');
-    await new Promise(resolve=>setTimeout(resolve,350));
-    assert.equal(await evaluate('previewCheck.optionalAdmissions'),0,'Held contact defers optional compiler admission');
+    await wait(`previewCheck.status&&!previewCheck.status.pending&&previewCheck.pixels('curves')`);
+    assert.equal(await evaluate(`!!previewCheck.image('curves')&&!previewCheck.image('curves').parentElement.querySelector('canvas')`),true,'Held contact shows the loaded bundled image without a GPU preview canvas');
+    assert.deepEqual(await evaluate('previewCheck.ids'),[],'Held contact requests no GPU previews for bundled rows');
+    assert.equal((await status()).requests,0,'Held contact loads bundled previews without GPU requests');
     await timed('release_ms',()=>evaluate("document.body.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:987,pointerType:'pen'}));undefined"),
       `previewCheck.status&&!previewCheck.status.pending&&previewCheck.pixels('curves')`);
-    assert.ok(await evaluate('previewCheck.optionalAdmissions>0'),'Optional compiler admission resumes after release');
+    await settle();
+    assert.equal(await evaluate(`!!previewCheck.image('curves')&&!previewCheck.image('curves').parentElement.querySelector('canvas')`),true,'Release retains the loaded bundled image without a GPU preview canvas');
     assert.deepEqual(await evaluate('previewCheck.ids'),[],'Built-in rows show bundled previews and request none');
     const first=await status();assert.equal(first.error??null,null);assert.equal(first.requests,0);
     for(const theme of ['light','dark']){

@@ -126,7 +126,7 @@ impl WebApp {
             let observed=observe.call1(&JsValue::NULL,&serialize(&restore.state.location)?)?;
             let observed:Option<layer_ui::DestinationFingerprint>=serde_wasm_bindgen::from_value(JsFuture::from(js_sys::Promise::resolve(&observed)).await?).map_err(js)?;
             admission.admit(restore.document()).map_err(|reason|js(reason.message(&localization)))?;
-            let mut candidate=documents::prepare_session(restore.document().clone(),adapter,device,queue,&brush,viewport,localization,None).await?;
+            let mut candidate=documents::prepare_session(restore.document().clone(),(adapter,device,queue),&brush,viewport,localization,None).await?;
             candidate.restore_session(restore,recovered,observed).map_err(js)?;
             Ok(WebSessionProject{session:Some(Box::new(candidate)),lost}.into())
         }))

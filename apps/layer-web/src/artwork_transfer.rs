@@ -100,7 +100,7 @@ pub(super) async fn save(capture:ArtworkCapture)->Result<JsValue,JsValue>{let wi
 #[derive(Serialize,Deserialize)]
 pub(super) struct OpenOptions {pub dimension:u32,pub photo_policy:layer_ui::PhotoOpenPolicy,pub names:layer_core::DocumentNames,pub intent:layer_ui::ImportIntent,#[serde(default)]pub source_bytes:Option<usize>}
 pub(super) type Preserved = (layer_ui::PackagePresentation,Option<js_sys::Object>);
-pub(super) enum Opened {Editable {document:layer_ui::ImportedDocument,fallback:Option<Preserved>},Package {presentation:layer_ui::PackagePresentation,preview:Option<js_sys::Object>}}
+pub(super) enum Opened {Editable {document:Box<layer_ui::ImportedDocument>,fallback:Option<Preserved>},Package {presentation:layer_ui::PackagePresentation,preview:Option<js_sys::Object>}}
 pub(super) async fn open(file:web_sys::Blob,options:OpenOptions,cancelled:Option<js_sys::Function>)->Result<Opened,JsValue>{
     let request=js_sys::Object::new();
     js_sys::Reflect::set(&request,&js("operation"),&js("read"))?;
@@ -124,7 +124,7 @@ pub(super) async fn open(file:web_sys::Blob,options:OpenOptions,cancelled:Option
         let preview=js_sys::Reflect::get(&wire,&js("preview"))?;
         Some((presentation,if preview.is_null()||preview.is_undefined(){None}else{Some(preview.dyn_into()?)}))
     };
-    Ok(Opened::Editable {document:layer_ui::ImportedDocument::new(document,source),fallback})
+    Ok(Opened::Editable {document:Box::new(layer_ui::ImportedDocument::new(document,source)),fallback})
 }
 #[wasm_bindgen]
 pub async fn raster_worker_read(options:&str,file:web_sys::Blob)->Result<JsValue,JsValue>{

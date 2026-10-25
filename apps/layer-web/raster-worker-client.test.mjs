@@ -4,6 +4,7 @@ import {createRasterWorker} from './raster-worker-client.js';
 
 function fixture(module) {
   const original=Object.fromEntries(['Worker','setTimeout','clearTimeout','setInterval','clearInterval'].map(k=>[k,globalThis[k]]));
+  const originalNow=Date.now;Date.now=()=>now;
   let now=0,next=0;const timers=new Map(),workers=[];
   const schedule=(callback,delay,interval=false)=>{const id=++next;timers.set(id,{callback,at:now+delay,interval:interval?delay:0});return id;};
   globalThis.setTimeout=(f,d)=>schedule(f,d);globalThis.setInterval=(f,d)=>schedule(f,d,true);
@@ -15,16 +16,196 @@ function fixture(module) {
     reply(result,extra={}){this.onmessage({data:{id:this.messages.at(-1).id,result,...extra}});}
     error(){this.onerror({preventDefault(){},message:'worker failed'});}
   };
-  const events=[],run=createRasterWorker(module,event=>events.push(event));
+  const events=[],capacity=[],run=createRasterWorker(module,event=>events.push(event),()=>capacity.push(now));
   run.configure({workers:8,requests:32,decoders:2,payloads:256*1024*1024,resultAge:180000,metadata:64*1024*1024,range:8*1024*1024,total:1024*1024*1024});
-  return {run,workers,events,async flush(){for(let i=0;i<4;i++)await Promise.resolve();},
+  return {run,workers,events,capacity,async flush(){for(let i=0;i<4;i++)await Promise.resolve();},
     async advance(delay){const end=now+delay;while(true){const ready=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!ready)break;const [id,t]=ready;now=t.at;if(!t.interval)timers.delete(id);t.callback();if(t.interval&&timers.has(id))t.at+=t.interval;await this.flush();}now=end;},
-    close(){for(const [k,v]of Object.entries(original))globalThis[k]=v;}};
+    close(){Date.now=originalNow;for(const [k,v]of Object.entries(original))globalThis[k]=v;}};
 }
 async function withFixture(body){const f=fixture();try{await body(f);}finally{f.close();}}
 const request=(operation='snapshot',extra={})=>({operation,metadata:'{}',buffers:[],...(operation==='read'?{file:new Blob(['input'])}:{}),...extra});
 const transfer=(kind='artwork',metadata='descriptor',buffers=[new Uint8Array([3,7,11])])=>({transfer_kind:kind,metadata,buffers});
 const admission=(run,values)=>run.configure({metadata:64*1024*1024,range:8*1024*1024,total:1024*1024*1024,workers:8,requests:32,decoders:2,payloads:256*1024*1024,resultAge:180000,...values});
+const refusal=promise=>promise.then(()=>assert.fail('Expected worker admission refusal'),error=>error);
+
+test('capacity waits retain opaque receipts until their owner consumes them',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});
+  const first=f.run(request('encode'));const bytes=new Uint8Array([3,7]);f.workers[0].reply(bytes);const receipt=await first;
+  const error=await refusal(f.run(request('image-decode')));assert.equal(error.worker_busy,true);
+  let ready=false;const waiting=f.run.waitForCapacity(error).then(()=>ready=true);
+  assert.equal(f.run.waitForCapacity(error),f.run.waitForCapacity(error));
+  await f.advance(0);assert.equal(ready,false);assert.deepEqual(receipt,{});
+  assert.equal(f.run.consumeResult('encode',receipt),bytes);await f.advance(0);await waiting;
+  assert.equal(ready,true);assert.equal(f.run.consumeResult('encode',receipt),null);
+}));
+
+test('capacity released before waiter registration is not a lost wake',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});const first=f.run(request('fingerprint'));
+  const error=await refusal(f.run(request('image-decode')));
+  f.workers[0].reply('finished');await first;
+  await f.run.waitForCapacity(error);
+  const retry=f.run(request('image-decode'));f.workers.at(-1).reply(new Uint8Array([11]));
+  assert.equal(f.run.consumeResult('image-decode',await retry)[0],11);
+}));
+
+test('aggregate resize waits use absolute required bytes and ignore the failed job release',()=>withFixture(async f=>{
+  admission(f.run,{payloads:40});
+  const occupied=f.run(request('fingerprint',{metadata:'',buffers:[new Uint8Array(20)]}));
+  const attempt=f.run(request('image-decode',{metadata:''}));f.workers[1].reply(new Uint8Array(32));
+  const error=await refusal(attempt);assert.equal(error.worker_busy,true);
+  let ready=false;const waiting=f.run.waitForCapacity(error).then(()=>ready=true);
+  await f.advance(0);assert.equal(ready,false);assert.deepEqual(f.capacity,[]);
+  f.workers[0].reply('finished');await occupied;await f.advance(0);await waiting;
+  assert.equal(ready,true);assert.equal(f.capacity.length,1);
+  const retry=f.run(request('image-decode',{metadata:''}));f.workers[1].reply(new Uint8Array(32));
+  assert.equal(f.run.consumeResult('image-decode',await retry).length,32);
+}));
+
+test('decoder capacity waits through independent validation and opaque receipt ownership',()=>withFixture(async f=>{
+  admission(f.run,{decoders:1});const first=f.run(request('read'));
+  const error=await refusal(f.run(request('validate-artwork')));
+  let ready=false;const waiting=f.run.waitForCapacity(error).then(()=>ready=true);
+  f.workers[0].reply(transfer());await f.flush();f.workers[1].reply(transfer());const result=await first;
+  await f.advance(0);assert.equal(ready,false);
+  const unrelated=f.run(request('fingerprint'));f.workers.at(-1).reply(true);await unrelated;
+  await f.advance(0);assert.equal(ready,false);
+  assert.ok(f.run.consume('artwork',result.metadata,result.buffers));await f.advance(0);await waiting;
+  assert.equal(ready,true);
+}));
+
+test('arena pressure waits for a usable idle arena rather than its own temporary job',()=>withFixture(async f=>{
+  admission(f.run,{workers:3});const first=f.run(request('fingerprint')),second=f.run(request('color-field'));
+  const error=await refusal(f.run(request('image-decode')));let ready=false;
+  const waiting=f.run.waitForCapacity(error).then(()=>ready=true);
+  await f.advance(0);assert.equal(ready,false);assert.deepEqual(f.capacity,[]);
+  f.workers[0].reply('finished');await first;await f.advance(0);await waiting;
+  const retry=f.run(request('image-decode'));assert.equal(f.workers[0].terminated,true);
+  f.workers[2].reply(new Uint8Array([13]));assert.equal(f.run.consumeResult('image-decode',await retry)[0],13);
+  f.workers[1].reply('independent');assert.equal(await second,'independent');
+}));
+
+test('closing a protected output arena releases a queued decode without retiring its sibling',()=>withFixture(async f=>{
+  admission(f.run,{workers:3});
+  const a=f.run(request('output-begin'));f.workers[0].reply('a');await a;
+  const b=f.run(request('output-begin'));f.workers[1].reply('b');await b;
+  const error=await refusal(f.run(request('image-decode')));let ready=false;
+  const waiting=f.run.waitForCapacity(error).then(()=>ready=true);await f.advance(0);assert.equal(ready,false);
+  const close=f.run(request('output-close',{metadata:'a'}));f.workers[0].reply(true);await close;
+  await f.advance(0);await waiting;assert.equal(ready,true);assert.equal(f.workers[1].terminated,false);
+  const next=f.run(request('image-decode'));f.workers[2].reply(new Uint8Array([23]));
+  assert.equal(f.run.consumeResult('image-decode',await next)[0],23);
+}));
+
+test('worker busy flags wait for a genuine later release and cannot wake themselves',()=>withFixture(async f=>{
+  const attempt=f.run(request('image-decode'));
+  f.workers[0].reply(undefined,{error:'temporarily occupied',worker_busy:true});
+  const error=await refusal(attempt);assert.equal(error.worker_busy,true);assert.equal(error.memory_error,undefined);
+  let ready=false;const waiting=f.run.waitForCapacity(error).then(()=>ready=true);
+  await f.advance(0);assert.equal(ready,false);assert.deepEqual(f.capacity,[]);
+  const other=f.run(request('fingerprint'));f.workers[1].reply('released');await other;
+  await f.advance(0);await waiting;assert.equal(ready,true);
+}));
+
+test('a real release before the busy reply is handled is not lost',()=>withFixture(async f=>{
+  const attempt=f.run(request('image-decode')),other=f.run(request('fingerprint'));
+  f.workers[1].reply('released before reply');await other;
+  f.workers[0].reply(undefined,{error:'queued busy result',worker_busy:true});
+  const error=await refusal(attempt);
+  await f.run.waitForCapacity(error);
+  assert.equal(error.worker_busy,true);
+}));
+
+test('a typed memory refusal cannot signal its own retry capacity',()=>withFixture(async f=>{
+  const attempt=f.run(request('image-decode'));f.workers[0].reply(undefined,{error:'retained memory pressure',memory_error:true});
+  const error=await refusal(attempt);assert.equal(error.memory_error,true);assert.equal(error.worker_busy,undefined);
+  await f.advance(0);assert.deepEqual(f.capacity,[]);
+  const other=f.run(request('fingerprint'));f.workers[1].reply(true);await other;
+  await f.advance(0);assert.equal(f.capacity.length,1);
+}));
+
+test('a waiting busy key resumes when another memory-failed job releases its exact capacity',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});const other=f.run(request('image-decode'));
+  const error=await refusal(f.run(request('encode')));
+  let ready=false;const waiting=f.run.waitForCapacity(error).then(()=>ready=true);await f.advance(0);assert.deepEqual(f.capacity,[]);
+  f.workers[0].reply(undefined,{error:'other key memory refusal',memory_error:true});await refusal(other);
+  await f.advance(0);await waiting;assert.equal(ready,true);assert.deepEqual(f.capacity,[]);
+}));
+
+test('remote busy waits exclude their own cleanup but observe another failed job',()=>withFixture(async f=>{
+  const attempt=f.run(request('image-decode')),other=f.run(request('encode'));
+  f.workers[0].reply(undefined,{error:'parked remote busy',worker_busy:true});const error=await refusal(attempt);
+  let ready=false;const waiting=f.run.waitForCapacity(error).then(()=>ready=true);
+  await f.advance(0);assert.equal(ready,false);assert.deepEqual(f.capacity,[]);
+  f.workers[1].reply(undefined,{error:'other memory refusal',memory_error:true});await refusal(other);
+  await f.advance(0);assert.equal(ready,true);assert.deepEqual(f.capacity,[]);await waiting;
+}));
+
+test('a retry shares the original absolute deadline instead of renewing it',()=>withFixture(async f=>{
+  admission(f.run,{requests:1,resultAge:100});const first=f.run(request('fingerprint'));
+  const error=await refusal(f.run(request('image-decode')));
+  const waiting=assert.rejects(f.run.waitForCapacity(error,undefined,25),actual=>actual===error);
+  await f.advance(25);await waiting;f.workers[0].reply(true);await first;
+}));
+
+test('capacity error identities cannot be forged, cloned or used by another controller',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});const first=f.run(request('fingerprint'));
+  const error=await refusal(f.run(request('image-decode')));
+  const forged=Object.assign(new Error(error.message),{worker_busy:true}),cloned=structuredClone(error);
+  for(const value of [forged,cloned,{...error}])await assert.rejects(f.run.waitForCapacity(value),actual=>actual===value);
+  await assert.rejects(createRasterWorker().waitForCapacity(error),actual=>actual===error);
+  f.workers[0].reply(true);await first;await f.run.waitForCapacity(error);
+  await assert.rejects(f.run.waitForCapacity(error),actual=>actual===error);
+}));
+
+test('invalid and permanently oversized inputs do not become busy under saturation',()=>withFixture(async f=>{
+  admission(f.run,{requests:1,payloads:32});const first=f.run(request('fingerprint'));
+  for(const extra of [{buffers:[new Uint8Array(new SharedArrayBuffer(4))]},{buffers:[new Uint8Array(33)]},{file:{size:4}}]){
+    const error=await refusal(f.run(request('image-decode',extra)));assert.equal(error.worker_busy,undefined);
+    await assert.rejects(f.run.waitForCapacity(error),actual=>actual===error);
+  }
+  f.workers[0].reply(true);await first;
+  const next=f.run(request('image-decode'));f.workers.at(-1).reply(undefined,{error:'actual memory pressure',memory_error:true,worker_busy:true});
+  const error=await refusal(next);assert.equal(error.memory_error,true);assert.equal(error.worker_busy,undefined);
+  await assert.rejects(f.run.waitForCapacity(error),actual=>actual===error);
+}));
+
+test('capacity waits have a bounded deadline and keep the original busy identity',()=>withFixture(async f=>{
+  admission(f.run,{requests:1,resultAge:100});const first=f.run(request('fingerprint'));
+  const error=await refusal(f.run(request('image-decode')));
+  const waiting=assert.rejects(f.run.waitForCapacity(error),actual=>actual===error);
+  await f.advance(100);await waiting;
+  f.workers[0].reply(true);await first;
+  await assert.rejects(f.run.waitForCapacity(error),actual=>actual===error);
+}));
+
+test('a busy error deadline cannot be restarted by delaying waiter registration',()=>withFixture(async f=>{
+  admission(f.run,{requests:1,resultAge:100});const first=f.run(request('fingerprint'));
+  const error=await refusal(f.run(request('image-decode')));await f.advance(100);
+  f.workers[0].reply(true);await first;
+  await assert.rejects(f.run.waitForCapacity(error),actual=>actual===error);
+}));
+
+test('capacity wait cancellation does not consume the receipt keeping the slot',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});const first=f.run(request('encode'));f.workers[0].reply(new Uint8Array([17]));const key=await first;
+  const error=await refusal(f.run(request('image-decode')));let cancelled=false;
+  const waiting=assert.rejects(f.run.waitForCapacity(error,()=>cancelled),{name:'AbortError'});
+  cancelled=true;await f.advance(50);await waiting;
+  assert.equal(f.run.consumeResult('encode',key)[0],17);
+}));
+
+test('waiter count is bounded and one error cannot allocate duplicate waiters',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});const first=f.run(request('fingerprint'));
+  const a=await refusal(f.run(request('image-decode'))),b=await refusal(f.run(request('image-decode')));
+  const waiting=f.run.waitForCapacity(a);assert.equal(f.run.waitForCapacity(a),waiting);
+  await assert.rejects(f.run.waitForCapacity(b),actual=>actual===b);
+  f.workers[0].reply(true);await first;await f.advance(0);await waiting;
+}));
+
+test('capacity callbacks are coalesced outside worker result handling',()=>withFixture(async f=>{
+  const first=f.run(request('encode'));f.workers[0].reply(new Uint8Array([19]));const key=await first;
+  assert.deepEqual(f.capacity,[]);f.run.consumeResult('encode',key);assert.deepEqual(f.capacity,[]);
+  await f.advance(0);assert.equal(f.capacity.length,1);await f.advance(0);assert.equal(f.capacity.length,1);
+}));
 
 test('pending requests and unconsumed results share one job slot',()=>withFixture(async f=>{
   admission(f.run,{requests:1});
@@ -49,7 +230,7 @@ test('aggregate payload charges survive transfer and resize to the held result',
 
 test('a small view cannot hide a large transferred ArrayBuffer',()=>withFixture(async f=>{
   admission(f.run,{payloads:20});
-  await assert.rejects(f.run(request('encode',{buffers:[new Uint8Array(32).subarray(0,1)]})),/Raster workers are busy/);
+  await assert.rejects(f.run(request('encode',{buffers:[new Uint8Array(32).subarray(0,1)]})),error=>/aggregate admission/.test(error.message)&&error.worker_busy===undefined);
   assert.equal(f.workers.length,0);
 }));
 
@@ -296,11 +477,11 @@ test('failed postMessage preserves its error and never retires another active jo
 test('already cancelled analysis sends nothing and preserves a parallel output owner',()=>withFixture(async f=>{
   const output=f.run(request('output-begin'));f.workers[0].reply('output');await output;
   await assert.rejects(f.run(request('snapshot',{cancelled:()=>true})),{name:'AbortError'});
-  assert.equal(f.workers[1].messages.length,0);assert.equal(f.workers[1].terminated,true);
+  assert.equal(f.workers.length,1);
   assert.equal(f.workers[0].terminated,false);
   const encoded=f.run(request('output-encode',{metadata:JSON.stringify({token:'output'})}));
   f.workers[0].reply('encoded');assert.equal(await encoded,'encoded');
-  const next=f.run(request());assert.equal(f.workers.length,3);f.workers[2].reply('next');assert.equal(await next,'next');
+  const next=f.run(request());assert.equal(f.workers.length,2);f.workers[1].reply('next');assert.equal(await next,'next');
 }));
 
 

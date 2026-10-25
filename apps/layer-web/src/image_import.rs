@@ -129,7 +129,9 @@ impl WebApp {
                     let mut scene = document.snapshot();
                     Arc::make_mut(&mut scene).context = layers.scene.context.clone();
                     let mut layers = (**layers).clone(); layers.scene = scene;
-                    clip.layers = Some(Arc::new(layers));
+                    #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared clipboard ownership includes single-threaded Wasm Liquify fields"))]
+                    let layers = Arc::new(layers);
+                    clip.layers = Some(layers);
                 }
                 output::cancelled(&control)?;
                 return Ok(WebPreparedImages { request, sources: Vec::new(), clip: Some(clip), control }.into());

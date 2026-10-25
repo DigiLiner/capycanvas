@@ -43,9 +43,8 @@ impl WebApp {
         Ok(layer_ui::color_feature_copy::export_preview_status(self.session.localization(), format, gainmap, clipped))
     }
     pub fn color_feature_error_copy(&self, error: JsValue, profile: Option<bool>) -> String {
-        if js_sys::Reflect::has(&error, &js("document_host_error")).unwrap_or(false) {
-            if let Some(reason) = documents::host_error_reason(&error) { return reason.message(self.session.localization()); }
-        }
+        if js_sys::Reflect::has(&error, &js("document_host_error")).unwrap_or(false)
+            && let Some(reason) = documents::host_error_reason(&error) { return reason.message(self.session.localization()); }
         if js_sys::Reflect::has(&error, &js("color_feature_error")).unwrap_or(false) {
             let reason = color_feature_reason(error);
             match profile { Some(true)=>reason.profile_message(self.session.localization()), Some(false)=>reason.preset_message(self.session.localization()), None=>reason.message(self.session.localization()) }

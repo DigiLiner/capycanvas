@@ -1,6 +1,60 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 
+export async function checkWorkerCapacity({call,evaluate,settle}) {
+  const wait=(condition,timeout=25000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error('Worker capacity: '+${JSON.stringify(condition)}+' '+JSON.stringify({busy:window.workerCapacity?.busy,attempts:window.workerCapacity?.attempts.length,state:layerApp.state().host_error})));else setTimeout(poll,20)}poll()})`);
+  await evaluate(`(async()=>{
+    const wasm=await import('./pkg/layer_web.js'),{createRasterWorker}=await import('./raster-worker-client.js');
+    const test=window.workerCapacity={wasm,attempts:[],busy:0,waits:0,picker:window.showOpenFilePicker,post:Worker.prototype.postMessage};
+    const transport=test.transport=createRasterWorker(undefined,()=>{},()=>{wasm.raster_worker_capacity_released();layerApp.wake()});
+    const worker=async request=>{try{return await transport(request)}catch(error){if(request.operation==='image-decode'&&error.worker_busy){test.busy++;test.error=error}throw error}};
+    test.hold=()=>transport({operation:'fingerprint',metadata:'capacity fixture',buffers:[new Uint8Array(256*1024*1024-64*1024-32)]}).catch(error=>{if(error.memory_error!==true)throw error;test.memoryReleases++});
+    Object.assign(worker,{configure:transport.configure,consume:transport.consume,consumeResult:transport.consumeResult,waitForCapacity(error,...args){if(error!==test.error)throw Error('Busy identity changed');const ordinal=++test.waits;return transport.waitForCapacity(error,...args).then(()=>{if(ordinal===1)test.held=test.hold()})}});
+    wasm.configure_raster_worker(worker);
+    Worker.prototype.postMessage=function(message,...args){
+      if(message.request?.operation==='fingerprint'&&message.request.metadata==='capacity fixture'){
+        test.release=()=>{this.dispatchEvent(new MessageEvent('message',{data:{id:message.id,error:'capacity fixture memory refusal',memory_error:true}}));delete test.release};return;
+      }
+      if(message.request?.operation==='image-decode')test.attempts.push({buffers:message.request.buffers,samples:message.request.buffers.map(bytes=>Array.from(bytes))});
+      return test.post.call(this,message,...args);
+    };
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const context=canvas.getContext('2d');context.fillStyle='rgb(180,40,90)';context.fillRect(0,0,64,64);
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve));test.file=new File([blob],'capacity.png',{type:'image/png'});
+    window.showOpenFilePicker=async()=>[{getFile:async()=>test.file}];
+    layerApp.dispatch({type:'preferences',action:{type:'edit',id:'missing_profile',value:0}});
+  })()`);
+  try {
+    for(const theme of ['light','dark']){
+      await evaluate(`layerApp.dispatch({type:'set_theme',theme:${JSON.stringify(theme)}});workerCapacity.attempts=[];workerCapacity.memoryReleases=workerCapacity.busy=workerCapacity.waits=0;
+        workerCapacity.held=workerCapacity.hold();void 0`);
+      await evaluate(`layerApp.dispatch({type:'invoke',command:'import_image'})`);
+      await wait('workerCapacity.waits===1');
+      assert.equal(await evaluate('workerCapacity.attempts.length'),1,'The failed decode does not spin while capacity is held');
+      assert.equal(await evaluate('workerCapacity.attempts[0].buffers.every(bytes=>bytes.byteLength===0)'),true,'The first real worker attempt transferred its arrays');
+      await new Promise(resolve=>setTimeout(resolve,100));await settle();
+      assert.equal(await evaluate('workerCapacity.attempts.length'),1,'Unrelated frames cannot retry before a real release');
+      await evaluate('(async()=>{workerCapacity.release();await workerCapacity.held})()');
+      await wait('workerCapacity.waits===2&&workerCapacity.attempts.length===2');
+      await new Promise(resolve=>setTimeout(resolve,100));assert.equal(await evaluate('workerCapacity.attempts.length'),2,'A second contention race keeps its waiter instead of parking forever');
+      await evaluate('(async()=>{workerCapacity.release();await workerCapacity.held})()');
+      await wait('workerCapacity.attempts.length===3',1000);
+      assert.equal(await evaluate('workerCapacity.memoryReleases'),2,'Other Memory-failed jobs release capacity without a global success notification');
+      await wait("workerCapacity.attempts.length===3&&layerApp.app.brush_ready()&&layerApp.state().commands.find(command=>command.id==='apply_transform')?.enabled");
+      assert.equal(await evaluate('workerCapacity.attempts.slice(1).every(attempt=>JSON.stringify(workerCapacity.attempts[0].samples)===JSON.stringify(attempt.samples))'),true,'Every retry rebuilds the exact transferred source bytes');
+      assert.equal(await evaluate('workerCapacity.attempts.slice(1).every(attempt=>workerCapacity.attempts[0].buffers.every((bytes,index)=>bytes!==attempt.buffers[index]))'),true,'Each retry owns newly allocated transfer arrays');
+      await evaluate("layerApp.dispatch({type:'invoke',command:'apply_transform'})");await wait('layerApp.app.brush_ready()&&!layerApp.state().document_file.busy');
+      await settle();
+      assert.equal(await evaluate('layerApp.state().host_error??null'),null);
+      const point=await evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect(),tab=layerApp.state().tabs.find(tab=>tab.active);return{x:r.x+((tab.width/2+16)*c.zoom+c.translation[0])*r.width/c.viewport[0],y:r.y+((tab.height/2+16)*c.zoom+c.translation[1])*r.height/c.viewport[1]}})()`);
+      const screenshot=await call('Page.captureScreenshot',{format:'png',clip:{...point,width:1,height:1,scale:1}});
+      const pixel=await evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${screenshot.data}';await image.decode();const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');context.drawImage(image,0,0);return Array.from(context.getImageData(0,0,1,1).data)})()`);
+      assert.ok(pixel.slice(0,3).every((value,index)=>Math.abs(value-[180,40,90][index])<8),'Retried image pixels appear: '+pixel);
+      await evaluate("layerApp.dispatch({type:'invoke',command:'undo'})");await wait('layerApp.app.brush_ready()&&!layerApp.state().layers.some(layer=>layer.object)');
+      console.log(`Worker capacity ${theme}: real detached decode, preserved busy identity, blocked wait, exact source rebuild and visible pixels passed`);
+    }
+  }finally{await evaluate('workerCapacity.release?.();Worker.prototype.postMessage=workerCapacity.post;window.showOpenFilePicker=workerCapacity.picker');}
+}
+
 export async function checkCallbackBoundaries({call,evaluate,settle,errors}) {
   const wait=condition=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+60000;function check(){if(${condition})resolve();else if(performance.now()>end)reject(Error('Callback boundary timeout: '+${JSON.stringify(condition)}+' '+document.body.innerText.slice(-1200)));else setTimeout(check,30)}check()})`);
   const click=label=>evaluate(`(()=>{const button=[...document.querySelectorAll('dialog[open] button')].find(button=>button.textContent===${JSON.stringify(label)});if(!button)throw Error('Missing '+${JSON.stringify(label)});button.click()})()`);
@@ -20,7 +74,7 @@ export async function checkCallbackBoundaries({call,evaluate,settle,errors}) {
         const device=layerApp.canvas.getContext('webgpu').getConfiguration().device;
         for(const message of ['capy-test: first diagnostic','capy-test: replacement diagnostic'])device.dispatchEvent(new GPUUncapturedErrorEvent('uncapturederror',{error:new GPUValidationError(message)}));
         const worker=request=>{test.wasm.configure_raster_worker(worker);test.requests.push({operation:request.operation,cancellable:typeof request.cancelled==='function'});return test.transport(request).then(value=>{if(request.operation==='write')test.outputs.push(value.token);if(typeof request.cancelled==='function')test.completions.push({operation:request.operation,cancelled:request.cancelled()});return value})};
-        Object.assign(worker,{configure:test.transport.configure,consume:test.transport.consume,consumeResult:test.transport.consumeResult});
+        Object.assign(worker,{configure:test.transport.configure,consume:test.transport.consume,consumeResult:test.transport.consumeResult,waitForCapacity:test.transport.waitForCapacity});
         test.wasm.configure_raster_worker(worker);
       })()`);
       const diagnostics=await evaluate('callbackBoundaries.diagnostics');
