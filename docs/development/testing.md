@@ -12,6 +12,13 @@ platform builds, packaging, script suites and software-adapter correctness tests
 ([release validation](releasing.md#release-validation)). Run the checks for every
 area your change touches; hosted validation does not replace hardware journeys.
 
+Native-tile writeback tests request both four and eight storage buffers per
+stage and require the same portable RGBA and gray-alpha batch sizes. The Web
+`--native-writeback` journey records actual browser-device limits and encoder
+bindings, paints grayscale and two-tone tiles, and checks pixels plus exact
+Undo/Redo and saved-file reopening. Browser defaults can exceed lower requested
+limits, so native limit checks do not replace this journey.
+
 The renderer's `dry_material::tests` module also runs in CI without a GPU.
 `every_kernel_entry_resolves_its_overrides` validates each generated dry-material
 kernel and the destination and reservoir modules of every material operation.

@@ -2,6 +2,7 @@ import {checkHdrBubbles} from './hdr-bubbles.test.mjs';
 import {checkBubbleRelease,checkBubbleReleaseColdStartup} from './bubble-release-journey.test.mjs';
 import {checkToolBubbles,installBubbleInputTrace} from "./tool-bubbles.test.mjs";
 import {checkGradientDefinitions} from './gradient.test.mjs';
+import {checkNativeWriteback,installNativeWritebackTrace} from './native-writeback.test.mjs';
 import {checkPressureCalibration} from './pressure-calibration.test.mjs';
 import {checkScopes,checkScopesSmoke} from './scopes.test.mjs';
 import {checkTonalControls} from './tonal-controls.test.mjs';
@@ -213,6 +214,7 @@ try {
     `window.__overflowEvents=[];for(const type of ['pointerdown','pointerup','click'])window.addEventListener(type,e=>{const value={type,id:e.pointerId,pointer:e.pointerType,target:e.target.tagName,source:e.target.closest('details')?.id};__overflowEvents.push(value);setTimeout(()=>{value.prevented=e.defaultPrevented},0);},true)`});
   if(process.argv.some(flag=>['--pipeline-readiness','--drawing-tabs-recovery','--staged-startup'].includes(flag)))await call('Page.addScriptToEvaluateOnNewDocument',{source:'Error.stackTraceLimit=100'});
   const pageUrl = packageHost?.url || process.env.LAYER_WEB_URL || "http://127.0.0.1:4173";
+  if(process.argv.includes('--native-writeback'))await call('Page.addScriptToEvaluateOnNewDocument',{source:`(${installNativeWritebackTrace})()`});
   if(process.argv.includes('--tool-bubbles')&&process.env.LAYER_BUBBLE_INPUT_TRACE==='1')await call('Page.addScriptToEvaluateOnNewDocument',{source:`(${installBubbleInputTrace})()`});
   await call("Page.navigate", { url: pageUrl });
   await evaluate(
@@ -276,6 +278,7 @@ try {
     [process.argv.includes("--crop"), () => checkCrop({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--image-commands"), () => checkImageCommands({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--merges"), () => checkMerges({call,evaluate,settle}), checkErrors],
+    [process.argv.includes('--native-writeback'), () => checkNativeWriteback({call,evaluate,settle}), checkRasterErrors],
     [process.argv.includes("--retouch-layers"), () => checkRetouchLayers({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--move-selection"), () => checkMoveSelection({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--clone"), () => checkClone({call,evaluate,settle}), checkErrors],

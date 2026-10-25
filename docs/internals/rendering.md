@@ -504,6 +504,11 @@ primaries, Float32 color working attachments and Float32 scalar coverage. Native
 commit publication quantizes affected pages into the declared backing depth;
 view transformations do not change those pages.
 
+Native publication batches use the portable downlevel binding budget on every
+host: up to two RGBA tiles or one gray-alpha tile per dispatch. Tracking,
+pipeline indexing and upload batching share those capacities. Higher browser
+device limits do not select a different gray-alpha shader recipe.
+
 [`working_color.wgsl`](../../crates/layer-render-wgpu/src/working_color.wgsl) shares
 unassociation, interpolation and perceptual conversion across scene composition,
 effects and materials. `working_unassociate`, `working_ratio` and

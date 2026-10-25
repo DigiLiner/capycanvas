@@ -235,7 +235,9 @@ impl NativeTileEncoder {
             .min(device.limits().max_storage_textures_per_shader_stage as usize / 2)
             .min(device.limits().max_storage_buffers_per_shader_stage.saturating_sub(2) as usize);
         let gray_tiles_per_dispatch=tiles_per_dispatch
-            .min(device.limits().max_storage_buffers_per_shader_stage.saturating_sub(2) as usize/2);
+            .min(device.limits().max_storage_buffers_per_shader_stage
+                .min(wgpu::Limits::downlevel_defaults().max_storage_buffers_per_shader_stage)
+                .saturating_sub(2) as usize/2);
         assert!(tiles_per_dispatch > 0);
         assert!(gray_tiles_per_dispatch>0);
         let mut layouts = Vec::new();

@@ -207,6 +207,15 @@ fn native_in_place_writeback_codes_boundaries_and_partial_tiles() { writeback_co
 
 #[test]
 fn four_storage_buffer_devices_batch_rgba_and_bound_gray_native_writes() {
+    portable_native_writes(4);
+}
+
+#[test]
+fn eight_storage_buffer_devices_batch_rgba_and_bound_gray_native_writes() {
+    portable_native_writes(8);
+}
+
+fn portable_native_writes(storage_buffers: u32) {
     use layer_core::color::LayerColorMode;
     let instance = WgpuRasterizer::headless_instance();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -216,12 +225,12 @@ fn four_storage_buffer_devices_batch_rgba_and_bound_gray_native_writes() {
     let features = adapter.features() & (wgpu::Features::FLOAT32_FILTERABLE
         | wgpu::Features::FLOAT32_BLENDABLE | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
     let mut limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
-    limits.max_storage_buffers_per_shader_stage = 4;
+    limits.max_storage_buffers_per_shader_stage = storage_buffers;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         required_features: features, required_limits: limits, ..Default::default()
     })).unwrap();
     let mut r = WgpuRasterizer::native_capture_on_gpu(adapter, device.into(), queue, Default::default()).unwrap();
-    assert_eq!(r.device.limits().max_storage_buffers_per_shader_stage, 4);
+    assert_eq!(r.device.limits().max_storage_buffers_per_shader_stage, storage_buffers);
     let working: Vec<_> = (0..2).map(|_| texture(&r, wgpu::TextureFormat::Rgba32Float)).collect();
     let canonical: Vec<_> = (0..2).map(|_| texture(&r, wgpu::TextureFormat::Rgba32Float)).collect();
     let rgba: Vec<_> = (0..2).map(|_| texture(&r, wgpu::TextureFormat::Rgba8Uint)).collect();
@@ -244,7 +253,7 @@ fn four_storage_buffer_devices_batch_rgba_and_bound_gray_native_writes() {
             }).collect();
             let batch = encoder.prepare(&r.device, &requests, &status, &mut Default::default()).unwrap();
             assert_eq!(batch.jobs.len(), if mode == LayerColorMode::FullColor { 1 } else { 2 },
-                "four-buffer device {mode:?} in_place={in_place}");
+                "{storage_buffers}-buffer device {mode:?} in_place={in_place}");
             submit(&r, &encoder, &status, &[batch], true);
             read_status(&r, &status).unwrap();
             for i in 0..2 {
@@ -255,7 +264,7 @@ fn four_storage_buffer_devices_batch_rgba_and_bound_gray_native_writes() {
                     let expected = if mode == LayerColorMode::TwoTone { [255, 255] }
                         else { let rgba = reference(pixels[0], SampleDepth::U8, RgbSpace::Srgb, AlphaAssociation::Straight); [rgba[0] as u8, rgba[3] as u8] };
                     let differing = actual.as_chunks::<2>().0.iter().filter(|pixel| **pixel != expected).count();
-                    assert_eq!(differing, 0, "four-buffer device {mode:?} in_place={in_place} native bytes expected={expected:?}");
+                    assert_eq!(differing, 0, "{storage_buffers}-buffer device {mode:?} in_place={in_place} native bytes expected={expected:?}");
                 }
             }
         }
