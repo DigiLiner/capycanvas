@@ -2404,11 +2404,12 @@ mod tests {
         let menu = app.query(json!({"type": "canvas_bar_menu", "context": bar.context, "shown": 0})).unwrap();
         assert!(menu["sections"].is_array());
         assert_eq!(menu, json!(app.session.canvas_bar_menu(bar.context, 0)));
-        let choice = app
-            .query(json!({"type": "canvas_bar_choice_menu", "context": bar.context, "id": "transform-interpolation"}))
-            .unwrap();
-        let nearest = choice["sections"][0].as_array().unwrap().iter().find(|item| item["label"] == "Nearest").unwrap();
-        app.dispatch(serde_json::from_value(nearest["action"].clone()).unwrap()).unwrap();
+        fn find(sections: &[Vec<layer_ui::ContextMenuItem>], action: &UiAction) -> Option<UiAction> {
+            sections.iter().flatten().find_map(|item| item.action.clone().filter(|a| a == action).or_else(|| find(&item.sections, action)))
+        }
+        let more = app.session.canvas_bar_menu(bar.context, 0).unwrap();
+        let nearest = find(&more.sections, &UiAction::Invoke { command: CommandId::TransformNearest }).expect("More offers Interpolation");
+        app.dispatch(nearest).unwrap();
         while !app.session.state().commands.iter().any(|c| c.id == CommandId::TransformNearest && c.selected) {
             frame_step(&mut app, &clock, deadline);
         }
@@ -2576,7 +2577,7 @@ mod tests {
         while !selected(&host, layer_ui::CommandId::TransformWarp) || !selected(&host, layer_ui::CommandId::WarpGridThree) { frame(&mut host); }
         assert!(selected(&host, layer_ui::CommandId::TransformWarp) && selected(&host, layer_ui::CommandId::WarpGridThree), "Warp offers its grid");
         let bar = host.session.state().canvas_bar.clone().expect("Warp bar");
-        assert!(bar.items.iter().any(|item| matches!(item.option, layer_ui::ToolOption::Choice { id: "transform-warp-grid", .. })));
+        assert!(bar.items.iter().any(|item| item.menu == Some(layer_ui::CanvasBarMenu::WarpGrid)));
         let bounds = host.session.engine().document().working.selection.as_ref().unwrap().bounds();
         let anchor = bar.anchor.expect("the bar anchors to the warped pixels");
         for (actual, expected) in anchor.into_iter().zip([bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y]) {
