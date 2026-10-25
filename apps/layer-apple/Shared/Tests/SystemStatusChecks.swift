@@ -212,6 +212,14 @@ extension XCTestCase {
             return Date().timeIntervalSince(stableSince) > 0.3
         }, evaluatedWith: drawer)
         waitForExpectations(timeout: 10)
+        if let row = layerRows.allElementsBoundByIndex.first(where: { !$0.frame.isEmpty && layerList.frame.contains($0.frame) }),
+           let eye = row.buttons.allElementsBoundByIndex.min(by: { $0.frame.minX < $1.frame.minX }) {
+            XCTAssertEqual(row.frame.width, drawer.frame.width, accuracy: 1, "Drawer rows run edge to edge like the panel's")
+            for icon in [eye, drawer.buttons["layer-Alpha lock"], drawer.buttons["layer-New layer"]] {
+                XCTAssertEqual(icon.frame.minX - drawer.frame.minX, 6, accuracy: 1, "\(icon.identifier) lines up with the rows' eye")
+            }
+            XCTAssertEqual(drawer.frame.maxX - layerActions.frame.maxX, 6, accuracy: 1, "Layer actions mirror the eye's inset")
+        } else { XCTFail("The Layers drawer shows a row") }
         #if os(macOS)
         let capture = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         #else

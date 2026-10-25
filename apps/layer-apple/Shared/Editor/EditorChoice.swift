@@ -27,7 +27,7 @@ struct EditorChoice: View {
     var ellipsis = false
     var bold = false
     var presentation: Presentation = .select
-    var height: CGFloat = 24
+    let height: CGFloat
     var menu: ((@escaping @MainActor (AppleContextMenu) -> Void) -> Void)? = nil
     let select: (Int) -> Void
     @State private var choosing = false

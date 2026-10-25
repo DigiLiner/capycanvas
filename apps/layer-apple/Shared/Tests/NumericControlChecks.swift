@@ -286,7 +286,7 @@ extension XCTestCase {
         let track = app.descendants(matching: .any)["number-track-tool-size"].firstMatch
         XCTAssertTrue(track.waitForExistence(timeout: 5))
         #if os(macOS)
-        XCTAssertEqual(value.frame.height, 24, accuracy: 1)
+        XCTAssertEqual(value.frame.height, 26, accuracy: 1)
         XCTAssertEqual(track.frame.height, 16, accuracy: 1)
         XCTAssertEqual(value.frame.maxY, track.frame.maxY, accuracy: 1)
         XCTAssertEqual(value.frame.maxX - track.frame.maxX, 76, accuracy: 1)

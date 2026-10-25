@@ -385,12 +385,13 @@ private struct ToolOptionsComponent: View {
         let item = toolbarItem(panel, tile)
         let style = ToolbarUI.cached(["type": "style", "style": panel["tile_style"].raw], language: store.interfaceLanguage)
         let tileSize = CGSize(width: style["size"][0].number, height: style["size"][1].number)
+        let bar = store.barMetrics
         let options = model["options"].array
         let sizes = options.map { toolOptionSize($0, vertical: vertical, width: size.width, tile: tileSize,
-            preferences: preferences, textSize: textSize, language: store.interfaceLanguage) }
+            preferences: preferences, textSize: textSize, bar: bar, language: store.interfaceLanguage) }
         let layout = ToolbarUI.cached(["type": "options_layout", "width": size.width, "height": size.height,
             "axis": vertical ? "vertical" : "horizontal", "sizes": sizes.map { [$0.width, $0.height] },
-            "button": style["size"].raw, "gap": vertical ? style["gap"].number : 10], language: store.interfaceLanguage)
+            "button": style["size"].raw, "gap": style["gap"].number], language: store.interfaceLanguage)
         ZStack(alignment: .topLeading) {
             Color.clear.contentShape(Rectangle())
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: item, surface: .tile, context: item, canDrag: false))
@@ -399,7 +400,8 @@ private struct ToolOptionsComponent: View {
                 if !bounds.isNull {
                     ToolOptionField(store: store, option: options[index], iconSize: CGFloat(panel["tile_icon_size"].number),
                         vertical: vertical, labeled: style["labeled"].bool, style: panel["tile_style"].string, preferences: preferences,
-                        stacked: bounds["width"].number < tileSize.width * CGFloat(options[index]["Choice"]["items"].array.count)) {
+                        stacked: bounds["width"].number < tileSize.width * CGFloat(options[index]["Choice"]["items"].array.count),
+                        bar: vertical ? nil : bar) {
                         store.toolbarEdit(model, $0, completion: $1)
                     }
                         .frame(width: bounds["width"].number, height: bounds["height"].number)
@@ -439,47 +441,84 @@ private struct ToolOptionsMore: View {
 
 typealias ToolOptionEdit = (Any, @escaping @MainActor (String?) -> Void) -> Void
 
-private let captionPadding: CGFloat = 10, captionGap: CGFloat = 6, captionIcon: CGFloat = 20, choicePadding: CGFloat = 8, gridCell: CGFloat = 18
+private let captionPadding: CGFloat = 10, captionGap: CGFloat = 6, choicePadding: CGFloat = 8, chevronSize: CGFloat = 12, gridCell: CGFloat = 18
+
+struct BarMetrics {
+    static let dividerSlot: CGFloat = 8
+    let tile: CGFloat
+    let gap: CGFloat
+    let icon: CGFloat
+    let control: CGFloat
+    var clear: CGFloat { (tile - control) / 2 }
+    var dividerLength: CGFloat { tile / 2 }
+}
+
+extension EditorStore {
+    var barMetrics: BarMetrics {
+        let small = ToolbarUI.cached(["type": "style", "style": "small"], language: interfaceLanguage)
+        return BarMetrics(tile: CGFloat(small["size"][1].number), gap: CGFloat(small["gap"].number),
+            icon: CGFloat(small["icon"].number), control: panelMetrics.height)
+    }
+}
+
+struct ToolbarDivider: View {
+    let vertical: Bool
+    let length: CGFloat
+    let color: Color
+    var body: some View {
+        Rectangle().fill(color)
+            .frame(width: vertical ? length : 1, height: vertical ? 1 : length)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 @MainActor func toolOptionSize(_ option: JSON, vertical: Bool, width: CGFloat, tile: CGSize, preferences: JSON, textSize: CGFloat,
-    caption: String? = nil, language: String = "en") -> CGSize {
-    func captioned(_ text: String) -> CGFloat { captionPadding * 2 + captionIcon + captionGap + ceil(toolbarTextWidth(text, size: textSize)) }
-    if !option["Range"].isNull { return CGSize(width: preferences["sliders"].bool ? 280 : 100, height: 28) }
-    if !option["Gradient"].isNull { return CGSize(width: vertical ? width : 120, height: 24) }
+    bar: BarMetrics, caption: String? = nil, language: String = "en") -> CGSize {
+    func text(_ value: String) -> CGFloat { ceil(toolbarTextWidth(value, size: textSize)) }
+    func boxed(_ content: CGFloat, height: CGFloat) -> CGSize {
+        vertical ? CGSize(width: content, height: height) : CGSize(width: content + 2 * bar.clear, height: tile.height)
+    }
+    if !option["Range"].isNull { return boxed(preferences["sliders"].bool ? 280 : 100, height: 28) }
+    if !option["Gradient"].isNull { return vertical ? CGSize(width: width, height: bar.control) : boxed(120, height: bar.control) }
     let choice = option["Choice"]
     if choice["labeled"].bool {
-        let metrics = ToolbarUI.cached(["type": "choice_style", "labeled": true], language: language)
-        return CGSize(width: ceil(toolbarTextWidth(choice["label"].string, size: textSize)) + 8
-            + CGFloat(metrics["size"][0].number) * CGFloat(choice["items"].array.count), height: metrics["size"][1].number)
+        let cell = ToolbarUI.cached(["type": "choice_style", "labeled": true], language: language)["size"]
+        return boxed(text(choice["label"].string) + 8 + CGFloat(cell[0].number) * CGFloat(choice["items"].array.count),
+            height: CGFloat(cell[1].number))
     }
     if choice["columns"].uint > 0 {
         let columns = CGFloat(choice["columns"].uint), rows = (CGFloat(choice["items"].array.count) / columns).rounded(.up)
-        return CGSize(width: columns * gridCell, height: rows * gridCell)
+        return CGSize(width: columns * gridCell + (vertical ? 0 : 2 * bar.clear), height: rows * gridCell)
     }
     if !choice.isNull && choice["segmented"].bool {
         let items = choice["items"].array, count = CGFloat(items.count)
-        if caption != nil { return CGSize(width: items.map { captioned($0["label"].string) }.reduce(0, +), height: tile.height) }
+        if caption != nil {
+            return boxed(items.map { choicePadding * 2 + bar.icon + captionGap + text($0["label"].string) }.reduce(0, +), height: tile.height)
+        }
         return vertical ? CGSize(width: width, height: tile.height * (width < tile.width * count ? count : 1))
-            : CGSize(width: tile.width * count, height: 24)
+            : CGSize(width: tile.width * count, height: tile.height)
     }
     if !option["Action"].isNull && option["Action"]["state"]["icon"].string.isEmpty {
         let action = option["Action"], label = caption ?? action["state"]["label"].string
-        let control = action["checkable"].bool ? ToolCommandToggle.intrinsicSize : CGSize(width: captionPadding * 2, height: 24)
-        return CGSize(width: ceil(toolbarTextWidth(label, size: textSize)) + control.width + captionGap, height: control.height)
+        let control = action["checkable"].bool ? ToolCommandToggle.intrinsicSize : CGSize(width: captionPadding * 2, height: bar.control)
+        return boxed(text(label) + control.width + captionGap, height: control.height)
     }
-    if !option["Action"].isNull, let caption { return CGSize(width: caption.isEmpty ? tile.height : captioned(caption), height: tile.height) }
+    if !option["Action"].isNull, let caption {
+        return caption.isEmpty ? CGSize(width: tile.height, height: tile.height)
+            : boxed(captionPadding * 2 + bar.icon + captionGap + text(caption), height: tile.height)
+    }
     if vertical || !option["Action"].isNull { return tile }
     if !choice.isNull && caption != nil {
-        let widest = choice["items"].array.map { ceil(toolbarTextWidth($0["label"].string, size: textSize)) }.max() ?? 0
-        return CGSize(width: captionPadding * 2 + captionIcon * 2 + captionGap * 2 + widest, height: tile.height)
+        let widest = choice["items"].array.map { text($0["label"].string) }.max() ?? 0
+        return boxed(captionPadding * 2 + bar.icon + captionGap * 2 + widest + chevronSize, height: tile.height)
     }
-    if !choice.isNull { return CGSize(width: 168, height: 24) }
+    if !choice.isNull { return boxed(168, height: bar.control) }
     let field = option["Numeric"]
     let samples = ToolbarUI.cached(["type": "numeric_info", "id": field["id"].raw, "control": field["numeric"].raw,
         "compact": true, "units": true], language: language)["samples"].array
     let valueWidth = (samples.map { toolbarTextWidth($0.string.map { $0.isNumber ? "8" : String($0) }.joined(), size: textSize) }.max() ?? 0) + 14
     let labelWidth = preferences["text"].bool ? toolbarTextWidth(field["label"].string, size: textSize) : 16
-    return CGSize(width: labelWidth + 4 + valueWidth + (preferences["sliders"].bool ? 60 : 0), height: 24)
+    return boxed(labelWidth + 4 + valueWidth + (preferences["sliders"].bool ? 60 : 0), height: bar.control)
 }
 
 struct ToolOptionField: View {
@@ -491,11 +530,25 @@ struct ToolOptionField: View {
     let style: String
     let preferences: JSON
     let stacked: Bool
+    var bar: BarMetrics? = nil
     var caption: String?
     var prefix = "toolbar"
     var accent = false
     let edit: ToolOptionEdit
+    private var tiled: Bool {
+        guard !option["Action"].isNull else { return false }
+        return caption.map(\.isEmpty) ?? !option["Action"]["state"]["icon"].string.isEmpty
+    }
     var body: some View {
+        if let bar, !tiled {
+            if option["Range"].isNull && option["Choice"]["columns"].uint == 0 {
+                field.frame(height: bar.control).padding(.horizontal, bar.clear)
+            } else {
+                field.padding(.horizontal, bar.clear)
+            }
+        } else { field }
+    }
+    @ViewBuilder private var field: some View {
         if !option["Numeric"].isNull {
             ToolbarNumberField(store: store, field: option["Numeric"], vertical: vertical,
                 labeled: labeled, style: style, preferences: preferences, edit: edit)
@@ -557,14 +610,14 @@ private struct ToolOptionAction: View {
             } else {
                 Button { edit(["type": "invoke", "command": command["id"].raw], { _ in }) } label: {
                     HStack(spacing: captionGap) {
-                        if !command["icon"].string.isEmpty { SharedIcon(name: command["icon"].string, size: caption == nil ? iconSize : captionIcon) }
+                        if !command["icon"].string.isEmpty { SharedIcon(name: command["icon"].string, size: iconSize) }
                         if let caption = caption ?? (command["icon"].string.isEmpty ? command["label"].string : nil), !caption.isEmpty {
                             Text(caption).lineLimit(1).fixedSize()
                         }
                     }.padding(.horizontal, caption?.isEmpty == false ? captionPadding : 0)
                         .foregroundStyle(highlighted ? palette.accentForeground : palette["text"])
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(highlighted ? palette.accent : .clear, in: SquircleShape.control)
+                        .background(highlighted ? palette.accent : .clear, in: SquircleShape.tile)
                         .contentShape(Rectangle())
                 }.buttonStyle(EditorControlButtonStyle(selected: checkable && command["selected"].bool, corner: .half))
             }
@@ -610,12 +663,13 @@ struct SegmentedChoiceBar: View {
     var shape = SquircleShape.control
     var stacked = false
     var captions = false
+    var labeledCell: CGSize? = nil
     let palette: EditorPalette
     let send: (JSON) -> Void
     private var choiceStyle: JSON { ToolbarUI.cached(["type": "choice_style", "labeled": choice["labeled"].bool]) }
     private var cellSize: CGSize? {
-        if prefix == "tool" && choice["labeled"].bool { return CGSize(width: 24, height: 24) }
-        return choice["labeled"].bool ? CGSize(width: choiceStyle["size"][0].number, height: choiceStyle["size"][1].number) : nil
+        guard choice["labeled"].bool else { return nil }
+        return labeledCell ?? CGSize(width: choiceStyle["size"][0].number, height: choiceStyle["size"][1].number)
     }
     var body: some View {
         if choice["labeled"].bool {
@@ -654,9 +708,9 @@ struct SegmentedChoiceBar: View {
             Button { send(item) } label: {
                 HStack(spacing: captionGap) {
                     SharedIcon(name: item["icon"].string, size: prefix == "tool" ? 16 : choice["labeled"].bool ? CGFloat(choiceStyle["icon"].number) : iconSize)
-                    if captions && !choice["labeled"].bool { Text(item["label"].string).lineLimit(1) }
-                }.padding(.horizontal, captions && !choice["labeled"].bool ? captionPadding : 0)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if captions && !choice["labeled"].bool { Text(item["label"].string).lineLimit(1).fixedSize() }
+                }.padding(.horizontal, captions && !choice["labeled"].bool ? choicePadding : 0)
+                    .frame(maxWidth: captions && !choice["labeled"].bool ? nil : .infinity, maxHeight: .infinity)
                     .background(item["selected"].bool ? surface.active : palette["input"],
                         in: shape.segment(index, of: items.count, stacked: stacked))
                     .contentShape(Rectangle())
@@ -689,10 +743,13 @@ private struct ToolbarChoiceField: View {
     private var items: [JSON] { choice["items"].array }
     var body: some View {
         if choice["segmented"].bool {
-            SegmentedChoiceBar(choice: choice, prefix: prefix, height: choice["labeled"].bool || vertical || captions ? nil : 24,
-                iconSize: vertical ? iconSize : captions ? captionIcon : 16,
+            let control = store.panelMetrics.height
+            SegmentedChoiceBar(choice: choice, prefix: prefix, height: choice["labeled"].bool || vertical || captions ? nil : control,
+                iconSize: vertical ? iconSize : store.panelMetrics.icon,
                 shape: choice["labeled"].bool ? SquircleShape.control : vertical ? SquircleShape.tile : SquircleShape.control,
                 stacked: !choice["labeled"].bool && vertical && stacked, captions: captions,
+                labeledCell: prefix == "tool" ? CGSize(width: control, height: control)
+                    : vertical ? nil : CGSize(width: CGFloat(ToolbarUI.cached(["type": "choice_style", "labeled": true])["size"][0].number), height: control),
                 palette: palette) { item in
                 edit(item["action"].raw, { _ in })
             }
@@ -700,12 +757,12 @@ private struct ToolbarChoiceField: View {
             let selected = items.first { $0["selected"].bool } ?? items.first ?? JSON()
             Button { open = true } label: {
                 HStack(spacing: captionGap) {
-                    SharedIcon(name: selected["icon"].string, size: captions ? captionIcon : 16)
+                    SharedIcon(name: selected["icon"].string, size: store.panelMetrics.icon)
                     if !vertical || labeled { Text(selected["label"].string).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading) }
-                    if !vertical { SharedIcon(name: "chevron-down", size: captions ? captionIcon : 12) }
+                    if !vertical { SharedIcon(name: "chevron-down", size: chevronSize) }
                 }.padding(.horizontal, vertical && !labeled ? 2 : captions ? captionPadding : choicePadding)
-                    .frame(maxWidth: .infinity, maxHeight: vertical || captions ? .infinity : 24)
-                    .background(vertical ? Color.clear : palette["input"], in: SquircleShape.control)
+                    .frame(maxWidth: .infinity, maxHeight: vertical || captions ? .infinity : store.panelMetrics.height)
+                    .background(vertical || captions ? Color.clear : palette["input"], in: SquircleShape.control)
                     .contentShape(Rectangle())
             }.buttonStyle(.plain)
                 .accessibilityLabel(choice["label"].string).accessibilityValue(selected["label"].string)

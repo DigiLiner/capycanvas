@@ -73,7 +73,7 @@ import SwiftUI
         try measurement.encoded().write(to: directory.appendingPathComponent(name + ".json"), atomically: true, encoding: .utf8)
         try require(frame.width >= natural - 0.001 && frame.width <= natural + pixel + 0.001,
             "Add Filter must allocate both sixteen-point icons, shared gaps, caption and padding: actual=\(frame.width), natural=\(natural)")
-        try require(abs(frame.height - 24) < 0.5, "Add Filter must retain its twenty-four-point control height")
+        try require(abs(frame.height - store.panelMetrics.height) < 0.5, "Add Filter must keep the panel control height")
         return measurement
     }
 
@@ -91,6 +91,7 @@ import SwiftUI
             }
             let options = store.catalog["layer_blends"].array.map(\.string)
             precondition(!options.isEmpty)
+            precondition(SquircleShape.controlRadius == store.panelMetrics.radius, "Controls use the shared control radius")
             let longest = options.indices.max { options[$0].count < options[$1].count }!
             for theme in ["light", "dark"] {
                 try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
@@ -101,7 +102,7 @@ import SwiftUI
                 for width: CGFloat in [160, 226, 320] {
                     for selected in [0, longest] {
                         for enabled in [true, false] {
-                            let geometry = ChoiceGeometry(), height: CGFloat = 140
+                            let geometry = ChoiceGeometry(), height: CGFloat = 140, control = store.panelMetrics.height
                             let palette = EditorPalette(source: store.state["palette"])
                             let textSize = store.catalog["text_size_pt"].number * 4 / 3
                             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
@@ -113,16 +114,16 @@ import SwiftUI
                                 PropertyChoiceRow {
                                     Text("Blend mode").lineLimit(1)
                                     EditorChoice(label: "Blend mode", options: options, selected: selected,
-                                        identifier: "property", background: palette["input"]) { _ in }
-                                }.frame(width: width - 12, height: 24).disabled(!enabled)
+                                        identifier: "property", background: palette["input"], height: control) { _ in }
+                                }.frame(width: width - 12, height: control).disabled(!enabled)
                                     .opacity(enabled ? 1 : 0.4).offset(x: 6, y: 6)
                                 EditorChoice(label: "Configuration layer", options: options, selected: selected,
-                                    identifier: "wide", background: palette["input"]) { _ in }
-                                    .frame(width: width - 12, height: 24)
+                                    identifier: "wide", background: palette["input"], height: control) { _ in }
+                                    .frame(width: width - 12, height: control)
                                     .offset(x: 6, y: 56)
                                 EditorChoice(label: "Layer blend mode", options: options, selected: selected,
-                                    identifier: "compact", background: palette["input"], presentation: .layerMenu) { _ in }
-                                    .frame(width: (width - 12 - store.panelMetrics.spacing) / 2, height: 24).disabled(!enabled).offset(x: 6, y: 106)
+                                    identifier: "compact", background: palette["input"], presentation: .layerMenu, height: control) { _ in }
+                                    .frame(width: (width - 12 - store.panelMetrics.spacing) / 2, height: control).disabled(!enabled).offset(x: 6, y: 106)
                             }.frame(width: width, height: height, alignment: .topLeading)
                                 .coordinateSpace(name: "choice-capture").environment(\.measureChoices, true)
                                 .onPreferenceChange(ChoiceFrames.self) { geometry.frames = $0 }
@@ -138,7 +139,7 @@ import SwiftUI
                             precondition(geometry.frames.count == 9)
                             for identifier in ["property", "wide", "compact"] {
                                 let bounds = geometry.frames[identifier]!, text = geometry.frames[identifier + ":text"]!
-                                precondition(abs(bounds.height - 24) < 0.5
+                                precondition(abs(bounds.height - control) < 0.5
                                     && abs(text.minX - bounds.minX - (identifier == "compact" ? 6 : 10)) < 0.5
                                     && abs(text.width - bounds.width + 28) < 0.5,
                                     "Choices must retain their height and role-specific text insets")

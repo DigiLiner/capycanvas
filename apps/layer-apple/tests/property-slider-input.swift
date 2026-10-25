@@ -100,12 +100,13 @@ import QuartzCore
                     guard let entryFrame = geometry.frames[identifier + ":entry"] else {
                         throw HostFailure(message: "Missing mounted property editor geometry")
                     }
-                    try require(abs(valueFrame.height - 24) < 0.5 && abs(entryFrame.height - 24) < 0.5,
-                        "Panel readouts and editors must share twenty-four-point height")
+                    let control = store.panelMetrics.height
+                    try require(abs(valueFrame.height - control) < 0.5 && abs(entryFrame.height - control) < 0.5,
+                        "Panel readouts and editors must share the panel control height")
                     try require(abs(valueFrame.maxY - entryFrame.maxY) < 0.5,
                         "Entering a panel number must preserve its bottom alignment")
                     if let root = geometry.frames[identifier + ":root"],
-                        let track = geometry.frames[identifier + ":track"], abs(root.height - 36) < 0.5 && abs(track.height - 16) < 0.5 {
+                        let track = geometry.frames[identifier + ":track"], abs(root.height - store.panelMetrics.sliderHeight) < 0.5 && abs(track.height - 16) < 0.5 {
                         try require(abs(entryFrame.width - 68) < 0.5 && abs(entryFrame.maxX - root.maxX) < 0.5
                             && abs(entryFrame.maxY - root.maxY) < 0.5 && entryFrame.minX - track.maxX >= 7.5,
                             "Panel editors must keep the upstream width, bottom rail and track clearance")
@@ -174,9 +175,9 @@ import QuartzCore
                         let root = geometry.frames[identifier + ":root"] else {
                         throw HostFailure(message: "Missing mounted brush entry geometry")
                     }
-                    try require(abs(entry.width - 68) < 0.5 && abs(entry.height - 24) < 0.5
+                    try require(abs(entry.width - 68) < 0.5 && abs(entry.height - store.panelMetrics.height) < 0.5
                         && abs(entry.maxX - root.maxX) < 0.5 && abs(entry.maxY - root.maxY) < 0.5,
-                        "Mounted panel entries must occupy 68 by 24 points at the bottom right")
+                        "Mounted panel entries must occupy 68 points by the panel control height at the bottom right")
                     try await action(["type": "select_brush", "id": 2])
                     let replacement = value()
                     try await commit(field, delegate)
@@ -225,7 +226,9 @@ import QuartzCore
                         guard let bounds = geometry.frames[identifier + ":dial"], let root = geometry.frames[identifier + ":root"] else {
                             throw HostFailure(message: "Missing native Light dial")
                         }
-                        try require(abs(root.height - 36) < 0.5 && abs(bounds.width - 28) < 0.5 && abs(bounds.height - 28) < 0.5,
+                        let diameter = store.panelMetrics.sliderHeight - 2 * store.panelMetrics.spacing
+                        try require(abs(root.height - store.panelMetrics.sliderHeight) < 0.5 && abs(bounds.width - diameter) < 0.5
+                            && abs(bounds.height - diameter) < 0.5,
                             "The Light dial must be a slider row's height less its control spacing: root=\(root), dial=\(bounds)")
                         try require(abs(root.maxX - 76 - bounds.maxX) < 0.5 && abs(bounds.midY - root.midY) < 0.5,
                             "The Light dial must end where slider tracks end: root=\(root), dial=\(bounds)")

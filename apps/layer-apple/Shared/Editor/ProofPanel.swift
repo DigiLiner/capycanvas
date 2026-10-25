@@ -209,14 +209,14 @@ private struct PrintProofControls: View {
         let labelWidth=store.panelLabelWidth(labels)
         let simulation=recipe["simulate_paper"].bool ? "paper_and_ink" : recipe["simulate_black_ink"].bool ? "black_ink" : "colors"
         VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
-            PrintProfileMenu(controller: controller, recipe: recipe, busy: $importing, labelWidth: labelWidth) { p in
+            PrintProfileMenu(controller: controller, recipe: recipe, busy: $importing, height: store.panelMetrics.height, labelWidth: labelWidth) { p in
                 change(recipe.replacing("name", with: p["name"]).replacing("profile", with: p["profile"]))
             }
             PropertyChoiceRow(labelWidth:labelWidth) {
                 let label=controller.form["print_controls"].array.first { $0["id"].string=="simulation" }?["label"].string ?? ""
                 Text(label).lineLimit(1)
                 EditorChoice(label:label,options:simulations.map { $0["label"].string },selected:simulations.firstIndex { $0["value"].string==simulation } ?? 0,
-                    identifier:"proof-simulation",background:EditorPalette(source:store.state["palette"])["input"],ellipsis:true) { index in
+                    identifier:"proof-simulation",background:EditorPalette(source:store.state["palette"])["input"],ellipsis:true,height:store.panelMetrics.height) { index in
                     let value=simulations[index]["value"].string
                     change(recipe.replacing("simulate_paper", with: JSON(value == "paper_and_ink")).replacing("simulate_black_ink", with: JSON(value != "colors")))
                 }
@@ -225,7 +225,7 @@ private struct PrintProofControls: View {
                 let label=controller.form["print_controls"].array.first { $0["id"].string=="intent" }?["label"].string ?? ""
                 Text(label).lineLimit(1)
                 EditorChoice(label:label,options:intents.map { $0["label"].string },selected:intents.firstIndex { $0["value"].string==recipe["conversion"]["intent"].string } ?? 0,
-                    identifier:"proof-intent",background:EditorPalette(source:store.state["palette"])["input"],ellipsis:true) { index in
+                    identifier:"proof-intent",background:EditorPalette(source:store.state["palette"])["input"],ellipsis:true,height:store.panelMetrics.height) { index in
                     change(recipe.replacing("conversion", with: recipe["conversion"].replacing("intent", with: intents[index]["value"])))
                 }
             }
@@ -236,7 +236,7 @@ private struct PrintProofControls: View {
                 .disabled(model["print"].isNull).accessibilityIdentifier("proof-gamut-warning")
             if controller.busy { ProgressView(copy["preparing"].string) }
             if let error = controller.error { Text(error).foregroundStyle(.red).font(.caption) }
-        }.toggleStyle(PanelCheckStyle()).disabled(controller.committing || importing)
+        }.toggleStyle(PanelCheckStyle(minHeight: store.panelMetrics.height)).disabled(controller.committing || importing)
             .task(id:store.interfaceLanguage) { controller.loadForm() }
             .onChange(of: controller.formRevision, initial: true) { _, _ in
                 if !controller.form.isNull && !controller.busy { recipe = controller.form["recipe"] }
@@ -252,6 +252,7 @@ private struct PrintProfileMenu: View {
     @ObservedObject var controller: ProofController
     let recipe: JSON
     @Binding var busy: Bool
+    let height: CGFloat
     var labelWidth: CGFloat? = nil
     let choose: (JSON) -> Void
     @StateObject private var entryCopy = ProfileEntryCopyCache()
@@ -281,7 +282,7 @@ private struct PrintProfileMenu: View {
                     Text(recipe["name"].string.isEmpty ? copy["choose"].string : recipe["name"].string).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength:0)
                     SharedIcon(name:"chevron-down",size:12)
-                }.padding(.horizontal,6).frame(minHeight:24)
+                }.padding(.horizontal,6).frame(minHeight:height)
                     .background(palette["input"],in:SquircleShape.control)
             }.buttonStyle(.plain).controlSize(.mini)
                 .accessibilityIdentifier("proof-profile")

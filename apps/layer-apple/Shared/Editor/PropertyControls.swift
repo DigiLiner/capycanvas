@@ -24,7 +24,7 @@ struct LayerPropertiesPanel: View {
                                 SharedIcon(name: "add-filter")
                                 Text(view["add_filter"]["title"].string).fontWeight(.bold)
                                 SharedIcon(name: "chevron-down")
-                            }.padding(.horizontal, 6).frame(height: 24)
+                            }.padding(.horizontal, 6).frame(height: store.panelMetrics.height)
                         }.fixedSize(horizontal: true, vertical: false)
                             .buttonStyle(EditorControlButtonStyle()).accessibilityIdentifier("properties-add-filter")
                     }
@@ -37,7 +37,7 @@ struct LayerPropertiesPanel: View {
                         if pages.count > 1 {
                             EditorChoice(label: view["title"].string, options: pages.map { $0["label"].string },
                                 selected: pages.firstIndex { $0["id"].string == view["page"].string } ?? 0, identifier: "properties-page",
-                                background: palette["input"]) {
+                                background: palette["input"], height: store.panelMetrics.height) {
                                 store.dispatch(["type": "effect", "action": ["op": "select_page", "layer": layer, "page": pages[$0]["id"].string]])
                             }
                         }
@@ -95,7 +95,7 @@ struct LayerPropertiesPanel: View {
         let importer = actions.first { $0["action"]["op"].string == "import_lookup" }
         return HStack(spacing: store.panelMetrics.spacing) {
             EditorChoice(label: view["resource_label"].string, options: labels, selected: selected ?? presets.count,
-                identifier: "property-resource-choice", background: palette["input"], ellipsis: true) { index in
+                identifier: "property-resource-choice", background: palette["input"], ellipsis: true, height: store.panelMetrics.height) { index in
                 if presets.indices.contains(index) { effect(presets[index]["action"]) }
             }.help(view["resource_name"].string)
             if let importer {
@@ -148,7 +148,7 @@ private struct PropertyField: View {
             }.id(control["kind"].stableKey + label)
         case "toggle":
             Toggle(label, isOn: Binding(get: { value.bool }, set: { change($0, revision: revision) }))
-                .toggleStyle(PanelCheckStyle()).accessibilityIdentifier("property-" + key)
+                .toggleStyle(PanelCheckStyle(minHeight: store.panelMetrics.height)).accessibilityIdentifier("property-" + key)
         case "choice" where !control["paper"].isNull:
             PropertyChoiceRow(labelWidth: labelWidth) {
                 Text(label).lineLimit(1)
@@ -159,7 +159,7 @@ private struct PropertyField: View {
                 Text(label).lineLimit(1)
                 EditorChoice(label: label, options: control["kind"]["options"].array.map(\.string),
                     selected: Int(value.uint), identifier: "property-" + key,
-                    background: EditorPalette(source: store.state["palette"])["input"]) { change($0, revision: revision) }
+                    background: EditorPalette(source: store.state["palette"])["input"], height: store.panelMetrics.height) { change($0, revision: revision) }
             }
         case "color":
             HStack(spacing: store.panelMetrics.spacing) {

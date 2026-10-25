@@ -59,6 +59,11 @@ including older gaps; a port does not require an unrestricted historical audit.
   Remove unnecessary compatibility code; add no old-format readers unless asked.
   Preserve the replaced tests' useful assertions. Review the final diff for
   duplicate logic and dead code; explain growth in refactors.
+- Take control sizes from shared metrics, not Swift literals: `store.panelMetrics`
+  for panel controls and `store.barMetrics` (the Small tile `style`) for toolbars
+  and the canvas bar, where icon actions stay tiles and worded controls are
+  panel-height controls centred in their tile. Pass the metric to views that
+  have no store.
 - Enable `Platform::Mac` and `Platform::Ios` gates with their native presentation
   and shared platform tests. Do not hide a feature to claim parity. Follow the
   [drag convention](ui/drag-and-reorder.md) for mouse, touch and Pencil.

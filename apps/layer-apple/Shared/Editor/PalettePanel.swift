@@ -45,7 +45,7 @@ struct PalettePanel: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bodyHeight = $0 }
                 VStack(spacing: 0) {
                     divider
-                    PaletteFooter(controller: controller, view: view)
+                    PaletteFooter(controller: controller, view: view, control: store.panelMetrics.height)
                     if let message = controller.message {
                         Text(message.text).font(.system(size: 13))
                             .foregroundStyle(message.error ? Color.red : palette["text"].opacity(0.7))
@@ -224,6 +224,7 @@ private struct PaletteFooter: View {
     @State private var width: CGFloat = 264
     @ObservedObject var controller: PaletteController
     let view: JSON
+    let control: CGFloat
     var measuring = false
     @Environment(\.editorPalette) private var palette
     @FocusState private var editorFocused: Bool
@@ -236,7 +237,7 @@ private struct PaletteFooter: View {
                 HStack(spacing: 4) {
                     Text(view["name"].string).lineLimit(1).truncationMode(.tail)
                     SharedIcon(name: "chevron-down", size: 12).rotationEffect(.degrees(180))
-                }.padding(.horizontal, 6).frame(minHeight: 24).contentShape(Rectangle())
+                }.padding(.horizontal, 6).frame(minHeight: control).contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle()).frame(maxWidth: width * 0.55, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                 .help(chooseCaption).accessibilityLabel(controller.copy["choose"].string)
@@ -245,8 +246,8 @@ private struct PaletteFooter: View {
                 if controller.editing && !measuring {
                     TextField(controller.copy["name"].string, text: Binding(get: { controller.editText }, set: { controller.editText = String($0.prefix(64)) }))
                         .textFieldStyle(.plain).multilineTextAlignment(.trailing)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .frame(minWidth: 64, maxWidth: 180).frame(height: 24)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 64, maxWidth: 180).frame(height: control)
                         .background(palette["input"], in: SquircleShape.control)
                         .overlay { if controller.message?.error == true { SquircleShape.control.strokeBorder(Color(red: 0.93, green: 0.33, blue: 0.33), lineWidth: 1) } }
                         .focused($editorFocused)
@@ -257,7 +258,7 @@ private struct PaletteFooter: View {
                         .accessibilityIdentifier("palette-name-editor")
                 } else {
                     Button { controller.focused = true; controller.beginEditing() } label: {
-                        Text(name).lineLimit(1).padding(.horizontal, 6).frame(minHeight: 24).contentShape(Rectangle())
+                        Text(name).lineLimit(1).padding(.horizontal, 6).frame(minHeight: control).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!view["can_name"].bool).opacity(view["can_name"].bool ? 1 : 0.4)
                         .help(controller.copy["rename_help"].string).accessibilityLabel(name).accessibilityIdentifier("palette-color-name")
                 }
@@ -289,9 +290,9 @@ private struct PaletteChooser: View {
                     TextField(store.catalog["native_copy"]["palettes"]["find"].string, text: $query).textFieldStyle(.plain).focused($searching)
                         .onKeyPress(.escape) { guard !NativeTextContext.composing else { return .ignored }; controller.chooser = false; return .handled }
                         .accessibilityIdentifier("palette-search")
-                }.padding(.horizontal, 6).frame(height: 24).background(palette["input"], in: SquircleShape.control)
+                }.padding(.horizontal, 6).frame(height: store.panelMetrics.height).background(palette["input"], in: SquircleShape.control)
                 Button { controller.openMenu(.library, owner: rows.owner) } label: {
-                    SharedIcon(name: "plus").frame(width: 24, height: 24).contentShape(Rectangle())
+                    SharedIcon(name: "plus").frame(width: store.panelMetrics.height, height: store.panelMetrics.height).contentShape(Rectangle())
                 }.buttonStyle(EditorControlButtonStyle()).help(controller.copy["new_import"].string).accessibilityLabel(controller.copy["new_import"].string)
                     .accessibilityIdentifier("palette-library-add")
                     .editorPopover(isPresented: controller.menuPresented(.library, owner: rows.owner), placement: .inward) { menu }
@@ -373,7 +374,7 @@ struct PaletteMeasurement: View {
                 }.frame(height: 1)
                 VStack(spacing: 0) {
                     Rectangle().frame(height: 1).padding(.vertical, 6)
-                    PaletteFooter(controller: controller, view: view, measuring: true)
+                    PaletteFooter(controller: controller, view: view, control: store.panelMetrics.height, measuring: true)
                 }.fixedSize(horizontal: false, vertical: true).padding(.horizontal, 8)
                     .modifier(PanelBodyMeasurement(panel: "palettes", part: "footer"))
             }.opacity(0).allowsHitTesting(false).accessibilityHidden(true)

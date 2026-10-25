@@ -30,7 +30,7 @@ private struct ActionFrames: PreferenceKey {
                         let item = fixture["actions"][index]
                         let command = item["command"].replacing("selected", with: JSON(column % 2 == 1))
                             .replacing("enabled", with: JSON(column < 2))
-                        ToolActionControl(command: command, checkable: item["checkable"].bool, textSize: fixture["text_size"].number) {}
+                        ToolActionControl(command: command, checkable: item["checkable"].bool, side: 26, textSize: fixture["text_size"].number) {}
                             .background(GeometryReader { proxy in
                                 Color.clear.preference(key: ActionFrames.self,
                                     value: ["\(column)-\(index)": proxy.frame(in: .named("capture"))])

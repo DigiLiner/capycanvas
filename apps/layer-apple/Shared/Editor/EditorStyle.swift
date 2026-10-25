@@ -266,6 +266,7 @@ struct HeaderButtonStyle: ButtonStyle {
 struct ToolActionControl: View {
     let command: JSON
     let checkable: Bool
+    let side: CGFloat
     var textSize: CGFloat = 44 / 3
     var caption: String? = nil
     var iconOnly = false
@@ -275,14 +276,14 @@ struct ToolActionControl: View {
         Group {
             if checkable {
                 Toggle(command["label"].string, isOn: Binding(get: { selected }, set: { _ in action() }))
-                    .toggleStyle(PanelCheckStyle())
+                    .toggleStyle(PanelCheckStyle(minHeight: side))
             } else {
                 Button(action: action) {
                     HStack(spacing: 4) {
                         if !command["icon"].string.isEmpty { SharedIcon(name: command["icon"].string, size: 16) }
                         if !iconOnly { Text(caption ?? command["label"].string).lineLimit(1).truncationMode(.tail) }
-                    }.frame(width: iconOnly ? 24 : nil)
-                        .frame(maxWidth: iconOnly ? nil : .infinity, minHeight: 24, alignment: iconOnly ? .center : .leading)
+                    }.frame(width: iconOnly ? side : nil)
+                        .frame(maxWidth: iconOnly ? nil : .infinity, minHeight: side, alignment: iconOnly ? .center : .leading)
                         .padding(.horizontal, iconOnly ? 0 : 6).contentShape(Rectangle())
                 }.buttonStyle(EditorControlButtonStyle(selected: selected))
                     .accessibilityAddTraits(selected ? .isSelected : [])
@@ -294,6 +295,7 @@ struct ToolActionControl: View {
 }
 
 struct PanelCheckStyle: ToggleStyle {
+    let minHeight: CGFloat
     @Environment(\.bubbleEdits) private var edits
     func makeBody(configuration: Configuration) -> some View {
         Button { if edits?.consumeClick() != true { configuration.isOn.toggle() } } label: {
@@ -303,7 +305,7 @@ struct PanelCheckStyle: ToggleStyle {
                     if configuration.isOn { SharedIcon(name: "check", size: 16) }
                 }.frame(width: 16, height: 16).frame(width: 18)
                 configuration.label.lineLimit(1)
-            }.frame(minHeight: 24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.frame(minHeight: minHeight).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityAddTraits(configuration.isOn ? .isSelected : [])
             .modifier(BubbleNativeControl(drags: false))
     }
@@ -316,6 +318,7 @@ struct PanelControlMetrics {
     var group: CGFloat { CGFloat(view["group_spacing"].number) }
     var compound: CGFloat { CGFloat(view["compound_spacing"].number) }
     var height: CGFloat { CGFloat(view["control_height"].number) }
+    var radius: CGFloat { CGFloat(view["control_radius"].number) }
     var sliderHeight: CGFloat { CGFloat(view["slider_height"].number) }
     var padding: CGFloat { CGFloat(view["field_padding"].number) }
     var icon: CGFloat { CGFloat(view["icon_size"].number) }

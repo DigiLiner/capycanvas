@@ -39,7 +39,7 @@ struct NumberControl: View {
     private var dial: Bool { control["kind"].string == "dial" }
     private var compactPanel: Bool { panel && (slider || dial) && !inline && !valueOnly && toolbar == nil }
     private var spinWidth: CGFloat {
-        compact && !slider ? max(24, EditorTextMetrics.width(inlineMeasure, size: store.catalog["text_size_pt"].number * 4 / 3, weight: .regular, monospacedDigits: true)) : entryWidth
+        compact && !slider ? max(store.panelMetrics.height, EditorTextMetrics.width(inlineMeasure, size: store.catalog["text_size_pt"].number * 4 / 3, weight: .regular, monospacedDigits: true)) : entryWidth
     }
     private var key: String { identifier.isEmpty ? label : identifier }
 
@@ -53,7 +53,8 @@ struct NumberControl: View {
             } else if inline {
                 HStack(spacing: 4) {
                     sliderTrack
-                    InlineNumberValueLayout(entrySize: showsEntry || field.dirty ? min(10, max(3, formatted["edit"].string.count)) : nil) {
+                    InlineNumberValueLayout(entrySize: showsEntry || field.dirty ? min(10, max(3, formatted["edit"].string.count)) : nil,
+                        height: store.panelMetrics.height) {
                         Text(inlineMeasure).monospacedDigit().padding(.horizontal, 6).hidden().accessibilityHidden(true)
                         Text("8").monospacedDigit().hidden().accessibilityHidden(true)
                         if showsEntry || field.dirty { numericEntry }
@@ -61,7 +62,8 @@ struct NumberControl: View {
                     }
                 }
             } else if valueOnly {
-                InlineNumberValueLayout(entrySize: showsEntry || field.dirty ? min(10, max(3, formatted["edit"].string.count)) : nil) {
+                InlineNumberValueLayout(entrySize: showsEntry || field.dirty ? min(10, max(3, formatted["edit"].string.count)) : nil,
+                    height: store.panelMetrics.height) {
                     Text(formatted["text"].string).monospacedDigit().padding(.horizontal, 6).hidden().accessibilityHidden(true)
                     Text("8").monospacedDigit().hidden().accessibilityHidden(true)
                     if showsEntry || field.dirty { numericEntry }
@@ -95,7 +97,7 @@ struct NumberControl: View {
                         else { valueButton }
                     }.frame(width: showsEntry || field.dirty ? 68 : nil)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                }.frame(height: 36).modifier(NumberControlMeasurement(id: key + ":header"))
+                }.frame(height: store.panelMetrics.sliderHeight).modifier(NumberControlMeasurement(id: key + ":header"))
             } else {
                 HStack(spacing: compact ? store.panelMetrics.spacing : 6) {
                     Text(label).lineLimit(1).truncationMode(.tail)
@@ -189,7 +191,7 @@ struct NumberControl: View {
         Button { showsEntry = true } label: {
             Text(formatted["text"].string).monospacedDigit().lineLimit(1)
                 .frame(maxWidth: inline || valueOnly || toolbar != nil ? .infinity : nil, alignment: valueOnly ? .center : .trailing)
-                .padding(.horizontal, 6).frame(height: 24)
+                .padding(.horizontal, 6).frame(height: store.panelMetrics.height)
         }.buttonStyle(EditorControlButtonStyle()).opacity(enabled ? 1 : 0.36)
             // An asynchronous rejection can arrive after text entry closes.
             // Keep compact errors visible without expanding the layer header.
@@ -227,7 +229,7 @@ struct NumberControl: View {
                     if horizontalDrag == true { position(event.location.x / max(1, geometry.size.width), phase: "up") }
                     horizontalDrag = nil
                 }.exclusively(before: SpatialTapGesture().onEnded { tap in position(tap.location.x / max(1, geometry.size.width)) }))
-        }.frame(height: compactPanel ? 16 : 24).modifier(NumberControlMeasurement(id: key + ":track"))
+        }.frame(height: compactPanel ? 16 : store.panelMetrics.height).modifier(NumberControlMeasurement(id: key + ":track"))
             .accessibilityElement().accessibilityLabel(label)
             .accessibilityValue(formatted["text"].string)
             .accessibilityAdjustableAction { direction in
@@ -282,7 +284,7 @@ struct NumberControl: View {
             submit: finish, cancel: cancel, step: step)
             .focusedValue(\.editorTextCommit, { _ = commit() })
             .frame(width: valueOnly || inline || toolbar != nil || affixes != nil ? nil : compactPanel ? 56 : slider ? 80 : spinWidth)
-            .padding(.horizontal, 6).frame(height: compact ? store.panelMetrics.height : valueOnly || slider || compactPanel ? 24 : 32)
+            .padding(.horizontal, 6).frame(height: compact || toolbar != nil || valueOnly || slider || compactPanel ? store.panelMetrics.height : 32)
             .background(palette["input"], in: SquircleShape.control)
             .modifier(NumberControlMeasurement(id: key + ":entry"))
             .accessibilityHint(field.error ?? "")
@@ -308,7 +310,7 @@ struct NumberControl: View {
     private func stepButton(_ direction: Int) -> some View {
         let active = enabled && (direction < 0 ? field.value > control["min"].number : field.value < control["max"].number)
         return Button { step(direction) } label: {
-            SharedIcon(name: direction < 0 ? "minus" : "plus").frame(width: compact ? store.panelMetrics.height : slider ? 24 : 32, height: compact ? store.panelMetrics.height : slider ? 24 : 32)
+            SharedIcon(name: direction < 0 ? "minus" : "plus").frame(width: compact || slider ? store.panelMetrics.height : 32, height: compact || slider ? store.panelMetrics.height : 32)
                 .contentShape(Rectangle())
         }.buttonStyle(EditorControlButtonStyle()).opacity(active ? 1 : 0.36)
             .modifier(NumberControlMeasurement(id: key + (direction < 0 ? ":minus" : ":plus")))
@@ -458,11 +460,12 @@ struct NumberControl: View {
 /// entry additionally reserves its initial character count, like input.size.
 private struct InlineNumberValueLayout: Layout {
     let entrySize: Int?
+    let height: CGFloat
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard subviews.count == 3 else { return .zero }
         let measure = subviews[0].sizeThatFits(.unspecified).width
         let entry = entrySize.map { CGFloat($0) * ceil(subviews[1].sizeThatFits(.unspecified).width) + 12 } ?? 0
-        return CGSize(width: max(measure, entry), height: 24)
+        return CGSize(width: max(measure, entry), height: height)
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         for view in subviews {

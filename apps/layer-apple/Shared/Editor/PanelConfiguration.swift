@@ -29,7 +29,7 @@ struct PanelConfiguration: View {
                                         else { SquircleShape(4).strokeBorder(palette["text"].opacity(0.25), lineWidth: 2) }
                                     }.frame(width: 16, height: 16)
                                 Text(item["label"].string)
-                            }.frame(maxWidth: .infinity, alignment: .leading).frame(minHeight: 24).contentShape(Rectangle())
+                            }.frame(maxWidth: .infinity, alignment: .leading).frame(minHeight: store.panelMetrics.height).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityValue(item["visible_in_panel"].bool ? "On" : "Off")
                             .accessibilityIdentifier("configure-visible-" + item["control"].string)
                         configuredControl(item)
@@ -60,7 +60,7 @@ struct PanelConfiguration: View {
             let layers = store.state["layers"].array
             EditorChoice(label: item["label"].string, options: layers.map { $0["label"].string },
                 selected: layers.firstIndex { $0["selected"].bool } ?? 0,
-                identifier: "configuration-layer", background: palette["input"]) {
+                identifier: "configuration-layer", background: palette["input"], height: store.panelMetrics.height) {
                 store.dispatch(["type": "select_layer", "id": layers[$0]["id"].raw])
             }
         case "layer_opacity":

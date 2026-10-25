@@ -35,28 +35,33 @@ private struct PlacedCanvasBar: View {
     @State private var placed = JSON()
     @State private var menu = JSON()
     @State private var menus: [String: JSON] = [:]
-    private static let itemHeight: CGFloat = 40, gap: CGFloat = 4, padding: CGFloat = 6, labelPadding: CGFloat = 6
-    private static let menuPadding: CGFloat = 10, menuIcon: CGFloat = 20, menuGap: CGFloat = 6, menuChevron: CGFloat = 12
+    private static let captionLeading: CGFloat = 12, captionTrailing: CGFloat = 8, captionOpacity = 0.8
+    private static let textPadding: CGFloat = 10, textGap: CGFloat = 6, chevron: CGFloat = 12
     private static let preferences = JSON(["sliders": false, "text": true])
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]).glassy }
     private var textSize: CGFloat { store.catalog["text_size_pt"].number > 0 ? store.catalog["text_size_pt"].number * 4 / 3 : 44 / 3 }
+    private var metrics: BarMetrics { store.barMetrics }
     private var items: [JSON] { view["items"].array }
     private var completion: [JSON] { view["completion"].array }
     private var context: JSON { view["context"] }
     private func width(_ item: JSON) -> CGFloat {
+        (item["separated"].bool ? BarMetrics.dividerSlot + metrics.gap : 0) + fieldWidth(item)
+    }
+    private func fieldWidth(_ item: JSON) -> CGFloat {
         if !item["menu"].isNull {
-            return Self.menuPadding * 2 + Self.menuIcon + Self.menuGap * 2 + Self.menuChevron - 2
+            if item["icon_only"].bool { return metrics.tile }
+            return 2 * metrics.clear + 2 * Self.textPadding + metrics.icon + 2 * Self.textGap + Self.chevron
                 + ceil(toolbarTextWidth(item["label"].string, size: textSize))
         }
-        return toolOptionSize(item["option"], vertical: false, width: 0, tile: CGSize(width: Self.itemHeight, height: Self.itemHeight),
-            preferences: Self.preferences, textSize: textSize, caption: item["label"].string, language: store.interfaceLanguage).width
+        return toolOptionSize(item["option"], vertical: false, width: 0, tile: CGSize(width: metrics.tile, height: metrics.tile),
+            preferences: Self.preferences, textSize: textSize, bar: metrics, caption: item["label"].string, language: store.interfaceLanguage).width
     }
     private var labelWidth: CGFloat {
-        view["label"].isNull ? 0 : ceil(toolbarTextWidth(view["label"].string, size: textSize)) + 2 * Self.labelPadding
+        view["label"].isNull ? 0 : ceil(toolbarTextWidth(view["label"].string, size: textSize)) + Self.captionLeading + Self.captionTrailing
     }
     private var measure: [String: Any] {
         ["context": context.raw, "label": labelWidth, "items": items.map(width), "completion": completion.map(width),
-         "more": Self.itemHeight, "height": Self.itemHeight + 2 * Self.padding, "gap": Self.gap, "padding": Self.padding]
+         "more": metrics.tile, "height": metrics.tile, "gap": metrics.gap, "padding": 0]
     }
     private func edit(_ action: Any, _ completion: @escaping @MainActor (String?) -> Void) {
         store.edit(["type": "canvas_bar_edit", "context": context.raw, "action": action], completion: completion)
@@ -81,50 +86,66 @@ private struct PlacedCanvasBar: View {
         }
     }
     private func bar(shown: Int) -> some View {
-        HStack(spacing: Self.gap) {
+        HStack(spacing: metrics.gap) {
             if !view["label"].isNull {
-                Text(view["label"].string).lineLimit(1).foregroundStyle(palette["text"].opacity(0.65))
-                    .frame(width: labelWidth).accessibilityIdentifier("canvas-bar-label")
+                Text(view["label"].string).lineLimit(1).foregroundStyle(palette["text"].opacity(Self.captionOpacity))
+                    .padding(.leading, Self.captionLeading).padding(.trailing, Self.captionTrailing)
+                    .frame(width: labelWidth, alignment: .leading).accessibilityIdentifier("canvas-bar-label")
             }
-            ForEach(Array(items.prefix(shown).enumerated()), id: \.offset) { _, item in field(item, completion: false) }
+            ForEach(Array(items.prefix(shown).enumerated()), id: \.offset) { _, item in field(item) }
             EditorMenuButton(menu: { [menu] in AppleContextMenu(menu) { store.dispatch($0) } }, identifier: "canvas-bar-menu",
                 rootFocusesSelection: false) {
-                SharedIcon(name: "more", size: 20).frame(width: Self.itemHeight, height: Self.itemHeight)
+                SharedIcon(name: "more", size: metrics.icon).frame(width: metrics.tile, height: metrics.tile)
             }.buttonStyle(EditorControlButtonStyle(selected: false, corner: .half))
                 .accessibilityLabel(store.bootstrap["common"]["more"].string).help(store.bootstrap["common"]["more"].string).accessibilityIdentifier("canvas-bar-more")
-            ForEach(Array(completion.enumerated()), id: \.offset) { _, item in field(item, completion: true) }
-        }.padding(Self.padding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            ForEach(Array(completion.enumerated()), id: \.offset) { _, item in field(item) }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .foregroundStyle(palette["text"])
             .environment(\.editorPalette, palette)
             .glassSurface(SquircleShape.surface, fill: palette.glassPanel)
             .accessibilityElement(children: .contain).accessibilityIdentifier("canvas-action-bar")
             .background { OutsideShadow(shape: SquircleShape.surface, opacity: 0.16, radius: 4, y: 2).accessibilityHidden(true) }
     }
-    @ViewBuilder private func field(_ item: JSON, completion: Bool) -> some View {
+    private func field(_ item: JSON) -> some View {
+        HStack(spacing: metrics.gap) {
+            if item["separated"].bool {
+                ToolbarDivider(vertical: false, length: metrics.dividerLength, color: palette["text"].opacity(0.3))
+                    .frame(width: BarMetrics.dividerSlot, height: metrics.tile).accessibilityHidden(true)
+            }
+            content(item).frame(width: fieldWidth(item), height: metrics.tile)
+        }
+    }
+    @ViewBuilder private func content(_ item: JSON) -> some View {
         let command = item["option"]["Action"]["state"]
         if !item["menu"].isNull {
-            menuField(item, command: command).frame(width: width(item), height: Self.itemHeight)
+            let tile = item["icon_only"].bool
+            menuField(item, command: command)
+                .frame(height: tile ? metrics.tile : metrics.control).padding(.horizontal, tile ? 0 : metrics.clear)
         } else {
-            ToolOptionField(store: store, option: item["option"], iconSize: 20, vertical: false, labeled: false,
-                style: "medium", preferences: Self.preferences, stacked: false, caption: item["label"].string, prefix: "canvas-bar",
+            ToolOptionField(store: store, option: item["option"], iconSize: metrics.icon, vertical: false, labeled: false,
+                style: "small", preferences: Self.preferences, stacked: false, bar: metrics, caption: item["label"].string, prefix: "canvas-bar",
                 accent: item["accent"].bool, edit: edit)
-                .frame(width: width(item), height: Self.itemHeight)
         }
     }
     private func menuField(_ item: JSON, command: JSON) -> some View {
-        let id = item["menu"].string, label = item["label"].string
+        let id = item["menu"].string, label = item["label"].string, tile = item["icon_only"].bool
         let disabled = !command.isNull && !command["enabled"].bool, reason = command.disabledReason
-        let tip = command.isNull ? label : reason ?? command["tooltip"].string
         return EditorMenuButton(menu: { [model = menus[id] ?? JSON()] in AppleContextMenu(model) { store.dispatch($0) } },
             identifier: "canvas-bar-menu-items-" + id, rootFocusesSelection: false) {
-            HStack(spacing: Self.menuGap) {
-                SharedIcon(name: item["icon"].string, size: Self.menuIcon)
-                Text(label).lineLimit(1).fixedSize()
-                SharedIcon(name: "chevron-down", size: Self.menuChevron).padding(.leading, -2)
-            }.padding(.horizontal, Self.menuPadding).frame(maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                if tile {
+                    SharedIcon(name: item["icon"].string, size: metrics.icon).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay(alignment: .bottomTrailing) { ToolGroupMarker() }
+                } else {
+                    HStack(spacing: Self.textGap) {
+                        SharedIcon(name: item["icon"].string, size: metrics.icon)
+                        Text(label).lineLimit(1).fixedSize()
+                        SharedIcon(name: "chevron-down", size: Self.chevron)
+                    }.padding(.horizontal, Self.textPadding).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
         }.buttonStyle(EditorControlButtonStyle(selected: false, corner: .half)).disabled(disabled)
-            .opacity(disabled ? 0.36 : 1).help(tip).accessibilityLabel(label).accessibilityHint(reason ?? "")
+            .opacity(disabled ? 0.36 : 1).help(reason ?? label).accessibilityLabel(label).accessibilityHint(reason ?? "")
             .accessibilityIdentifier("canvas-bar-menu-" + id)
             .modifier(DisabledExplanation(reason: reason, identifier: "canvas-bar-reason-" + id))
     }

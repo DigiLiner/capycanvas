@@ -111,7 +111,7 @@ struct LayerPanel: View {
             HStack(spacing: store.panelMetrics.spacing) {
                 let blends = store.catalog["layer_blends"].array.map(\.string)
                 EditorChoice(label: store.catalog["native_copy"]["layers"]["blend"].string, options: blends,
-                    selected: blends.firstIndex(of: current["blend_label"].string) ?? -1, identifier: "layer-blend", background: palette["input"], presentation: .layerMenu,
+                    selected: blends.firstIndex(of: current["blend_label"].string) ?? -1, identifier: "layer-blend", background: palette["input"], presentation: .layerMenu, height: store.panelMetrics.height,
                     menu: { [store, id = current["id"].raw] show in
                         store.query(["type": "layer_blend_menu", "id": id]) { menu in
                             if !menu.isNull { show(AppleContextMenu(menu) { store.dispatch($0) }) }
@@ -119,26 +119,26 @@ struct LayerPanel: View {
                     }) { _ in }.disabled(!view["controls"]["blend"].bool).frame(maxWidth: .infinity)
                 LayerOpacityField(store: store).disabled(!view["controls"]["opacity"].bool).frame(maxWidth: .infinity)
             }
-            HStack(spacing: store.panelMetrics.spacing) {
+            HStack(spacing: store.panelMetrics.compound) {
                 flag("alpha-lock", store.catalog["native_copy"]["layers"]["alpha_lock"].string, "alpha_locked", "alpha_lock", "alpha_lock")
                 flag("lock", store.catalog["native_copy"]["layers"]["lock_editing"].string, "locked", "lock", "edit_lock")
                 let attachment = view["attachment"]
-                LayerButton(icon: attachment["icon"].string, label: attachment["label"].string,
+                LayerButton(icon: attachment["icon"].string, label: attachment["label"].string, side: store.panelMetrics.height,
                     enabled: !attachment["action"].isNull, selected: attachment["checked"].bool) {
                     let action = store.state["layer_tools"]["attachment"]["action"]
                     if !action.isNull { store.layer(action.object) }
                 }.accessibilityHint(attachment["description"].string).help(attachment["description"].string)
                     .accessibilityIdentifier("layer-attachment")
-                LayerButton(icon: "reference", label: view["reference_action_label"].string,
+                LayerButton(icon: "reference", label: view["reference_action_label"].string, side: store.panelMetrics.height,
                     enabled: view["can_reference"].bool, selected: view["references_selected"].bool) {
                     store.layer(["op": "reference_selection"])
                 }
                 Spacer(minLength: 0)
             }
-        }.padding(.horizontal, store.panelMetrics.inset).padding(.vertical, 4)
+        }.padding(.horizontal, layerEdgeInset).padding(.vertical, 4)
     }
     private func flag(_ icon: String, _ label: String, _ property: String, _ op: String, _ capability: String) -> some View {
-        LayerButton(icon: icon, label: label, enabled: view["controls"][capability].bool, selected: current[property].bool) {
+        LayerButton(icon: icon, label: label, side: store.panelMetrics.height, enabled: view["controls"][capability].bool, selected: current[property].bool) {
             store.layer(["op": op, "id": current["id"].raw, "value": !current[property].bool])
         }
     }
@@ -146,21 +146,21 @@ struct LayerPanel: View {
         view["footer"].array.filter { footerWidth + 0.5 < $0["min_width"].number }.map { $0["item"] }
     }
     private var footer: some View {
-        HStack(spacing: store.panelMetrics.spacing) {
+        HStack(spacing: store.panelMetrics.compound) {
             ForEach(view["footer"].array.indices, id: \.self) { index in
                 let slot = view["footer"][index]
                 if footerWidth + 0.5 >= slot["min_width"].number { footerButton(slot) }
             }
             Spacer(minLength: 0)
-            LayerButton(icon: "more-small", label: store.catalog["native_copy"]["layers"]["actions"].string, enabled: !current.isNull) {
+            LayerButton(icon: "more-small", label: store.catalog["native_copy"]["layers"]["actions"].string, side: store.panelMetrics.height, enabled: !current.isNull) {
                 openMenu(current, mask: current["mask_selected"].bool, source: .footer)
             }.editorPopover(isPresented: menuPresented(at: .footer), placement: .inward) { menuContent }
-        }.padding(.horizontal, store.panelMetrics.inset).padding(.vertical, 4)
+        }.padding(.horizontal, layerEdgeInset).padding(.vertical, 4)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { footerWidth = $0 }
     }
     @ViewBuilder private func footerButton(_ slot: JSON) -> some View {
         let item = slot["item"], kind = slot["button"].string
-        let button = LayerButton(icon: item["icon"].string, label: item["label"].string,
+        let button = LayerButton(icon: item["icon"].string, label: item["label"].string, side: store.panelMetrics.height,
             enabled: item["enabled"].bool, selected: item["selected"].bool) {
                 if kind == "add_filter" { filterMenu = view["add_filter"] }
                 else if !item["action"].isNull { store.dispatch(item["action"]) }
@@ -332,16 +332,19 @@ private struct LayerPanelRow: Identifiable {
 private struct LayerButton: View {
     let icon: String
     let label: String
+    let side: CGFloat
     var enabled = true
     var selected = false
-    var height: CGFloat = 24
+    var height: CGFloat? = nil
     var size: CGFloat = 16
     let action: () -> Void
     var body: some View {
         IconTile(icon: icon, label: label, selected: selected, enabled: enabled, size: size, action: action)
-            .frame(width: 24, height: height).accessibilityIdentifier("layer-" + label)
+            .frame(width: side, height: height ?? side).accessibilityIdentifier("layer-" + label)
     }
 }
+
+let layerEdgeInset: CGFloat = 6
 
 private struct LayerRow: View {
     @State private var rowCaption = ""
@@ -363,10 +366,10 @@ private struct LayerRow: View {
     }
     var body: some View {
         HStack(spacing: 2) {
-            LayerButton(icon: layer["visible"].bool && !layer["visibility_blocked"].bool ? "eye" : "eye-hidden", label: visibilityLabel, height: 36) {
+            LayerButton(icon: layer["visible"].bool && !layer["visibility_blocked"].bool ? "eye" : "eye-hidden", label: visibilityLabel, side: store.panelMetrics.height, height: 36) {
                 perform { store.dispatch(["type": "set_layer_visibility", "id": id, "visible": !layer["visible"].bool]) }
             }.opacity(layer["visibility_blocked"].bool ? 0.35 : 1)
-            if !simple { LayerButton(icon: layer["selection_icon"].string, label: store.catalog["native_copy"]["layers"]["select_row_help"].string, selected: layer["selected"].bool, height: 36) {
+            if !simple { LayerButton(icon: layer["selection_icon"].string, label: store.catalog["native_copy"]["layers"]["select_row_help"].string, side: store.panelMetrics.height, selected: layer["selected"].bool, height: 36) {
                 selectRow(toggle: true)
             }.accessibilityAddTraits(layer["selected"].bool ? .isSelected : []) }
             HStack(spacing: 2) {
@@ -378,7 +381,7 @@ private struct LayerRow: View {
                     }.frame(width: 30, height: 30).accessibilityIdentifier("selection-load-\(id)")
                 }
                 if !simple && layer["has_mask"].bool {
-                    LayerButton(icon: layer["mask_linked"].bool ? "link" : "unlink", label: layer["mask_linked"].bool ? store.catalog["native_copy"]["layers"]["unlink_mask"].string : store.catalog["native_copy"]["layers"]["link_mask_to_layer"].string, size: 10) {
+                    LayerButton(icon: layer["mask_linked"].bool ? "link" : "unlink", label: layer["mask_linked"].bool ? store.catalog["native_copy"]["layers"]["unlink_mask"].string : store.catalog["native_copy"]["layers"]["link_mask_to_layer"].string, side: store.panelMetrics.height, size: 10) {
                         perform { store.layer(["op": "link_mask", "id": id, "value": !layer["mask_linked"].bool]) }
                     }.foregroundStyle(palette["text"]).disabled(layer["locked"].bool)
                     thumbnail(mask: true)
@@ -403,7 +406,7 @@ private struct LayerRow: View {
                     .modifier(LayerRowMeasurement(id: id, part: \.grip, enabled: !preview))
                     .accessibilityLabel(store.catalog["native_copy"]["layers"]["move_layer"].string).accessibilityIdentifier("layer-grip-\(id)")
             }
-        }.padding(.horizontal, 6).padding(.vertical, 2).frame(minHeight: 40)
+        }.padding(.horizontal, layerEdgeInset).padding(.vertical, 2).frame(minHeight: 40)
             .modifier(LayerRowMeasurement(id: id, part: \.swipe, enabled: !preview))
             .background((layer["selected"].bool ? surface.active : Color.clear)
                 .contentShape(Rectangle()).onTapGesture {

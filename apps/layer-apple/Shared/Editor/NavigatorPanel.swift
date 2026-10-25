@@ -104,7 +104,7 @@ struct RendererStatsPanel: View {
                         label: stats.view["chart_label"].string).equatable()
                 }
             }
-            RecordingButton(recording: store.strokeRecording)
+            RecordingButton(recording: store.strokeRecording, height: store.panelMetrics.height)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("renderer-stats")
             .onAppear { stats.show(viewer); store.strokeRecording.refresh() }.onDisappear { stats.hide(viewer) }
     }
@@ -150,9 +150,10 @@ private struct RendererStatsChart: View, Equatable {
 private struct RecordingButton: View {
     @Environment(\.capyNativeCopy) private var nativeCopy
     @ObservedObject var recording: StrokeRecording
+    let height: CGFloat
     var body: some View {
         Button { recording.activate() } label: {
-            Text(recording.label).fontWeight(.bold).frame(maxWidth: .infinity, minHeight: 24).contentShape(Rectangle())
+            Text(recording.label).fontWeight(.bold).frame(maxWidth: .infinity, minHeight: height).contentShape(Rectangle())
         }.buttonStyle(EditorControlButtonStyle(background: Color.primary.opacity(0.05))).disabled(recording.busy)
             .help(nativeCopy["color"]["record_tablet"].string).accessibilityIdentifier("stroke-recording")
     }

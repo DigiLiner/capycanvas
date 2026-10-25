@@ -216,7 +216,7 @@ private extension ToolSettingsControls {
     func actionButton(_ action: JSON) -> some View {
         let command = store.command(action["command"].string)
         let caption = store.state["canvas_bar"]["completion"].array.first { $0["option"]["Action"]["state"]["id"].string == command["id"].string }?["label"].string
-        return ToolActionControl(command: command, checkable: action["checkable"].bool,
+        return ToolActionControl(command: command, checkable: action["checkable"].bool, side: store.panelMetrics.height,
             textSize: store.catalog["text_size_pt"].number * 4 / 3, caption: caption, iconOnly: action["icon_only"].bool) { store.invoke(command["id"].string) }
     }
     func actionChoice(_ group: (id: String, items: [JSON])) -> some View {
@@ -228,7 +228,7 @@ private extension ToolSettingsControls {
         return PropertyChoiceRow(labelWidth: store.panelLabelWidth(labels)) {
             Text(label).lineLimit(1)
             EditorChoice(label: label, options: commands.map { $0["label"].string }, selected: commands.firstIndex { $0["selected"].bool } ?? 0,
-                identifier: "tool-action-group-" + group.id, background: palette["input"], menu: { open in
+                identifier: "tool-action-group-" + group.id, background: palette["input"], height: store.panelMetrics.height, menu: { open in
                     open(AppleContextMenu(JSON(["sections": [commands.map { command in
                         ["label": command["label"].raw, "enabled": command["enabled"].raw, "selected": command["selected"].raw,
                          "identifier": "tool-action-" + command["id"].string, "action": ["type": "invoke", "command": command["id"].raw]]
@@ -280,7 +280,8 @@ private struct TonalSettingsControls: View {
             ForEach(store.state["tool_extra"].array.indices, id: \.self) { index in
                 let choice = store.state["tool_extra"][index]["Choice"]
                 if !choice.isNull {
-                    SegmentedChoiceBar(choice: choice, prefix: "tool", height: store.panelMetrics.height, iconSize: store.panelMetrics.icon, palette: palette) { item in
+                    SegmentedChoiceBar(choice: choice, prefix: "tool", height: store.panelMetrics.height, iconSize: store.panelMetrics.icon,
+                        labeledCell: CGSize(width: store.panelMetrics.height, height: store.panelMetrics.height), palette: palette) { item in
                         store.dispatch(item["action"])
                     }
                 }
@@ -314,13 +315,13 @@ private struct PickerSettingsRows: View {
         VStack(alignment:.leading,spacing:store.panelMetrics.spacing) {
             PropertyChoiceRow(labelWidth:store.panelLabelWidth(labels)) {
                 Text(labels[0]).lineLimit(1)
-                EditorChoice(label:labels[0],options:source,selected:picker["layer"].bool ? 1 : 0,identifier:"picker-setting-source",background:EditorPalette(source:store.state["palette"])["input"]) {
+                EditorChoice(label:labels[0],options:source,selected:picker["layer"].bool ? 1 : 0,identifier:"picker-setting-source",background:EditorPalette(source:store.state["palette"])["input"],height:store.panelMetrics.height) {
                     store.dispatch(["type":"color_picker","action":["kind":"source","layer":$0==1]])
                 }
             }
             PropertyChoiceRow(labelWidth:store.panelLabelWidth(labels)) {
                 Text(labels[1]).lineLimit(1)
-                EditorChoice(label:labels[1],options:sizes.map { width in copy["sizes"].array.first { $0[0].uint==width }?[1].string ?? "" },selected:sizes.firstIndex(of:picker["sample_width"].uint) ?? 0,identifier:"picker-setting-size",background:EditorPalette(source:store.state["palette"])["input"]) {
+                EditorChoice(label:labels[1],options:sizes.map { width in copy["sizes"].array.first { $0[0].uint==width }?[1].string ?? "" },selected:sizes.firstIndex(of:picker["sample_width"].uint) ?? 0,identifier:"picker-setting-size",background:EditorPalette(source:store.state["palette"])["input"],height:store.panelMetrics.height) {
                     store.dispatch(["type":"set_color_sample_size","width":sizes[$0]])
                 }
             }

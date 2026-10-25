@@ -279,10 +279,8 @@ private struct WorkspaceTile: View {
     var body: some View {
         Group {
             if kind == "divider" {
-                Rectangle().fill(palette["text"].opacity(0.3))
-                    .frame(width: vertical ? nil : 1, height: vertical ? 1 : nil)
-                    .padding(vertical ? .horizontal : .vertical, 4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+                ToolbarDivider(vertical: vertical, length: store.barMetrics.dividerLength, color: palette["text"].opacity(0.3))
+                    .contentShape(Rectangle())
             } else {
                 ToolbarTileButton(panel: panel, tile: tile, palette: palette, drawerOpen: drawerOpen,
                     drawerDirection: store.contentDrawers.sources["tool"]?.direction) {

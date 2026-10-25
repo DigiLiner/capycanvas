@@ -97,9 +97,9 @@ import SwiftUI
                         let key = "\(column)-\(row)"
                         let root = geometry.frames[key + ":root"]!, track = geometry.frames[key + ":track"]!
                         let value = geometry.frames[key + ":value"]!
-                        precondition(abs(root.height - 36) < 0.5 && abs(track.height - 16) < 0.5)
+                        precondition(abs(root.height - store.panelMetrics.sliderHeight) < 0.5 && abs(track.height - 16) < 0.5)
                         precondition(abs(track.minX - root.minX - 36) < 0.5 && abs(root.maxX - track.maxX - 76) < 0.5)
-                        precondition(value.width > 12 && abs(value.height - 24) < 0.5)
+                        precondition(value.width > 12 && abs(value.height - store.panelMetrics.height) < 0.5)
                         precondition(abs(value.maxX - root.maxX) < 0.5 && abs(value.maxY - root.maxY) < 0.5)
                         precondition(abs(track.maxY - root.maxY) < 0.5)
                         precondition(geometry.frames[key + ":minus"] == nil && geometry.frames[key + ":plus"] == nil)
@@ -108,9 +108,10 @@ import SwiftUI
                         let key = "\(column)-\(row)", root = geometry.frames[key + ":root"]!
                         let entry = geometry.frames[key + ":entry"]!
                         let minus = geometry.frames[key + ":minus"]!, plus = geometry.frames[key + ":plus"]!
-                        precondition(abs(root.height - 24) < 0.5 && abs(entry.height - 24) < 0.5)
-                        precondition(abs(minus.width - 24) < 0.5 && abs(minus.height - 24) < 0.5)
-                        precondition(abs(plus.width - 24) < 0.5 && abs(plus.height - 24) < 0.5)
+                        let control = store.panelMetrics.height
+                        precondition(abs(root.height - control) < 0.5 && abs(entry.height - control) < 0.5)
+                        precondition(abs(minus.width - control) < 0.5 && abs(minus.height - control) < 0.5)
+                        precondition(abs(plus.width - control) < 0.5 && abs(plus.height - control) < 0.5)
                         precondition(abs(entry.maxX - minus.minX) < 0.5 && abs(minus.maxX - plus.minX) < 0.5)
                     }
                 }
@@ -167,7 +168,7 @@ import SwiftUI
                 }
                 if panelID == "properties" {
                     let choice = geometry.choices["property-blend"]!, text = geometry.choices["property-blend:text"]!
-                    precondition(abs(choice.height - 24) < 0.5 && abs(choice.maxX - width + 8) < 0.5,
+                    precondition(abs(choice.height - store.panelMetrics.height) < 0.5 && abs(choice.maxX - width + 8) < 0.5,
                         "Property choices must share compact height and the right content rail")
                     precondition(abs(text.minX - choice.minX - 10) < 0.5,
                         "Property choice text must use the select disclosure inset")

@@ -69,7 +69,7 @@ import SwiftUI
                 guard let choice = geometry.frames["filter-category"] else {
                     throw HostFailure(message: "Filters must reuse the measured editor choice")
                 }
-                try require(abs(choice.width - 162) < 0.5 && abs(choice.height - 24) < 0.5,
+                try require(abs(choice.width - 162) < 0.5 && abs(choice.height - store.panelMetrics.height) < 0.5,
                     "Category allocation must use the shared compact panel spacing: \(choice)")
                 try capture("closed")
                 for next in 1...categories.count {

@@ -166,7 +166,8 @@ extension XCTestCase {
         XCTAssertTrue(segments.waitForExistence(timeout: 10), "Selection modes join the options bar")
         let dropdown = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "toolbar-choice-")).firstMatch
         XCTAssertTrue(dropdown.exists, "Selection tools keep a list choice")
-        XCTAssertEqual(segments.frame.height, 24, accuracy: 1, "Segments match the dropdown height")
+        XCTAssertEqual(segments.frame.height, 26, accuracy: 1, "Segments are panel-height controls")
+        XCTAssertEqual(dropdown.frame.height, 26, accuracy: 1, "Dropdowns are panel-height controls")
         XCTAssertEqual(segments.frame.midY, dropdown.frame.midY, accuracy: 1, "Segments center with the dropdown")
         attachEditor(in: app, name: "photo-selection-options-\(theme)")
         workspaceActivate(more)

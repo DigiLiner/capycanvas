@@ -61,7 +61,7 @@ private struct WorkspaceCollapsedColumnContent: View {
                         let group = column["groups"][index], panels = self.panels[index]
 
                         if index > 0 {
-                            Rectangle().fill(palette["text"].opacity(0.3))
+                            ToolbarDivider(vertical: true, length: store.barMetrics.dividerLength, color: palette["text"].opacity(0.3))
                                 .placed(JSON(group["divider"].rect.offsetBy(dx: -clip.rect.minX, dy: -clip.rect.minY + offset)))
                                 .allowsHitTesting(false).accessibilityHidden(true)
                         }
@@ -199,7 +199,7 @@ struct LayerInspector<Owner: LayerInspectorOwner>: View {
             ZStack(alignment: .topLeading) {
                 LayerPanel(store: store, panel: drawer.panel(JSON("layers")), drawerPagePosition: drawer.pagePosition, simple: drawer.simple)
                     .environment(\.measuresWorkspacePanel, true)
-                    .frame(width: max(0, width - 16), height: max(0, pageHeight - 16, measurement["fixed_height"].number + measurement["unit_height"].number - 16)).padding(8)
+                    .frame(width: width, height: max(0, pageHeight - 16, measurement["fixed_height"].number + measurement["unit_height"].number - 16)).padding(.vertical, 8)
                     .offset(y: -drawer.pagePosition * pageHeight).allowsHitTesting(!open).accessibilityHidden(open)
                     .onPreferenceChange(PanelSizeFacts.self) { facts in
                         let fixed = facts.filter { $0.key.panel == "layers" && $0.key.kind == .fixed }.values.reduce(16, +)
@@ -220,18 +220,19 @@ struct LayerInspector<Owner: LayerInspectorOwner>: View {
                 IconTile(icon: "add-layer", label: store.catalog["native_copy"]["layers"]["new_layer"].string) {
                     store.layer(["op": "new", "group": false, "clipped": false])
                 }
-                    .frame(width: 48, height: footerHeight - 1).opacity(open ? 0 : 1).disabled(open).accessibilityHidden(open)
+                    .frame(width: store.panelMetrics.height + 2 * layerEdgeInset, height: footerHeight - 1).opacity(open ? 0 : 1).disabled(open).accessibilityHidden(open)
                     .accessibilityIdentifier("bubble-new-layer")
             }
             Button { drawer.toggleProperties() } label: {
                 HStack(spacing: 6) {
-                    if !drawer.simple { SharedIcon(name: "properties").frame(width: 16, height: 16).frame(width: 24, height: 24) }
+                    if !drawer.simple { SharedIcon(name: "properties").frame(width: 16, height: 16).frame(width: store.panelMetrics.height, height: store.panelMetrics.height) }
                     VStack(alignment: drawer.simple ? .trailing : .leading, spacing: 1) {
                         Text(label).lineLimit(1).accessibilityIdentifier("layer-properties-disclosure-label")
                         if !drawer.simple && !summary.isEmpty { Text(summary).font(.system(size: store.catalog["text_size_pt"].number * 4 / 3 * 0.9)).foregroundStyle(palette["text"].opacity(0.55)).lineLimit(1) }
                     }.frame(maxWidth: .infinity, alignment: drawer.simple ? .trailing : .leading)
-                    SharedIcon(name: "chevron-down").frame(width: 16, height: 16).rotationEffect(.degrees(open ? 0 : 180)).frame(width: drawer.simple ? 16 : 24, height: 24)
-                }.padding(.horizontal, 16).frame(height: footerHeight - 1).contentShape(Rectangle())
+                    SharedIcon(name: "chevron-down").frame(width: 16, height: 16).rotationEffect(.degrees(open ? 0 : 180))
+                        .frame(width: store.panelMetrics.height, height: store.panelMetrics.height)
+                }.padding(.horizontal, layerEdgeInset).frame(height: footerHeight - 1).contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle(active: footerHover, joinedEdge: "top"))
                 .onHover { footerHover = $0 }.disabled(!open && view["layer"].isNull).help([label, summary].filter { !$0.isEmpty }.joined(separator: "\n"))
                 .accessibilityLabel(label)

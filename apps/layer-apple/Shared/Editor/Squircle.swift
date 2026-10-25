@@ -3,7 +3,7 @@ import SwiftUI
 struct SquircleShape: InsettableShape {
     enum Corner: Equatable { case radius(CGFloat), half }
     static let surfaceRadius: CGFloat = 18
-    static let controlRadius: CGFloat = 12
+    static let controlRadius: CGFloat = 13
     static let surface = SquircleShape(surfaceRadius)
     static let control = SquircleShape(controlRadius)
     static let tile = SquircleShape(corners: [.half, .half, .half, .half])

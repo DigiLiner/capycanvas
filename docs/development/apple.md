@@ -923,7 +923,7 @@ type takes the remaining space, including when the panel needs a scrollbar.
 their Dark variants, check filter artwork, history, search and native controls.
 Convert catalog text sizes from points with the shared 4/3 factor before
 allocating native text. Panel choices, including configuration layer selection,
-use the shared 24-point height and input fill. Ordinary select labels clip;
+use the shared panel control height and input fill. Ordinary select labels clip;
 resource, proof and layer-blend labels ellipsize. Label weight and disabled
 appearance follow the corresponding control role. The layer-blend menu centers its
 label and uses the shared twelve-point chevron with six-point trailing padding.
@@ -954,8 +954,10 @@ notice's Use G-Pen and New Paint Layer actions, Fill inside an ellipse outline
 and outside it on a new paint layer below, Erase up to intersection between two
 crossings, and the merged line parts. The iPad journeys skip canvas input.
 
-Layer-row icon buttons share a 24-point width, including the mask link between
-thumbnails. Keep the hit target independent of its smaller glyph. Mask-transform
+Layer-row icon buttons are as wide as the shared panel control height, including
+the mask link between thumbnails. Rows, the header, the footer and the drawer's
+disclosure share a six-point side inset (`layerEdgeInset`), and drawers and the
+Layers bubble show rows edge to edge, so every first icon lines up with the eye. Keep the hit target independent of its smaller glyph. Mask-transform
 journeys use the inline link control and check independent and linked transforms,
 cancellation and exact Undo/Redo pixels in both themes.
 

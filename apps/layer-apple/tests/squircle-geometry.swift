@@ -47,7 +47,7 @@ import SwiftUI
         precondition(SquircleShape.tile(joined: "bottom").radii(in: CGRect(x: 0, y: 0, width: 72, height: 36)) == [18, 18, 0, 0])
 
         let leading = SquircleShape.control.segment(0, of: 3), inner = SquircleShape.control.segment(1, of: 3)
-        precondition(leading.corners == [.radius(12), .radius(0), .radius(0), .radius(12)]
+        precondition(leading.corners == [.radius(SquircleShape.controlRadius), .radius(0), .radius(0), .radius(SquircleShape.controlRadius)]
             && inner.corners.allSatisfy { $0 == SquircleShape.Corner.radius(0) })
         precondition(SquircleShape.tile.segment(2, of: 3, stacked: true).corners == [.radius(0), .radius(0), .half, .half])
         precondition(SquircleShape.control.segment(0, of: 1).corners == SquircleShape.control.corners)
