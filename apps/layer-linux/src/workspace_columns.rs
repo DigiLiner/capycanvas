@@ -338,15 +338,8 @@ impl Columns {
 
 fn column_separator() -> gtk::Box {
     // Only tab groups within a member have a separator.
-    let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    slot.add_css_class("toolbar-divider");
+    let slot = crate::tiles::divider_slot(gtk::Orientation::Vertical);
     slot.add_css_class("column-divider");
-    slot.set_height_request(8);
     slot.set_vexpand(false);
-    let line = gtk::Separator::new(gtk::Orientation::Horizontal);
-    line.set_halign(gtk::Align::Center);
-    line.set_valign(gtk::Align::Center);
-    line.set_vexpand(true);
-    slot.append(&line);
     slot
 }

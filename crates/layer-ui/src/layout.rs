@@ -64,7 +64,10 @@ pub const BRUSH_SETS_MIN_WIDTH: f32 = 104.0;
 pub const TAB_BAR_HEIGHT: f32 = TILE_SIZE;
 const PANEL_GRIP_HEIGHT: f32 = 20.0;
 const TOOLBAR_GRIP_SIZE: f32 = 20.0;
-const TOOLBAR_DIVIDER_SIZE: f32 = 8.0;
+/// The slot a divider takes along a strip of tiles.
+pub const TOOLBAR_DIVIDER_SIZE: f32 = 8.0;
+/// A divider's line, centred across its strip, for toolbars, column groups and the canvas bar.
+pub const DIVIDER_LENGTH: f32 = TILE_SIZE / 2.0;
 /// Shared gesture distances in logical UI pixels, not preferences.
 pub const WORKSPACE_PROXIMITY: f32 = 80.0;
 const PANEL_SNAP_DISTANCE: f32 = WORKSPACE_PROXIMITY * 0.5;

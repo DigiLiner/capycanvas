@@ -190,9 +190,7 @@ impl CanvasBar {
                 let (widget, field) = build(workspace, view.context, item);
                 let widget = if item.separated {
                     let group = gtk::Box::new(gtk::Orientation::Horizontal, GAP);
-                    let divider = gtk::Separator::new(gtk::Orientation::Vertical);
-                    divider.add_css_class("canvas-action-bar-divider");
-                    group.append(&divider);
+                    group.append(&crate::tiles::divider_slot(gtk::Orientation::Horizontal));
                     group.append(&widget);
                     group.upcast()
                 } else {

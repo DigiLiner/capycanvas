@@ -126,10 +126,7 @@ pub(super) fn tile_button(
         ));
     }
     if tile.control == ToolbarControl::Divider {
-        let line = gtk::Separator::new(gtk::Orientation::Horizontal);
-        line.set_halign(gtk::Align::Center);
-        line.set_valign(gtk::Align::Center);
-        button.set_child(Some(&line));
+        button.set_child(Some(&crate::tiles::divider_line(gtk::Orientation::Horizontal)));
         button.add_css_class("toolbar-divider");
     }
     button
