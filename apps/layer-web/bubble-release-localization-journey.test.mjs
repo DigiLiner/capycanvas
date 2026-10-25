@@ -49,6 +49,21 @@ export async function checkBubbleReleaseLocalization({call,evaluate,settle}) {
         await send({type:'customize',action:{type:'close_expanded'}});await language('en');
       }
     });
+    await check(`${theme}-configure-workspace-replacement`,async()=>{
+      const before=await evaluate('layerApp.app.workspace_persistence()'),name=`Release lifecycle ${theme}`;
+      const bounds=()=>evaluate(`layerApp.app.layout(innerWidth,innerHeight).groups.map(({id,panels,bounds})=>({id,panels,bounds}))`),geometryBefore=await bounds();
+      await send({type:'customize',action:{type:'new_toolbar',group:null}});await wait('!!document.querySelector("#tool-picker[open]")');
+      await evaluate(`(()=>{const name=document.querySelector('#toolbar-name');name.value=${JSON.stringify(name)};name.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#tool-picker .tool-choice input').click();document.querySelector('#confirm-tools').click()})()`);await settle();
+      const panel=await evaluate(`layerApp.state().workspace.layout.panels.find(panel=>panel.content.kind==='toolbar'&&panel.content.name===${JSON.stringify(name)})?.id`);assert.ok(panel,'new custom toolbar exists');
+      await send({type:'customize',action:{type:'show_all_controls',panel}});await wait(`layerApp.state().customization.expanded===${JSON.stringify(panel)}&&!!document.querySelector('.panel-configuration')`);
+      assert.equal(await evaluate('document.querySelector("#status").textContent'),'','no dispatch errors before workspace replacement');
+      const immediate=await evaluate(`(()=>{layerApp.dispatch({type:'restore_workspace',workspace:${JSON.stringify(before)}});return document.querySelector('#status').textContent})()`);assert.equal(immediate,'','workspace replacement does not catch a missing Configure model error');await settle();
+      await wait(`layerApp.state().customization.expanded==null&&!document.querySelector('.panel-configuration,.expanded-panel')`);
+      assert.ok(await evaluate(`!layerApp.state().workspace.layout.panels.some(p=>p.id===${JSON.stringify(panel)})`),'workspace replacement removes the custom toolbar');
+      assert.deepEqual(await bounds(),geometryBefore,'workspace replacement restores the other dock groups and bounds');
+      const groups=await evaluate(`[...document.querySelectorAll('.dock-group')].filter(n=>n.checkVisibility()).map(n=>{const r=n.getBoundingClientRect();return{width:r.width,height:r.height}})`);assert.ok(groups.length);assert.ok(groups.every(r=>Number.isFinite(r.width)&&Number.isFinite(r.height)&&r.width>0&&r.height>0),'remaining dock groups retain usable geometry');
+      await send({type:'customize',action:{type:'show_all_controls',panel:'sizes'}});await wait(`layerApp.state().customization.expanded==='sizes'&&!!document.querySelector('.panel-configuration h3')`);assert.equal(await evaluate('document.querySelector("#status").textContent'),'','builtin Configure reopens without a stale custom toolbar');await capture(`${theme}-configure-after-workspace-replacement`);await send({type:'customize',action:{type:'close_expanded'}});
+    });
     await check(`${theme}-toolbar-all-languages`,async()=>{
       await send({type:'customize',action:{type:'new_toolbar',group:null}});await wait('!!document.querySelector("#tool-picker[open]")');
       await evaluate(`document.querySelector('#tool-picker .tool-choice input').click();window.releaseToolbarName=document.querySelector('#toolbar-name');releaseToolbarName.value='Literal 🎨';releaseToolbarName.dispatchEvent(new Event('input',{bubbles:true}));`);await settle();

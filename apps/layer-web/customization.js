@@ -588,7 +588,7 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
   function refresh() {
     refreshPanels(); refreshPicker(); refreshManager(); refreshPrompt();
     for (const update of fields.values()) update();
-    if (expanded) {
+    if (expanded && views.has(expanded.panel)) {
       const view = views.get(expanded.panel);
       const title = expanded.body.querySelector('h3'), hint = expanded.body.querySelector('p');
       if (title.textContent !== view.configuration_title) title.textContent = view.configuration_title;
