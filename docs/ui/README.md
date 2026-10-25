@@ -69,7 +69,7 @@ RGB. Histogram shows how often each value occurs.
 Source and channel selectors occupy one toolbar above the graph. Log counts
 changes Histogram's height or Waveform's trace brightness; its toggle and
 clipping buttons sit beside the status below the graph. The toggle and its
-caption share a 24-pixel target. Status and axis labels use secondary text at
+caption share a 26-pixel target. Status and axis labels use secondary text at
 55% opacity. The graph's tooltip
 contains detailed counts. In floating documents, Waveform includes nonpositive
 values on its bottom rail. Its scale labels overlay the graph so the trace uses
@@ -124,7 +124,7 @@ those habits while keeping the underlying commands consistent. These workflows
 are arrangements of a common editor rather than separate applications. Tool
 Settings follows the active tool, and Properties exposes the relevant effect
 parameters. Shared Properties copy identifies the layer name and localized type.
-Workspace panels on GTK, Web, Android, Windows, macOS and iPadOS use 24-unit
+Workspace panels on GTK, Web, Android, Windows, macOS and iPadOS use 26-unit
 dropdowns, checkboxes, action buttons and joined choices, with 16-unit icons.
 These measurements are logical pixels, dp on Android. Numeric sliders keep their
 36-unit base rows; tonal
@@ -172,10 +172,10 @@ belong to one group, as do Gradient shape, stop editing and opacity.
 
 Toolbar tiles keep their shared 2-pixel or 4-pixel gaps and 36-pixel base size.
 Preferences and dialogs keep their larger section spacing. These contexts do not
-set the density of compact workspace forms. Single-line controls have a 24-unit
+set the density of compact workspace forms. Single-line controls have a 26-unit
 base height and may grow for system text scaling; icon-only actions stay square.
-Ordinary numeric readouts and editors use the same 24-unit height. Control
-surfaces follow the [12-unit squircle rule](squircle-corners.md#radii).
+Ordinary numeric readouts and editors use the same 26-unit height. Control
+surfaces follow the [13-unit squircle rule](squircle-corners.md#radii).
 
 ### Properties
 
@@ -203,11 +203,11 @@ A footer too narrow for every button hides the lowest-priority ones and lists th
 at the top of its actions menu: New selection layer goes first, then Import image,
 New group, Add Filter, Add mask and Delete; New layer and New vector layer stay
 longest. `LayersView::footer` publishes each button with the narrowest footer that
-shows it, from the shared 24-unit buttons, 4-unit spacing and 8-unit insets.
+shows it, from the shared 26-unit buttons, 2-unit spacing and 6-unit insets.
 Long layer types, property labels and Tools list rows wrap to two lines before
 they ellipsize.
 Properties dropdowns and their adjacent action buttons share the compact
-24-pixel panel height and 6-pixel horizontal padding, in docks and drawers.
+26-pixel panel height and 6-pixel horizontal padding, in docks and drawers.
 **Add Filter** is also available in each eligible layer's context menu. It opens
 the menu bar's filter categories and
 adds a local filter above the owner's existing chain, so it runs last. Selecting

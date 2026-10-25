@@ -12,7 +12,7 @@ entry without changing the effect application.
 
 - Small-range integers: label left, a conventional spin control right. GTK
   uses `GtkSpinButton` in panels and `AdwSpinRow` in Preferences.
-  Compact workspace spin controls have a 24-unit base height, with compact step buttons
+  Compact workspace spin controls have a 26-unit base height, with compact step buttons
   and a value field sized from the shared formatted range and units.
   Web and Apple measure that range's shaped text with tabular digits; browser
   input character counts must not choose compact field widths.
@@ -53,7 +53,7 @@ entry without changing the effect application.
   preserving the 16-unit track allocation and bottom-aligned editor.
   GTK panel readouts align shaped text within their allocated line width so
   units stay anchored when the digit count changes.
-  The panel editor is 68 pixels wide with a 24-unit base height, keeping an 8-pixel gap
+  The panel editor is 68 pixels wide with a 26-unit base height, keeping an 8-pixel gap
   from the slider hit area. Readouts use their text's natural width and retain
   the same right inset. Long expressions scroll within the field.
   Double-clicking a tool setting or property label restores its shared default.
