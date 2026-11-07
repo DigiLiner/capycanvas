@@ -921,6 +921,7 @@ def check(args):
     boot(machine, gui=False)
     lock = claim(machine)
     sync_machine(machine)
+    prepare_rust(machine)
     configuration = "Debug" if args.debug else "Release"
     guest(machine, f"& '{GUEST_PWSH}' -NoProfile -File '{GUEST_REPO}\\apps\\layer-windows\\scripts\\test-without-gpu.ps1' "
                    f"-Configuration {configuration}")
@@ -1001,7 +1002,14 @@ def fixture_directory(hardware, profile):
     return (HARDWARE_BUILD if hardware else SOFTWARE_BUILD) + ("" if profile == "release" else f"-{profile}")
 
 
+def prepare_rust(machine):
+    script = (GUEST_FILES / "prepare-rust.ps1").read_text()
+    guest_script(machine, f"$ErrorActionPreference='Stop'; Set-Location '{GUEST_REPO}'\n"
+                 f"& {{\n{script}\n}} -Manifest '{GUEST_REPO}\\Cargo.toml'")
+
+
 def fixture_build(machine, hashes, no_build, hardware, profile="release", controls=None):
+    prepare_rust(machine)
     inputs = build_inputs(hashes)
     directory = fixture_directory(hardware, profile)
     intermediate = (HARDWARE_BUILD if hardware else SOFTWARE_BUILD) + ".obj"

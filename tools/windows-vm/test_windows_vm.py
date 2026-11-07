@@ -89,6 +89,7 @@ class CheckTests(unittest.TestCase):
                     patch.object(sys, "argv", ["windows-vm.py", "check", *options]), \
                     patch.object(vm, "selected", return_value=None), patch.object(vm, "boot"), \
                     patch.object(vm, "claim"), patch.object(vm, "sync_machine"), \
+                    patch.object(vm, "prepare_rust"), \
                     patch.object(vm, "guest") as guest:
                 vm.main()
             self.assertTrue(guest.call_args.args[1].endswith(f"-Configuration {configuration}"))
@@ -649,6 +650,9 @@ class ProcessOwnershipTests(unittest.TestCase):
 
 class FixtureBuildTests(unittest.TestCase):
     def setUp(self):
+        rust = patch.object(vm, "prepare_rust")
+        rust.start()
+        self.addCleanup(rust.stop)
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.machine = SimpleNamespace(directory=Path(self.directory.name))

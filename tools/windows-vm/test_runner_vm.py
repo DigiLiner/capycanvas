@@ -18,6 +18,9 @@ spec.loader.exec_module(vm)
 
 class RunnerVmTests(unittest.TestCase):
     def setUp(self):
+        rust = patch.object(vm, "prepare_rust")
+        rust.start()
+        self.addCleanup(rust.stop)
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)

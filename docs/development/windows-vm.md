@@ -70,6 +70,8 @@ Each check uses a fresh
 Build outputs persist between syncs;
 each sync sends only files that changed since that VM's last sync, stamped with
 the current time, so incremental builds stay correct when a VM switches trees.
+Build commands update stable Rust only when the active compiler is older than the
+workspace's `rust-version`, then verify it before running Cargo.
 `sync`, `check` and `fixtures` lock their VM, so run parallel work on separate
 VMs. Run other commands from the synced tree, for example strict Clippy:
 

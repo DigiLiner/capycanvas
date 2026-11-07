@@ -69,6 +69,68 @@ if(@($errors).Count){throw ($errors|Out-String)}
         if($previousExit){Set-Variable LASTEXITCODE $previousExit.Value -Scope Global}else{Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue}
     }
 } (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'password-policy.ps1') -Raw)
+& {
+    param([string]$Source)
+    $manifest='C:\fixture\Cargo.toml'
+    $workspace=@'
+[package]
+version = "7.0.0"
+rust-version = "8.0.0"
+[workspace.package] # Root MSRV
+version = "4.0.0"
+rust-version = "1.99.0"
+[workspace.dependencies]
+rust-version = "9.0.0"
+'@
+    function Get-Content {
+        [CmdletBinding()]param([string]$LiteralPath,[switch]$Raw)
+        if($LiteralPath -ne $manifest -or !$Raw -or $PSBoundParameters.Count -ne 2){throw 'Rust preparation read an unrelated manifest'}
+        if($case.ContainsKey('manifest')){$case.manifest}else{$workspace}
+    }
+    function rustc {
+        if(($args -join ' ') -ne '--version' -or $state.reads -ge $case.compilers.Count){throw 'Rust preparation used unexpected compiler arguments or repeated its read'}
+        $index=$state.reads;$state.reads++
+        $global:LASTEXITCODE=if($case.compilerExit){[int]$case.compilerExit}else{0}
+        $case.compilers[$index]
+    }
+    function rustup {
+        if(($args -join ' ') -ne 'update stable' -or $state.updates){throw 'Rust preparation changed an override/default or repeated the update'}
+        $state.updates++
+        if($case.stderr){Write-Error 'Fixture rustup informational stderr'}
+        $global:LASTEXITCODE=[int]$case.updateExit
+        'Fixture stable update output'
+    }
+    $previousExit=Get-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    try{
+        foreach($case in @(
+            @{compilers=@('rustc 1.99.0 (fixture 2026-11-01)');reads=1;updates=0;before='1.99.0';after='1.99.0'},
+            @{compilers=@('rustc 1.100.0 (fixture 2026-11-01)');reads=1;updates=0;before='1.100.0';after='1.100.0'},
+            @{compilers=@('rustc 1.98.1 (fixture 2026-09-26)','rustc 1.99.0 (fixture 2026-11-01)');reads=2;updates=1;before='1.98.1';after='1.99.0';stderr=$true},
+            @{compilers=@('rustc 1.98.1 (fixture 2026-09-26)');reads=1;updates=1;updateExit=17;stderr=$true;error='update stable Rust.*exit 17.*Fixture rustup informational stderr'},
+            @{compilers=@('rustc 1.98.1 (fixture 2026-09-26)','rustc 1.98.1 (fixture 2026-09-26)');reads=2;updates=1;error='Active Rust compiler 1.98.1 is below workspace rust-version 1.99.0'},
+            @{compilers=@();reads=0;updates=0;manifest="[package]`nrust-version = '1.99.0'";error='Expected one \[workspace.package\] section'},
+            @{compilers=@();reads=0;updates=0;manifest="[workspace.package]`nrust-version = 'invalid'";error='Expected one numeric workspace rust-version'},
+            @{compilers=@('rustc invalid');reads=1;updates=0;error='Invalid rustc --version output'},
+            @{compilers=@('Fixture compiler failure');reads=1;updates=0;compilerExit=9;error='active Rust compiler.*exit 9.*Fixture compiler failure'}
+        )){
+            $state=@{reads=0;updates=0};$failure=$null;$output=@()
+            try{$output=@(& ([scriptblock]::Create($Source)) -Manifest $manifest)}catch{$failure=$_}
+            if($state.reads -ne $case.reads -or $state.updates -ne $case.updates){throw "Rust preparation skipped or repeated a compiler/update boundary: $failure"}
+            if($case.error){
+                if(!$failure -or $failure.Exception.Message -notmatch $case.error){throw "Rust preparation replaced its original error: $failure"}
+            }else{
+                if($failure){throw $failure}
+                if($output.Count -ne 1){throw 'Rust preparation leaked compiler/update output'}
+                $result=$output[0]|ConvertFrom-Json
+                if((($result.PSObject.Properties.Name|Sort-Object)-join ',') -ne 'after,before,required,updated'){throw 'Rust receipt changed its field set'}
+                if($result.required -ne '1.99.0' -or $result.before -ne $case.before -or $result.after -ne $case.after -or $result.updated -isnot [bool] -or $result.updated -ne [bool]$case.updates){throw 'Rust preparation lost numeric MSRV or upgrade provenance'}
+            }
+            if($ErrorActionPreference -ne 'Stop'){throw 'Rust preparation changed the caller error preference'}
+        }
+    }finally{
+        if($previousExit){Set-Variable LASTEXITCODE $previousExit.Value -Scope Global}else{Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue}
+    }
+} (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'prepare-rust.ps1') -Raw)
 $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Enable-FixtureJapaneseInput'},$true)
 if(!$definition){throw 'VM preparation does not enable the fixture Japanese input profile'}
 . ([scriptblock]::Create($definition.Extent.Text))
