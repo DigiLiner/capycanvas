@@ -33,7 +33,7 @@ crates that a given machine may not be able to run.
 | Android | Without a device: `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug -PcapyAbi=arm64-v8a` in `apps/layer-android`. On a reserved tablet, through `tools/devices/devices.py run`: install both APKs with `adb install -r`, then `am instrument -w -e class art.capycanvas.<Class>[#method] $CAPY_APPLICATION_ID.test/androidx.test.runner.AndroidJUnitRunner`. Read `OK` or `FAILURES!!!`, not the exit status ([Android](android.md#device-tests)). |
 | Android distribution | `python3 -m unittest discover -s tools/build -p 'test_android_*.py'`, then the [APK release checks](releasing.md#android-apk) on devices with and without Google services. A local build does not verify the APK that Play processes. |
 | Apple | Anywhere: `cargo test --locked -p layer-apple --lib -- --test-threads=1` and `python3 apps/layer-apple/tests/test_icon_assets.py`. On a Mac: the Swift fixtures, the command audit, and the XCTest journeys in the [Apple guide](apple.md#tests). The iOS simulator renders the canvas through the Float32 texel fallback; hardware filtering, Pencil and timing need a physical iPad. |
-| Windows | From any OS: `cargo test --locked -p layer-host -p layer-ui -p layer-workspace -p layer-windows --lib` and `cargo clippy --locked -p layer-windows --all-targets -- -D warnings`. On Windows: `apps/layer-windows/scripts/test-without-gpu.ps1`, then the `exercise-*.ps1` fixtures for the changed area; from Linux, `tools/windows-vm/windows-vm.py check` and `fixtures <name>`; use `fixtures --runners N <names>` for matrices within the [CPU pool](windows-vm.md#cpu-runner-pool). A configured [VM GPU pool](windows-vm.md#hardware-gpu-pool) also supports `gpu-check` and `fixtures --hardware-gpu <name>`. HDR output, physical input and performance targets require the corresponding reference hardware ([Windows](windows.md#test)). |
+| Windows | From any OS: `cargo test --locked -p layer-host -p layer-ui -p layer-workspace -p layer-windows --lib` and `cargo clippy --locked -p layer-windows --all-targets -- -D warnings`. On Windows: `apps/layer-windows/scripts/test-without-gpu.ps1`, then the `exercise-*.ps1` fixtures for the changed area; from Linux, `tools/windows-vm/windows-vm.py check` and `fixtures <name>`, which runs in [shared GPU sessions](windows-vm.md#shared-gpu-sessions); `fixtures --warp <names>` or `--runners N` runs on the [CPU pool](windows-vm.md#cpu-runner-pool). A configured [VM GPU pool](windows-vm.md#hardware-gpu-pool) also supports `gpu-check` and `fixtures --hardware-gpu <name>`. HDR output, physical input and performance targets require the corresponding reference hardware ([Windows](windows.md#test)). |
 | GTK runtime recipe or SDK setup | The source regressions in the [runtime guide](../../tools/build/gtk-runtime/README.md#build-and-validate) and the release workflow's Arch job; GPU journeys still run on the private display on hardware. |
 | Image codecs or color references | The affected Rust suites, the reference generators in `tools/validation/` as the Arch job in `.github/workflows/release-checks.yml` builds and runs them, and the [fuzz targets](#fuzzing-untrusted-input). The remaining ignored color tests need the pinned libavif 1.3.0 qualification SDK or external HEIF references. |
 | Dependencies or `Cargo.lock` | `cargo deny --locked check advisories licenses sources` ([publication](publication.md)). |
@@ -45,12 +45,13 @@ crates that a given machine may not be able to run.
 Select fixtures by the behavior and consumers a change affects, including callers
 outside the edited feature. Run every affected variant, with both themes and
 each affected input device. A single passing variant does not cover its family.
-Brush, blender and frame-path shader changes must complete a fine default Pencil stroke on a WARP CPU runner before pushing; use `layers:default` and its painted-thumbnail check.
+Brush, blender and frame-path shader changes must complete a fine default Pencil stroke on a WARP CPU runner before pushing; use `fixtures --warp layers:default` and its painted-thumbnail check.
 
-The fixture registry marks rows whose WARP first-dispatch or first-stroke submission
+UI fixtures run in shared GPU sessions by default. On `--warp`, the fixture registry
+marks rows whose WARP first-dispatch or first-stroke submission
 stall exceeds the fixture bound; production refuses software adapters. The runner
 routes those rows to one pool GPU VM at the CPU runners' 150% scale. New rows
-run on CPU runners. A hardware annotation requires recorded WARP-only stall
+run on CPU runners there. A hardware annotation requires recorded WARP-only stall
 evidence and hardware clearance of that stage, and hardware must reach at least
 as far as the row's furthest recorded WARP stage. Keep later failures as failures;
 never move a row to hardware to avoid a check that passes on WARP.

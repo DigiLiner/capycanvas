@@ -1,5 +1,6 @@
 """Once-only shared fixture claims and complete merged result coverage."""
 
+from collections import deque
 import json
 import math
 import secrets
@@ -12,12 +13,13 @@ class Queue:
     def __init__(self, selectors, runners, durations, plan):
         if not selectors or len(selectors) != len(set(selectors)):
             raise ValueError("Fixture selectors must be nonempty and distinct")
-        if not runners or len(runners) != len(set(runners)):
-            raise ValueError("Fixture runners must be nonempty and distinct")
+        if len(runners) != len(set(runners)):
+            raise ValueError("Fixture runners must be distinct")
         known = {name: value for name, value in durations.items()
                  if type(value) in (int, float) and math.isfinite(value) and value > 0}
         fallback = median(known.values()) if known else 1
-        self.remaining = iter(sorted(selectors, key=lambda name: -known.get(name, fallback)))
+        self.remaining = deque(sorted(selectors, key=lambda name: -known.get(name, fallback)))
+        self.draining = set()
         self.lock = Lock()
         self.selectors = selectors
         self.assignments = {runner: [] for runner in runners}
@@ -34,7 +36,7 @@ class Queue:
                     self.send_error(403)
                     return
                 with queue.lock:
-                    selector = next(queue.remaining, None)
+                    selector = queue.remaining.popleft() if queue.remaining and runner not in queue.draining else None
                     if selector is not None:
                         queue.assignments[runner].append(selector)
                         queue.save()
@@ -55,6 +57,21 @@ class Queue:
         temporary = self.plan.with_suffix(".tmp")
         temporary.write_text(json.dumps({"runs": self.selectors, "shards": self.assignments}, indent=2))
         temporary.replace(self.plan)
+
+    def add_runner(self, runner):
+        with self.lock:
+            if runner in self.tokens:
+                raise ValueError(f"Fixture runner already exists: {runner}")
+            self.tokens[runner] = secrets.token_urlsafe(32)
+            self.assignments[runner] = []
+
+    def pending(self):
+        with self.lock:
+            return len(self.remaining)
+
+    def drain(self, runner):
+        with self.lock:
+            self.draining.add(runner)
 
     def configuration(self, runner):
         return {"url": f"http://10.0.2.2:{self.server.server_port}/{runner}", "token": self.tokens[runner]}

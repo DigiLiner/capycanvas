@@ -8,7 +8,8 @@ param(
     [switch]$List,
     [ValidateSet('release','dev-perf')][string]$RustProfile='release',
     [ValidateRange(1,1440)][int]$TimeoutMinutes = 20,
-    [switch]$HardwareGpu
+    [switch]$HardwareGpu,
+    [switch]$SharedSession
 )
 $ErrorActionPreference = 'Stop'
 trap {
@@ -142,6 +143,7 @@ if($buildManifest -and ($buildManifest.profile -ne $RustProfile -or [bool]$build
 $controlBuilds=@{}
 $scripts = (Resolve-Path (Join-Path $PSScriptRoot '../../apps/layer-windows/scripts')).Path
 . (Join-Path $scripts 'CapyEnvironment.ps1')
+. (Join-Path $PSScriptRoot 'test-hardware-traces.ps1')
 function Get-FixtureVariantArguments([string]$Fixture,[string]$Option,[string]$Choice){
     if($Fixture -eq 'switcher-drag' -and $Option -eq 'ContextEnding'){'-ContextHoldOnly'}
     "-$Option";if($Choice){$Choice}
@@ -167,6 +169,10 @@ foreach ($script in Get-ChildItem (Join-Path $scripts 'exercise-*.ps1')) {
 foreach($hardwareSelector in @('idle-brush','idle-brush:light','touch-gestures','touch-gestures:Simple','touch-gestures:SimpleLight','touch-gestures:ThreeFinger','touch-gestures:layers','localization:ColorOnly','tool-variations:sketch','tool-variations:sketch-light','color-picker:light','tool-bubbles:EraserOnly','tool-bubbles:EraserLightOnly','tool-bubbles:blenders-dark','tool-bubbles:blenders-light','tool-bubbles:BlendersOnly','tool-bubbles:sliders-dark','tool-bubbles:sliders-light','tool-bubbles:SlidersOnly')){
     if(!$runs.Contains($hardwareSelector)){throw "Unknown hardware fixture: $hardwareSelector"}
     $runs[$hardwareSelector].hardware_gpu=$true
+}
+foreach($unrendered in @('tool-bubbles:ObserverOnly')){
+    if(!$runs.Contains($unrendered)){throw "Unknown unrendered fixture: $unrendered"}
+    $runs[$unrendered].renders=$false
 }
 function Get-FixtureProcessArguments([string]$Fixture,[string[]]$Arguments){
     if($Fixture -cne 'snap'){return $Arguments}
@@ -292,16 +298,17 @@ function Stop-Review {
     $owned | Stop-Process -Force
     $owned | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
 }
-function Save-Evidence([string]$Log) {
+function Save-Evidence([string]$Log,[bool]$Renders=$true) {
+    $rendered = $Renders -and $HardwareGpu -and !$controlFixture
     if (!(Test-Path "$Log-context.json")) {
-        if ($HardwareGpu) { throw "Missing fixture context: $Log-context.json" }
+        if ($rendered) { throw "Missing fixture context: $Log-context.json" }
         return
     }
     $context = Get-Content "$Log-context.json" -Raw | ConvertFrom-Json
     $evidence = "$Log-evidence"
     New-Item -ItemType Directory -Force $evidence | Out-Null
-    $owners = @($context.process_id) + @(Reviews | ForEach-Object Id)
-    $folders = @($context.trace_directory, $context.run, (Split-Path $Executable)) | Where-Object { $_ } | Select-Object -Unique
+    $owners = @($context.process_id) + @($context.windows | ForEach-Object { $_.process_id }) + @(Reviews | ForEach-Object Id)
+    $folders = @($context.trace_directory, $context.run, (Split-Path $Executable)) + @($context.windows | ForEach-Object { $_.trace_directory }) | Where-Object { $_ } | Select-Object -Unique
     foreach ($folder in $folders) {
         foreach ($owner in $owners | Where-Object { $_ } | Select-Object -Unique) {
             Get-ChildItem -LiteralPath $folder -File | Where-Object {
@@ -314,16 +321,13 @@ function Save-Evidence([string]$Log) {
         & robocopy.exe $context.run $evidence /E /R:0 /W:0 /NFL /NDL /NJH /NJS | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "Could not preserve fixture evidence: $($context.run)" }
     }
-    if($HardwareGpu){
+    if($rendered){
         $scales=@(Get-ChildItem -LiteralPath $evidence -Filter 'ui-state-*.json'|ForEach-Object {
             $snapshot=Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json
             @{file=$_.Name;process_id=$snapshot.process_id;window_id=$snapshot.window_id;scale=$snapshot.model.layout_input.cache.context.scale}
         })
         @{context_scales=$scales;expected_scale=$buildManifest.fixture_scale}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$Log-display.json"
         if($buildManifest.fixture_scale -and (!$scales.Count -or @($scales|Where-Object {$_.scale -ne $buildManifest.fixture_scale}).Count)){throw 'Hardware fixture runtime scale differs from the round display'}
-    }
-    if ($HardwareGpu -and $controlFixture -ne 'Popup') {
-        . (Join-Path $PSScriptRoot 'test-hardware-traces.ps1')
         Assert-HardwareTraces -Directory $evidence -Output "$Log-adapters.json"
     }
 }
@@ -385,7 +389,7 @@ $env:NO_COLOR = '1'
 Write-FixturePlan (Join-Path $Output 'plan.json') @(if(!$QueueConfig){$planned})
 $queue=if($QueueConfig){Get-Content -LiteralPath $QueueConfig -Raw|ConvertFrom-Json}else{$null}
 if($QueueConfig -and (!$queue.url -or !$queue.token)){throw 'The fixture queue configuration is incomplete.'}
-$env:CAPY_WAIT_SCALE = if($HardwareGpu){$null}else{'3'}
+$env:CAPY_WAIT_SCALE = if($HardwareGpu -and !$SharedSession){$null}else{'3'}
 $textScale=[pscustomobject]@{exists=$false;kind=$null;value=$null}
 Restore-FixtureTextScale $textScale
 $claimed=[Collections.Generic.List[string]]::new()
@@ -429,7 +433,7 @@ while($null -ne ($name=Get-NextFixture $planned $queue $claimed)){
       }
       try {
         if ($exit -ne 0 -and !(Test-Path "$log.png")) { Save-Screen "$log.png" }
-        Save-Evidence $log
+        Save-Evidence $log ($runs[$run.Key].renders -ne $false)
       } catch { $exit = 'evidence'; $message += " $($_.Exception.Message)" }
     } finally {
         if($textScale){try{Restore-FixtureTextScale $textScale}catch{$cleanupError=$_.Exception.Message}}

@@ -38,7 +38,7 @@ class ShardTests(unittest.TestCase):
             self.assertEqual([self.request(queue, "r1") for _ in range(3)], ["a", "c", "b"])
         with self.queue(["a", "b"], durations={"a": float("nan"), "b": -1}) as queue:
             self.assertEqual([self.request(queue, "r1") for _ in range(2)], ["a", "b"])
-        for selectors, runners in (([], ["r1"]), (["a", "a"], ["r1"]), (["a"], []), (["a"], ["r1", "r1"])):
+        for selectors, runners in (([], ["r1"]), (["a", "a"], ["r1"]), (["a"], ["r1", "r1"])):
             with self.subTest(selectors=selectors, runners=runners), self.assertRaises(ValueError):
                 self.queue(selectors, runners)
 
@@ -68,6 +68,27 @@ class ShardTests(unittest.TestCase):
             self.assertEqual(next(row for row in rows if row["name"] == missing)["exit"], "missing")
             self.assertTrue(any("claim response or runner was lost" in error for error in errors))
             self.assertIsNone(self.request(queue, "r0"))
+
+    def test_draining_runner_stops_claiming_while_others_finish_the_queue(self):
+        with self.queue(["a", "b", "c"], durations=dict(a=3, b=2, c=1)) as queue:
+            self.assertEqual(queue.pending(), 3)
+            self.assertEqual(self.request(queue, "r1"), "a")
+            queue.drain("r1")
+            self.assertIsNone(self.request(queue, "r1"))
+            self.assertEqual(queue.pending(), 2)
+            self.assertEqual([self.request(queue, "r2") for _ in range(2)], ["b", "c"])
+            self.assertEqual(queue.assignments, {"r1": ["a"], "r2": ["b", "c"]})
+
+    def test_runners_can_join_with_their_own_credentials(self):
+        with self.queue(["a", "b"], runners=[]) as queue:
+            queue.add_runner("lease-1")
+            self.assertEqual(self.request(queue, "lease-1"), "a")
+            queue.drain("lease-1")
+            queue.add_runner("lease-2")
+            self.assertEqual(self.request(queue, "lease-2"), "b")
+            self.assertEqual(queue.assignments, {"lease-1": ["a"], "lease-2": ["b"]})
+            with self.assertRaises(ValueError):
+                queue.add_runner("lease-1")
 
     def shard(self, name, selectors):
         return {"vm": name, "selectors": selectors, "complete": True,

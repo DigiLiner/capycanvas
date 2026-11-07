@@ -484,7 +484,7 @@ class RunnerVmTests(unittest.TestCase):
         record = {"profile": "dev-perf", "hardware_gpu": False, "controls": {}}
         result = {"vm": self.primary.name, "results": [{"name": "navigator", "exit": 0}],
                   "complete": True, "failure": None, "plan": {"runs": ["navigator"]}}
-        args = SimpleNamespace(names=["navigator:default"], runners=None, keep_runners=False,
+        args = SimpleNamespace(names=["navigator:default"], runners=None, keep_runners=False, warp=True,
                                hardware_gpu=False, no_build=False, profile="dev-perf", timeout_minutes=20)
         with patch.object(vm, "ARTIFACTS", self.root / "plain"), \
                 patch.object(vm, "selected", return_value=self.primary), \
@@ -516,7 +516,7 @@ class RunnerVmTests(unittest.TestCase):
 
     def test_actual_primary_memory_is_admitted_before_any_boot(self):
         self.primary.directory.mkdir()
-        args = SimpleNamespace(names=["navigator:default"], runners=None, keep_runners=False,
+        args = SimpleNamespace(names=["navigator:default"], runners=None, keep_runners=False, warp=True,
                                hardware_gpu=False, no_build=False, profile="release", timeout_minutes=20)
         for memory, gib in (("32G", 32), ("64G", 64)):
             with self.subTest(memory=memory), \

@@ -2,15 +2,24 @@
 
 [Windows development](windows.md) · [Developer guide](README.md)
 
-`tools/windows-vm/windows-vm.py` runs Windows 11 Enterprise evaluation VMs under
-QEMU/KVM. The default VMs use Windows' software D3D12 adapter (WARP). An optional
-[GPU pool](#hardware-gpu-pool) gives each running hardware VM one exclusive card.
-The table below describes the default WARP configuration:
+`tools/windows-vm/windows-vm.py` runs Windows evaluation VMs under QEMU/KVM. A
+worktree's own VM runs Windows 11 Enterprise on Windows' software D3D12 adapter
+(WARP) and builds the app. UI fixtures run by default in
+[shared GPU sessions](#shared-gpu-sessions), where agents share Windows Server VMs
+that each own one pool card. Choose a fixture mode by what you need to test:
+
+| Mode | Command | Use it for |
+| --- | --- | --- |
+| Shared GPU sessions (default) | `fixtures [names]` | UI structure, shared state, injected input and rendered journeys, from one row to the full matrix |
+| WARP CPU runners | `fixtures --warp [names]`, `fixtures --runners N [names]` | Shader and frame-path changes that must complete on WARP, the 8 GiB memory limit of a runner, or when no card is free |
+| Exclusive GPU VM | `fixtures --hardware-gpu [names]`, `gpu-check` | The renderer suite, Windows 11, a real console desktop or a whole card |
+
+The table below describes what the worktree's own VM can run without a GPU:
 
 | Runs in a VM | Needs a hardware GPU |
 | --- | --- |
 | `check`: the build, native input tests and Rust unit tests, including the GPU-backed `layer-host` tests and the D3D12 document, tab and filter-package tests | `layer-render-wgpu` unit tests, which time out and exceed pixel tolerances on WARP |
-| `fixtures`: native UI fixtures except marked registry rows | ignored `layer-windows` tests that remove devices, the HDR document test and the color import/export round trip |
+| `fixtures --warp`: native UI fixtures except marked registry rows | ignored `layer-windows` tests that remove devices, the HDR document test and the color import/export round trip |
 | | `tools/performance` scripts, PresentMon, physical pens and touch screens, HDR output, multiple displays and visual parity captures |
 
 Requirements: x86_64 Linux with KVM, Python 3, about 150 GB of free disk space for
@@ -21,7 +30,7 @@ packages automatically on Fedora, Ubuntu/Debian and Arch.
 tools/windows-vm/windows-vm.py setup     # packages, KVM access, ISO download
 tools/windows-vm/windows-vm.py create    # unattended Windows and toolchain install
 tools/windows-vm/windows-vm.py check     # sync, build and run GPU-free tests
-tools/windows-vm/windows-vm.py fixtures  # sync, build and run the UI fixtures on WARP
+tools/windows-vm/windows-vm.py fixtures --warp  # sync, build and run the UI fixtures on WARP
 ```
 
 `setup` downloads the evaluation ISO into your downloads folder unless it is
@@ -72,8 +81,8 @@ tools/windows-vm/windows-vm.py ssh 'cd C:\capycanvas; cargo clippy --locked -p l
 | `list` | Show the VMs and which are running. |
 | `ssh [command]` | Open PowerShell, or run a command, as the `capy` administrator. |
 | `sync` | Copy the working tree without building. |
-| `fixtures [name ...]` | Run UI fixtures, routing marked rows to one owned GPU VM; see below. |
-| `fixtures --runners N [name ...]`, `runners [--reset]` | Shard CPU fixtures over reserved runners, with marked rows on one owned GPU VM; list reservations or delete stopped runners owned by this worktree. |
+| `fixtures [name ...]`, `sessions` | Run UI fixtures in [shared GPU sessions](#shared-gpu-sessions); show those VMs, their sessions and the runs sharing them. |
+| `fixtures --warp [name ...]`, `fixtures --runners N [name ...]`, `runners [--reset]` | Shard CPU fixtures over reserved runners, with marked rows on one owned GPU VM; list reservations or delete stopped runners owned by this worktree. |
 | `screenshot <file.png>` | Save the VM display. |
 | `reset` | Delete the VM; the next `start` makes a fresh one. |
 | `destroy` | Delete the base image and every VM; the ISO stays. Stop the VMs first. |
@@ -96,9 +105,63 @@ Windows Update is disabled so the VMs keep the ISO's build. The evaluation
 licence expires 90 days after `create`; stop every VM, then run `destroy` and
 `create` to renew it.
 
+## Shared GPU sessions
+
+Set up the shared image once per host. It needs FreeRDP's X11 client and Xvfb;
+without root, unpack those packages under `<state>/rdp-client/usr`.
+
+```sh
+tools/windows-vm/windows-vm.py setup --server   # packages and the Windows Server ISO
+tools/windows-vm/windows-vm.py create --server  # about 20 minutes, unattended
+```
+
+Then `fixtures` needs no reservation, from any worktree and any number of agents
+at once:
+
+```sh
+tools/windows-vm/windows-vm.py fixtures smoke navigator
+tools/windows-vm/windows-vm.py fixtures --workers 4 layers
+tools/windows-vm/windows-vm.py sessions
+```
+
+The worktree's own VM builds the hardware app and any control fixtures. The VMs
+`shared-gpu-1` and `shared-gpu-2` then run the fixtures, one Remote Desktop session
+per fixture at a time. Each VM runs Windows Server 2025 and holds one whole pool
+card and eight CPU slots (32 vCPU / 64 GiB), so both leave eight WARP runners in a
+96-vCPU pool. Fifteen sessions fit on a VM; a sixteenth exhausts desktop resources.
+`gpu-pool.json` can set `{"shared": {"vms", "sessions", "cpu_slots", "idle_minutes"}}`;
+each VM is its own owner in `cpu-pool.json`, so `per_owner_limit` must allow its `cpu_slots`.
+
+A run starts the first VM when it needs one and the second only when total demand
+exceeds the first. A VM stops after 10 minutes with no leased session, releasing its
+card and slots; `--vm shared-gpu-N stop` stops an idle one sooner. `start` warms one.
+If no card or slot is free, the run keeps waiting for 30 minutes and then fails
+with the reason; it never falls back to WARP.
+
+Running fixture lists share sessions fairly: a run that needs little gets all it
+needs and larger runs split the rest. A run grows when sessions free up, and it
+gives one back after that session's current fixture when another run needs it, so
+a short list started during a full round begins within minutes. `--workers N` caps
+a run. Each session is its own Windows account, desktop, clipboard and user
+settings, with its own copy of the run's source and binaries.
+
+Each fixture must leave hardware-adapter evidence and report 150% scale. Sessions
+run at 2560 × 1600 with the same three-times `CAPY_WAIT_SCALE` as WARP, because 15
+apps starting together need about 14 s for their first shaders. Sessions are virtual
+displays with no vsync target, so they do not measure frame rate or presentation.
+
+The merged output under `<artifacts>/<primary>/shared-<timestamp>` holds `plan.json`,
+`results.jsonl`, `shards.json`, `summary.json` and `provenance.json`, with each
+lease's evidence and crash dumps under `sessions/`. A lost session reports its
+claimed selector as missing, and its account takes no more work in that run.
+
+The evaluation licence lasts 180 days and Remote Desktop's unlicensed grace period
+120 days from `create --server`. To renew, wait until `sessions` shows no runs, stop
+both VMs, then run `destroy --server` and `create --server`.
+
 ## CPU runner pool
 
-Use pooled CPU runners for fixture lists with more than a few selectors:
+Use pooled CPU runners for WARP fixture lists with more than a few selectors:
 
 ```sh
 tools/windows-vm/windows-vm.py runners
@@ -150,7 +213,7 @@ below.
 
 An agent claims one free GPU when its VM starts and releases it when the VM shuts
 down. Cards stay bound to VFIO between guests. Assignment happens at boot;
-hot-attach is not implemented. Ordinary `start`, `check` and `fixtures` keep their
+hot-attach is not implemented. Ordinary `start` and `check` keep their
 software-adapter behaviour unless hardware mode is requested.
 Keep a native GPU outside the pool for the desktop and Linux applications to
 share. A passed-through card belongs exclusively to its guest until shutdown.
@@ -315,7 +378,7 @@ not a RAM-backed `/tmp`.
 
 ## UI fixtures on the software adapter
 
-For CPU rows, `fixtures` syncs and builds Release with `build.ps1 -SoftwareAdapterTests` into
+For CPU rows, `fixtures --warp` syncs and builds Release with `build.ps1 -SoftwareAdapterTests` into
 `artifacts\windows\SoftwareAdapter`, and runs
 [`run-fixtures.ps1`](../../tools/windows-vm/run-fixtures.ps1) in the VM's desktop
 session through a scheduled task, because SSH sessions cannot use UI Automation
@@ -348,8 +411,8 @@ full dark/light pair. A bare `canvas-editing` includes the focused variants too.
 
 Name fixtures (`layers`) or single variants (`header:pen`). A bare name includes all its variants;
 `localization:default` selects only the default dark, normal-text run. Split long
-matrices with `fixtures --runners N` within the [CPU pool](#cpu-runner-pool) budget.
-The registry marks hardware rows under the [validation rule](testing.md#windows-validation-scope); new rows default to CPU. With no names it runs `shortcuts`
+WARP matrices with `fixtures --runners N` within the [CPU pool](#cpu-runner-pool) budget.
+On `--warp`, the registry marks hardware rows under the [validation rule](testing.md#windows-validation-scope); new rows default to CPU there. With no names it runs `shortcuts`
 and every fixture that launches its own app, once with its defaults and once for
 each switch and each other `ValidateSet` choice, including document GPU recovery
 and exhausted recovery. The isolated removal hook drains rendering and
@@ -371,11 +434,11 @@ command. The runner removes duplicate selections. For the full matrix, omit all
 fixture names:
 
 ```sh
-tools/windows-vm/windows-vm.py fixtures --runners 6 smoke navigator
-tools/windows-vm/windows-vm.py fixtures --runners 6
+tools/windows-vm/windows-vm.py fixtures smoke navigator
+tools/windows-vm/windows-vm.py fixtures
 ```
 
-Use the available CPU pool capacity. Check that the merged results cover every
+Check that the merged results cover every
 selector in `plan.json`, and keep first-attempt failures even when a diagnostic
 rerun passes.
 

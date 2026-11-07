@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage Windows 11 evaluation VMs that build the Windows client and run its tests.
+"""Manage Windows evaluation VMs that build the Windows client and run its tests.
 
 See docs/development/windows-vm.md.
 """
@@ -7,7 +7,7 @@ See docs/development/windows-vm.md.
 import argparse
 import base64
 from contextlib import contextmanager, nullcontext, ExitStack
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 import fcntl
 import getpass
 import hashlib
@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import re
+from threading import Lock
 import resource
 import secrets
 import shlex
@@ -32,12 +33,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gpu_pool
 import cpu_pool
 import fixture_shards
+import session_pool
 
 
 ROOT = Path(__file__).resolve().parents[2]
 GUEST_FILES = Path(__file__).resolve().parent
 PROGRAM = sys.argv[0]
 ISO_URL = "https://aka.ms/Win11E-ISO-25H2-en-us"
+SERVER_ISO_URL = "https://aka.ms/WinServ2025iso-enus"
 STATE = Path(os.environ.get("CAPYCANVAS_VM_DIR") or Path(
     os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "capycanvas/windows-vm")
 RUNTIME = Path(os.environ["CAPYCANVAS_VM_RUNTIME"]) if os.environ.get("CAPYCANVAS_VM_RUNTIME") else (
@@ -64,11 +67,25 @@ KNOWN_HOSTS = STATE / "known_hosts"
 PASSWORD = STATE / "password"
 INSTALL = STATE / "install"
 BASE = STATE / "base"
+SERVER_ISO_RECORD = STATE / "iso-server"
+SERVER_PASSWORD = STATE / "password-server"
+SERVER_INSTALL = STATE / "install-server"
+SERVER_BASE = STATE / "base-server"
 VMS = STATE / "vms"
 LEGACY_RUN = STATE / "run"
 LEGACY_PID = STATE / "qemu.pid"
 VM_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+SHARED_PREFIX = "shared-gpu-"
+SHARED_DISPLAY = "2560x1600"
+SHARED_ROOT = "C:\\capyrun"
+SHARED_OWNER = STATE / "shared-gpu"
+RDP_CLIENT = STATE / "rdp-client/usr"
 COMMANDS = ("qemu-system-x86_64", "qemu-img", "swtpm", "xorriso", "ssh", "ssh-keygen", "curl")
+SERVER_PACKAGES = {
+    "fedora": [["dnf", "install", "-y", "freerdp", "xorg-x11-server-Xvfb"]],
+    "debian": [["apt-get", "install", "-y", "freerdp3-x11", "xvfb"]],
+    "arch": [["pacman", "-S", "--needed", "--noconfirm", "freerdp", "xorg-server-xvfb"]],
+}
 PACKAGES = {
     "fedora": [["dnf", "install", "-y", "qemu-system-x86", "qemu-img", "qemu-ui-gtk", "edk2-ovmf",
                 "swtpm", "xorriso", "openssh-clients", "curl"]],
@@ -86,15 +103,18 @@ EXTRACT = f"tar -xmf - -C {GUEST_REPO}; exit $LASTEXITCODE"
 
 
 class Machine:
-    def __init__(self, name, directory):
+    def __init__(self, name, directory, server=None):
         self.name = name
         self.directory = directory
+        self.server = name.startswith(SHARED_PREFIX) if server is None else server
+        self.base = SERVER_BASE if self.server else BASE
         self.runtime = RUNTIME / name
         self.qmp_socket = self.runtime / "qmp.sock"
         self.tpm_socket = self.runtime / "swtpm.sock"
         self.qemu_pid = self.runtime / "qemu.pid"
         self.tpm_pid = self.runtime / "swtpm.pid"
         self.ssh_port = self.runtime / "ssh-port"
+        self.rdp_port = self.runtime / "rdp-port"
         self.prepared = directory / "prepared"
         self.gpu = directory / "gpu"
         self.runner = directory / "runner.json"
@@ -102,6 +122,10 @@ class Machine:
 
 def installer():
     return Machine(".install", INSTALL)
+
+
+def server_installer():
+    return Machine(".install-server", SERVER_INSTALL, server=True)
 
 
 def machines():
@@ -167,13 +191,17 @@ def ready():
     return "gtk" in displays.split() and firmware() is not None
 
 
-def install_packages():
-    if ready():
-        return
+def package_family():
     release = dict(line.split("=", 1) for line in Path("/etc/os-release").read_text().splitlines()
                    if "=" in line)
     distributions = f"{release.get('ID', '')} {release.get('ID_LIKE', '')}".replace('"', "").split()
-    family = next((name for name in PACKAGES if name in distributions), None)
+    return next((name for name in PACKAGES if name in distributions), None)
+
+
+def install_packages():
+    if ready():
+        return
+    family = package_family()
     if family is None:
         sys.exit("Install QEMU with its GTK display, OVMF, swtpm, xorriso, OpenSSH and curl, "
                  "then rerun setup.")
@@ -182,6 +210,27 @@ def install_packages():
         run(*sudo, *command)
     if not ready():
         sys.exit("QEMU, swtpm, xorriso, OpenSSH, curl or Secure Boot OVMF firmware is still missing.")
+
+
+def rdp_tools():
+    private = RDP_CLIENT / "bin"
+    def tool(*names):
+        return next((found for name in names for found in (shutil.which(name), private / name)
+                     if found and Path(found).exists()), None)
+    return tool("xfreerdp", "xfreerdp3"), tool("Xvfb")
+
+
+def install_server_packages():
+    if all(rdp_tools()):
+        return
+    family = package_family()
+    if family is None:
+        sys.exit("Install FreeRDP's X11 client and Xvfb, then rerun setup --server.")
+    sudo = [] if os.geteuid() == 0 else ["sudo"]
+    for command in SERVER_PACKAGES[family]:
+        run(*sudo, *command)
+    if not all(rdp_tools()):
+        sys.exit("FreeRDP's X11 client or Xvfb is still missing.")
 
 
 def ensure_kvm_access():
@@ -202,12 +251,12 @@ def downloads():
     return Path.home() / "Downloads"
 
 
-def download_iso():
-    url = run("curl", "-fsSIL", "-o", "/dev/null", "-w", "%{url_effective}", ISO_URL,
+def download_iso(source=ISO_URL):
+    url = run("curl", "-fsSIL", "-o", "/dev/null", "-w", "%{url_effective}", source,
               capture_output=True, text=True).stdout
     name = unquote(Path(urlparse(url).path).name)
     if not name.endswith(".iso"):
-        sys.exit(f"{ISO_URL} did not redirect to an ISO: {url}")
+        sys.exit(f"{source} did not redirect to an ISO: {url}")
     iso = downloads() / name
     if not iso.exists():
         iso.parent.mkdir(parents=True, exist_ok=True)
@@ -218,17 +267,20 @@ def download_iso():
 
 
 def setup(args):
+    server = getattr(args, "server", False)
     install_packages()
+    if server:
+        install_server_packages()
     ensure_kvm_access()
-    iso = args.iso.resolve() if args.iso else download_iso()
+    iso = args.iso.resolve() if args.iso else download_iso(SERVER_ISO_URL if server else ISO_URL)
     if not iso.is_file():
         sys.exit(f"{iso} is not a file.")
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     STATE.chmod(0o700)
     if shutil.which("chattr"):
         subprocess.run(["chattr", "+C", STATE], stderr=subprocess.DEVNULL)
-    ISO_RECORD.write_text(f"{iso}\n")
-    print(f"Windows ISO: {iso}\nNext: {PROGRAM} create")
+    (SERVER_ISO_RECORD if server else ISO_RECORD).write_text(f"{iso}\n")
+    print(f"Windows ISO: {iso}\nNext: {PROGRAM} create{' --server' if server else ''}")
 
 
 def process(pidfile, name):
@@ -285,12 +337,12 @@ def qmp(machine, command, **arguments):
         return reply["return"]
 
 
-def forwarded_ssh_port(machine):
+def forwarded_port(machine, guest_port):
     output = qmp(machine, "human-monitor-command", **{"command-line": "info usernet"})
-    ports = re.findall(r"^\s*TCP\[HOST_FORWARD\]\s+\d+\s+127\.0\.0\.1\s+(\d+)\s+10\.0\.2\.15\s+22(?:\s|$)",
+    ports = re.findall(rf"^\s*TCP\[HOST_FORWARD\]\s+\d+\s+127\.0\.0\.1\s+(\d+)\s+10\.0\.2\.15\s+{guest_port}(?:\s|$)",
                        output or "", re.MULTILINE)
     if len(ports) != 1 or not 0 < int(ports[0]) <= 65535:
-        sys.exit(f"QEMU did not report one bound SSH forwarding port for {machine.name}.")
+        sys.exit(f"QEMU did not report one bound port {guest_port} forward for {machine.name}.")
     return int(ports[0])
 
 
@@ -315,7 +367,8 @@ def launch(machine, cdroms=(), gui=False, gpu=None, reservations=(), cpus=None, 
         "-device", "tpm-crb,tpmdev=tpm",
         "-drive", f"if=none,id=disk,format=qcow2,discard=unmap,file={machine.directory / 'disk.qcow2'}",
         "-device", "nvme,drive=disk,serial=capycanvas,bootindex=0",
-        "-netdev", "user,id=net,hostfwd=tcp:127.0.0.1:0-:22", "-device", "e1000e,netdev=net",
+        "-netdev", "user,id=net,hostfwd=tcp:127.0.0.1:0-:22" + (",hostfwd=tcp:127.0.0.1:0-:3389" if machine.server else ""),
+        "-device", "e1000e,netdev=net",
         "-device", "qemu-xhci", "-device", "usb-tablet", "-device", VGA,
         "-qmp", f"unix:{machine.qmp_socket},server=on,wait=off", "-display", "gtk" if gui else "none",
         "-daemonize", "-pidfile", machine.qemu_pid,
@@ -343,13 +396,19 @@ def launch(machine, cdroms=(), gui=False, gpu=None, reservations=(), cpus=None, 
         raise
     if machine.qemu_pid.exists():
         machine.launched_pid = int(machine.qemu_pid.read_text())
-    machine.ssh_port.write_text(f"{forwarded_ssh_port(machine)}\n")
+    machine.ssh_port.write_text(f"{forwarded_port(machine, 22)}\n")
+    if machine.server:
+        machine.rdp_port.write_text(f"{forwarded_port(machine, 3389)}\n")
+
+
+def host_alias(machine):
+    return "capycanvas-windows-server" if getattr(machine, "server", False) else "capycanvas-windows-vm"
 
 
 def ssh_command(machine, *remote):
     return ["ssh", "-i", str(KEY), "-p", machine.ssh_port.read_text().strip(), "-o", "IdentitiesOnly=yes",
             "-o", "BatchMode=yes", "-o", f"UserKnownHostsFile={KNOWN_HOSTS}",
-            "-o", "StrictHostKeyChecking=accept-new", "-o", "HostKeyAlias=capycanvas-windows-vm",
+            "-o", "StrictHostKeyChecking=accept-new", "-o", f"HostKeyAlias={host_alias(machine)}",
             "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=8",
             "-o", "LogLevel=ERROR", f"{USER}@127.0.0.1", *remote]
 
@@ -381,40 +440,54 @@ def wait_for_ssh(machine, timeout):
         time.sleep(5)
 
 
+def server_unattend(text):
+    administrator = ("<AdministratorPassword><Value>@PASSWORD@</Value><PlainText>true</PlainText></AdministratorPassword>\n"
+                     "        <LocalAccounts>")
+    if text.count("<Value>1</Value>") != 1 or text.count("<LocalAccounts>") != 1:
+        raise ValueError("The answer file no longer has one image index and one account list")
+    return text.replace("<Value>1</Value>", "<Value>2</Value>").replace("<LocalAccounts>", administrator)
+
+
 def create(args):
-    if (BASE / "disk.qcow2").exists():
-        sys.exit(f"The base image already exists; run `{PROGRAM} destroy` to rebuild it.")
-    machine = installer()
+    server = getattr(args, "server", False)
+    flag = " --server" if server else ""
+    machine = server_installer() if server else installer()
+    base, install = (SERVER_BASE, SERVER_INSTALL) if server else (BASE, INSTALL)
+    record, password_file = (SERVER_ISO_RECORD, SERVER_PASSWORD) if server else (ISO_RECORD, PASSWORD)
+    if (base / "disk.qcow2").exists():
+        sys.exit(f"The base image already exists; run `{PROGRAM} destroy{flag}` to rebuild it.")
     if running(machine):
         sys.exit("A base image install is running.")
-    iso = Path(ISO_RECORD.read_text().strip()) if ISO_RECORD.exists() else None
+    iso = Path(record.read_text().strip()) if record.exists() else None
     if iso is None or not iso.is_file():
-        sys.exit(f"The Windows ISO is missing; run `{PROGRAM} setup`.")
+        sys.exit(f"The Windows ISO is missing; run `{PROGRAM} setup{flag}`.")
     selected_firmware = firmware()
     if selected_firmware is None:
         sys.exit(f"No Secure Boot OVMF firmware was found; run `{PROGRAM} setup`.")
     STATE.chmod(0o700)
     FIRMWARE.write_text(json.dumps(selected_firmware))
-    remove(INSTALL)
-    seed = INSTALL / "seed"
-    (INSTALL / "tpm").mkdir(parents=True)
+    remove(install)
+    seed = install / "seed"
+    (install / "tpm").mkdir(parents=True)
     seed.mkdir()
-    shutil.copyfile(selected_firmware["vars"], INSTALL / "efivars")
-    run("qemu-img", "create", "-q", "-f", "qcow2", INSTALL / "disk.qcow2", DISK_SIZE)
+    shutil.copyfile(selected_firmware["vars"], install / "efivars")
+    run("qemu-img", "create", "-q", "-f", "qcow2", install / "disk.qcow2", DISK_SIZE)
     if not KEY.exists():
         run("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "capycanvas-windows-vm", "-f", KEY)
-    password = secrets.token_urlsafe(18)
-    write_private(PASSWORD, f"{password}\n")
-    unattend = (GUEST_FILES / "autounattend.xml").read_text().replace("@PASSWORD@", password)
+    password = secrets.token_urlsafe(18) + ("aA1!" if server else "")
+    write_private(password_file, f"{password}\n")
+    unattend = (GUEST_FILES / "autounattend.xml").read_text()
+    unattend = (server_unattend(unattend) if server else unattend).replace("@PASSWORD@", password)
     write_private(seed / "autounattend.xml", unattend)
-    for name in ("bootstrap.ps1", "provision.ps1", "prepare.ps1"):
+    for name in ("bootstrap.ps1", "prepare.ps1"):
         shutil.copy(GUEST_FILES / name, seed)
+    shutil.copy(GUEST_FILES / ("provision-server.ps1" if server else "provision.ps1"), seed / "provision.ps1")
     shutil.copy(KEY.with_suffix(".pub"), seed / "administrators_authorized_keys")
     image = run("xorriso", "-as", "mkisofs", "-quiet", "-J", "-joliet-long", "-r", "-V", SEED_LABEL,
-                "-o", INSTALL / "seed.iso", seed, capture_output=True, text=True, check=False)
+                "-o", install / "seed.iso", seed, capture_output=True, text=True, check=False)
     if image.returncode:
         sys.exit(image.stderr)
-    launch(machine, [iso, INSTALL / "seed.iso"], args.gui)
+    launch(machine, [iso, install / "seed.iso"], args.gui)
     print("Installing Windows and the build tools; this takes a while.", flush=True)
     for _ in range(30):
         qmp(machine, "send-key", keys=[{"type": "qcode", "data": "ret"}])
@@ -423,10 +496,10 @@ def create(args):
     guest(machine, f"& ('{{0}}:\\provision.ps1' -f (Get-Volume -FileSystemLabel {SEED_LABEL}).DriveLetter)")
     stop_machine(machine)
     remove(seed)
-    remove(INSTALL / "seed.iso")
-    INSTALL.rename(BASE)
-    (BASE / "disk.qcow2").chmod(0o444)
-    print(f"Created the base image. Next: {PROGRAM} check")
+    remove(install / "seed.iso")
+    install.rename(base)
+    (base / "disk.qcow2").chmod(0o444)
+    print(f"Created the base image. Next: {PROGRAM} {'fixtures' if server else 'check'}")
 
 
 def restart(machine):
@@ -446,6 +519,10 @@ def restart(machine):
 
 def prepare(machine):
     script = (GUEST_FILES / "prepare.ps1").read_text()
+    if machine.server:
+        accounts = ",".join(f"'{account}'" for account in shared_accounts())
+        script += (f"\n$sharedAccounts=@({accounts})\n$sharedPassword='{SERVER_PASSWORD.read_text().strip()}'\n"
+                   + (GUEST_FILES / "prepare-shared.ps1").read_text())
     digest = hashlib.sha256(f"{VGA}\n{script}".encode()).hexdigest()
     if machine.prepared.exists() and machine.prepared.read_text().strip() == digest:
         return
@@ -478,15 +555,19 @@ def boot_locked(machine, gui, gpu):
         if machine.gpu.exists():
             prepare_gpu_display(machine)
         return
-    if not (BASE / "disk.qcow2").exists():
-        sys.exit(f"The base image does not exist; run `{PROGRAM} create`.")
+    if not (machine.base / "disk.qcow2").exists():
+        sys.exit(f"The base image does not exist; run `{PROGRAM} create{' --server' if machine.server else ''}`.")
     if gpu and resource.getrlimit(resource.RLIMIT_MEMLOCK)[0] != resource.RLIM_INFINITY:
         sys.exit("GPU VMs require unlimited locked memory; use start --gpu after the host GPU setup.")
     with ExitStack() as reservations:
         device = None
         descriptors = ()
         cpus, memory = None, None
-        if runner or gpu and os.environ.get("CAPYCANVAS_VM_ROUND_GPU") == "1":
+        if machine.server:
+            slot, descriptors = reservations.enter_context(cpu_pool.reserve(
+                STATE, machine.name, SHARED_OWNER / machine.name, slot_count=shared_settings()["cpu_slots"]))
+            cpus, memory = slot.cpus, slot.memory
+        elif runner or gpu and os.environ.get("CAPYCANVAS_VM_ROUND_GPU") == "1":
             slot, descriptors = reservations.enter_context(cpu_pool.reserve(
                 STATE, machine.name, ROOT, slot_count=1 if runner else 2))
             cpus, memory = slot.cpus, slot.memory
@@ -500,8 +581,8 @@ def boot_locked(machine, gui, gpu):
             if runner and fresh.exists():
                 sys.exit(f"An unfinished runner disk exists at {fresh}; inspect it before starting again.")
             remove(fresh)
-            shutil.copytree(BASE, fresh, ignore=shutil.ignore_patterns("disk.qcow2"))
-            run("qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", BASE / "disk.qcow2",
+            shutil.copytree(machine.base, fresh, ignore=shutil.ignore_patterns("disk.qcow2"))
+            run("qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", machine.base / "disk.qcow2",
                 fresh / "disk.qcow2")
             fresh.rename(machine.directory)
         if runner:
@@ -614,6 +695,10 @@ $result|ConvertTo-Json -Depth 5
 
 def start(args):
     machine = selected(args)
+    if machine.server:
+        start_shared_vm(machine)
+        print(f"Starting the {machine.name} VM; `{PROGRAM} sessions` shows when it is ready.")
+        return
     gpu = getattr(args, "gpu", None)
     if gpu and not running(machine) and not os.environ.get("CAPYCANVAS_VM_GPU_SERVICE"):
         start_gpu_service(machine, args)
@@ -690,6 +775,14 @@ def stop_machine(machine):
 
 def stop(args):
     machine = selected(args)
+    if machine.server:
+        with shared_pool().closed(machine.name, shared_accounts()) as closed:
+            if not closed:
+                sys.exit(f"Fixture runs hold sessions on {machine.name}; it stops by itself when they finish.")
+            run("systemctl", "--user", "stop", shared_unit(machine), check=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stop_machine(machine)
+        return
     stop_machine(machine)
     if not os.environ.get("CAPYCANVAS_VM_GPU_SERVICE"):
         run("systemctl", "--user", "stop", gpu_unit(machine), check=False,
@@ -813,19 +906,19 @@ def check(args):
                    f"-Configuration {configuration}")
 
 
-def desktop(machine, arguments):
+def desktop(machine, arguments, user=USER, task=DESKTOP_TASK, directory=GUEST_REPO):
     guest_script(machine, f"""$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $deadline = (Get-Date).AddMinutes(2)
-while (!(Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue | Where-Object UserName -Like '*\\{USER}')) {{
+while (!(Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue | Where-Object UserName -Like '*\\{user}')) {{
     if ((Get-Date) -ge $deadline) {{ throw 'The interactive desktop did not start.' }}
     Start-Sleep 2
 }}
-$action = New-ScheduledTaskAction -Execute conhost.exe -Argument '"{GUEST_PWSH}" -NoProfile -Sta -ExecutionPolicy Bypass {arguments}' -WorkingDirectory '{GUEST_REPO}'
-$principal = New-ScheduledTaskPrincipal -UserId {USER} -LogonType Interactive -RunLevel Limited
+$action = New-ScheduledTaskAction -Execute conhost.exe -Argument '"{GUEST_PWSH}" -NoProfile -Sta -ExecutionPolicy Bypass {arguments}' -WorkingDirectory '{directory}'
+$principal = New-ScheduledTaskPrincipal -UserId {user} -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
-Register-ScheduledTask {DESKTOP_TASK} -Action $action -Principal $principal -Settings $settings -Force | Out-Null
-Start-ScheduledTask {DESKTOP_TASK}
+Register-ScheduledTask {task} -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask {task}
 """, timeout=180)
 
 
@@ -919,8 +1012,8 @@ def fixture_build(machine, hashes, no_build, hardware, profile="release", contro
     return directory, record
 
 
-def retrieve(machine, root, name):
-    local = ARTIFACTS / machine.name
+def retrieve(machine, root, name, local=None):
+    local = local or ARTIFACTS / machine.name
     local.mkdir(parents=True, exist_ok=True)
     fetch = subprocess.Popen(ssh_command(machine, f"tar -cf - -C {root} {name}"), stdout=subprocess.PIPE)
     run("tar", "-xf", "-", "-C", local, stdin=fetch.stdout)
@@ -1073,10 +1166,16 @@ def execute_fixtures(machine, args, directory, provenance, names, queue=None):
 def fixtures(args):
     if getattr(args, "keep_runners", False) and getattr(args, "runners", None) is None:
         raise ValueError("--keep-runners requires --runners")
-    if not getattr(args, "hardware_gpu", False):
-        return sharded_fixtures(args)
-    if getattr(args, "runners", None) is not None:
+    warp = getattr(args, "warp", False) or getattr(args, "runners", None) is not None
+    hardware = getattr(args, "hardware_gpu", False)
+    if hardware and warp:
         raise ValueError("CPU runners cannot be used with --hardware-gpu")
+    if getattr(args, "workers", None) is not None and (hardware or warp):
+        raise ValueError("--workers applies to shared GPU sessions; use --runners for WARP")
+    if warp:
+        return sharded_fixtures(args)
+    if not hardware:
+        return shared_fixtures(args)
     fixture_selection(args.names)
     machine = selected(args)
     start(argparse.Namespace(vm=args.vm, gui=False, gpu="auto"))
@@ -1384,6 +1483,580 @@ def sharded_fixtures(args):
     (local / "complete").touch()
 
 
+def shared_settings():
+    return {"vms": 2, "sessions": 15, "cpu_slots": 8, "idle_minutes": 10} | SETTINGS.get("shared", {})
+
+
+def shared_accounts():
+    return [f"capy{index:02}" for index in range(1, shared_settings()["sessions"] + 1)]
+
+
+def shared_machines():
+    names = [f"{SHARED_PREFIX}{index}" for index in range(1, shared_settings()["vms"] + 1)]
+    return [Machine(name, VMS / name) for name in names]
+
+
+def shared_pool():
+    return session_pool.Pool(RUNTIME / "shared-sessions")
+
+
+def shared_unit(machine):
+    return f"capy-shared-{hashlib.sha256(bytes(STATE)).hexdigest()[:8]}-{machine.name}"
+
+
+def host_alive(machine):
+    machine.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = cpu_pool.lock_file(machine.runtime / "host-lock")
+    if lock is None:
+        return True
+    lock.close()
+    return False
+
+
+def ready_accounts(machine):
+    if not host_alive(machine):
+        return []
+    try:
+        return json.loads((machine.runtime / "sessions.json").read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def start_shared_vm(machine):
+    if host_alive(machine):
+        return
+    machine.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (machine.runtime / "startup-error").unlink(missing_ok=True)
+    program = [sys.executable, str(Path(__file__).resolve()), "--vm", machine.name, "shared-host"]
+    environment = {"CAPYCANVAS_VM_DIR": str(STATE), "CAPYCANVAS_VM_RUNTIME": str(RUNTIME),
+                   "CAPYCANVAS_VM_DISPLAY": SHARED_DISPLAY}
+    unit = shared_unit(machine)
+    run("systemctl", "--user", "reset-failed", unit, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run("systemd-run", "--user", "--quiet", f"--unit={unit}", "--collect", "--property=KillMode=process",
+        "--property=LimitMEMLOCK=infinity", "--property=TimeoutStopSec=6min",
+        *[f"--setenv={key}={value}" for key, value in environment.items()],
+        *[item.replace("$", "$$") for item in program], check=False, stderr=subprocess.DEVNULL)
+
+
+class RdpClients:
+    def __init__(self, machine):
+        self.machine = machine
+        self.directory = machine.runtime / "rdp"
+        self.record = self.directory / "clients.json"
+        self.children = {}
+        self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.stop_recorded()
+
+    def stop_recorded(self):
+        if not self.record.exists():
+            return
+        for row in json.loads(self.record.read_text()):
+            command = Path("/proc") / str(row["pid"]) / "cmdline"
+            if command.exists() and row["identity"].encode() in command.read_bytes():
+                os.kill(row["pid"], signal.SIGTERM)
+        self.record.unlink()
+
+    def save(self):
+        rows = [{"pid": child.pid, "identity": str(child.args[0])}
+                for pair in self.children.values() for child in pair]
+        self.record.write_text(json.dumps(rows))
+
+    def start(self, account):
+        client, xvfb = rdp_tools()
+        if not client or not xvfb:
+            raise RuntimeError(f"FreeRDP's X11 client or Xvfb is missing; run `{PROGRAM} setup --server`.")
+        number = self.directory / f"{account}-display"
+        with number.open("w") as output, (self.directory / f"{account}-xvfb.log").open("w") as log:
+            display = subprocess.Popen([str(xvfb), "-displayfd", str(output.fileno()), "-screen", "0", f"{SHARED_DISPLAY}x24",
+                                        "-nolisten", "tcp", "-noreset", "-ac"], stdout=log, stderr=log,
+                                       pass_fds=(output.fileno(),), start_new_session=True)
+        self.children[account] = [display]
+        self.save()
+        deadline = time.monotonic() + 15
+        while not number.read_text().strip():
+            if display.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(f"The private display of {account} did not start.")
+            time.sleep(0.1)
+        environment = dict(os.environ, DISPLAY=":" + number.read_text().strip(), XDG_CONFIG_HOME=str(self.directory),
+                           XDG_CACHE_HOME=str(self.directory), XDG_STATE_HOME=str(self.directory))
+        if str(client).startswith(str(RDP_CLIENT)):
+            environment["LD_LIBRARY_PATH"] = str(RDP_CLIENT / "lib64")
+        width, height = SHARED_DISPLAY.split("x")
+        with (self.directory / f"{account}.log").open("w") as log:
+            session = subprocess.Popen([str(client), f"/v:127.0.0.1:{self.machine.rdp_port.read_text().strip()}",
+                                        f"/u:{account}", "/d:capycanvas-vm", "/from-stdin:force", "/cert:ignore",
+                                        f"/size:{width}x{height}", "/scale-desktop:150", "/scale-device:100", "/network:lan",
+                                        "/gdi:sw", "-clipboard", "-wallpaper", "-suppress-output", "/log-level:WARN"],
+                                       stdin=subprocess.PIPE, stdout=log, stderr=log, env=environment, start_new_session=True)
+        session.stdin.write(SERVER_PASSWORD.read_bytes())
+        session.stdin.close()
+        self.children[account].append(session)
+        self.save()
+
+    def keep_connected(self, accounts):
+        for account in accounts:
+            pair = self.children.get(account)
+            if pair and all(child.poll() is None for child in pair):
+                continue
+            for child in pair or ():
+                self.stop_child(child)
+            self.start(account)
+
+    def stop_child(self, child):
+        if child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
+
+    def close(self):
+        for pair in self.children.values():
+            for child in pair:
+                self.stop_child(child)
+        self.children.clear()
+        self.record.unlink(missing_ok=True)
+
+
+def session_shells(machine):
+    result = guest(machine, "@(Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue).UserName -join ','",
+                   stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    return {name.rsplit("\\", 1)[-1].strip().lower() for name in result.stdout.split(",")}
+
+
+def shared_host(args):
+    machine = selected(args)
+    if not machine.server:
+        raise ValueError("Only shared GPU VMs have a session host")
+    machine.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = cpu_pool.lock_file(machine.runtime / "host-lock")
+    if lock is None:
+        return
+    stopping = []
+    def terminated(*_):
+        stopping.append(True)
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, terminated)
+    record = machine.runtime / "sessions.json"
+    record.unlink(missing_ok=True)
+    settings = shared_settings()
+    accounts = shared_accounts()
+    pool = shared_pool()
+    clients = RdpClients(machine)
+    try:
+        fresh = not running(machine)
+        if fresh:
+            fixture_memory_admission(machine.runtime, "shared-vm", [settings["cpu_slots"] * cpu_pool.configuration(STATE)["runner_memory_gib"]])
+        boot(machine, gui=False, gpu="auto")
+        if fresh:
+            guest(machine, f"Get-ChildItem {SHARED_ROOT} -ErrorAction SilentlyContinue|Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
+                  stdin=subprocess.DEVNULL)
+        idle_since = time.monotonic()
+        while running(machine):
+            clients.keep_connected(accounts)
+            shells = session_shells(machine)
+            temporary = record.with_suffix(".tmp")
+            temporary.write_text(json.dumps([account for account in accounts if account in shells]))
+            temporary.replace(record)
+            if pool.holders(machine.name, accounts):
+                idle_since = time.monotonic()
+            elif time.monotonic() - idle_since >= settings["idle_minutes"] * 60:
+                with pool.closed(machine.name, accounts) as closed:
+                    if closed:
+                        record.unlink()
+                        break
+            time.sleep(15)
+    except (Exception, SystemExit) as error:
+        if not stopping:
+            (machine.runtime / "startup-error").write_text(str(error))
+        raise
+    finally:
+        record.unlink(missing_ok=True)
+        clients.close()
+        stop_machine(machine)
+
+
+class SharedSession:
+    def __init__(self, machine, account, lock, run_id, lease):
+        self.machine = machine
+        self.account = account
+        self.lock = lock
+        self.slot = f"{machine.name}-{account}"
+        self.id = f"{self.slot}-{lease}"
+        self.root = f"{SHARED_ROOT}\\{run_id}\\{lease}"
+        self.repo = self.root + "\\repo"
+        self.task = f"capycanvas-{account}"
+        self.started = None
+        self.launched = False
+        self.closing = None
+        self.closed = False
+        self.draining = False
+        self.complete = False
+        self.failure = None
+        self.results = []
+        self.progress = time.monotonic()
+        self.evidence = None
+
+
+def session_status_command(sessions):
+    rows = ",".join(f"@{{id='{session.id}';output='{session.root}\\output';task='{session.task}'}}" for session in sessions)
+    return r"""$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+function Read-FixtureText([string]$Path){
+    if(!(Test-Path -LiteralPath $Path)){return $null}
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $reader=[IO.StreamReader]::new($stream)
+    try{$reader.ReadToEnd()}finally{$reader.Dispose();$stream.Dispose()}
+}
+$rows=@{}
+foreach($row in @(""" + rows + r""")){
+    $state=[string](Get-ScheduledTask $row.task).State
+    $complete=Test-Path "$($row.output)\complete"
+    $rows[$row.id]=@{state=$state;complete=$complete;log=Read-FixtureText "$($row.output)\results.jsonl";error=Read-FixtureText "$($row.output)\runner-error.txt"}
+}
+ConvertTo-Json -InputObject $rows -Depth 4 -Compress
+"""
+
+
+class SharedRun:
+    def __init__(self, args, local, identity, queue, update_demand, payload):
+        self.args = args
+        self.local = local
+        self.id = identity
+        self.queue = queue
+        self.update_demand = update_demand
+        self.payload = payload
+        self.pool = shared_pool()
+        self.machines = shared_machines()
+        self.sessions = []
+        self.prepared = {}
+        self.locks = {machine.name: Lock() for machine in self.machines}
+        self.broken = set()
+        self.errors = []
+        self.start_attempts = {}
+        self.polled = 0
+        self.poll_failures = {}
+        self.peak_sessions = 0
+
+    def payload_root(self):
+        return f"{SHARED_ROOT}\\{self.id}\\payload"
+
+    def prepare_machine(self, machine):
+        with self.locks[machine.name]:
+            if self.prepared.get(machine.name):
+                return
+            root = self.payload_root()
+            directory = fixture_directory(True, self.args.profile).replace(GUEST_REPO, root)
+            live = ",".join(f"'{run}'" for run in self.pool.runs())
+            guest_script(machine, f"""$ProgressPreference='SilentlyContinue'
+Get-ChildItem {SHARED_ROOT} -ErrorAction SilentlyContinue|Where-Object {{$_.Name -notin @({live}) -and $_.CreationTime -lt (Get-Date).AddMinutes(-5)}}|Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+$ErrorActionPreference='Stop'
+New-Item -ItemType Directory -Force '{root}\\artifacts\\windows'|Out-Null
+""", timeout=300)
+            for archive, destination in ((self.payload["source"], root), (self.payload["build"], root + "\\artifacts\\windows")):
+                with archive.open("rb") as stream:
+                    run(*ssh_command(machine, f"tar -xzmf - -C {destination}"), stdin=stream)
+            record = self.payload["record"]
+            validate_build(record, build_inputs(self.payload["hashes"]), build_files(machine, directory), self.args.profile)
+            validate_controls(machine, directory, record, True, record["controls"])
+            publish_build_record(machine, directory, dict(record, fixture_scale=1.5))
+            self.prepared[machine.name] = directory
+
+    def start_session(self, session):
+        machine = session.machine
+        self.prepare_machine(machine)
+        directory = self.prepared[machine.name].replace(self.payload_root(), session.repo)
+        queue = json.dumps(self.queue.configuration(session.id))
+        guest_script(machine, f"""$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$owned=@(Get-Process -IncludeUserName -ErrorAction SilentlyContinue|Where-Object {{$_.UserName -like '*\\{session.account}' -and $_.ProcessName -in 'pwsh','powershell','conhost','CapyCanvas','capy-photo-reader'}})
+$owned|Stop-Process -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath 'C:\\Users\\{session.account}\\AppData\\Local\\CrashDumps' -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force '{session.root}'|Out-Null
+& icacls.exe '{session.root}' /grant '{session.account}:(OI)(CI)F' /Q|Out-Null
+if($LASTEXITCODE){{throw 'Could not grant the session its workspace'}}
+& robocopy.exe '{self.payload_root()}' '{session.repo}' /E /MT:4 /NFL /NDL /NJH /NJS /NP|Out-Null
+if($LASTEXITCODE -ge 8){{throw 'Could not copy the fixture payload'}}
+[IO.File]::WriteAllText('{session.root}\\queue.json','{queue}',[Text.UTF8Encoding]::new($false))
+$global:LASTEXITCODE=0
+""", timeout=900)
+        desktop(machine, f"-File {session.repo}\\tools\\windows-vm\\session-worker.ps1 -Executable {directory}\\CapyCanvas.exe "
+                         f"-Output {session.root}\\output -BuildRecord {directory}\\fixture-build.json "
+                         f"-QueueConfig {session.root}\\queue.json -RustProfile {self.args.profile} "
+                         f"-TimeoutMinutes {self.args.timeout_minutes}",
+                user=session.account, task=session.task, directory=session.repo)
+        session.launched = True
+        session.progress = time.monotonic()
+
+    def close_session(self, session):
+        machine = session.machine
+        try:
+            if running(machine):
+                guest_script(machine, f"""$ProgressPreference='SilentlyContinue'
+Stop-ScheduledTask {session.task} -ErrorAction SilentlyContinue
+Unregister-ScheduledTask {session.task} -Confirm:$false -ErrorAction SilentlyContinue
+$dumps='C:\\Users\\{session.account}\\AppData\\Local\\CrashDumps'
+if((Test-Path -LiteralPath '{session.root}\\output') -and (Test-Path -LiteralPath $dumps)){{New-Item -ItemType Directory -Force '{session.root}\\output\\wer\\dumps'|Out-Null;Copy-Item -Path "$dumps\\*" -Destination '{session.root}\\output\\wer\\dumps' -Force}}
+""", timeout=300)
+                if session.launched:
+                    session.evidence = str(retrieve(machine, session.root, "output", self.local / "sessions" / session.id))
+                guest(machine, f"Remove-Item -LiteralPath '{session.root}' -Recurse -Force -ErrorAction SilentlyContinue",
+                      stdin=subprocess.DEVNULL, timeout=600, check=False)
+        except (Exception, SystemExit) as error:
+            session.complete = False
+            session.failure = "; ".join(filter(None, (session.failure, f"evidence: {error}")))
+        finally:
+            session.lock.close()
+            session.closed = True
+
+    def fail_session(self, session, failure):
+        self.broken.add(session.slot)
+        session.failure = "; ".join(filter(None, (session.failure, failure)))
+        session.draining = True
+        self.queue.drain(session.id)
+        print(f"{session.id}: {failure}", flush=True)
+
+    def poll(self, executor):
+        groups = {}
+        for session in self.sessions:
+            if session.started and session.started.done() and not session.started.exception() and not session.closing:
+                groups.setdefault(session.machine.name, (session.machine, []))[1].append(session)
+        for machine, group in groups.values():
+            try:
+                result = guest(machine, session_status_command(group), stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=120)
+                statuses = json.loads(result.stdout)
+                self.poll_failures[machine.name] = 0
+            except (subprocess.SubprocessError, ValueError, OSError) as error:
+                self.poll_failures[machine.name] = self.poll_failures.get(machine.name, 0) + 1
+                if self.poll_failures[machine.name] >= 30 or not running(machine):
+                    for session in group:
+                        self.fail_session(session, f"lost contact with {machine.name}: {error}")
+                        session.closing = executor.submit(self.close_session, session)
+                continue
+            for session in group:
+                status = statuses[session.id]
+                rows = (status["log"] or "").splitlines()
+                for line in rows[len(session.results):]:
+                    try:
+                        result = json.loads(line)
+                    except ValueError:
+                        break
+                    session.results.append(result)
+                    session.progress = time.monotonic()
+                    print(f"{'pass' if result['exit'] == 0 else 'FAIL'} {result['seconds']:5.0f}s {result['name']} [{session.id}]", flush=True)
+                if status["complete"]:
+                    session.complete = True
+                elif status["state"] not in ("Running", "Queued"):
+                    self.fail_session(session, status["error"] or "The session worker stopped before completing its fixtures.")
+                elif time.monotonic() - session.progress > self.args.timeout_minutes * 60 + 300:
+                    self.fail_session(session, "The session worker exceeded its fixture deadline.")
+                else:
+                    continue
+                session.closing = executor.submit(self.close_session, session)
+
+    def schedule(self, executor):
+        waiting_since = time.monotonic()
+        settings = shared_settings()
+        while True:
+            for session in self.sessions:
+                if session.started and session.started.done() and session.started.exception() and not session.closing:
+                    error = session.started.exception()
+                    self.errors.append(f"{session.id} could not start: {error}")
+                    self.fail_session(session, f"could not start: {error}")
+                    session.closing = executor.submit(self.close_session, session)
+            live = [session for session in self.sessions if not session.closed]
+            active = [session for session in live if not session.draining and not session.closing]
+            pending = self.queue.pending()
+            if not pending and not live:
+                return
+            in_flight = sum(len(self.queue.assignments[session.id]) > len(session.results) for session in active)
+            useful = pending + in_flight
+            if self.args.workers:
+                useful = min(useful, self.args.workers)
+            self.update_demand(useful)
+            demands = {run: row["demand"] for run, row in self.pool.runs().items()}
+            ready = {machine.name: ready_accounts(machine) for machine in self.machines}
+            capacity = sum(map(len, ready.values()))
+            target = session_pool.fair_shares(demands, capacity).get(self.id, 0)
+            hosted = sum(host_alive(machine) for machine in self.machines) * settings["sessions"]
+            if sum(demands.values()) > hosted:
+                self.start_next_machine()
+            if pending:
+                self.acquire(executor, min(target, useful) - len(active), ready)
+                for session in reversed(active[target:] if capacity else ()):
+                    session.draining = True
+                    self.queue.drain(session.id)
+            self.peak_sessions = max(self.peak_sessions, sum(not session.closed for session in self.sessions))
+            usable = [account for machine in self.machines for account in ready[machine.name]
+                      if f"{machine.name}-{account}" not in self.broken]
+            if pending and not live and any(ready.values()) and not usable:
+                raise RuntimeError(f"Every shared GPU session failed: {'; '.join(self.errors) or 'see the session evidence'}")
+            if live or usable:
+                waiting_since = time.monotonic()
+            elif time.monotonic() - waiting_since > 30 * 60:
+                raise RuntimeError(f"No shared GPU session became available in 30 minutes: {'; '.join(self.errors) or 'see `sessions` and `gpus`'}")
+            if time.monotonic() - self.polled >= 10:
+                self.polled = time.monotonic()
+                self.poll(executor)
+            time.sleep(2)
+
+    def start_next_machine(self):
+        for machine in self.machines:
+            error = machine.runtime / "startup-error"
+            if error.exists():
+                text = error.read_text()
+                if text not in self.errors:
+                    self.errors.append(text)
+                    print(f"{machine.name}: {text}", flush=True)
+            if host_alive(machine):
+                continue
+            if time.monotonic() - self.start_attempts.get(machine.name, -120) >= 120:
+                self.start_attempts[machine.name] = time.monotonic()
+                start_shared_vm(machine)
+            return
+
+    def acquire(self, executor, count, ready):
+        machines = sorted(self.machines, key=lambda machine: machine.name not in self.prepared)
+        for machine in machines:
+            for account in ready[machine.name]:
+                if count <= 0:
+                    return
+                if f"{machine.name}-{account}" in self.broken:
+                    continue
+                lock = self.pool.claim(machine.name, account, self.id, ROOT)
+                if lock is None:
+                    continue
+                if account not in ready_accounts(machine):
+                    lock.close()
+                    continue
+                session = SharedSession(machine, account, lock, self.id, len(self.sessions) + 1)
+                self.queue.add_runner(session.id)
+                session.started = executor.submit(self.start_session, session)
+                self.sessions.append(session)
+                count -= 1
+
+    def abandon(self):
+        for session in self.sessions:
+            if session.started and not session.started.cancel():
+                wait([session.started])
+        for session in self.sessions:
+            if session.closing is None:
+                self.queue.drain(session.id)
+                session.failure = session.failure or "The run stopped before this session finished."
+                self.close_session(session)
+
+    def release_machines(self):
+        for machine in self.machines:
+            if machine.name in self.prepared and running(machine):
+                guest(machine, f"Remove-Item -LiteralPath '{SHARED_ROOT}\\{self.id}' -Recurse -Force -ErrorAction SilentlyContinue",
+                      stdin=subprocess.DEVNULL, timeout=600, check=False)
+
+    def shards(self):
+        return [{"vm": session.id, "selectors": self.queue.assignments[session.id], "results": session.results,
+                 "complete": session.complete and not session.failure, "failure": session.failure, "evidence": session.evidence}
+                for session in self.sessions if self.queue.assignments[session.id]]
+
+
+def source_archive(hashes, destination):
+    listing = "".join(f"{name}\0" for name in hashes).encode()
+    run("tar", "--null", "--files-from=-", "--create", "--gzip", f"--file={destination}", cwd=ROOT, input=listing)
+    return destination
+
+
+def shared_fixtures(args):
+    fixture_selection(args.names)
+    primary = selected(args)
+    if primary.runner.exists() or primary.server:
+        raise ValueError("Build fixtures from the worktree's primary VM")
+    if not (SERVER_BASE / "disk.qcow2").exists():
+        raise RuntimeError(f"The shared GPU image does not exist; run `{PROGRAM} setup --server` and `create --server`, or use --warp.")
+    if not all(rdp_tools()):
+        raise RuntimeError(f"FreeRDP's X11 client or Xvfb is missing; run `{PROGRAM} setup --server`, or use --warp.")
+    if not gpu_pool.devices(STATE):
+        raise RuntimeError("No GPU pool is configured; see docs/development/windows-vm.md, or use --warp.")
+    budget = cpu_pool.configuration(STATE)
+    if shared_settings()["cpu_slots"] > min(budget["per_owner_limit"], cpu_pool.capacity(budget)):
+        raise RuntimeError(f"A shared GPU VM needs {shared_settings()['cpu_slots']} CPU slots; raise per_owner_limit in "
+                           "cpu-pool.json or lower shared.cpu_slots in gpu-pool.json, or use --warp.")
+    local = ARTIFACTS / primary.name / ("shared-" + time.strftime("%Y%m%d-%H%M%S"))
+    local.mkdir(parents=True, exist_ok=False)
+    started = time.monotonic()
+    with claim(primary):
+        if primary.gpu.exists() and running(primary):
+            raise ValueError("Stop the primary GPU VM before preparing a shared fixture run")
+        if not running(primary):
+            fixture_memory_admission(local, "build-primary", [fixture_memory_gib(MEMORY)])
+        boot(primary, gui=False)
+        hashes = sync_machine(primary)
+        plan = dict(planned_fixtures(primary, args, fixture_directory(True, args.profile)))
+        selectors = plan["runs"]
+        directory, record = fixture_build(primary, hashes, args.no_build, True, args.profile, controls=plan["controls"])
+        provenance = {"revision": run("git", "rev-parse", "HEAD", cwd=ROOT, capture_output=True, text=True).stdout.strip(),
+                      "source": hashes, "build": record, "hardware_gpu": True, "shared_sessions": True}
+        (local / "provenance.json").write_text(json.dumps(provenance, indent=2))
+        (local / "plan.json").write_text(json.dumps(plan, indent=2))
+        payload = {"source": source_archive(hashes, local / "source.tar.gz"),
+                   "build": export_fixture_build(primary, directory, record, local),
+                   "record": record, "hashes": hashes}
+        if not args.names:
+            stop_machine(primary)
+    build_seconds = time.monotonic() - started
+    identity = secrets.token_hex(4)
+    pool = shared_pool()
+    capacity = len(shared_machines()) * len(shared_accounts())
+    shards, failure = [], None
+    with pool.register(identity, ROOT) as update_demand, \
+            fixture_shards.Queue(selectors, [], fixture_durations(), local / "queue.json") as queue:
+        shared = SharedRun(args, local, identity, queue, update_demand, payload)
+        with ThreadPoolExecutor(max_workers=capacity) as executor:
+            try:
+                shared.schedule(executor)
+            except (Exception, SystemExit) as error:
+                failure = str(error)
+            finally:
+                shared.abandon()
+        shared.release_machines()
+        shards = shared.shards()
+    results, errors = fixture_shards.merge(selectors, shards)
+    if failure:
+        errors.append(failure)
+    plan["shards"] = {row["vm"]: row["selectors"] for row in shards}
+    (local / "plan.json").write_text(json.dumps(plan, indent=2))
+    (local / "results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in results))
+    (local / "shards.json").write_text(json.dumps(shards, indent=2))
+    (local / "summary.json").write_text(json.dumps({
+        "wall_seconds": time.monotonic() - started, "build_seconds": build_seconds,
+        "peak_sessions": shared.peak_sessions, "session_errors": shared.errors, "errors": errors}, indent=2))
+    for name in (payload["source"], payload["build"]):
+        name.unlink(missing_ok=True)
+    print(f"{sum(row['exit'] == 0 for row in results)}/{len(selectors)} passed on up to {shared.peak_sessions} shared GPU sessions. Logs: {local}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    (local / "complete").touch()
+
+
+def sessions(args):
+    pool = shared_pool()
+    settings = shared_settings()
+    accounts = shared_accounts()
+    for machine in shared_machines():
+        ready = ready_accounts(machine)
+        held = pool.holders(machine.name, accounts)
+        state = "ready" if ready else "starting" if host_alive(machine) else "stopped"
+        card = f", GPU {machine.gpu.read_text().strip()}" if running(machine) and machine.gpu.exists() else ""
+        print(f"{machine.name}\t{state}{card}, {len(ready)}/{settings['sessions']} sessions, {len(held)} held")
+        for account, row in sorted(held.items()):
+            print(f"  {account}\trun {row.get('run')} from {row.get('owner')}")
+        error = machine.runtime / "startup-error"
+        if error.exists() and state == "stopped":
+            print(f"  last error: {error.read_text()}")
+    for run_id, row in pool.runs().items():
+        print(f"run {run_id}\tdemand {row.get('demand')} from {row.get('owner')} since {row.get('started')}")
+
+
 def screenshot(args):
     machine = selected(args)
     require_running(machine)
@@ -1410,12 +2083,20 @@ def list_machines(args):
 
 
 def destroy(args):
-    active = [machine.name for machine in machines() + [installer()] if running(machine)]
-    if process(LEGACY_PID, "qemu-system-x86"):
+    server = getattr(args, "server", False)
+    scope = [machine for machine in machines() if machine.server] if server else machines()
+    active = [machine.name for machine in scope + [server_installer(), *([] if server else [installer()])] if running(machine)]
+    if not server and process(LEGACY_PID, "qemu-system-x86"):
         active.append("(unnamed VM from an older windows-vm.py)")
     if active:
         sys.exit(f"Stop these VMs first: {', '.join(active)}")
-    for path in (INSTALL, BASE, VMS, LEGACY_RUN, STATE / "run.partial", FIRMWARE, PASSWORD, KNOWN_HOSTS):
+    if server:
+        run("ssh-keygen", "-R", "capycanvas-windows-server", "-f", KNOWN_HOSTS, check=False,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for path in [machine.directory for machine in scope] + [SERVER_INSTALL, SERVER_BASE, SERVER_PASSWORD]:
+            remove(path)
+        return
+    for path in (INSTALL, BASE, SERVER_INSTALL, SERVER_BASE, VMS, LEGACY_RUN, STATE / "run.partial", FIRMWARE, PASSWORD, SERVER_PASSWORD, KNOWN_HOSTS):
         remove(path)
 
 
@@ -1443,14 +2124,18 @@ def main():
         subcommand.set_defaults(handler=handler)
         return subcommand
 
-    command("setup", setup, "install host packages, grant KVM access and download the ISO").add_argument(
-        "--iso", type=Path, help="use this ISO instead of downloading one")
-    command("create", create, "install Windows and the build tools into the base image").add_argument(
-        "--gui", action="store_true", help="show the installer display in a window")
+    setup_command = command("setup", setup, "install host packages, grant KVM access and download the ISO")
+    setup_command.add_argument("--iso", type=Path, help="use this ISO instead of downloading one")
+    setup_command.add_argument("--server", action="store_true", help="prepare the Windows Server image of the shared GPU VMs")
+    create_command = command("create", create, "install Windows and the build tools into the base image")
+    create_command.add_argument("--gui", action="store_true", help="show the installer display in a window")
+    create_command.add_argument("--server", action="store_true", help="install the Windows Server image of the shared GPU VMs")
     start_command = command("start", start, "boot the VM, creating it from the base image if needed")
     start_command.add_argument("--gui", action="store_true", help="show the VM display in a window")
     start_command.add_argument("--gpu", nargs="?", const="auto", help="claim one free GPU, or the specified pool PCI address")
     command("gpus", gpus, "show the hardware GPU pool and its reservations")
+    command("sessions", sessions, "show the shared GPU VMs, their sessions and the runs sharing them")
+    command("shared-host", shared_host, argparse.SUPPRESS)
     command("runners", runners, "show CPU runner reservations").add_argument(
         "--reset", action="store_true", help="delete this owner's stopped runner disks")
     command("gpu-check", gpu_check, "run the hardware renderer and Windows D3D12 tests").add_argument(
@@ -1462,19 +2147,22 @@ def main():
     command("sync", sync, f"copy the working tree to {GUEST_REPO}, keeping build outputs")
     command("check", check, "sync, build and run the tests that need no GPU").add_argument(
         "--debug", action="store_true", help="use unoptimized Debug builds and tests (default: Release)")
-    fixture = command("fixtures", fixtures, "sync, build and run UI fixtures (no names: one CPU runner plus one GPU VM)")
+    fixture = command("fixtures", fixtures, "sync, build and run UI fixtures, by default in shared GPU VM sessions")
     fixture.add_argument("names", nargs="*", help="fixtures to run, e.g. layers or header:pen (default: all)")
     fixture.add_argument("--no-build", action="store_true", help="reuse a validated build for the selected adapter mode")
     fixture.add_argument("--profile", choices=("release", "dev-perf"), default="release",
                          help="Rust build profile (default: release; dev-perf enables incremental development builds)")
-    fixture.add_argument("--hardware-gpu", action="store_true", help="claim a GPU and test a hardware-only app build")
-    fixture.add_argument("--runners", type=positive_int, help="run WARP fixtures on up to N pooled CPU VMs")
+    fixture.add_argument("--workers", type=positive_int, help="use at most N shared GPU sessions (default: a fair share of those free)")
+    fixture.add_argument("--hardware-gpu", action="store_true", help="claim a whole GPU and console desktop for one VM")
+    fixture.add_argument("--warp", action="store_true", help="run on the WARP CPU pool, sending marked rows to one GPU VM")
+    fixture.add_argument("--runners", type=positive_int, help="run WARP fixtures on up to N pooled CPU VMs (implies --warp)")
     fixture.add_argument("--keep-runners", action="store_true", help="retain CPU runners and their reservations after a sharded run")
     fixture.add_argument("--timeout-minutes", type=fixture_timeout, default=20,
                          help="deadline for each fixture, 1–1440 minutes (default: 20)")
     command("screenshot", screenshot, "save the VM display as a PNG").add_argument("file", type=Path)
     command("reset", reset, "delete the VM; the next start makes a fresh one from the base image")
-    command("destroy", destroy, "delete the base image and every VM, keeping the downloaded ISO")
+    command("destroy", destroy, "delete the base image and every VM, keeping the downloaded ISO").add_argument(
+        "--server", action="store_true", help="delete only the Windows Server image and the shared GPU VMs")
     args = parser.parse_args()
     try:
         args.handler(args)

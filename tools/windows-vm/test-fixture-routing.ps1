@@ -493,24 +493,24 @@ try{
         $HardwareGpu=$true;$buildManifest=@{fixture_scale=1.5};$Executable=$editorExecutable
         $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Save-Evidence'},$false)
         . ([scriptblock]::Create($definition.Extent.Text))
-        function Control-Fixture{'Popup'}
-        function Build-ControlFixture{$editorExecutable}
+        function Control-Fixture{}
+        function Assert-HardwareTraces{}
         function Get-NextFixture($Planned,$Queue,$Claimed){
             $script:claims++
             if($script:claims -le 2){@('first','second')[$script:claims-1]}
         }
         function Reviews{}
-        function Get-ChildItem($LiteralPath,$Filter,[switch]$File){
+        function Get-ChildItem($LiteralPath,$Filter,[switch]$File,[switch]$Recurse){
             if($Filter){[pscustomobject]@{Name='ui-state-123.json';FullName='ui-state-123.json'}}
         }
         function Get-Content($LiteralPath,[switch]$Raw){
             if($LiteralPath -like '*-context.json'){'{"process_id":123}'}
             elseif($LiteralPath -eq 'ui-state-123.json'){
-                @{process_id=123;window_id=1;model=@{layout_input=@{cache=@{context=@{scale=$(if(!$script:scaleEvidence.Count){1.25}else{1.5})}}}}}|ConvertTo-Json -Depth 8 -Compress
+                @{process_id=123;window_id=1;model=@{windows_adapter='Fixture GPU (DiscreteGpu)';layout_input=@{cache=@{context=@{scale=$(if(!$script:scaleEvidence.Count){1.25}else{1.5})}}}}}|ConvertTo-Json -Depth 8 -Compress
             }
         }
         function Set-Content($LiteralPath,[Parameter(ValueFromPipeline)]$Value){
-            process{$script:scaleEvidence.Add(@{path=$LiteralPath;receipt=($Value|ConvertFrom-Json)})}
+            process{if($LiteralPath -like '*-display.json'){$script:scaleEvidence.Add(@{path=$LiteralPath;receipt=($Value|ConvertFrom-Json)})}}
         }
         function Write-FixtureResult($Path,$Json){$script:rowResults.Add(($Json|ConvertFrom-Json))}
         & $execute
@@ -632,4 +632,45 @@ namespace CapyLocalDumpsTest {
         }
         "Per-app LocalDumps actual typed helpers passed $cases cases"
     }finally{Remove-Item -LiteralPath $temporary -Recurse -Force}
+}
+& {
+    $assignment=$ast.Find({param($node)$node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$env:CAPY_WAIT_SCALE'},$false)
+    if(!$assignment){throw 'The fixture runner does not choose a wait scale'}
+    foreach($case in @(@($true,$false,$null),@($true,$true,'3'),@($false,$false,'3'))){
+        $HardwareGpu,$SharedSession,$expected=$case
+        $actual=& ([scriptblock]::Create($assignment.Right.Extent.Text))
+        if($actual -cne $expected){throw "Wait scale for hardware=$HardwareGpu session=${SharedSession}: $actual"}
+    }
+    'Shared sessions keep the WARP wait scale; exclusive hardware keeps the hardware bound'
+}
+& {
+    $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Save-Evidence'},$false)
+    . ([scriptblock]::Create($definition.Extent.Text))
+    function Stop-Review{}
+    function Reviews{}
+    $HardwareGpu=$true;$buildManifest=@{fixture_scale=1.5}
+    $directory=Join-Path ([IO.Path]::GetTempPath()) ('capy-feedback-evidence-'+[guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($directory)|Out-Null
+    try{
+        $Executable=Join-Path $directory 'CapyCanvas.exe';$log=Join-Path $directory 'row'
+        foreach($kind in 'Feedback','Popup','LayerDrop'){$controlFixture=$kind;Save-Evidence $log}
+        @{process_id=7;trace_directory=$directory}|ConvertTo-Json|Set-Content -LiteralPath ($log+'-context.json')
+        foreach($kind in 'Feedback','Popup','LayerDrop'){$controlFixture=$kind;Save-Evidence $log}
+        $controlFixture=$null;$failure=$null
+        try{Save-Evidence $log}catch{$failure=$_.Exception.Message}
+        if($failure -ne 'Hardware fixture runtime scale differs from the round display'){throw "A rendered row without scale evidence passed: $failure"}
+        Remove-Item -LiteralPath ($log+'-context.json')
+        $controlFixture=$null;$failure=$null
+        try{Save-Evidence $log}catch{$failure=$_.Exception.Message}
+        if($failure -notlike 'Missing fixture context*'){throw 'A rendered row without its context passed'}
+        Save-Evidence $log $false
+        $trace=Join-Path $directory 'closed-window';[IO.Directory]::CreateDirectory($trace)|Out-Null
+        [IO.File]::WriteAllText((Join-Path $trace 'ui-state-90-3.json'),'{"process_id":90}')
+        @{windows=@(@{process_id=90;trace_directory=$trace})}|ConvertTo-Json -Depth 4|Set-Content -LiteralPath ($log+'-context.json')
+        function Assert-HardwareTraces{}
+        $buildManifest=@{}
+        Save-Evidence $log
+        if(!(Test-Path -LiteralPath ($log+'-evidence\ui-state-90-3.json'))){throw 'Evidence lost the trace of a recorded window whose app already exited'}
+    }finally{Remove-Item -LiteralPath $directory -Recurse -Force}
+    'Control and registered unrendered rows skip app adapter evidence; rendered rows require context and scale and keep traces of exited windows'
 }

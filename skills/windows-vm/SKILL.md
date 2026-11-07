@@ -1,6 +1,6 @@
 ---
 name: windows-vm
-description: Start, reserve, connect to, and test Capy Canvas Windows VMs from Linux, with optional exclusive hardware GPUs and preserved test evidence.
+description: Start, reserve, connect to, and test Capy Canvas Windows VMs from Linux, with shared GPU sessions, WARP runners, exclusive hardware GPUs and preserved test evidence.
 ---
 
 # Windows VM work
@@ -20,19 +20,26 @@ configured state/artifact directories and prefer `/mnt/localssd` when available.
 
 ## Choose and reserve
 
-Builds and model/input checks use ordinary `check`; software UI journeys use
-`fixtures`. Marked registry rows run on the owned primary with one pool GPU;
-other rows use WARP CPU runners. WARP results do not establish hardware rendering
-or performance.
-For fixture lists with more than a few selectors, use `fixtures --runners N`
-within the CPU pool budget shown by `runners`; reserve only what the list needs.
-The round GPU holds two ordinary CPU slots (8 vCPU / 16 GiB), runs at the CPU
-runners' 150% scale and always releases its card and slots. The coordinator
-records memory admission and per-row scale evidence; wrong scale or mode fails.
-The full plan and merged results cover both partitions. New rows default to
-CPU; hardware rows need a proved WARP-only first-dispatch/stroke stall, must clear
-that stage on hardware and reach the furthest recorded WARP stage. The run releases its runners on completion. Stop retained `--keep-runners` VMs
-when finished; keep the GPU pool for checks that require hardware.
+Builds and model/input checks use ordinary `check`. UI fixtures use `fixtures`,
+which builds on the owned primary and runs in Remote Desktop sessions on the
+shared GPU VMs `shared-gpu-1` and `shared-gpu-2`. No reservation is needed, sessions
+are divided fairly between running agents, and the VMs start and stop by themselves;
+`sessions` shows them. `--workers N` caps a run. The first use on a host needs
+`setup --server` and `create --server`.
+
+Use `fixtures --warp` or `fixtures --runners N` when a change must complete on WARP,
+such as brush, blender and frame-path shaders, when a row needs a runner's 8 GiB
+limit, or when no card is free. Marked registry rows then run on the owned primary
+with one pool GPU, and the rest on WARP CPU runners within the budget shown by
+`runners`; reserve only what the list needs. The round GPU holds two ordinary CPU
+slots (8 vCPU / 16 GiB), runs at the CPU runners' 150% scale and always releases its
+card and slots. The coordinator records memory admission and per-row scale evidence;
+wrong scale or mode fails. WARP results do not establish hardware rendering or
+performance. The run releases its runners on completion. Stop retained
+`--keep-runners` VMs when finished.
+
+Use an exclusive GPU VM below for `gpu-check`, Windows 11, a console desktop or a
+whole card. Sessions do not measure frame rate or presentation.
 
 For hardware rendering:
 
