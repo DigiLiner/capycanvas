@@ -220,14 +220,14 @@ class AndroidPhoneAuditTest {
                     host.drain(obj("type" to "invoke", "command" to "change_bit_depth"))
                     host.awaitMain("Bit depth controls are composed", 30_000, diagnostics = { "" }, compose = compose) { findTag("document-color-dither") != null }
                     compose.onNodeWithTag("color-choice-$depthLabel").assertTextContains(copy.getString(if (suggested == "U8") "depth_8" else "depth_16"))
-                    val dither = compose.onNodeWithTag("document-color-dither").assertIsDisplayed().assertIsOff()
+                    val dither = compose.onNodeWithTag("document-color-dither").performScrollTo().assertIsDisplayed().assertIsOff()
                     if (current == "U16") dither.assertIsEnabled() else dither.assertIsNotEnabled()
                     screenshot("f3-depth-$current-$theme.png")
                     if (current == "U16") {
                         dither.performClick().assertIsOn()
-                        compose.onNodeWithTag("color-choice-$depthLabel").performClick()
+                        compose.onNodeWithTag("color-choice-$depthLabel").performScrollTo().performClick()
                         compose.onNodeWithText(copy.getString("depth_16"), useUnmergedTree = true).performClick()
-                        dither.assertIsNotEnabled().assertIsOn()
+                        dither.performScrollTo().assertIsNotEnabled().assertIsOn()
                     }
                     compose.onNodeWithTag("document-color-cancel").performClick()
                     host.awaitMain("Bit depth closes", 30_000, diagnostics = { "" }, compose = compose) { findTag("document-color") == null }
@@ -485,14 +485,7 @@ class AndroidPhoneAuditTest {
         compose.waitForIdle()
         if (family == "proofProfile") {
             state("proof-profile-picker") {
-                host.drain(obj("type" to "phone", "action" to obj("kind" to "panel", "panel" to "proof")))
-                host.awaitFrame("Proof drawer opens") { findTag("proof-mode-print") != null }
-                tap("proof-mode-print")
-                host.awaitFrame("Proof profile row is ready", 30_000) { findTag("proof-profile") != null }
-                compose.onNodeWithTag("proof-profile", useUnmergedTree = true).performScrollTo()
-                tap("proof-profile")
-                host.awaitFrame("Proof profile picker opens outside its scroller") { findTag("proof-profile-picker") != null }
-                host.awaitFrame("Proof menu uses shared Standard section",30_000) { findTag("profile-menu-standard") != null }
+                openProofProfile(host,::tap)
                 awaitEditorPage(activity, host, "proof-profile-picker")
             }
             tap("proof-profile-picker-done")
@@ -518,7 +511,7 @@ class AndroidPhoneAuditTest {
             return
         }
         if(family=="pagesA4" || family=="sourcePages" || family=="fileProgress") {
-            visitPagesA4(activity,host,::event,::tap,::state,sourceOnly=family=="sourcePages",fileOnly=family=="fileProgress")
+            visitPagesA4(activity,host,::tap,::state,sourceOnly=family=="sourcePages",fileOnly=family=="fileProgress")
             assertTrue(failures.joinToString("\n"),failures.isEmpty())
             return
         }
@@ -960,7 +953,21 @@ class AndroidPhoneAuditTest {
         }
     }
 
-    private fun visitPagesA4(activity: MainActivity,host: CanvasHost,event: (Int,Offset) -> Unit,tap: (String) -> Unit,state: (String,() -> Unit) -> Unit,sourceOnly:Boolean=false,fileOnly:Boolean=false) {
+    private fun openProofProfile(host: CanvasHost,tap: (String) -> Unit) {
+        host.drain(obj("type" to "phone", "action" to obj("kind" to "panel", "panel" to "proof")))
+        host.awaitFrame("Proof print mode is ready",30_000) {
+            findTag("proof-mode-print")?.second?.config?.let { it.getOrNull(SemanticsProperties.Disabled) == null } == true
+        }
+        compose.onNodeWithTag("proof-mode-print",useUnmergedTree = true).performScrollTo()
+        tap("proof-mode-print")
+        host.awaitFrame("Proof profile row is ready",30_000) { findTag("proof-profile") != null }
+        compose.onNodeWithTag("proof-profile",useUnmergedTree = true).performScrollTo()
+        tap("proof-profile")
+        host.awaitFrame("Proof profile picker opens outside its scroller") { findTag("proof-profile-picker") != null }
+        host.awaitFrame("Proof menu uses shared Standard section",30_000) { findTag("profile-menu-standard") != null }
+    }
+
+    private fun visitPagesA4(activity: MainActivity,host: CanvasHost,tap: (String) -> Unit,state: (String,() -> Unit) -> Unit,sourceOnly:Boolean=false,fileOnly:Boolean=false) {
         val decor = activity.window.decorView
         val fixtures = File(instrumentation.targetContext.getExternalFilesDir(null),"a4-fixtures")
         fun fixture(name: String) = File(fixtures,name).also { assertTrue("Fixture $name is pushed",it.isFile) }
@@ -978,14 +985,6 @@ class AndroidPhoneAuditTest {
         fun settle() { compose.waitForIdle();if(!sourceOnly&&!fileOnly)SystemClock.sleep(400);if(keyboard())hideIme() }
         fun close(tag: String) { if(exists(tag)) { try { tap(tag) } catch(error: Throwable) { predictiveBack(activity,cancel = false) };compose.waitForIdle() } }
         fun reveal(tag: String) { compose.onNodeWithTag(tag,useUnmergedTree = true).performScrollTo();compose.waitForIdle() }
-        fun tapText(owner: String,prefix: String) {
-            val center = checkNotNull(findTag(owner)).let { (root,node) ->
-                val target = checkNotNull(node.find { it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text.startsWith(prefix) } == true }) { "No \"$prefix\" in $owner" }
-                val screen = IntArray(2);instrumentation.runOnMainSync { root.view.getLocationOnScreen(screen) }
-                target.boundsInRoot.center + Offset(screen[0].toFloat(),screen[1].toFloat())
-            }
-            event(MotionEvent.ACTION_DOWN,center);event(MotionEvent.ACTION_UP,center);host.drain()
-        }
         fun <T> picking(action: String,uri: android.net.Uri,block: () -> T): T {
             val monitor = object : android.app.Instrumentation.ActivityMonitor() {
                 override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? =
@@ -1201,30 +1200,31 @@ class AndroidPhoneAuditTest {
                     if(split) { assertEquals(before.top,after.top,1f);assertTrue(after.left>=before.right) }
                     else assertTrue(after.top>=before.bottom)
                     if(command=="repair_source_profile") {
-                        val current=findTag("source-current-description")!!.second.boundsInRoot
-                        val corrected=findTag("color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile"))!!.second.boundsInRoot
-                        assertTrue("Current source precedes the chooser",current.bottom<=corrected.top)
+                        val current=findTag("source-current-description")!!.second
+                        val corrected=findTag("color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile"))!!.second
+                        assertTrue("Current source precedes the chooser",current.positionInRoot.y+current.size.height<=corrected.positionInRoot.y)
                     }
                 }
             }
             if(sourceOnly && command=="repair_source_profile") {
                 val profileCopy=host.catalog.getJSONObject("profile_copy")
                 state("repair-profile-menu") {
-                    tap("color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile"))
+                    val chooser="color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile")
+                    reveal(chooser);tap(chooser)
                     wait("profile-menu-current",30_000);wait("profile-menu-standard",30_000);settle()
-                    val current=findTag("profile-menu-current")!!.second.boundsInRoot
-                    val standard=findTag("profile-menu-standard")!!.second.boundsInRoot
-                    assertTrue("Current precedes Standard",current.bottom<=standard.top)
-                    val original=findTag("profile-menu-current-item")!!.second.boundsInRoot
-                    assertTrue("Original ICC follows Current",current.bottom<=original.top && original.bottom<=standard.top)
+                    val current=findTag("profile-menu-current")!!.second
+                    val standard=findTag("profile-menu-standard")!!.second
+                    val original=findTag("profile-menu-current-item")!!.second
+                    assertTrue("Current precedes Standard",current.positionInRoot.y+current.size.height<=standard.positionInRoot.y)
+                    assertTrue("Original ICC follows Current",current.positionInRoot.y+current.size.height<=original.positionInRoot.y && original.positionInRoot.y+original.size.height<=standard.positionInRoot.y)
                 }
                 state("repair-profile-library") {
-                    compose.onNodeWithText(profileCopy.getString("saved_dialog")).performClick();wait("profile-library",30_000);settle()
+                    compose.onNodeWithText(profileCopy.getString("saved_dialog")).performScrollTo().performClick();wait("profile-library",30_000);settle()
                 }
                 state("repair-profile-import-return") {
                     compose.waitUntil(30_000) { compose.onNodeWithText(profileCopy.getString("import")).fetchSemanticsNode().config.getOrNull(SemanticsProperties.Disabled)==null }
                     picking(pick,android.net.Uri.fromFile(fixture("proof-p3.icc"))) {
-                        compose.onNodeWithText(profileCopy.getString("import")).performClick()
+                        compose.onNodeWithText(profileCopy.getString("import")).performScrollTo().performClick()
                         host.awaitFrame("Imported source profile returns to its comparison",120_000) { !exists("profile-library") && exists("source-edit") && exists("color-comparison-after") }
                     }
                     settle()
@@ -1234,28 +1234,27 @@ class AndroidPhoneAuditTest {
         }
         if(sourceOnly)return
         state("proof-profile-picker") {
-            host.drain(obj("type" to "phone","action" to obj("kind" to "panel","panel" to "proof")))
-            host.awaitFrame("Proof drawer",30_000,{ "form=${host.proof.form}" }) { exists("proof-mode-print") }
-            tap("proof-mode-print")
-            host.awaitFrame("Proof profile control",60_000,{ "form=${host.proof.form?.toString()?.take(400)}" }) { exists("proof-profile") }
-            reveal("proof-profile");tap("proof-profile")
-            wait("proof-profile-picker",30_000)
+            openProofProfile(host,tap)
             compose.waitForIdle();settle()
         }
+        val profileCopy=host.catalog.getJSONObject("profile_copy")
         state("proof-profile-library") {
-            tapText("proof-profile-picker","Manage");wait("profile-library",30_000);settle()
+            compose.onNodeWithText(profileCopy.getString("saved_dialog")).performScrollTo().performClick();wait("profile-library",30_000);settle()
         }
         state("proof-library-return") {
             close("profile-library-done");gone("profile-library");wait("proof-profile");settle()
         }
         state("profile-library-import") {
-            if(!exists("profile-library")) { reveal("proof-profile");tap("proof-profile");wait("proof-profile-picker");tapText("proof-profile-picker","Manage");wait("profile-library") }
+            if(!exists("profile-library")) {
+                if(!exists("proof-profile-picker"))openProofProfile(host,tap)
+                compose.onNodeWithText(profileCopy.getString("saved_dialog")).performScrollTo().performClick();wait("profile-library")
+            }
             val before = findTag("profile-library")!!.second.let { node -> var count = 0;fun walk(n: SemanticsNode) { count++;n.children.forEach(::walk) };walk(node);count }
-            picking(pick,android.net.Uri.fromFile(fixture("proof-p3.icc"))) { tapText("profile-library","Import")
+            picking(pick,android.net.Uri.fromFile(fixture("proof-p3.icc"))) { compose.onNodeWithText(profileCopy.getString("import")).performScrollTo().performClick()
             host.awaitFrame("Imported ICC profile appears",30_000) { findTag("profile-library")?.second?.let { node -> var count = 0;fun walk(n: SemanticsNode) { count++;n.children.forEach(::walk) };walk(node);count > before } == true } }
             settle()
         }
-        close("profile-library-done");close("proof-profile-done")
+        close("profile-library-done");close("proof-profile-picker-done")
         instrumentation.runOnMainSync { host.proof.action(obj("type" to "mode","mode" to "off")) }
         if(exists("proof-mode-print"))predictiveBack(activity,cancel = false)
 
