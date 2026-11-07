@@ -1572,6 +1572,17 @@ try{
     $from=@{x=[int]($list.X+$list.Width/2);y=[int](($lastBottom+$footerTop)/2)};$before=Center $layers
     Drag $from @{x=$from.x+[int](60*$scale);y=$from.y+[int](15*$scale)}
     Wait-Until {(Center $layers).x -gt $before.x+30*$scale} 'Unused list space did not move the Layers card'
+    if($Device -eq 'touch'){
+        $card=Card $layers;$list=(Control 'layer-list' -Within $card -Arranged).Current.BoundingRectangle
+        $lastBottom=(@((Model).state.layers)|ForEach-Object {(Control "layer-row-$($_.id)" -Within $card -Arranged).Current.BoundingRectangle.Bottom}|Measure-Object -Maximum).Maximum
+        $footerTop=(Control "bubble-properties-$layers" -Within $card -Arranged).Current.BoundingRectangle.Top
+        if($footerTop -le $lastBottom+10*$scale){throw 'Layers card has no unused space for its native pair control'}
+        $pairY=[int](($lastBottom+$footerTop)/2);$before=Center $layers;$blankCheckpoint=Drawing-Checkpoint
+        Touch-Pair ([int]($list.X+$list.Width*.25)) $pairY ([int]($list.X+$list.Width*.75)) $pairY ([int](40*$scale)) ([int](15*$scale)) 1 -Tag 'blank-card'
+        Wait-Until {(Center $layers).x -gt $before.x+20*$scale} 'Two fingers on unused list space did not move the Layers card'
+        if((Drawing-Checkpoint) -cne $blankCheckpoint){throw 'Blank card native pair changed artwork history'}
+        $checks.Add('blank-card-native-pair-moves-without-artwork-history')
+    }
     $card=Card $layers;$count=@((Model).state.layers).Count
     $add=Find "bubble-new-layer-$layers" -Within $card
     if($add){Invoke "bubble-new-layer-$layers" -Within $card}else{Invoke 'layer-new' -Within $card}

@@ -241,6 +241,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             if(trace){lastIgnoredDown=O({{L"generation",N(double(generation))},{L"pointer_id",N(e.Pointer().PointerId())},{L"reason",S(L"drop_pending")}});publish();}
             e.Handled(true);return;
         }
+        if(!touches.empty()&&touch(e,L"down"))return;
         auto owner=view.lock();if(owner&&owner->data->claimBubbleContact(e))return;
         if(touch(e,L"down"))return;
         if(pointer){if(pointer.PointerId()!=e.Pointer().PointerId())cancel(L"multiple_contacts");return;}

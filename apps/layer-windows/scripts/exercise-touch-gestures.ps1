@@ -130,6 +130,7 @@ try{
  if($seedPixels -ceq $blankPixels){throw 'Gesture seed changed history without effective artwork pixels'}
  Open-SimpleLayers
  $p=Pair-OnRow $id;$seedIdle=@((Model).state.commands|Where-Object id -eq 'add_layer')[0].enabled;$workspaceBeforeHold=(Model).windows_workspace|Select-Object ready,busy,saving,owner_lost,page,prompt;Begin-Pair $p
+ Wait-Until {$pair=(Find 'layer-list').Current.ItemStatus|ConvertFrom-Json;$pair.source -eq $id -and $pair.touch_contacts -eq 2 -and $pair.multitouch -and $pair.touch_captures -eq 2} 'Native layer pair did not retain both contacts before held selection'
  Wait-Until {(Model).state.layer_tools.has_selection} 'Held two fingers on layer did not load painted contents'
  End-Pair;Record 'two-finger layer hold loads contents'
  (Control "layer-$id-name" -Arranged).SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),[uint16]0x44);Wait-Until {!(Model).state.layer_tools.has_selection} 'Deselect did not finish after layer hold'

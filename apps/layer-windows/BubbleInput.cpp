@@ -106,6 +106,8 @@ bool WorkspaceBubbles::Impl::join(PointerRoutedEventArgs const& e){
     auto p=e.GetCurrentPoint(workspace);auto at=p.Position();
     if(p.Properties().IsCanceled()){cancel();e.Handled(true);return true;}
     if(c->fingers.contains(p.PointerId())){if(c->paired)e.Handled(true);return c->paired;}
+    if(c->mode==L"native"&&e.Handled())for(auto weak:c->path)if(auto owner=weak.get();owner&&
+        PointerGesture::Captured(owner,c->pointer.PointerId())&&PointerGesture::Captured(owner,p.PointerId()))return false;
     if(c->device!=NativeInput::PointerDeviceType::Touch||p.PointerDeviceType()!=c->device||distance(at,c->record->center)>num(c->record->packet,L"reach")+90)return false;
     std::vector<weak_ref<UIElement>> path;
     for(auto node=e.OriginalSource().try_as<DependencyObject>();node;node=VisualTreeHelper::GetParent(node)){
