@@ -326,7 +326,7 @@ impl DecodedTiles {
         self.reap_retired();
         let leased=self.slots.iter().filter(|slot|Arc::strong_count(&slot.lease)>1 && !self.required(slot,self.required.len()))
             .map(|slot|texture_bytes(&slot.texture)).sum::<u64>();
-        (self.limits.bytes.saturating_sub(self.non_slot_bytes()).saturating_sub(self.retired_bytes.load(Ordering::Acquire))
+        (self.limits.bytes.saturating_sub(self.non_slot_bytes())
             .saturating_sub(leased).saturating_sub(reserved)/NORMALIZED_PAGE_BYTES) as usize
     }
     fn required(&self, slot: &Slot, count: usize) -> bool {
@@ -337,7 +337,7 @@ impl DecodedTiles {
     }
     fn slot_limit(&self) -> usize {
         self.reap_retired();
-        (self.limits.bytes.saturating_sub(self.non_slot_bytes()).saturating_sub(self.retired_bytes.load(Ordering::Acquire)) / NORMALIZED_PAGE_BYTES) as usize
+        (self.limits.bytes.saturating_sub(self.non_slot_bytes()) / NORMALIZED_PAGE_BYTES) as usize
     }
     pub fn reserve_mips(&mut self, bytes: u64, _encoder: &crate::submission::CommandEncoder) -> Result<bool, GpuRasterError> {
         Ok(bytes <= self.mip_allowance)
@@ -347,7 +347,7 @@ impl DecodedTiles {
         let protected = self.protected_sources(NORMALIZED_PAGE_BYTES);
         let mut released = 0;
         for _ in 0..SOURCE_SLOTS {
-            if self.slots.iter().map(|slot|texture_bytes(&slot.texture)).sum::<u64>().saturating_add(self.non_slot_bytes()) <= self.limits.bytes { break; }
+            if self.live_bytes() <= self.limits.bytes { break; }
             let Some(index) = self.slots.iter().enumerate().filter(|(_,slot)| Arc::strong_count(&slot.lease)==1 && !self.required(slot, protected))
                 .min_by_key(|(_,slot)|slot.used).map(|(index,_)|index) else { break; };
             let slot = self.slots.swap_remove(index);
@@ -387,7 +387,7 @@ impl DecodedTiles {
     pub(crate) fn free_slots(&self) -> usize {
         self.reap_retired();
         let leased=self.slots.iter().filter(|slot|Arc::strong_count(&slot.lease)>1).map(|slot|texture_bytes(&slot.texture)).sum::<u64>();
-        (self.limits.bytes.saturating_sub(self.non_slot_bytes()).saturating_sub(self.retired_bytes.load(Ordering::Acquire))
+        (self.limits.bytes.saturating_sub(self.non_slot_bytes())
             .saturating_sub(leased)/NORMALIZED_PAGE_BYTES) as usize
     }
     pub(crate) fn begin_unit(&mut self) { self.unit = Some(self.clock); self.overflowed = false; }
@@ -449,11 +449,13 @@ impl DecodedTiles {
                 })
                 .sum::<u64>()
     }
+    fn live_bytes(&self) -> u64 {
+        self.slots.iter().map(|slot| texture_bytes(&slot.texture)).sum::<u64>()
+            + self.non_slot_bytes()
+    }
     pub fn gpu_bytes(&self) -> u64 {
         self.reap_retired();
-        self.slots.iter().map(|slot| texture_bytes(&slot.texture)).sum::<u64>()
-            + self.retired_bytes.load(Ordering::Acquire)
-            + self.non_slot_bytes()
+        self.live_bytes() + self.retired_bytes.load(Ordering::Acquire)
     }
     pub fn cpu_bytes(&self) -> u64 {
         self.pixels.capacity() as u64 * std::mem::size_of::<[f32; 4]>() as u64
@@ -536,16 +538,14 @@ impl DecodedTiles {
     fn make_room(&mut self, bytes: u64, except: Option<&wgpu::TextureView>) -> Result<(), GpuRasterError> {
         self.reap_retired();
         if bytes == 0 { return Ok(()); }
-        if self.gpu_bytes().saturating_add(bytes) <= self.limits.bytes { return Ok(()); }
+        if self.live_bytes().saturating_add(bytes) <= self.limits.bytes { return Ok(()); }
         if let Some(start)=self.unit {
-            let current=self.slots.iter().filter(|slot|slot.used>start).map(|slot|texture_bytes(&slot.texture)).sum::<u64>()
-                .saturating_add(self.retired_slots.borrow().iter().filter(|retired|retired.slot.used>start).map(|retired|retired.bytes).sum::<u64>());
+            let current=self.slots.iter().filter(|slot|slot.used>start).map(|slot|texture_bytes(&slot.texture)).sum::<u64>();
             self.overflowed|=current.saturating_add(self.non_slot_bytes()).saturating_add(bytes)>self.limits.bytes;
         }
         let input=except.and_then(|view|self.slots.iter().find(|slot|slot.view==*view)).map_or(0,|slot|texture_bytes(&slot.texture));
         let protected = self.protected_sources(bytes.saturating_add(input));
-        while self.slots.iter().map(|slot| texture_bytes(&slot.texture)).sum::<u64>()
-            .saturating_add(self.non_slot_bytes()).saturating_add(bytes) > self.limits.bytes {
+        while self.live_bytes().saturating_add(bytes) > self.limits.bytes {
             let Some(index) = self.slots.iter().enumerate()
                 .filter(|(_, slot)| Arc::strong_count(&slot.lease) == 1 && except != Some(&slot.view) && !self.required(slot, protected))
                 .min_by_key(|(_, slot)| slot.used).map(|(index, _)| index) else { break; };
@@ -555,7 +555,8 @@ impl DecodedTiles {
             let completion = self.retire(slot);
             self.retiring.push(completion);
         }
-        Err(if self.unit.is_some() && self.overflowed || !self.retiring.is_empty() || self.retired_bytes.load(Ordering::Acquire) != 0 {
+        if self.live_bytes().saturating_add(bytes) <= self.limits.bytes { return Ok(()); }
+        Err(if self.unit.is_some() && self.overflowed {
             GpuRasterError::DeferredObjectWork
         } else { GpuRasterError::SourceWorkingSetExceeded })
     }
@@ -593,7 +594,7 @@ impl DecodedTiles {
         let protected = self.protected_sources(NORMALIZED_PAGE_BYTES);
         let unused = self.slots.iter().position(|slot| Arc::strong_count(&slot.lease) == 1 && !slot.valid.load(Ordering::Acquire)
             && slot.texture.format() == format && (!self.required(slot, protected) || slot.key.as_ref().is_some_and(|stored| stored.matches(&key))));
-        let index = if let Some(index) = unused { index } else if self.gpu_bytes().saturating_add(bytes) <= self.limits.bytes {
+        let index = if let Some(index) = unused { index } else if self.live_bytes().saturating_add(bytes) <= self.limits.bytes {
             self.allocate_slot(r, format, samples)
         } else {
             let Some(index) = self.slots.iter().enumerate().filter(|(_, slot)| Arc::strong_count(&slot.lease) == 1 && !self.required(slot, protected))
@@ -622,7 +623,7 @@ impl DecodedTiles {
         let samples = self.slots[index].samples.ok_or(GpuRasterError::InvalidImage)?;
         let table_bytes = if self.transfer.contains(samples.space) { 0 } else { transfer::TABLE_BYTES };
         let protected=self.protected_sources(NORMALIZED_PAGE_BYTES.saturating_add(texture_bytes(&tile.texture)));
-        let reusable=(table_bytes==0 && self.gpu_bytes().saturating_add(NORMALIZED_PAGE_BYTES)>self.limits.bytes).then(||
+        let reusable=(table_bytes==0 && self.live_bytes().saturating_add(NORMALIZED_PAGE_BYTES)>self.limits.bytes).then(||
             self.slots.iter().enumerate().filter(|(_,slot)|slot.texture.format()==wgpu::TextureFormat::Rgba32Float
                 && Arc::strong_count(&slot.lease)==1 && !self.required(slot,protected))
                 .min_by_key(|(_,slot)|slot.used).map(|(index,_)|index)).flatten();

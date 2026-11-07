@@ -139,7 +139,7 @@ fn drained_source_renderer() -> (WgpuRasterizer, layer_core::MemoryReservation, 
     let foreign_bytes = sources.slots.iter().filter(|slot| foreign.iter().any(|lease| Arc::ptr_eq(lease, &slot.lease)))
         .map(|slot| texture_bytes(&slot.texture)).sum::<u64>();
     assert_eq!(capacity as u64, sources.limits.bytes.saturating_sub(sources.non_slot_bytes())
-        .saturating_sub(sources.retired_bytes.load(Ordering::Acquire)).saturating_sub(foreign_bytes) / NORMALIZED_PAGE_BYTES);
+        .saturating_sub(foreign_bytes) / NORMALIZED_PAGE_BYTES);
     assert!(capacity > SOURCE_SLOTS);
     drop(sources);
     (r, pressure, source, foreign, capacity)
@@ -1062,14 +1062,13 @@ fn stored_source_promotion_under_a_full_leased_grant_defers_without_overgrant() 
     assert!(r.source_tiles.borrow().slots.iter().all(|slot| slot.texture.format() == wgpu::TextureFormat::Rgba8Unorm));
     drop((encoder, leases));
     let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-    assert!(matches!(r.prepare_raw_neighborhood(target,[0,0],[Some([0,0])],false,&mut encoder),Err(GpuRasterError::DeferredObjectWork)));
-    assert!(encoder.has_work(),"retirement must be submitted before admission can resume");
-    assert!(r.source_tiles.borrow().gpu_bytes()<=grant);
-    r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
-    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
     r.prepare_raw_neighborhood(target,[0,0],[Some([0,0])],false,&mut encoder).unwrap();
-    assert!(r.source_tiles.borrow().gpu_bytes()<=grant);
+    let sources=r.source_tiles.borrow();
+    assert!(sources.live_bytes()<=grant);
+    assert_eq!(sources.gpu_bytes(),sources.live_bytes()+sources.retired_bytes.load(Ordering::Acquire));
+    drop(sources);
     r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
+    assert!(r.source_tiles.borrow().gpu_bytes()<=grant);
     assert_eq!(r.source_tiles.borrow().prepared_view(&source,[0,0]).unwrap().texture().format(),wgpu::TextureFormat::Rgba32Float);
 }
 
@@ -1118,4 +1117,90 @@ fn source_display_records_reuse_scene_uniform_storage_and_preserve_encoded_order
             }
         }
     }
+}
+
+#[test]
+fn live_admission_cross_format_eviction_fits_with_retirement_outstanding() {
+    let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let source=stored_code_source(SampleDepth::U8,5);
+    let mut cache=cache_with_slots(1);
+    let encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    for x in 0..4 {cache.plan(&r,&source,[x,0]).unwrap().1.unwrap().write.track(&encoder);}
+    encoder.submit(&r.queue);crate::test_support::complete(&r);
+    assert_eq!(cache.gpu_bytes(),NORMALIZED_PAGE_BYTES);
+    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    let (tile,pending)=cache.plan_exact(&r,&source,[4,0]).expect("cross-format retirement cannot defer a live-fitting page");
+    assert_eq!(tile.texture.format(),wgpu::TextureFormat::Rgba32Float);
+    assert_eq!(cache.evictions,4);
+    assert_eq!(cache.slots.len(),1);
+    assert_eq!(cache.retired_bytes.load(Ordering::Acquire),NORMALIZED_PAGE_BYTES);
+    assert_eq!(cache.gpu_bytes(),2*NORMALIZED_PAGE_BYTES);
+    pending.unwrap().write.track(&encoder);
+    drop(tile);
+    cache.flush_retired(&mut encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
+    assert_eq!(cache.gpu_bytes(),NORMALIZED_PAGE_BYTES);
+    assert_eq!(cache.retired_bytes.load(Ordering::Acquire),0);
+}
+
+#[test]
+fn live_admission_promotion_fits_a_full_unleased_encoded_grant() {
+    let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let source=stored_code_source(SampleDepth::U8,8);
+    let mut cache=DecodedTiles::default();
+    cache.prepare_transfer(&r.device,RgbSpace::Srgb).unwrap();
+    let overhead=cache.non_slot_bytes();
+    let grant=overhead+2*NORMALIZED_PAGE_BYTES;
+    cache.admit_limits(grant,16*NORMALIZED_PAGE_BYTES,0);
+    let encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    for x in 0..8 {cache.plan(&r,&source,[x,0]).unwrap().1.unwrap().write.track(&encoder);}
+    encoder.submit(&r.queue);crate::test_support::complete(&r);
+    assert_eq!(cache.gpu_bytes(),grant);
+    assert!(cache.slots.iter().all(|slot|slot.texture.format()==wgpu::TextureFormat::Rgba8Unorm && Arc::strong_count(&slot.lease)==1));
+    let input=cache.prepared_view(&source,[0,0]).unwrap();
+    let input=RawTile {texture:input.texture().clone(),view:input.clone()};
+    let (exact,pending)=cache.promote(&r,input).expect("promotion must protect its live input while evicting other unleased pages");
+    assert_eq!(exact.texture.format(),wgpu::TextureFormat::Rgba32Float);
+    assert!(pending.is_some());
+    assert_eq!(cache.evictions,4);
+    assert_eq!(cache.slots.len(),4);
+    assert_eq!(cache.slots.iter().map(|slot|crate::texture_bytes(&slot.texture)).sum::<u64>(),7*NORMALIZED_PAGE_BYTES/4);
+    assert_eq!(cache.retired_bytes.load(Ordering::Acquire),5*NORMALIZED_PAGE_BYTES/4);
+    assert_eq!(cache.gpu_bytes(),grant+NORMALIZED_PAGE_BYTES);
+    assert_eq!(cache.prepared_view(&source,[0,0]).unwrap(),&exact.view);
+    drop((pending,exact));
+}
+
+#[test]
+fn live_admission_submission_retirement_equals_evicted_bytes_until_completion() {
+    let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let source=stored_code_source(SampleDepth::U8,9);
+    let mut cache=cache_with_slots(1);
+    let encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    for x in 0..4 {cache.plan(&r,&source,[x,0]).unwrap().1.unwrap().write.track(&encoder);}
+    encoder.submit(&r.queue);crate::test_support::complete(&r);
+    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    let mut evicted_bytes=0;
+    for x in 4..9 {
+        let previous:Vec<_>=cache.slots.iter().map(|slot|slot.texture.clone()).collect();
+        let (tile,pending)=if x==4 {cache.plan_exact(&r,&source,[x,0])}else{cache.plan(&r,&source,[x,0])}
+            .expect("both cross-format transfers must fit in the same submission");
+        evicted_bytes+=previous.iter().filter(|texture|cache.slots.iter().all(|slot|slot.texture!=**texture))
+            .map(crate::texture_bytes).sum::<u64>();
+        drop(previous);
+        pending.unwrap().write.track(&encoder);
+        drop(tile);
+        let live=cache.slots.iter().map(|slot|crate::texture_bytes(&slot.texture)).sum::<u64>();
+        assert!(live+cache.non_slot_bytes()<=cache.limits.bytes);
+        assert_eq!(cache.retired_bytes.load(Ordering::Acquire),evicted_bytes);
+        assert_eq!(cache.gpu_bytes(),live+cache.non_slot_bytes()+evicted_bytes);
+    }
+    assert_eq!(cache.evictions,5);
+    assert_eq!(evicted_bytes,2*NORMALIZED_PAGE_BYTES);
+    assert_eq!(cache.gpu_bytes(),3*NORMALIZED_PAGE_BYTES);
+    cache.flush_retired(&mut encoder);
+    assert_eq!(cache.retired_bytes.load(Ordering::Acquire),evicted_bytes);
+    encoder.submit(&r.queue);crate::test_support::complete(&r);
+    assert_eq!(cache.gpu_bytes(),NORMALIZED_PAGE_BYTES);
+    assert_eq!(cache.retired_bytes.load(Ordering::Acquire),0);
+    assert!(cache.retired_slots.borrow().is_empty());
 }
