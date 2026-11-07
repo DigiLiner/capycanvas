@@ -444,9 +444,17 @@ private fun copyText(context: android.content.Context, text: String) {
     onBegin: () -> Unit, onCommit: (String) -> Unit, onCancel: () -> Unit,
     onScrub: ((Float, String) -> Unit)? = null, onEndScrub: ((Boolean) -> Unit)? = null, wide: Boolean = false) {
     val colors = LocalPalette.current
-    val width = if (hex) 112.dp else if (wide) 88.dp else 58.dp
     val style = if (hex) MaterialTheme.typography.bodyMedium.copy(fontSize = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = .6.sp, color = colors.text, fontFeatureSettings = "tnum")
         else MaterialTheme.typography.bodyMedium.copy(color = colors.text, textAlign = TextAlign.End, fontFeatureSettings = "tnum")
+    val width = if (hex) {
+        val measurer = rememberTextMeasurer()
+        val fontDensity = LocalDensity.current
+        remember(style, text.length, fontDensity) {
+            val glyph = "0123456789ABCDEF".maxBy { measurer.measure(it.toString(), style).multiParagraph.intrinsics.maxIntrinsicWidth }
+            val template = "#" + glyph.toString().repeat((text.length - 1).coerceAtLeast(0))
+            maxOf(112.dp, with(fontDensity) { measurer.measure(template, style).size.width.toDp() } + 8.dp)
+        }
+    } else if (wide) 88.dp else 58.dp
     if (editing) {
         val keyboard = LocalSoftwareKeyboardController.current
         DisposableEffect(Unit) { onDispose { keyboard?.hide() } }

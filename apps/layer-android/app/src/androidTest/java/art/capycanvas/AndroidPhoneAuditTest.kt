@@ -60,6 +60,19 @@ class AndroidPhoneAuditTest {
     private fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
         instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
 
+    private fun textLayouts(tag: String): List<androidx.compose.ui.text.TextLayoutResult> {
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        instrumentation.runOnMainSync {
+            fun collect(node: SemanticsNode) {
+                node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
+                node.children.forEach(::collect)
+            }
+            collect(checkNotNull(findTag(tag)).second)
+        }
+        assertTrue("$tag has measured text", layouts.isNotEmpty())
+        return layouts
+    }
+
     private fun awaitCanvasPresentation(host: CanvasHost) {
         val deadline = SystemClock.uptimeMillis() + 30_000
         var presented = false
@@ -1684,6 +1697,10 @@ class AndroidPhoneAuditTest {
         state("color") {
             instrumentation.runOnMainSync { host.colorEditor = ColorEditorRequest("foreground",null,false,false) { _,_ -> } }
             wait("color-use")
+            textLayouts("color-value-hex").forEach { layout ->
+                assertTrue("The complete hex value fits: ${layout.layoutInput.text}", layout.multiParagraph.intrinsics.maxIntrinsicWidth <= layout.size.width)
+                assertFalse("The hex value stays on one visible line", layout.didOverflowHeight)
+            }
         }
         state("color-model-popover") {
             reveal("color-format-0");tap("color-format-0")
