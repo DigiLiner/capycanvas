@@ -175,38 +175,80 @@ impl RestorePreflight {
                 Ok(target)=>targets.push(Some(target)),Err(error)=>{failure=Some(error);break;},
             }
         }
-        let projected=targets.iter().flatten().try_fold(0u64,|bytes,target|bytes.checked_add(target.projected_bytes(r)?).ok_or(GpuRasterError::SourceWorkingSetExceeded));
-        match projected.and_then(|bytes|r.admit_preparation_bytes(bytes,r.bake_preflight.as_ref().map_or(0,|bake|bake.projected_bytes())).map(|()|bytes)) {
-            Ok(_)=>(),Err(error) if error.is_preparation_pending()=>(),Err(error)=>failure=Some(error),
-        }
         Self {key,targets,failure,consumed:false}
     }
     fn complete(&self)->bool {self.failure.is_some() || self.targets.iter().flatten().all(TargetRestore::complete)}
 }
 impl WgpuRasterizer {
-    pub(crate) fn admit_preparation_bytes(&self,restore:u64,bake:u64)->Result<(),GpuRasterError> {
-        self.admit_preparation_with_transforms(restore,bake,self.transforms.as_ref())
+    pub(crate) fn admit_preparation_bytes(&mut self,restore:u64,bake:u64)->Result<(),GpuRasterError> {
+        self.admit_preparation_with_transforms(restore,bake,None)
     }
-    pub(crate) fn admit_preparation_with_transforms(&self,restore:u64,bake:u64,transforms:Option<&paint_transform::PaintTransforms>)->Result<(),GpuRasterError> {
-        if self.native_edit.is_none() {return Ok(());}
-        let [scene, paint] = self.memory.preparation_limits();
-        let limit=scene.checked_add(paint).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
+    fn retained_preparation_bytes(&self,transforms:Option<&paint_transform::PaintTransforms>)->Result<u64,GpuRasterError> {
         let mut textures=RetainedTextures::default();
-        let mut bytes=restore.checked_add(bake).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
+        let mut bytes=0u64;
         let published=self.paint_layers.iter().flat_map(|layer|layer.pages.iter().flat_map(|page|std::iter::once(&page.primary.texture).chain(page.secondary.iter().map(|surface|&surface.texture)).chain(page.stroke_start.iter().map(|(_,surface)|&surface.texture)))
             .chain(layer.watercolor_wetness_pages.iter().flat_map(|page|[&page.primary.texture,&page.secondary.texture])))
             .chain(self.layer_masks.pages.values().map(|page|&page.texture));
         for texture in published {if textures.insert(texture.clone()) {bytes=bytes.checked_add(texture_bytes(texture)).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;}}
         bytes=bytes.checked_add(self.scale_display.as_ref().map_or(0,|cache|cache.resident_bytes()))
-            .and_then(|bytes|bytes.checked_add(transforms.map_or(0,|transforms|transforms.preparation_bytes(&mut textures))))
+            .and_then(|bytes|bytes.checked_add(transforms.or(self.transforms.as_ref()).map_or(0,|transforms|transforms.preparation_bytes(&mut textures))))
             .ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
-        let retained = bytes.saturating_sub(restore).saturating_sub(bake);
+        bytes.checked_add(self.display_backup.as_ref().map_or(0,|backup|backup.bytes))
+            .ok_or(GpuRasterError::SourceWorkingSetExceeded)
+    }
+    pub(crate) fn admit_preparation_with_transforms(&mut self,restore:u64,bake:u64,transforms:Option<&paint_transform::PaintTransforms>)->Result<(),GpuRasterError> {
+        if self.native_edit.is_none() {return Ok(());}
+        self.refresh_preparation_memory();
+        let [scene, paint] = self.memory.preparation_limits();
+        let limit=scene.checked_add(paint).ok_or(GpuRasterError::SourceWorkingSetExceeded)?
+            .saturating_sub(self.retired_display_bytes.load(std::sync::atomic::Ordering::Acquire));
+        let projected=restore.checked_add(bake).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
+        let mut retained=self.retained_preparation_bytes(transforms)?;
+        let mut bytes=projected.checked_add(retained).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
         if bytes>limit.max(retained) {
+            if self.factory.device_memory_limit().is_some_and(|limit|projected.saturating_add(self.pinned_paint_bytes()).saturating_add(self.source_tiles.borrow().non_slot_bytes())>limit) {
+                self.preparation_memory(0);
+                return Err(GpuRasterError::SourceWorkingSetExceeded);
+            }
+            let mut encoder=submission::CommandEncoder::new(&self.device,&Default::default());
+            let mut retired=0;
+            let mut pages=Vec::new();
+            if self.scale_display.as_ref().is_some_and(|cache|cache.resident_bytes()!=0) {
+                if self.display_backup.is_none() {
+                    self.display_backup=self.scale_display.as_ref().and_then(|cache|cache.backup(self,&mut encoder));
+                }
+                retired=self.scale_display.take().unwrap().storage_bytes();
+                retained=self.retained_preparation_bytes(transforms)?;
+                bytes=projected.checked_add(retained).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
+            }
+            if bytes>limit.max(retained) && !transforms.is_some_and(|transforms|transforms.has_preview()) {
+                loop {
+                    let batch=self.trim_native_color_cache_to(&[],&[],0);
+                    if batch.is_empty() {break;}
+                    pages.extend(batch);
+                }
+                self.refresh_storage_metrics();
+                retired=retired.checked_add(pages.iter().map(PageSurface::storage_bytes).sum::<u64>()).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
+                retained=self.retained_preparation_bytes(transforms)?;
+                bytes=projected.checked_add(retained).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
+            }
+            if retired!=0 {
+                self.retired_display_bytes.fetch_add(retired,std::sync::atomic::Ordering::AcqRel);
+                let charge=DisplayRetirement {bytes:retired,charge:self.retired_display_bytes.clone(),
+                    #[cfg(not(target_arch="wasm32"))] _backup:None,
+                    #[cfg(not(target_arch="wasm32"))] _scratch:(pages,Vec::new())};
+                #[cfg(not(target_arch="wasm32"))]
+                let wake=self.preparation_wake.clone();
+                encoder.on_submitted_work_done(move||{drop(charge);#[cfg(not(target_arch="wasm32"))] if let Some(wake)=wake {wake();}});
+                self.last_submission=Some(encoder.submit(&self.queue));
+                self.publish_memory(true);
+            }
             self.preparation_memory(bytes);
             self.factory.memory_budget().flush_reports();
             let [scene, raster] = self.preparation_memory_limits();
-            let fresh = scene.checked_add(raster).ok_or(GpuRasterError::SourceWorkingSetExceeded)?;
-            if bytes>fresh.max(retained) {
+            let retiring=self.retired_display_bytes.load(std::sync::atomic::Ordering::Acquire);
+            let fresh = scene.checked_add(raster).ok_or(GpuRasterError::SourceWorkingSetExceeded)?.saturating_sub(retiring);
+            if bytes>fresh.max(retained) && retiring==0 {
                 self.preparation_memory(0);
                 return Err(GpuRasterError::SourceWorkingSetExceeded);
             }

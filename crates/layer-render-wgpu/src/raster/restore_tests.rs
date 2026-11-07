@@ -343,7 +343,8 @@ fn replacement_overlap_is_rejected_before_any_private_page_upload() {
     let tile=RasterTile::backed(blob(color,RasterPlane::WatercolorWetness,2));
     let candidate=RasterData {tiles:(0..limit/bytes).map(|i|(TileKey {plane:RasterPlane::WatercolorWetness,coordinate:[(i%36) as u32,(i/36) as u32]},tile.clone())).collect(),watercolor:Some(layer_core::raster::RasterWatercolor {wet_edge:0.5,burnt_edge:0.5,edge_width:2.})};
     let submissions=r.metrics.native_restore_submissions;
-    assert!(matches!(r.restore_raster(source,&first,&candidate),Err(GpuRasterError::SourceWorkingSetExceeded)));
+    let result=r.restore_raster(source,&first,&candidate);
+    assert!(matches!(&result,Err(GpuRasterError::SourceWorkingSetExceeded)),"{result:?}");
     assert_eq!(r.metrics.native_restore_submissions,submissions);
     assert_eq!(r.paint_layers[0].pages[0].active().texture,texture);assert_eq!(live_pixels(&r),original);
     let replacement=data(color,1,&[RasterPlane::Color],3);

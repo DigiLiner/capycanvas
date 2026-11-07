@@ -293,6 +293,12 @@ impl WgpuRasterizer {
         self.factory.memory_budget().flush_reports();
         self.refresh_memory_limits();
     }
+    pub(crate) fn refresh_preparation_memory(&mut self) {
+        if self.memory.preparation.get() == 0 { return; }
+        self.publish_memory(true);
+        self.factory.memory_budget().flush_reports();
+        self.refresh_memory_limits();
+    }
     pub(crate) fn preparation_memory(&self, bytes: u64) {
         let before = self.memory.preparation.replace(if bytes == 0 { 0 } else { bytes.saturating_add(self.memory.working_limit()) });
         if before.abs_diff(self.memory.preparation.get()) >= MIB { self.publish_memory(false); }

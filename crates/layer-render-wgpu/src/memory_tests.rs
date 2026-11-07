@@ -529,6 +529,72 @@ fn an_import_draining_headroom_preserves_image_and_effect_frame_working_memory()
 }
 
 #[test]
+fn a_restore_drops_backed_color_before_refusing_working_memory() {
+    use layer_core::raster::{RasterData, RasterPlane, RasterTile, TileBlob, TileKey};
+    let doc = layer_core::Document::new(layer_core::PortableId::random(), PAGE_SIZE * 8, PAGE_SIZE * 4,
+        layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+    let target = doc.active_target().unwrap();
+    let mut r = renderer(doc.composition().color,
+        layer_core::DeviceMemoryFacts { unified: true, ..Default::default() }).unwrap();
+    r.ensure_document_metadata(doc.composition().size, doc.scene()).unwrap();
+    let blob = Arc::new(TileBlob::encode(doc.composition().color.paint_descriptor(),
+        &[37, 83, 109, 255].repeat(PAGE_SIZE.pow(2) as usize)).unwrap());
+    let data = RasterData { tiles: (0..32).map(|index| (TileKey {
+        plane: RasterPlane::Color, coordinate: [index % 8, index / 8] }, RasterTile::backed_shared(blob.clone()))).collect(),
+        ..Default::default() };
+    crate::test_support::prepare_raster(&mut r, |r| r.restore_raster(target, &RasterData::default(), &data)).unwrap();
+    complete(&r);
+    r.refresh_storage_metrics();
+    assert_eq!(r.pinned_paint_bytes(), r.paint_memory_bytes() - r.color_memory_bytes());
+    let budget = r.factory.memory_budget().clone();
+    budget.set_ram_override(Some(384 * MIB));
+    r.publish_memory(true);
+    budget.flush_reports();
+    let pressure = budget.admit_import(budget.import_headroom_bytes()).unwrap();
+    r.refresh_memory_limits();
+    let [scene, raster] = r.memory.preparation_limits();
+    let page = r.paint_layers[0].pages[0].primary.storage_bytes();
+    let restore = (scene + raster) / 2 / page * page;
+    assert!(restore > 0 && restore + r.color_memory_bytes() > scene + raster);
+    let result = r.admit_preparation_bytes(restore, 0);
+    assert!(result.is_ok() || result.as_ref().is_err_and(|error| error.is_preparation_pending()),
+        "backed color must not cause terminal restore refusal: {result:?}");
+    assert_eq!(r.color_memory_bytes(), 0);
+    assert_eq!(r.native_backing(target).unwrap().tiles.len(), 32);
+    complete(&r);
+    assert!(r.admit_preparation_bytes(restore, 0).is_ok());
+    drop(pressure);
+}
+
+#[test]
+fn a_restore_drops_an_evictable_hierarchy_before_refusing_working_memory() {
+    let doc = layer_core::Document::new(layer_core::PortableId::random(), 4096, 4096,
+        layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+    let mut r = renderer(doc.composition().color,
+        layer_core::DeviceMemoryFacts { unified: true, ..Default::default() }).unwrap();
+    r.factory.memory_budget().set_ram_override(Some(8 << 30));
+    let mut frame = packet(doc.scene(), doc.composition().size);
+    frame.view = crate::test_support::view([512; 2]);
+    frame.view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
+    submit_settled(&mut r, frame);
+    complete(&r);
+    let resident = r.scale_display.as_ref().unwrap().resident_bytes();
+    assert!(resident > 256 * MIB);
+    let budget = r.factory.memory_budget().clone();
+    budget.set_ram_override(Some(384 * MIB));
+    r.publish_memory(true);
+    budget.flush_reports();
+    r.refresh_memory_limits();
+    let result = r.admit_preparation_bytes(64 * MIB, 0);
+    assert!(result.is_ok() || result.as_ref().is_err_and(|error| error.is_preparation_pending()),
+        "evictable hierarchy must not cause terminal restore refusal: {result:?}");
+    assert_eq!(r.scale_display.as_ref().map_or(0, |cache| cache.resident_bytes()), 0);
+    assert!(r.has_presentable_frame());
+    complete(&r);
+    assert!(r.admit_preparation_bytes(64 * MIB, 0).is_ok());
+}
+
+#[test]
 fn a_restore_is_refused_or_admitted_after_one_budget_rebalance() {
     let mut r = renderer(Default::default(), layer_core::DeviceMemoryFacts {unified: true, ..Default::default()}).unwrap();
     let budget = r.factory.memory_budget().clone();

@@ -178,11 +178,14 @@ impl WgpuRasterizer {
     /// those workloads need separate scheduling. No backing wait or readback
     /// happens here.
     pub(crate) fn trim_native_color_cache(&mut self, batches: &[DabBatch], tiles: &[Vec<BrushTile>]) -> Vec<PageSurface> {
+        let limit = self.native_edit.as_ref().map_or(0, |native| native.color_cache_bytes.saturating_add(native.color_cache_pinned_bytes));
+        self.trim_native_color_cache_to(batches, tiles, limit)
+    }
+    pub(crate) fn trim_native_color_cache_to(&mut self, batches: &[DabBatch], tiles: &[Vec<BrushTile>], limit: u64) -> Vec<PageSurface> {
         let mut retired = Vec::new();
         let Some(native) = &self.native_edit else { return retired; };
         if self.transform_preview.is_some() || self.transforms.as_ref().is_some_and(|t| t.has_preview()) { return retired; }
         let mut bytes = self.color_memory_bytes();
-        let limit = native.color_cache_bytes.saturating_add(native.color_cache_pinned_bytes);
         if bytes <= limit { return retired; }
         let destinations = self.destination_pages(batches, tiles);
         for layer in &mut self.paint_layers {
