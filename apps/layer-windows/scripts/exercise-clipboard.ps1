@@ -57,9 +57,9 @@ function Cross-Window-Clip{
  $peer=@((Read-Snapshot $windowsFile).windows|Where-Object {[long]$_.hwnd -ne $sourceHandle.ToInt64()})[-1]
  try{
   $script:CapyStateFile=Join-Path $run ("ui-state-"+$review.Id+"-"+$peer.id+".json")
-  Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'The clipboard destination window did not become ready' 90
-  $native=Owned-DrawingWindow $review ([long]$peer.hwnd)
-  $script:root=$native.Root;$script:drawingWindow=$native.Handle
+  $native=@{window=$null}
+  Wait-Until {$native.window=Owned-DrawingWindow $review ([long]$peer.hwnd);$native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'The clipboard destination window did not become ready' 90
+  $script:root=$native.window.Root;$script:drawingWindow=$native.window.Handle
   Chord @(0x11) 0x56
   Wait-Until {(Requests) -eq 0 -and (Model).state.document_file.modified -and (Model).brush_ready} 'The copied layer did not paste into the second window' 90
   Capture "cross-window-layer-$Theme" -WithModel
@@ -121,8 +121,8 @@ function Document-Point($Camera,[double[]]$Surface){
  @((($cos*$x+$sin*$y)/$Camera.zoom*$(if($Camera.flipped[0]){-1}else{1})),((-$sin*$x+$cos*$y)/$Camera.zoom*$(if($Camera.flipped[1]){-1}else{1})))
 }
 function Paste-Position([string]$Command,[string]$Shortcut,[uint16[]]$Modifiers,$Before,[switch]$Cursor){
- [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null;(Control 'drawing-canvas').SetFocus()
- Wait-Until {(Control 'drawing-canvas').Current.HasKeyboardFocus -and [CapyRowPointer]::GetForegroundWindow() -eq $drawingWindow} 'Paste position needs the owned drawing canvas focused'
+ [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null;(Control 'drawing-canvas' -NoPopups).SetFocus()
+ Wait-Until {(Control 'drawing-canvas' -NoPopups).Current.HasKeyboardFocus -and [CapyRowPointer]::GetForegroundWindow() -eq $drawingWindow} 'Paste position needs the owned drawing canvas focused'
  $binding=@((Model).state.commands|Where-Object id -eq $Command)
  if($binding.Count -ne 1 -or !$binding[0].enabled -or $binding[0].shortcut -ne $Shortcut){throw "$Command does not expose the default $Shortcut binding"}
  $original=@($Before.manifest.objects|Where-Object type -eq 'capy.image-object/1')
@@ -132,7 +132,7 @@ function Paste-Position([string]$Command,[string]$Shortcut,[uint16[]]$Modifiers,
  $image=@($Before.manifest.objects|Where-Object id -eq $original[0].data.image.ref)[0]
  if(($a[0] -ne 1 -or $a[1] -ne 0 -or $a[2] -ne 0 -or $a[3] -ne 1) -or ($image.data.extent -join 'x') -ne '40x30'){throw 'Position checks require the original unscaled 40x30 image'}
  $clip=@((Clip-Size) -split 'x'|ForEach-Object {[double]$_})
- $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$camera=(Model).state.camera;$area=$camera.work_area
+ $bounds=(Control 'drawing-canvas' -Arranged -NoPopups).Current.BoundingRectangle;$camera=(Model).state.camera;$area=$camera.work_area
  $surface=@(($area[0]+$area[2]/2),($area[1]+$area[3]/2));$point=$null;$requested=$null;$hover=$null
  if($Cursor){
   $point=@([int]($bounds.X+($area[0]+$area[2]*.25)*$bounds.Width/$camera.viewport[0]),[int]($bounds.Y+($area[1]+$area[3]*.65)*$bounds.Height/$camera.viewport[1]))
@@ -162,7 +162,7 @@ function Paste-Position([string]$Command,[string]$Shortcut,[uint16[]]$Modifiers,
  $center=Document-Point $camera $surface
  $expected=@($a);foreach($axis in 0..1){$expected[4+$axis]+=[Math]::Round($center[$axis]-$clip[$axis]/2,[MidpointRounding]::AwayFromZero)-[Math]::Floor($a[4+$axis])}
  $revision=(Model).state.document_file.revision
- if(!(Control 'drawing-canvas').Current.HasKeyboardFocus){throw 'The canvas lost keyboard focus after cursor acknowledgment'}
+ if(!(Control 'drawing-canvas' -NoPopups).Current.HasKeyboardFocus){throw 'The canvas lost keyboard focus after cursor acknowledgment'}
  [CapyRowPointer]::Chord([uint32]$review.Id,$Modifiers,0x56)
  Wait-Until {(Model).state.document_file.revision -gt $revision -and @((Model).state.layers|Where-Object object).Count -eq 2 -and (Model).state.layer_tools.editing_layer.object -and (Requests) -eq 0} "$Shortcut did not paste a second image"
  if((Model).state.layer_tools.tool -eq 'transform'){throw "$Shortcut opened placement handles"}
@@ -234,9 +234,9 @@ function New-Image([scriptblock]$Action,[string]$Extent,[string]$Name,[int]$Obje
 function Layers{@((Model).state.layers).Count}
 function Requests{@((Model).state.requests).Count}
 function Chord([uint16[]]$Modifiers,[uint16]$Key){
- (Control 'drawing-canvas').SetFocus()
+ (Control 'drawing-canvas' -NoPopups).SetFocus()
  [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
- Wait-Until {(Control 'drawing-canvas').Current.HasKeyboardFocus -and [CapyRowPointer]::GetForegroundWindow() -eq $drawingWindow} 'Clipboard input needs the owned drawing canvas focused'
+ Wait-Until {(Control 'drawing-canvas' -NoPopups).Current.HasKeyboardFocus -and [CapyRowPointer]::GetForegroundWindow() -eq $drawingWindow} 'Clipboard input needs the owned drawing canvas focused'
  [CapyRowPointer]::Chord([uint32]$review.Id,$Modifiers,$Key)
 }
 function Copied([scriptblock]$Action,[string]$Message){
@@ -298,7 +298,7 @@ try {
  Invoke 'Test stroke' -Name
  Wait-Until {(Model).state.document_file.modified} 'Stroke not acknowledged'
  $opacity=Control 'layer-opacity';$opacity.SetFocus();$opacity.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('55')
- (Control 'drawing-canvas').SetFocus()
+ (Control 'drawing-canvas' -NoPopups).SetFocus()
  Wait-Until {[Math]::Abs((Model).state.layer_tools.editing_layer.opacity-.55) -lt .000001 -and !(Model).state.layer_tools.has_selection} 'The authored clipboard layer opacity did not settle'
  $authoredPath=Join-Path $run 'Authored source.capy';Save-ProjectAs $authoredPath;$authoredSource=Package $authoredPath
  $null=Authored-Paint $authoredSource
@@ -389,9 +389,20 @@ try {
  Wait-Until {(Layers) -eq $count+1} 'Ctrl+V did not paste the cut pixels'
  Invoke 'Undo' -Name;Wait-Until {(Layers) -eq $count} 'Undo did not remove the pasted cut'
  $checks.cut_selected_canvas=Clip-Size
- Tool 'lasso';Wait-Until {(Model).state.canvas_bar.context.kind -eq 'selection' -and ((Find 'canvas-bar-menu-copy') -or (Find 'canvas-bar-more'))} 'The selection bar did not appear'
- if(Find 'canvas-bar-menu-copy'){Invoke 'canvas-bar-menu-copy'}else{
-  Invoke 'canvas-bar-more';$copy=@{item=$null};Wait-Until {$copy.item=Menu-Item 'Copy';$copy.item} 'The selection bar overflow did not offer Copy'
+ Tool 'lasso';$selectionCopy=@{id=$null}
+ Wait-Until {
+  $m=Model;$bar=$m.state.canvas_bar;$workspace=Workspace-Root
+  if(!$bar -or $bar.context.kind -ne 'selection' -or !$workspace){return $false}
+  $native=$workspace.Current.ItemStatus|ConvertFrom-Json;$published=$native.workspace_update.canvas_bar
+  if(!$published.layout -or $native.revision -lt $m.workspace_update.revision -or $native.model_revision -lt $m.workspace_update.model_revision -or $published.context.kind -ne $bar.context.kind -or $published.context.generation -ne $bar.context.generation){return $false}
+  $items=@($bar.items);$index=@(0..($items.Count-1)|Where-Object {$items[$_].menu -eq 'copy'})
+  if($index.Count -ne 1){throw 'The selection bar does not define one Copy menu'}
+  $selectionCopy.id=if($index[0] -lt $published.layout.items){'canvas-bar-menu-copy'}else{'canvas-bar-more'}
+  [bool](Find $selectionCopy.id -Visible -NoPopups)
+ } 'The selection bar did not acknowledge its Copy menu placement'
+ Invoke $selectionCopy.id -Within (Control 'canvas-action-bar' -Arranged -NoPopups)
+ if($selectionCopy.id -eq 'canvas-bar-more'){
+  $copy=@{item=$null};Wait-Until {$copy.item=Menu-Item 'Copy';$copy.item} 'The selection bar overflow did not offer Copy'
   $copy.item.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
  }
  $merged=@{item=$null};Wait-Until {$merged.item=Menu-Item 'Copy Merged';$merged.item} 'Copy did not list Copy Merged'
@@ -441,7 +452,7 @@ try {
  $bitmap=[Drawing.Bitmap]::new(80,20);try{$g=[Drawing.Graphics]::FromImage($bitmap);$g.Clear([Drawing.Color]::FromArgb(255,210,50,30));$g.Dispose();$bitmap.Save($wide,[Drawing.Imaging.ImageFormat]::Png)}finally{$bitmap.Dispose()}
  Sta {param($first,$second)$files=[Collections.Specialized.StringCollection]::new();$null=$files.Add($first);$null=$files.Add($second);[Windows.Forms.Clipboard]::SetFileDropList($files)} @($foreign,$wide)|Out-Null
  New-Image {Chord @(0x11,0x12) 0x4e} '80x30' 'external-batch-as-new-image' 2 @('40x30','80x20')
- (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x42)
+ (Control 'drawing-canvas' -NoPopups).SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x42)
  Wait-Until {((Model).state.commands|Where-Object id -eq 'brush').selected -and @((Model).state.tool_settings).Count} 'B did not return to the brush after the image paste'
  $tabSource=(Model).windows_tabs.selected;$tabIdentity=Document-Identity;$tabCount=@((Model).windows_tabs.tabs).Count
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File';Invoke-Id 'new_document'

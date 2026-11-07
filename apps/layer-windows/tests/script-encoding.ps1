@@ -93,9 +93,18 @@ foreach($name in @('Json','Resource-Value')){
 $leaf='leaf-'+$records[0].title+$records[0].hint;$nested='"'+$leaf+'"'
 foreach($i in 1..80){$nested='{"branch":'+$nested+'}'}
 $members=@([pscustomobject]@{Key='manifest.json';Value=[Text.Encoding]::UTF8.GetBytes($nested)});$After=$nested|ConvertFrom-Json;$decoded=0
-foreach($name in @('exercise-clipboard.ps1','exercise-image-objects.ps1','ObjectFixture.ps1')){
-    $ast=Fixture-Ast $name
-    foreach($command in $ast.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'ConvertFrom-Json'},$true)){
+foreach($source in @(
+    @{file='exercise-clipboard.ps1';functions=@('Package')},
+    @{file='exercise-image-objects.ps1';functions=@('Package')},
+    @{file='ObjectFixture.ps1';functions=@('Package','Assert-ObjectMotion')}
+)){
+    $ast=Fixture-Ast $source.file
+    foreach($name in $source.functions){
+        $function=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name}.GetNewClosure(),$true)
+        if(!$function){throw "Missing actual JSON decoder function: $($source.file) $name"}
+        $commands=@($function.Body.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'ConvertFrom-Json'},$true))
+        if($commands.Count -ne 1){throw "Expected one package JSON decoder: $($source.file) $name"}
+        $command=$commands[0]
         $value=& ([scriptblock]::Create($command.Parent.Extent.Text))
         foreach($i in 1..80){if($value.GetType() -ne [Management.Automation.PSCustomObject]){throw 'Fixture JSON lost structured nested objects'};$value=$value.branch}
         if($value -cne $leaf){throw 'Fixture JSON truncated nested Unicode data'};$decoded++

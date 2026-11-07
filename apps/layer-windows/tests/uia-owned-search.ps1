@@ -2015,3 +2015,127 @@ public static class CapyCaptionOriginTest {
  }
  'Actual column Drag: advanced generation waits for delayed capture; missing capture, optional guard and device policy preserved.'
 }
+
+& {
+    $tokens=$null;$errors=$null
+    $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-clipboard.ps1'),[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw ($errors|Out-String)}
+    $actual=$source.Find({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-eq'Cross-Window-Clip'},$true)
+    $handoff=$actual.Body.Find({param($node)$node-is[Management.Automation.Language.TryStatementAst]},$true)
+    $prefix=[Collections.Generic.List[string]]::new()
+    foreach($statement in $handoff.Body.Statements){
+        if($statement-is[Management.Automation.Language.PipelineAst]-and$statement.PipelineElements[0]-is[Management.Automation.Language.CommandAst]-and$statement.PipelineElements[0].GetCommandName()-eq'Chord'){break}
+        $prefix.Add($statement.Extent.Text)
+    }
+    if(!$prefix.Count){throw 'Missing actual clipboard window handoff'}
+    $savedRoot=$script:root;$savedHandle=$script:drawingWindow;$savedState=$script:CapyStateFile;$savedEach=$script:CapyEach
+    $sourceRoot=[CapyOwnedSearchTest.Node]::new('clipboard-source',33,0,0)
+    $peerRoot=[CapyOwnedSearchTest.Node]::new('clipboard-peer',33,200,200)
+    $sourceHandle=[IntPtr]101;$peerHandle=[IntPtr]202
+    $sourceRoot.NativeWindowHandle=$sourceHandle;$peerRoot.NativeWindowHandle=$peerHandle
+    $peer=@{id=202;hwnd=202};$review=[CapyOwnedSearchTest.Review]::new();$run='clipboard-handoff'
+    $script:root=$sourceRoot;$script:drawingWindow=$sourceHandle;$script:clipboardHandoffTicks=0
+    function Model{@{brush_ready=$true;windows_workspace=@{ready=$true;busy=$false}}}
+    function Owned-DrawingWindow($Process,[long]$WindowHandle){
+        if($Process.Id-ne33-or$WindowHandle-ne202){throw 'Clipboard handoff requested another owned window'}
+        if($script:clipboardHandoffTicks-ge3){@{Root=$peerRoot;Handle=$peerHandle}}
+    }
+    $script:CapyEach={
+        if($script:root-ne$sourceRoot-or$script:drawingWindow-ne$sourceHandle){throw 'Clipboard handoff bound its root before native readiness'}
+        $script:clipboardHandoffTicks++
+    }
+    try{
+        . ([scriptblock]::Create(($prefix-join[Environment]::NewLine)))
+        if($script:clipboardHandoffTicks-ne3-or$script:root-ne$peerRoot-or$script:drawingWindow-ne$peerHandle){throw 'Clipboard handoff accepted model readiness before its native window became ready'}
+    }finally{
+        $script:root=$savedRoot;$script:drawingWindow=$savedHandle;$script:CapyStateFile=$savedState;$script:CapyEach=$savedEach
+        Remove-Variable clipboardHandoffTicks -Scope Script
+    }
+}
+Write-Output 'Actual clipboard handoff waits for its native owned window before binding the destination root, even when its shared model is already ready.'
+
+& {
+    $tokens=$null;$errors=$null
+    $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-clipboard.ps1'),[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw ($errors|Out-String)}
+    $actual=$source.Find({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-eq'Chord'},$true)
+    $prefix=[Collections.Generic.List[string]]::new();$dispatch=$null
+    foreach($statement in $actual.Body.EndBlock.Statements){
+        $dispatch=$statement.Find({param($node)$node-is[Management.Automation.Language.InvokeMemberExpressionAst]-and$node.Static-and$node.Member.Value-eq'Chord'-and$node.Expression.TypeName.FullName-eq'CapyRowPointer'},$true)
+        if($dispatch){break}
+        $prefix.Add($statement.Extent.Text)
+    }
+    if(!$dispatch-or!$prefix.Count){throw 'Missing actual clipboard keyboard dispatch'}
+    $savedRoot=$script:root;$savedHandle=$script:drawingWindow;$savedEach=$script:CapyEach
+    $savedPopups=$script:CapyPopups;$savedFind=$script:CapyFind;$savedForeground=[CapyOwnedSearchTest.Driver]::Foreground
+    $sourceRoot=[CapyOwnedSearchTest.Node]::new('clipboard-source',33,0,0)
+    $peerRoot=[CapyOwnedSearchTest.Node]::new('clipboard-peer',33,200,200)
+    $sourceRoot.NativeWindowHandle=[IntPtr]101;$peerRoot.NativeWindowHandle=[IntPtr]202
+    $ownCanvas=[CapyOwnedSearchTest.Node]::new('drawing-canvas',33,10,10)
+    $peerCanvas=[CapyOwnedSearchTest.Node]::new('drawing-canvas',33,210,210);$peerRoot.Children.Add($peerCanvas)
+    $review=[CapyOwnedSearchTest.Review]::new()
+    $script:root=$sourceRoot;$script:drawingWindow=$sourceRoot.NativeWindowHandle
+    $script:CapyPopups=$true;$script:CapyFind='prefer-visible';$script:clipboardCanvasTicks=0
+    [CapyOwnedSearchTest.Driver]::Foreground=[IntPtr]::Zero
+    function Owned-ProcessWindows($Process){foreach($window in @($sourceRoot,$peerRoot)){@{Root=$window;Handle=$window.NativeWindowHandle}}}
+    $script:CapyEach={
+        if($peerCanvas.HasKeyboardFocus){throw 'Clipboard canvas focus escaped its current native window'}
+        $script:clipboardCanvasTicks++
+        if($script:clipboardCanvasTicks-eq3){$sourceRoot.Children.Add($ownCanvas)}
+    }
+    try{
+        . ([scriptblock]::Create(($prefix-join[Environment]::NewLine).Replace('[CapyRowPointer]','[CapyOwnedSearchTest.Driver]')))
+        if(!$ownCanvas.HasKeyboardFocus-or$peerCanvas.HasKeyboardFocus-or[CapyOwnedSearchTest.Driver]::Foreground-ne$script:drawingWindow-or$script:clipboardCanvasTicks-lt3){throw 'Clipboard input did not focus its current native canvas before keyboard dispatch'}
+    }finally{
+        $script:root=$savedRoot;$script:drawingWindow=$savedHandle;$script:CapyEach=$savedEach
+        $script:CapyPopups=$savedPopups;$script:CapyFind=$savedFind;[CapyOwnedSearchTest.Driver]::Foreground=$savedForeground
+        Remove-Variable clipboardCanvasTicks -Scope Script
+    }
+}
+Write-Output 'Actual clipboard keyboard preparation waits for its current native canvas and never focuses another registered window before dispatch.'
+
+& {
+    $tokens=$null;$errors=$null
+    $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-clipboard.ps1'),[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw ($errors|Out-String)}
+    $merged=$source.Find({param($node)$node-is[Management.Automation.Language.AssignmentStatementAst]-and$node.Left-is[Management.Automation.Language.VariableExpressionAst]-and$node.Left.VariablePath.UserPath-eq'merged'},$true)
+    $start=@($source.FindAll({param($node)$node-is[Management.Automation.Language.CommandAst]-and$node.GetCommandName()-eq'Tool'-and$node.CommandElements[1].Value-eq'lasso'-and$node.Extent.StartOffset-lt$merged.Extent.StartOffset},$true))[-1]
+    $text=$source.Extent.Text.Substring($start.Extent.StartOffset,$merged.Extent.StartOffset-$start.Extent.StartOffset).Replace('[System.Windows.Automation.ExpandCollapsePattern]','[CapyOwnedSearchTest.InvokePattern]')
+    $savedRoot=$script:root;$savedEach=$script:CapyEach;$savedPopups=$script:CapyPopups;$savedFind=$script:CapyFind
+    try{foreach($route in 'direct','overflow'){
+        $script:root=[CapyOwnedSearchTest.Node]::new('clipboard-window',33,0,0)
+        $barNode=[CapyOwnedSearchTest.Node]::new('canvas-action-bar',33,10,10);$script:root.Children.Add($barNode)
+        $moreNode=[CapyOwnedSearchTest.Node]::new('canvas-bar-more',33,20,20);$barNode.Children.Add($moreNode)
+        $copyNode=[CapyOwnedSearchTest.Node]::new('canvas-bar-menu-copy',33,30,20)
+        $review=[CapyOwnedSearchTest.Review]::new();$script:CapyPopups=$true;$script:CapyFind='prefer-visible'
+        $script:clipboardPlacementTicks=0;$script:clipboardPlacementInvokes=0;$script:clipboardPlacementExpands=0
+        function Tool($Id){if($Id-ne'lasso'){throw 'Clipboard placement selected another tool'}}
+        function Model{@{state=@{canvas_bar=@{context=@{kind='selection';generation=7};items=@(@{menu='other'},@{menu='copy'},@{menu='mask'})}};workspace_update=@{revision=10;model_revision=20}}}
+        function Workspace-Root{
+            $generation=if($script:clipboardPlacementTicks-lt2){6}else{7}
+            $revision=if($script:clipboardPlacementTicks-eq2){9}else{10}
+            $modelRevision=if($script:clipboardPlacementTicks-eq3){19}else{20}
+            $shown=if($route-eq'direct'){2}else{1}
+            @{Current=@{ItemStatus=(@{revision=$revision;model_revision=$modelRevision;workspace_update=@{canvas_bar=@{context=@{kind='selection';generation=$generation};layout=@{items=$shown}}}}|ConvertTo-Json -Depth 8 -Compress)}}
+        }
+        function Invoke($Id,$Within){
+            if($script:clipboardPlacementTicks-lt4-or($route-eq'direct'-and$Id-ne'canvas-bar-menu-copy')){throw 'Clipboard selected overflow before native Copy placement was acknowledged'}
+            if($Within-ne$barNode-or($route-eq'overflow'-and$Id-ne'canvas-bar-more')){throw 'Clipboard Copy invocation escaped its arranged native bar'}
+            $script:clipboardPlacementInvokes++
+        }
+        $expand=[pscustomobject]@{};$expand|Add-Member ScriptMethod Expand {$script:clipboardPlacementExpands++}
+        $menu=[pscustomobject]@{Pattern=$expand};$menu|Add-Member ScriptMethod GetCurrentPattern {param($Pattern)$this.Pattern}
+        function Menu-Item($Name){if($Name-ne'Copy'-or$route-ne'overflow'-or$script:clipboardPlacementInvokes-ne1){throw 'Clipboard requested an unexpected overflow menu'};$menu}
+        $script:CapyEach={
+            $script:clipboardPlacementTicks++
+            if($route-eq'direct'-and$script:clipboardPlacementTicks-eq5){$barNode.Children.Add($copyNode)}
+        }
+        . ([scriptblock]::Create($text))
+        $expectedExpands=if($route-eq'overflow'){1}else{0}
+        if($script:clipboardPlacementInvokes-ne1-or$script:clipboardPlacementExpands-ne$expectedExpands-or($route-eq'direct'-and$script:clipboardPlacementTicks-lt5)){throw 'Clipboard Copy placement did not invoke its acknowledged route exactly once'}
+    }}finally{
+        $script:root=$savedRoot;$script:CapyEach=$savedEach;$script:CapyPopups=$savedPopups;$script:CapyFind=$savedFind
+        Remove-Variable clipboardPlacementTicks,clipboardPlacementInvokes,clipboardPlacementExpands -Scope Script
+    }
+}
+Write-Output 'Actual clipboard Copy routing rejects stale native context and revisions, waits for a late direct control and invokes direct or genuine overflow exactly once.'
