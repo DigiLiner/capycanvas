@@ -310,6 +310,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
             var task = 0L
             var control = 0L
             var temporary: File? = null
+            var failureName=uri?.lastPathSegment ?: document.optString("name",host.catalog.getJSONObject("document_delivery_copy").getString("untitled"))
             try {
                 val location = if (uri == null) null else withContext(Dispatchers.IO) {
                     val name = application.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
@@ -317,6 +318,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
                     } ?: uri.lastPathSegment ?: document.optString("name", host.catalog.getJSONObject("document_delivery_copy").getString("untitled") + ".capy")
                     obj("uri" to uri.toString(), "name" to name)
                 }
+                if(location!=null)failureName=location.getString("name")
                 if (kind == "export") {
                     val master = host.snapshot?.getJSONObject("state")?.getJSONObject("document_file")?.objectOrNull("location")?.optString("uri")
                     check(master==null||!withContext(Dispatchers.IO) {sameDestination(Uri.parse(master),uri!!)}) { host.catalog.getJSONObject("document_delivery_copy").getString("separate_copy") }
@@ -394,7 +396,11 @@ internal class DocumentController(private val host: CanvasHost, private val appl
                 withContext(NonCancellable) { finish(id, false) }
                 throw e
             } catch (e: Exception) {
-                finish(id, false, if (exportCancelled) null else e.message ?: actionFailed)
+                val message=if(exportCancelled)null else if(kind=="open") {
+                    android.util.Log.e("CapyCanvas.Documents","File open failed",e)
+                    JSONTokener(host.withNative{Native.query(it,obj("type" to "file_open_failure","name" to failureName).toString())}).nextValue() as String
+                } else e.message ?: actionFailed
+                finish(id, false, message)
             } finally {
                 exportControl = 0; exporting = false; opening = false; publishing = false
                 withContext(NonCancellable + Dispatchers.IO) { if (task != 0L) Native.projectFree(task); if (control != 0L) Native.captureFree(control); temporary?.delete() }

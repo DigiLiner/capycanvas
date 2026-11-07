@@ -803,6 +803,7 @@ impl NativeHost {
             Catalog,
             NativeCaption { caption: layer_ui::NativeCaption },
             DocumentDeliveryMessage { message: layer_ui::DocumentDeliveryMessage },
+            FileOpenFailure { name: String },
             ProfileEntriesCopy { entries: Vec<layer_ui::profile_library::ProfileEntry> },
             ProfileLibraryMatches { entry: layer_ui::profile_library::ProfileEntry, query: String },
             WorkspaceNameValidation { name: String },
@@ -942,6 +943,7 @@ impl NativeHost {
             Query::Catalog => json!(self.catalog),
             Query::NativeCaption { caption } => json!(caption.message(self.session.localization())),
             Query::DocumentDeliveryMessage { message } => json!(message.message(self.session.localization())),
+            Query::FileOpenFailure { name } => json!(layer_ui::file_open_failure(self.session.localization(), &name)),
             Query::ProfileEntriesCopy { entries } => {
                 if entries.len() > layer_ui::profile_library::PROFILE_LIBRARY_ENTRIES { return Err(layer_ui::ColorFeatureError::ProfileLibraryLimit.message(self.session.localization())); }
                 json!(entries.into_iter().map(|mut entry| { entry.profile = None; entry.localized_view(self.session.localization()) }).collect::<Vec<_>>())
@@ -1382,6 +1384,9 @@ mod tests {
             let filename = host.query(json!({"type":"document_delivery_message","message":{"type":"converted_name","name":name}})).unwrap();
             assert_eq!(filename, layer_ui::DocumentDeliveryMessage::ConvertedName { name:name.into() }.message(&localization));
             assert!(filename.as_str().unwrap().contains(name));
+            let failure = host.query(json!({"type":"file_open_failure","name":name})).unwrap();
+            assert_eq!(failure, layer_ui::file_open_failure(&localization, name));
+            assert!(failure.as_str().unwrap().contains(name));
             assert!(std::sync::Arc::ptr_eq(host.session.localization(), &localization));
             assert!(host.session.renderer_mut().0.is_none());
         }

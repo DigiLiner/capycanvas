@@ -962,6 +962,16 @@ class AndroidPhoneAuditTest {
         fun epoch() = shared().getJSONObject("document_file").getLong("epoch")
         fun openFile(name: String) = instrumentation.runOnMainSync { assertTrue(host.documents.openUris(listOf(android.net.Uri.fromFile(fixture(name))))) }
         fun opened(before: Long,timeout: Long = 120_000) = host.awaitFrame("Opened drawing is active",timeout) { epoch() != before && !host.documents.working && !host.drawingTabs.switching }
+        fun failedOpen() {
+            state("cannot-open-file") {
+                val before=epoch();openFile("broken.png");wait("file-error-ok",60_000);settle()
+                assertEquals("A failed open keeps the drawing",before,epoch())
+                val message=checkNotNull(host.hostError)
+                assertTrue("The failure names the selected file",message.contains("broken.png"))
+                compose.onNodeWithText(message).assertIsDisplayed()
+            }
+            close("file-error-ok");gone("file-error")
+        }
         val pick = android.content.Intent.ACTION_OPEN_DOCUMENT
         val create = android.content.Intent.ACTION_CREATE_DOCUMENT
         var keyboardHeight = 0
@@ -1062,11 +1072,7 @@ class AndroidPhoneAuditTest {
         state("delete-toolbar") { host.drain(obj("type" to "customize","action" to obj("type" to "delete_toolbar","panel" to toolbar)));wait("toolbar-prompt");settle() }
         if(host.snapshot?.objectOrNull("toolbar_prompt") != null)host.drain(obj("type" to "customize","action" to obj("type" to "cancel_toolbar")))
 
-        state("cannot-open-file") {
-            val before = epoch();openFile("broken.png");wait("file-error-ok",60_000);settle()
-            assertEquals("A failed open keeps the drawing",before,epoch())
-        }
-        close("file-error-ok");gone("file-error")
+        failedOpen()
         state("preserved-package-preview") { openFile("corrupt.capy");wait("preserved-package-preview",60_000);settle() }
         state("package-copy-return") {
             if(!exists("preserved-package-preview")) { openFile("corrupt.capy");wait("preserved-package-preview",60_000) }
@@ -1082,6 +1088,7 @@ class AndroidPhoneAuditTest {
             host.awaitFrame("$tag shows its operation title") {findTag("$tag-title")?.second?.config?.getOrNull(SemanticsProperties.Text)?.any{it.text==title}==true}
             compose.onNodeWithTag("$tag-status").assertTextContains(host.bootstrap!!.getString("preparing_document"))
         }
+        if(fileOnly)failedOpen()
         if(!sourceOnly) {
         state("document-opening-progress") {
             openFile("big.png");wait("document-progress",60_000)
