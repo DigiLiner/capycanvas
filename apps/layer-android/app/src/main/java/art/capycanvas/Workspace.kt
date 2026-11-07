@@ -245,7 +245,7 @@ private val HiddenChromeShape=object:Shape {
                         Workspace(host, snapshot)
                     }
                     host.dialogError?.takeIf { snapshot?.objectOrNull("preferences") == null }?.let { message ->
-                        DialogShell(host,host.bootstrap!!.getJSONObject("file_error_dialog"),host.bootstrap!!.getString("action_failed"),onCancel=host::clearActionError,tag="action-error",
+                        DialogShell(host,host.bootstrap!!.getJSONObject("file_error_dialog"),host.dialogErrorTitle ?: host.bootstrap!!.getString("action_failed"),onCancel=host::clearActionError,tag="action-error",
                             responses=listOf(DialogResponse(host.bootstrap!!.getJSONObject("common").getString("ok"),"action-error-ok",action=host::clearActionError)),body={Text(message)})
                     }
                     CommandSearch(host)

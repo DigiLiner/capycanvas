@@ -447,4 +447,6 @@ native-color-stroke-recording-save-first = 기존 획 기록을 먼저 저장하
 
 native-color-stroke-recording-compression-failed = 기록을 압축하지 못했습니다
 
+native-color-stroke-recording-save-failed = 획 기록을 저장할 수 없습니다.
+
 native-color-save-stroke-recording = 획 기록 저장

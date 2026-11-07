@@ -632,4 +632,6 @@ native-color-stroke-recording-save-first = Guarda primero la grabación de trazo
 
 native-color-stroke-recording-compression-failed = No se pudo comprimir la grabación
 
+native-color-stroke-recording-save-failed = No se pudo guardar la grabación de trazos.
+
 native-color-save-stroke-recording = Guardar grabación de trazos

@@ -629,4 +629,6 @@ native-color-stroke-recording-save-first = Save the existing stroke recording fi
 
 native-color-stroke-recording-compression-failed = Recording compression failed
 
+native-color-stroke-recording-save-failed = Could not save the stroke recording.
+
 native-color-save-stroke-recording = Save stroke recording

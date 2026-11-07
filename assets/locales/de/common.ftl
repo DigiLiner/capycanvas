@@ -630,4 +630,6 @@ native-color-stroke-recording-save-first = Zuerst die vorhandene Strichaufzeichn
 
 native-color-stroke-recording-compression-failed = Die Aufzeichnung konnte nicht komprimiert werden
 
+native-color-stroke-recording-save-failed = Die Strichaufzeichnung konnte nicht gespeichert werden.
+
 native-color-save-stroke-recording = Strichaufzeichnung speichern

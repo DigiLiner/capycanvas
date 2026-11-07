@@ -447,4 +447,6 @@ native-color-stroke-recording-save-first = 先に現在のストローク記録�
 
 native-color-stroke-recording-compression-failed = 記録を圧縮できませんでした
 
+native-color-stroke-recording-save-failed = ストローク記録を保存できませんでした。
+
 native-color-save-stroke-recording = ストローク記録を保存

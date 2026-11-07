@@ -623,4 +623,6 @@ native-color-stroke-recording-save-first = Сначала сохраните с�
 
 native-color-stroke-recording-compression-failed = Не удалось сжать запись
 
+native-color-stroke-recording-save-failed = Не удалось сохранить запись штрихов.
+
 native-color-save-stroke-recording = Сохранить запись штрихов

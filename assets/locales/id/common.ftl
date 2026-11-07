@@ -706,4 +706,6 @@ native-color-stroke-recording-save-first = Simpan rekaman goresan yang ada terle
 
 native-color-stroke-recording-compression-failed = Rekaman gagal dikompresi
 
+native-color-stroke-recording-save-failed = Rekaman goresan tidak dapat disimpan.
+
 native-color-save-stroke-recording = Simpan rekaman goresan

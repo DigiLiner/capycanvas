@@ -9,12 +9,17 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.util.zip.GZIPOutputStream
 
-/** Window-owned state survives panel hiding, document switches and rotation. */
 internal class StrokeRecording(private val host: CanvasHost) {
     var status by mutableStateOf<JSONObject?>(null)
         private set
     var busy by mutableStateOf(false)
     var saveRequested by mutableStateOf(false)
+
+    fun reportFailure(error:Exception,message:String=host.bootstrap!!.getString("action_failed")) {
+        android.util.Log.e("CapyCanvas.StrokeRecording","Stroke recording failed",error)
+        host.reportActionError(message,host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("stroke_recording"))
+    }
+    fun reportSaveFailure(error:Exception)=reportFailure(error,host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("stroke_recording_save_failed"))
 
     suspend fun update(action: String? = null) {
         val next = host.withNative { JSONObject(Native.query(it, obj("type" to "stroke_recording", "action" to action).toString())) }
@@ -31,7 +36,8 @@ internal class StrokeRecording(private val host: CanvasHost) {
                     status?.optBoolean("ready") == true -> saveRequested = true
                     else -> update("start")
                 }
-            } catch (e: Exception) { host.reportActionError(e.message ?: "Could not record strokes") }
+            } catch(e:CancellationException){throw e}
+            catch (e: Exception) { reportFailure(e) }
             finally { busy = false }
         }
     }
@@ -44,29 +50,27 @@ internal class StrokeRecording(private val host: CanvasHost) {
         if (uri == null) recording.busy = false
         else host.viewModelScope.launch {
             try {
-                // Only take the snapshot on the engine owner; compression and
-                // provider I/O run away from the render Looper and main thread.
                 val raw = host.withNative { Native.strokeRecordingData(it) }
                 val header = recording.status!!.getString("header")
                 withContext(Dispatchers.IO) {
-                    val stream = resolver.openOutputStream(uri, "wt") ?: error("Could not open recording destination")
+                    val stream = resolver.openOutputStream(uri, "wt") ?: throw java.io.IOException()
                     stream.use { output ->
                         output.write(header.toByteArray(Charsets.US_ASCII))
                         GZIPOutputStream(output).use { it.write(raw) }
                     }
                 }
                 recording.update("saved")
-            } catch (e: Exception) { host.reportActionError(e.message ?: "Could not save stroke recording") }
+            } catch(e:CancellationException){throw e}
+            catch (e: Exception) { recording.reportSaveFailure(e) }
             finally { recording.busy = false }
         }
     }
     LaunchedEffect(host) {
         while (isActive) {
-            // Native initialization may still be pending on first composition.
             if (host.snapshot != null && (recording.status == null || recording.status?.optBoolean("recording") == true)) {
                 try { recording.update() }
                 catch (e: CancellationException) { throw e }
-                catch (e: Exception) { host.reportActionError(e.message ?: "Could not read stroke recording status"); break }
+                catch (e: Exception) { recording.reportFailure(e); break }
             }
             delay(200)
         }
@@ -76,7 +80,7 @@ internal class StrokeRecording(private val host: CanvasHost) {
             recording.saveRequested = false
             recording.busy = true
             try { launcher.launch("stroke-recording.capystrokes") }
-            catch (e: Exception) { recording.busy = false; host.reportActionError(e.message ?: "Could not open recording destination") }
+            catch (e: Exception) { recording.busy = false; recording.reportSaveFailure(e) }
         }
     }
 }

@@ -447,4 +447,6 @@ native-color-stroke-recording-save-first = 請先儲存現有的筆畫錄製
 
 native-color-stroke-recording-compression-failed = 錄製壓縮失敗
 
+native-color-stroke-recording-save-failed = 無法儲存筆畫錄製檔。
+
 native-color-save-stroke-recording = 儲存筆畫錄製

@@ -623,4 +623,6 @@ native-color-stroke-recording-save-first = Önce mevcut fırça darbesi kaydın�
 
 native-color-stroke-recording-compression-failed = Kayıt sıkıştırılamadı
 
+native-color-stroke-recording-save-failed = Fırça darbesi kaydı kaydedilemedi.
+
 native-color-save-stroke-recording = Fırça darbesi kaydını kaydet

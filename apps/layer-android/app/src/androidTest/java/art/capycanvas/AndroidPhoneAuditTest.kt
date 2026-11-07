@@ -974,6 +974,30 @@ class AndroidPhoneAuditTest {
         }
         val pick = android.content.Intent.ACTION_OPEN_DOCUMENT
         val create = android.content.Intent.ACTION_CREATE_DOCUMENT
+        fun recordingSaveError() {
+            state("recording-save-error") {
+                tolerateActionError = true
+                picking(create,android.net.Uri.fromFile(File("/proc/version"))) {
+                    instrumentation.runOnMainSync { host.strokeRecording.click() }
+                    compose.waitUntil(10_000) { host.strokeRecording.status?.optBoolean("recording") == true && !host.strokeRecording.busy }
+                    instrumentation.runOnMainSync { host.strokeRecording.click() }
+                    compose.waitUntil(20_000) { findTag("action-error-ok") != null }
+                }
+                val expected=host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("stroke_recording_save_failed")
+                assertEquals(expected,host.dialogError)
+                val title=host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("stroke_recording")
+                assertEquals(title,host.dialogErrorTitle)
+                compose.onNodeWithTag("action-error-title").assertTextContains(title)
+                compose.onNodeWithText(expected).assertIsDisplayed()
+                runBlocking{host.strokeRecording.update()}
+                assertTrue("Failed save keeps the recording",host.strokeRecording.status!!.getBoolean("ready"))
+                assertFalse(host.strokeRecording.busy)
+                settle()
+            }
+            if(findTag("action-error-ok") != null) { compose.onNodeWithTag("action-error-ok").performSemanticsAction(SemanticsActions.OnClick);compose.waitUntil(10_000) { findTag("action-error") == null } }
+            assertNull(host.dialogErrorTitle)
+            tolerateActionError = false
+        }
         var keyboardHeight = 0
         fun withKeyboard(tag: String) {
             if(keyboardHeight == 0) {
@@ -1013,18 +1037,7 @@ class AndroidPhoneAuditTest {
         }
         if(findTag("action-error-ok") != null) { compose.onNodeWithTag("action-error-ok").performSemanticsAction(SemanticsActions.OnClick);compose.waitUntil(10_000) { findTag("action-error") == null } }
         tolerateActionError = false
-        state("recording-save-error") {
-            tolerateActionError = true
-            picking(create,android.net.Uri.fromFile(File("/proc/version"))) {
-                instrumentation.runOnMainSync { host.strokeRecording.click() }
-                compose.waitUntil(10_000) { host.strokeRecording.status?.optBoolean("recording") == true && !host.strokeRecording.busy }
-                instrumentation.runOnMainSync { host.strokeRecording.click() }
-                compose.waitUntil(20_000) { findTag("action-error-ok") != null }
-            }
-            settle()
-        }
-        if(findTag("action-error-ok") != null) { compose.onNodeWithTag("action-error-ok").performSemanticsAction(SemanticsActions.OnClick);compose.waitUntil(10_000) { findTag("action-error") == null } }
-        tolerateActionError = false
+        recordingSaveError()
 
         val paperLayer = shared().array("layers").objects().first { it.optJSONObject("paper")?.optBoolean("editable") == true }.getLong("id")
         state("paper-import-return") {
@@ -1088,7 +1101,7 @@ class AndroidPhoneAuditTest {
             host.awaitFrame("$tag shows its operation title") {findTag("$tag-title")?.second?.config?.getOrNull(SemanticsProperties.Text)?.any{it.text==title}==true}
             compose.onNodeWithTag("$tag-status").assertTextContains(host.bootstrap!!.getString("preparing_document"))
         }
-        if(fileOnly)failedOpen()
+        if(fileOnly){recordingSaveError();failedOpen()}
         if(!sourceOnly) {
         state("document-opening-progress") {
             openFile("big.png");wait("document-progress",60_000)

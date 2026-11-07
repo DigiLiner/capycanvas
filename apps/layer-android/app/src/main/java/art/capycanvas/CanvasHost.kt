@@ -390,6 +390,8 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     /** Host file and platform errors, shown in a dialog until acknowledged. */
     internal var dialogError by mutableStateOf<String?>(null)
         private set
+    internal var dialogErrorTitle by mutableStateOf<String?>(null)
+        private set
     /** The core's file and renderer error, shown once for each value it publishes. */
     internal var hostError by mutableStateOf<String?>(null)
         private set
@@ -548,8 +550,8 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     internal fun documentChanged(complete: () -> Unit = {}) = post {
         refreshChrome(); publish(true); wake(); main.post { drawingTabs.refresh(); complete() }
     }
-    internal fun reportActionError(message: String) { dialogError = message }
-    fun clearActionError() { dialogError = null }
+    internal fun reportActionError(message: String,title:String?=null) { dialogErrorTitle=title;dialogError = message }
+    fun clearActionError() { dialogError = null;dialogErrorTitle=null }
     internal fun dismissHostError() { hostError = null }
     /** Accept runs the core's action; declining, or the timeout, dismisses it. */
     internal fun answerNotice(shown: CanvasNotice, accept: Boolean, action: String? = null) {

@@ -406,4 +406,6 @@ native-color-stroke-recording-save-first = Salva prima la registrazione dei trat
 
 native-color-stroke-recording-compression-failed = Impossibile comprimere la registrazione
 
+native-color-stroke-recording-save-failed = Non è stato possibile salvare la registrazione dei tratti.
+
 native-color-save-stroke-recording = Salva registrazione dei tratti

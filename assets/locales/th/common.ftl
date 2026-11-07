@@ -399,4 +399,6 @@ native-color-stroke-recording-save-first = บันทึกการบัน�
 
 native-color-stroke-recording-compression-failed = บีบอัดการบันทึกไม่สำเร็จ
 
+native-color-stroke-recording-save-failed = จัดเก็บการบันทึกเส้นวาดไม่สำเร็จ
+
 native-color-save-stroke-recording = บันทึกเส้นวาดลงไฟล์

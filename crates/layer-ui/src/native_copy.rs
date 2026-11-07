@@ -257,6 +257,8 @@ copy_struct! { ColorCopy {
     screen: COMMON_SCREEN_TITLE,
     record_tablet: NATIVE_COLOR_RECORD_TABLET,
     stroke_recording_file_type: NATIVE_COLOR_STROKE_RECORDING_FILE_TYPE,
+    stroke_recording: NATIVE_COLOR_STROKE_RECORDING,
+    stroke_recording_save_failed: NATIVE_COLOR_STROKE_RECORDING_SAVE_FAILED,
     histogram: NATIVE_COLOR_HISTOGRAM,
     auto_update: NATIVE_COLOR_AUTO_UPDATE,
     channel: NATIVE_COLOR_CHANNEL,

@@ -623,4 +623,6 @@ native-color-stroke-recording-save-first = Hãy lưu bản ghi nét vẽ hiện 
 
 native-color-stroke-recording-compression-failed = Không thể nén bản ghi
 
+native-color-stroke-recording-save-failed = Không thể lưu bản ghi nét vẽ.
+
 native-color-save-stroke-recording = Lưu bản ghi nét vẽ
