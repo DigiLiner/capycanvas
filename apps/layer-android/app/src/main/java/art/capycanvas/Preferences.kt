@@ -70,8 +70,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.Hyphens
-import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
@@ -420,7 +418,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
     BoxWithConstraints(Modifier.fillMaxWidth().heightIn(min = 72.dp).then(action)
         .testTag("preference-" + row.getString("id")).padding(horizontal = 14.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
         val controlWidth = maxWidth * .48f
-        val labelStyle = LocalTextStyle.current.copy(hyphens = Hyphens.Auto, lineBreak = LineBreak.Paragraph)
+        val labelStyle = settingsLabelStyle()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Column(Modifier.weight(1f).testTag("preference-label-" + row.getString("id")), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(row.getString("title"), style = labelStyle, fontWeight = FontWeight.Medium, color = if (enabled) colors.text else colors.settingsSecondary)

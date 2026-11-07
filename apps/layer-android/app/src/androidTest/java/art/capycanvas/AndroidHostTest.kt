@@ -3886,6 +3886,24 @@ class AndroidHostTest {
         assertNull(host.actionError)
     }
 
+    @Test fun exportColorUsesSharedContentWidth() {
+        action(obj("type" to "invoke", "command" to "export_document"))
+        host.awaitMain("Export root opens",30_000,diagnostics={""},compose=compose) { findTag("export-color") != null }
+        compose.onNodeWithTag("export-color").performScrollTo().performClick()
+        val background="color-choice-"+host.catalog.getJSONObject("export_copy").getString("background")
+        host.awaitMain("Export Color opens",30_000,diagnostics={""},compose=compose) { findTag(background) != null }
+        compose.onNodeWithTag(background).performScrollTo().assertIsDisplayed()
+        val density=compose.activity.resources.displayMetrics.density
+        val width=bounds("export-dialog").width/density
+        val expected=(org.json.JSONTokener(Native.dialogUi(obj("kind" to "preferences_content_width","width" to width,"minimum" to 0).toString())).nextValue() as Number).toFloat()
+        assertEquals("Export Color uses the shared content width",expected,bounds(background).width/density,1f/density)
+        capture("r3-export-color-tablet")
+        compose.onNodeWithTag("export-back").performClick()
+        host.awaitMain("Export returns to root",30_000,diagnostics={""},compose=compose) { findTag("export-presets") != null }
+        compose.onNodeWithTag("export-back").performClick()
+        host.awaitMain("Export closes",30_000,diagnostics={""},compose=compose) { findTag("export-dialog") == null }
+    }
+
     @Test fun settingsPanesShareTopEdgeAndUseAppScale() {
         openSettings()
         for (theme in listOf("light", "dark")) {

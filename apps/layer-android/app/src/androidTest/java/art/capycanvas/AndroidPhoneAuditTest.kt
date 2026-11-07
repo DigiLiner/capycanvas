@@ -85,6 +85,16 @@ class AndroidPhoneAuditTest {
         }
     }
 
+    private fun assertSettingRowInset(tag: String) {
+        instrumentation.runOnMainSync {
+            val row = checkNotNull(findTag(tag)).second
+            val label = checkNotNull(findTag("$tag-label")).second
+            val density = instrumentation.targetContext.resources.displayMetrics.density
+            assertTrue("The row leaves space for its label", label.size.width > 0)
+            assertEquals("The label uses the native row inset", row.positionInRoot.x + 14 * density, label.positionInRoot.x, 1f)
+        }
+    }
+
     private fun awaitCanvasPresentation(host: CanvasHost) {
         val deadline = SystemClock.uptimeMillis() + 30_000
         var presented = false
@@ -1640,7 +1650,7 @@ class AndroidPhoneAuditTest {
                 }
             }
         }
-        state("preferences-shortcuts") { page("shortcuts") }
+        state("preferences-shortcuts") { page("shortcuts");assertSettingRowInset("keymap-preset") }
         state("shortcuts-query") {
             if(preferences()?.getString("page") != "shortcuts")page("shortcuts")
             type("shortcuts-search","Undo") { preferences()?.optString("shortcut_query") == "Undo" }
@@ -1819,6 +1829,8 @@ class AndroidPhoneAuditTest {
         state("export-color") {
             exportRoot();reveal("export-color");tap("export-color")
             host.awaitFrame("Export colour page") { findTag("export-presets") == null && placed("export-back") }
+            val background = "color-choice-" + host.catalog.getJSONObject("export_copy").getString("background")
+            reveal(background);assertSettingRowInset(background)
         }
         if(findTag("export-presets") == null && findTag("export-dialog") != null) { tap("export-back");host.awaitFrame("Export Back returns to its root") { findTag("export-presets") != null } }
         state("export-presets") { exportRoot();reveal("export-presets");tap("export-presets");wait("export-preset-save") }

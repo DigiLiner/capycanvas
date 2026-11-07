@@ -34,6 +34,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
@@ -97,15 +99,17 @@ private fun subtitle(row: JSONObject): String =
     titleColor: androidx.compose.ui.graphics.Color = LocalPalette.current.text, enabled:Boolean=true, trailing: @Composable RowScope.() -> Unit = {}) {
     val colors = LocalPalette.current
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).alpha(if(enabled)1f else .5f).semantics{if(!enabled)disabled()}.then(if (onClick != null) Modifier.clickable(enabled=enabled,onClick = onClick) else Modifier)
-        .testTag(tag).padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        .testTag(tag).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, color = titleColor)
-            if (subtitle.isNotEmpty()) Text(subtitle, color = colors.settingsSecondary, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(title, Modifier.testTag("$tag-label"), color = titleColor, style = settingsLabelStyle())
+            if (subtitle.isNotEmpty()) Text(subtitle, color = colors.settingsSecondary, fontSize = 13.sp, lineHeight = 18.sp, style = settingsLabelStyle())
         }
         trailing()
     }
 }
+
+@Composable internal fun settingsLabelStyle() = LocalTextStyle.current.copy(hyphens = Hyphens.Auto, lineBreak = LineBreak.Paragraph)
 
 @Composable private fun Value(text: String, tag: String? = null) {
     Text(text, Modifier.widthIn(max = 220.dp).then(if (tag != null) Modifier.testTag(tag) else Modifier),
@@ -268,8 +272,8 @@ private fun subtitle(row: JSONObject): String =
         val perTool = editor.getBoolean("per_tool")
         SettingsCard(rows = listOf<@Composable () -> Unit>({
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(!perTool, role = Role.Switch) { host.preference(same(!it)) }
-                .testTag("$prefix-same").padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("same_all_tools"), Modifier.weight(1f))
+                .testTag("$prefix-same").padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("same_all_tools"), Modifier.weight(1f), style = settingsLabelStyle())
                 Switch(!perTool, onCheckedChange = null)
             }
         }) + editor.array("actions").objects().map { action ->
@@ -294,13 +298,13 @@ private fun subtitle(row: JSONObject): String =
     val existing = capture.optBoolean("existing")
     val conflict = !capture.isNull("conflict")
     val notice = capture.optString("notice")
-    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         SharedIcon(if (existing || notice.isNotEmpty()) "info" else "keyboard", null, Modifier.size(20.dp),
             tint = if (!existing && notice.isNotEmpty()) MaterialTheme.colorScheme.error else colors.text)
         Column(Modifier.weight(1f)) {
-            Text(capture.optString("shortcut"), Modifier.testTag("shortcut-recording"))
-            if (notice.isNotEmpty()) Text(notice, color = colors.settingsSecondary, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(capture.optString("shortcut"), Modifier.testTag("shortcut-recording"), style = settingsLabelStyle())
+            if (notice.isNotEmpty()) Text(notice, color = colors.settingsSecondary, fontSize = 13.sp, lineHeight = 18.sp, style = settingsLabelStyle())
         }
         TextButton({ host.preference(obj("type" to "cancel_shortcut")) }, Modifier.testTag("cancel-shortcut")) { Text(host.bootstrap!!.getJSONObject("common").getString("cancel")) }
         Button({ host.preference(obj("type" to "confirm_shortcut", "replace" to conflict)) }, Modifier.testTag("confirm-shortcut"),
@@ -404,7 +408,10 @@ private fun subtitle(row: JSONObject): String =
             if (event.key == Key.Back) false else { host.key(event.nativeKeyEvent); true }
         }) {
             Description(host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("press_hold_key"), Modifier.padding(horizontal = 16.dp), TextAlign.Center)
-            Box(Modifier.padding(horizontal = 16.dp)) { SettingsCard(rows = listOf { RecordingRow(host, capture) }) }
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val width = (org.json.JSONTokener(Native.dialogUi(obj("kind" to "preferences_content_width", "width" to maxWidth.value, "minimum" to 0).toString())).nextValue() as Number).toFloat()
+                SettingsCard(Modifier.widthIn(max = width.dp), rows = listOf { RecordingRow(host, capture) })
+            }
         }
     }
     val picker = view.getJSONObject("shortcut_page").objectOrNull("picker") ?: return

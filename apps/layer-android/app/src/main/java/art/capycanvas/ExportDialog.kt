@@ -92,8 +92,10 @@ import org.json.JSONTokener
         }),
         secondary=if(page!="root")null else ({TextButton({scope.launch{try{preview.prepare(query("export_dialog_recipe") as JSONObject)}catch(e:Exception){error=e}}},Modifier.testTag("export-preview")){Text(copy.getString("preview"))}}),
         body={padding ->
-            Column(Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(padding),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            BoxWithConstraints(Modifier.fillMaxWidth(),contentAlignment=Alignment.TopCenter) {
+                val width=(org.json.JSONTokener(Native.dialogUi(obj("kind" to "preferences_content_width","width" to maxWidth.value,"minimum" to 0).toString())).nextValue() as Number).toFloat().dp
+                val inset=PaddingValues(top=padding.calculateTopPadding(),bottom=padding.calculateBottomPadding())
+                Column(Modifier.widthIn(max=width).fillMaxWidth().padding(inset),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     @Composable fun choices(label:String,key:String,value:Any,enabled:Boolean=true,action:(Any)->Unit) {
                         val values=model.array(key).objects()
                         ExportChoiceRow(label,"color-choice-$label",values.map{it.getString("label")},
