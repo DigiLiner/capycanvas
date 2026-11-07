@@ -214,7 +214,7 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
         DialogButton(copy.getString("use_texture"), "texture-use", accent = true) { use() }
             }))
 
-    rememberDialogContent(renaming)?.let { action -> PaperRenameDialog(host,action,renaming != null) {renaming=null} }
+    rememberDialogContent(renaming)?.let { action -> PaperRenameDialog(host,action,visible && renaming != null) {renaming=null} }
 }
 
 @Composable private fun PaperRenameDialog(host: CanvasHost, action: JSONObject, visible:Boolean, close: () -> Unit) {

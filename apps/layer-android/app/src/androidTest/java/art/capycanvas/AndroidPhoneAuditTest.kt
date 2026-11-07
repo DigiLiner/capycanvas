@@ -1073,16 +1073,22 @@ class AndroidPhoneAuditTest {
             host.awaitFrame("Imported paper is applied",60_000) { !exists("texture-dialog") && shared().array("layers").objects().first { it.getLong("id") == paperLayer }.optJSONObject("paper")?.optString("id")?.startsWith("builtin") == false } }
             settle()
         }
-        state("paper-rename") {
+        fun renamePaper() {
             host.drain(obj("type" to "layer","action" to obj("op" to "select","id" to paperLayer,"mask" to false)))
             instrumentation.runOnMainSync { host.textureDialog = TextureDialogRequest(paperLayer,false) }
             wait("texture-use")
             val tile = checkNotNull(findNode({ it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("texture-tile-") == true && it.config.getOrNull(SemanticsProperties.Selected) == true })) { "No selected paper tile" }
                 .second.config[SemanticsProperties.TestTag]
             compose.onNodeWithTag(tile,useUnmergedTree = true).performScrollTo().performSemanticsAction(SemanticsActions.OnLongClick)
-            wait("texture-action-rename_paper");tap("texture-action-rename_paper");wait("paper-rename-dialog");settle()
+            wait("texture-action-rename_paper");tap("texture-action-rename_paper");wait("paper-rename-dialog")
         }
-        close("paper-rename-cancel");instrumentation.runOnMainSync { host.textureDialog = null }
+        state("paper-rename") { renamePaper();settle() }
+        if(exists("paper-rename-dialog")) {
+            close("paper-rename-dialog-cancel");gone("paper-rename-dialog")
+            renamePaper()
+            instrumentation.runOnMainSync { host.textureDialog = null }
+            gone("paper-rename-dialog")
+        }
         state("palette-import-return") {
             val count = host.palettes.view()?.array("palettes")?.length() ?: 0
             picking(pick,android.net.Uri.fromFile(fixture("a4-palette.gpl"))) {
