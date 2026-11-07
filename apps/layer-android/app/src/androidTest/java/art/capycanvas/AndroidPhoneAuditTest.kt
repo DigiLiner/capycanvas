@@ -73,6 +73,18 @@ class AndroidPhoneAuditTest {
         return layouts
     }
 
+    private fun assertHeaderSpacing(tag: String, cancel: String, primary: String) {
+        textLayouts("$tag-title").forEach { assertEquals("The page title stays on one line", 1, it.lineCount) }
+        instrumentation.runOnMainSync {
+            val title = checkNotNull(findTag("$tag-title")).second.boundsInRoot
+            val start = checkNotNull(findTag(cancel)).second.boundsInRoot
+            val end = checkNotNull(findTag(primary)).second.boundsInRoot
+            val gap = 6 * instrumentation.targetContext.resources.displayMetrics.density - 1
+            assertTrue("The title keeps a gap after its start control", title.left >= start.right + gap)
+            assertTrue("The title keeps a gap before its end control", title.right <= end.left - gap)
+        }
+    }
+
     private fun awaitCanvasPresentation(host: CanvasHost) {
         val deadline = SystemClock.uptimeMillis() + 30_000
         var presented = false
@@ -1701,6 +1713,7 @@ class AndroidPhoneAuditTest {
                 assertTrue("The complete hex value fits: ${layout.layoutInput.text}", layout.multiParagraph.intrinsics.maxIntrinsicWidth <= layout.size.width)
                 assertFalse("The hex value stays on one visible line", layout.didOverflowHeight)
             }
+            assertHeaderSpacing("color-editor", "color-cancel", "color-use")
         }
         state("color-model-popover") {
             reveal("color-format-0");tap("color-format-0")
@@ -1728,6 +1741,7 @@ class AndroidPhoneAuditTest {
             host.drain(obj("type" to "layer","action" to obj("op" to "select","id" to paper,"mask" to false)))
             instrumentation.runOnMainSync { host.textureDialog = TextureDialogRequest(paper,false) }
             wait("texture-use")
+            assertHeaderSpacing("texture-dialog", "texture-cancel", "texture-use")
         }
         closeAll()
 

@@ -353,11 +353,12 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
             maxOf(start.maxIntrinsicWidth(constraints.maxHeight),end.maxIntrinsicWidth(constraints.maxHeight))*2+title.maxIntrinsicWidth(constraints.maxHeight)
         val startPlace = start.measure(Constraints(maxWidth=56.dp.roundToPx(),maxHeight=constraints.maxHeight))
         val endPlace = end.measure(Constraints(maxWidth=(width-startPlace.width-48.dp.roundToPx()).coerceAtLeast(0),maxHeight=constraints.maxHeight))
-        val remaining=width-startPlace.width-endPlace.width
+        val gap=6.dp.roundToPx()
+        val remaining=width-startPlace.width-endPlace.width-2*gap
         val natural=title.maxIntrinsicWidth(constraints.maxHeight)
         val titleWidth=minOf(natural,remaining).coerceAtLeast(0)
         val titlePlace = title.measure(Constraints.fixedWidth(titleWidth))
-        val titleX=((width-titleWidth)/2).coerceIn(startPlace.width,(width-endPlace.width-titleWidth).coerceAtLeast(startPlace.width))
+        val titleX=((width-titleWidth)/2).coerceIn(startPlace.width+gap,(width-endPlace.width-titleWidth-gap).coerceAtLeast(startPlace.width+gap))
         val height = maxOf(constraints.minHeight,startPlace.height,titlePlace.height,endPlace.height)
         layout(width,height) {
             startPlace.placeRelative(0,(height-startPlace.height)/2)
