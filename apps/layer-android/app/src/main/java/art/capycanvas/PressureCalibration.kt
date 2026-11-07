@@ -153,7 +153,8 @@ import kotlin.math.roundToInt
                                     enabled = view.getBoolean("lighter_enabled"), shape = ControlShape, contentPadding = PaddingValues(horizontal = 12.dp)) { Text(view.getString("lighter")) }
                             } else {
                                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(metrics.spacing)) {
-                                    Text(view.getString("sensitivity"), Modifier.weight(1f, fill = false).testTag("pen-tilt-sensitivity-title"))
+                                    Text(view.getString("sensitivity"), Modifier.weight(1f, fill = false).testTag("pen-tilt-sensitivity-title"),
+                                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     Row(Modifier.clip(ControlShape).border(1.dp, colors.divider, ControlShape)) {
                                         for ((key, lighter, icon) in listOf(Triple("firmer", false, "minus"), Triple("lighter", true, "plus"))) {
                                             HoverTip(view.getString(key)) {
@@ -165,7 +166,8 @@ import kotlin.math.roundToInt
                                     }
                                 }
                                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(metrics.spacing, Alignment.End)) {
-                                    Text(view.getString("direction"), Modifier.weight(1f, fill = false).testTag("pen-tilt-direction-title"))
+                                    Text(view.getString("direction"), Modifier.weight(1f, fill = false).testTag("pen-tilt-direction-title"),
+                                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     Row(Modifier.height(36.dp).clip(ControlShape).border(1.dp, colors.divider, ControlShape).testTag("pen-tilt-axes")) {
                                         for ((field, icon, tag) in listOf(Triple("reverse_horizontal", "flip-horizontal", "reverse-horizontal"),
                                             Triple("reverse_vertical", "flip-vertical", "reverse-vertical"), Triple("swap", "swap-orientation", "swap-axes"))) {

@@ -2008,6 +2008,10 @@ class AndroidPhoneAuditTest {
                 val area = host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONObject("work_area").rect()
                 val density = activity.resources.displayMetrics.density
                 assertTrue("Calibration fits the shared work area: $body in $area",body.left>=area.left*density-1 && body.top>=area.top*density-1 && body.right<=area.right*density+1 && body.bottom<=area.bottom*density+1)
+                if (kind == "tilt") {
+                    for (tag in listOf("pen-tilt-sensitivity-title", "pen-tilt-direction-title"))
+                        textLayouts(tag).forEach { assertEquals("Tilt labels stay on one line", 1, it.lineCount) }
+                }
             }
             if(shared().objectOrNull("${kind}_calibration") != null) {
                 tap("pen-$kind-close")
