@@ -134,6 +134,54 @@ fn document() -> layer_core::Document {
 }
 
 #[test]
+fn a_cold_restore_registers_its_raster_work_before_eager_selection() {
+    use layer_core::raster::{RasterData, RasterPlane, RasterTile, TileBlob, TileKey};
+    for tight in [false, true] {
+        let doc = layer_core::Document::new(layer_core::PortableId::random(), PAGE_SIZE * 8, PAGE_SIZE * 4,
+            layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+        let target = doc.active_target().unwrap();
+        let mut r = renderer(doc.composition().color,
+            layer_core::DeviceMemoryFacts { unified: true, ..Default::default() }).unwrap();
+        r.ensure_document_metadata(doc.composition().size, doc.scene()).unwrap();
+        assert!(r.native_edit.as_ref().unwrap().color_cache_bytes < 64 * MIB);
+        let budget = r.factory.memory_budget().clone();
+        let pressure = tight.then(|| budget.admit_import(budget.import_headroom_bytes().checked_sub(8 * MIB).unwrap()).unwrap());
+        let blob = Arc::new(TileBlob::encode(doc.composition().color.paint_descriptor(),
+            &[37, 83, 109, 255].repeat(PAGE_SIZE.pow(2) as usize)).unwrap());
+        let data = RasterData { tiles: (0..32).map(|x| (TileKey { plane: RasterPlane::Color,
+            coordinate: [x % 8, x / 8] }, RasterTile::backed_shared(blob.clone()))).collect(), ..Default::default() };
+        crate::test_support::prepare_raster(&mut r, |r| r.restore_raster(target, &RasterData::default(), &data)).unwrap();
+        assert_eq!(r.paint_layers[0].pages.len(), if tight { 0 } else { 32 },
+            "headroom admits the full candidate; pressure keeps its color cold");
+        assert_eq!(r.native_backing(target).unwrap().tiles.len(), 32);
+        complete(&r);
+        r.after_present();
+        assert_eq!(r.paint_layers[0].pages.len(), if tight { 0 } else { 32 });
+        drop(pressure);
+    }
+}
+
+#[test]
+fn a_paint_only_view_does_not_reserve_its_hierarchy_in_the_raster_pool() {
+    let doc = layer_core::Document::new(layer_core::PortableId::random(), 9504, 6336,
+        layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+    let mut r = renderer(doc.composition().color,
+        layer_core::DeviceMemoryFacts { budget_bytes: Some(4 << 30), ..Default::default() }).unwrap();
+    let mut frame = packet(doc.scene(), doc.composition().size);
+    frame.view = crate::test_support::view([1024, 768]);
+    frame.view.document_to_surface = [0.1, 0., 0., 0.1, 0., 0.];
+    r.begin_frame_memory(frame);
+    r.publish_memory(true);
+    r.factory.memory_budget().flush_reports();
+    r.refresh_memory_limits();
+    assert_eq!(r.paint_memory_bytes(), 0);
+    let raster = r.memory.raster.handle.reported();
+    assert!(raster.demand_gpu_bytes <= WORKING_BYTES, "empty raster demand: {raster:?}");
+    assert!(r.memory_limit(Kind::Scene) >= r.memory.scene_retention.get(),
+        "the hierarchy and scene cache fit beside an empty raster pool");
+}
+
+#[test]
 fn leased_source_pins_do_not_reduce_an_ample_scene_grant() {
     let doc = document();
     let mut r = legacy_scene_renderer(doc.composition().color);

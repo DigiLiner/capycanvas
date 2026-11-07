@@ -36,7 +36,7 @@ struct TargetRestore {
 enum SourcePage {Raster(TileKey,RasterTile),Base([u32;2],layer_core::authored::PaintBase)}
 struct Request {target:SourceTarget,extent:[u32;2],before:RasterData,data:Arc<RasterData>,required:BTreeSet<[u32;2]>,base:Option<layer_core::authored::PaintBase>,replace:bool}
 impl TargetRestore {
-    fn new(r:&WgpuRasterizer,request:Request)->Result<Self,GpuRasterError> {
+    fn new(r:&mut WgpuRasterizer,request:Request)->Result<Self,GpuRasterError> {
         let Request {target,extent,before,data,required,base,replace}=request;
         data.validate_storage_index(extent,target.is_coverage(),r.document_color()).map_err(GpuRasterError::Effect)?;
         let (before,selected)=r.select_restore_data(target,&before,&data,&required);
@@ -168,7 +168,7 @@ impl RestorePreflight {
             _=>&[],
         }
     }
-    fn new(r:&WgpuRasterizer,key:Key,requests:Vec<Request>)->Self {
+    fn new(r:&mut WgpuRasterizer,key:Key,requests:Vec<Request>)->Self {
         let mut targets=Vec::new();let mut failure=None;
         for request in requests {
             match TargetRestore::new(r,request) {

@@ -284,6 +284,15 @@ impl WgpuRasterizer {
         self.refresh_memory_limits();
         result
     }
+    pub(crate) fn prepare_raster_working(&mut self, bytes: u64) {
+        if bytes == 0 { return; }
+        let mut report = self.memory.raster.published.get();
+        report.demand_gpu_bytes = report.demand_gpu_bytes.max(bytes.saturating_add(report.pinned_gpu_bytes)
+            .saturating_add(self.raster_buffers.bytes.load(std::sync::atomic::Ordering::Acquire)));
+        self.memory.raster.publish(report, true);
+        self.factory.memory_budget().flush_reports();
+        self.refresh_memory_limits();
+    }
     pub(crate) fn preparation_memory(&self, bytes: u64) {
         let before = self.memory.preparation.replace(if bytes == 0 { 0 } else { bytes.saturating_add(self.memory.working_limit()) });
         if before.abs_diff(self.memory.preparation.get()) >= MIB { self.publish_memory(false); }
@@ -322,10 +331,12 @@ impl WgpuRasterizer {
         let paint = self.paint_memory_bytes();
         let paint_pinned = self.pinned_paint_bytes();
         let color_pinned = self.color_memory_bytes().saturating_sub(paint.saturating_sub(paint_pinned));
+        let raster_pins = self.raster_buffers.transfer.load(std::sync::atomic::Ordering::Acquire).saturating_add(paint_pinned);
+        let raster_floor = raster_pins.max(WORKING_BYTES);
         let raster_changed = self.memory.raster.publish(MemoryReport { ram_bytes: ram, gpu_bytes: gpu.saturating_add(paint),
             pinned_ram_bytes: self.raster_buffers.working.load(std::sync::atomic::Ordering::Acquire).max(WORKING_BYTES),
-            pinned_gpu_bytes: self.raster_buffers.transfer.load(std::sync::atomic::Ordering::Acquire).saturating_add(paint_pinned).max(WORKING_BYTES),
-            demand_ram_bytes: ram.max(WORKING_BYTES), demand_gpu_bytes: gpu.saturating_add(paint).max(self.memory.scene_retention.get()), ..Default::default() },
+            pinned_gpu_bytes: raster_floor,
+            demand_ram_bytes: ram.max(WORKING_BYTES), demand_gpu_bytes: gpu.saturating_add(paint).saturating_add(self.projected_restore_bytes()).saturating_add(raster_floor.saturating_sub(raster_pins)).max(WORKING_BYTES), ..Default::default() },
             force || self.memory.color_pinned.get().abs_diff(color_pinned) >= MIB);
         if raster_changed { self.memory.color_pinned.set(color_pinned); }
         let [uploads, uploads_pinned] = self.uploads.memory_bytes();

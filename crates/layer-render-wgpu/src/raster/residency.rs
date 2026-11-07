@@ -114,8 +114,8 @@ impl WgpuRasterizer {
         Ok(())
     }
 
-    pub(super) fn select_restore_data(&self,target:SourceTarget,previous:&RasterData,data:&RasterData,required:&BTreeSet<[u32;2]>)->(RasterData,RasterData) {
-        if let Some(native) = &self.native_edit {
+    pub(super) fn select_restore_data(&mut self,target:SourceTarget,previous:&RasterData,data:&RasterData,required:&BTreeSet<[u32;2]>)->(RasterData,RasterData) {
+        if self.native_edit.is_some() {
             let paint = self.paint_layers.iter().find(|l| l.id == target);
             let resident: BTreeSet<_> = paint
                 .into_iter()
@@ -136,9 +136,13 @@ impl WgpuRasterizer {
                 .count() as u64;
             // Reserve both mutable color surfaces, including a future blend
             // companion, before deciding whether an eager restore fits.
-            let eager = other_bytes.saturating_add(
+            let candidate = other_bytes.saturating_add(
                 colors.saturating_mul(2 * PAGE_SIZE as u64 * PAGE_SIZE as u64 * 16),
-            ) <= native.color_cache_bytes;
+            );
+            if colors != 0 && !self.snapshot_worker && candidate > self.native_edit.as_ref().unwrap().color_cache_bytes {
+                self.prepare_raster_working(candidate);
+            }
+            let eager = candidate <= self.native_edit.as_ref().unwrap().color_cache_bytes;
             let selected = RasterData {
                 watercolor: data.watercolor,
                 tiles: data

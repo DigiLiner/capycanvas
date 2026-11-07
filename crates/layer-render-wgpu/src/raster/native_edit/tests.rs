@@ -215,7 +215,7 @@ fn native_cache_limits_use_renderer_grants_without_a_synthetic_image_reserve() {
     let mut r=crate::memory::memory_tests::legacy_scene_renderer(document.composition().color);
     crate::test_support::submit_published(&mut r,crate::test_support::packet(document.scene(),[256;2]));
     let native=r.native_edit.as_ref().unwrap();
-    assert!(native.color_cache_bytes>=256<<20);
+    assert!(native.color_cache_bytes<=r.memory_limit(layer_core::MemoryOwnerKind::RasterPool));
     assert_eq!(native.composition_bytes,r.memory_limit(layer_core::MemoryOwnerKind::Scene));
     for resident in [0,native.composition_bytes/2,native.composition_bytes,native.composition_bytes.saturating_add(1)] {
         assert_eq!(native.image_pixel_budget(resident),native.composition_bytes.saturating_sub(resident));
