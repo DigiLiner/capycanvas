@@ -50,6 +50,8 @@ a 2560 × 1600 display at 150 % scale, the dark theme the fixtures were written
 against, and one restart. This takes a few
 minutes; later starts take under a minute. Several VMs can run at once, each with
 its own disk, TPM, SSH port and desktop session.
+Startup keeps local test passwords from expiring and repairs an expired autologon
+before using the desktop.
 
 ```sh
 tools/windows-vm/windows-vm.py --vm review start

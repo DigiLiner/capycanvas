@@ -302,6 +302,8 @@ class SharedImageTests(unittest.TestCase):
             self.assertTrue(launch.call_args.args[0].server)
             seed = paths["SERVER_INSTALL"] / "seed"
             self.assertIn("RDS-RD-Server", (seed / "provision.ps1").read_text())
+            self.assertEqual((seed / "password-policy.ps1").read_text(),
+                             (vm.GUEST_FILES / "password-policy.ps1").read_text())
             self.assertFalse(paths["PASSWORD"].exists())
             password = paths["SERVER_PASSWORD"].read_text().strip()
             self.assertTrue(password.endswith("aA1!"))

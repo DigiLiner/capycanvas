@@ -2,6 +2,73 @@ $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'prepare.ps1'),[ref]$tokens,[ref]$errors)
 if(@($errors).Count){throw ($errors|Out-String)}
+& {
+    param([string]$Policy)
+    $now=[datetime]'2026-11-07T22:35:00Z';$user=[Environment]::UserName
+    function Get-LocalUser {
+        [CmdletBinding()]param([string]$Name)
+        if($Name -ne $user -or $PSBoundParameters.Count -ne 1 -or $state.netCalls){throw 'Policy queried the wrong account or changed it before reading expiry'}
+        $state.userReads++
+        if($case.readFailure){throw 'Fixture account lookup failed'}
+        $state.account
+    }
+    function Get-Date {$now}
+    function Get-Process {
+        [CmdletBinding()]param([string]$Name,[switch]$IncludeUserName)
+        if($Name -ne 'explorer' -or !$IncludeUserName -or $state.netCalls){throw 'Policy changed before observing the owned desktop'}
+        $state.desktopReads++
+        [pscustomobject]@{UserName='fixture\other-user'}
+        if($case.desktop){[pscustomobject]@{UserName=('fixture\'+$user)}}
+    }
+    function net.exe {
+        $arguments=@($args);$state.netCalls++
+        if($state.userReads -ne 1 -or $state.desktopReads -ne 1){throw 'Policy changed before observing expiry and desktop'}
+        if($state.netCalls -eq 1){
+            if(($arguments -join ' ') -ne 'accounts /maxpwage:unlimited'){throw 'Policy changed a password or unrelated machine setting'}
+            $global:LASTEXITCODE=[int]$case.setExit
+            if(!$case.setExit){$state.account.PasswordExpires=$null;$state.maximumAge='Unlimited'}
+            'Fixture policy set result'
+        }elseif($state.netCalls -eq 2){
+            if(($arguments -join ' ') -ne 'accounts'){throw 'Policy verification changed machine settings'}
+            $global:LASTEXITCODE=[int]$case.verifyExit
+            'Maximum password age (days): '+$case.reported
+            'Lockout duration (minutes): Unlimited'
+        }else{throw 'Policy retried a failed operation'}
+    }
+    $previousExit=Get-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    try{
+        foreach($case in @(
+            @{expiry=$now.AddMinutes(-1);desktop=$false},
+            @{expiry=$now.AddMinutes(-1);desktop=$true},
+            @{expiry=$now.AddDays(1);desktop=$false},
+            @{expiry=$null;desktop=$true},
+            @{expiry=$now.AddMinutes(-1);desktop=$false;setExit=5;error='set unlimited VM password age.*exit 5.*Fixture policy set result'},
+            @{expiry=$now.AddMinutes(-1);desktop=$false;verifyExit=2;error='verify VM password age.*exit 2.*Maximum password age'},
+            @{expiry=$now.AddMinutes(-1);desktop=$false;reported='42';error='maximum password age is not Unlimited.*42'},
+            @{expiry=$now.AddMinutes(-1);desktop=$false;readFailure=$true;error='Fixture account lookup failed'}
+        )){
+            if(!$case.ContainsKey('reported')){$case.reported='Unlimited'}
+            $state=@{account=[pscustomobject]@{PasswordExpires=$case.expiry};userReads=0;desktopReads=0;netCalls=0;maximumAge='42';password='retained';enabled=$true;otherPolicy='retained'}
+            $expired=$null -ne $case.expiry -and $case.expiry -le $now
+            $failure=$null;$output=@();try{$output=@(& ([scriptblock]::Create($Policy)))}catch{$failure=$_}
+            if($case.error){
+                if(!$failure -or $failure.Exception.Message -notmatch $case.error){throw "Policy failure was hidden or replaced: $failure"}
+                $expectedCalls=if($case.readFailure){0}elseif($case.setExit){1}else{2}
+                if($state.netCalls -ne $expectedCalls){throw 'Policy continued or retried after failure'}
+            }else{
+                if($failure){throw $failure}
+                if($output.Count -ne 1){throw 'Policy leaked account or command output'}
+                $result=$output[0]|ConvertFrom-Json
+                if((($result.PSObject.Properties.Name|Sort-Object)-join ',') -ne 'desktop_ready,password_expired'){throw 'Policy receipt changed its field set'}
+                if($result.password_expired -isnot [bool] -or $result.desktop_ready -isnot [bool] -or $result.password_expired -ne $expired -or $result.desktop_ready -ne $case.desktop){throw 'Policy lost the pre-repair expiry or desktop observation'}
+                if($state.netCalls -ne 2 -or $state.maximumAge -ne 'Unlimited' -or $state.userReads -ne 1 -or $state.desktopReads -ne 1){throw 'Policy did not apply and verify once'}
+            }
+            if($state.password -ne 'retained' -or !$state.enabled -or $state.otherPolicy -ne 'retained'){throw 'Policy changed a credential, enabled state or unrelated policy'}
+        }
+    }finally{
+        if($previousExit){Set-Variable LASTEXITCODE $previousExit.Value -Scope Global}else{Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue}
+    }
+} (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'password-policy.ps1') -Raw)
 $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Enable-FixtureJapaneseInput'},$true)
 if(!$definition){throw 'VM preparation does not enable the fixture Japanese input profile'}
 . ([scriptblock]::Create($definition.Extent.Text))

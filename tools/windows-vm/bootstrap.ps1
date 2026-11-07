@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+& (Join-Path $PSScriptRoot 'password-policy.ps1') | Out-Null
 Start-Transcript (Join-Path $env:SystemRoot 'Temp\capycanvas-bootstrap.log')
 
 function Set-Registry([string]$Key, [string]$Name, [string]$Type, [string]$Value) {

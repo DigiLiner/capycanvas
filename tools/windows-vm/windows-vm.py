@@ -479,7 +479,7 @@ def create(args):
     unattend = (GUEST_FILES / "autounattend.xml").read_text()
     unattend = (server_unattend(unattend) if server else unattend).replace("@PASSWORD@", password)
     write_private(seed / "autounattend.xml", unattend)
-    for name in ("bootstrap.ps1", "prepare.ps1"):
+    for name in ("bootstrap.ps1", "prepare.ps1", "password-policy.ps1"):
         shutil.copy(GUEST_FILES / name, seed)
     shutil.copy(GUEST_FILES / ("provision-server.ps1" if server else "provision.ps1"), seed / "provision.ps1")
     shutil.copy(KEY.with_suffix(".pub"), seed / "administrators_authorized_keys")
@@ -517,7 +517,27 @@ def restart(machine):
         time.sleep(3)
 
 
+def prepare_logon(machine):
+    with tempfile.TemporaryFile() as output:
+        guest_script(machine, (GUEST_FILES / "password-policy.ps1").read_text(), stdout=output)
+        output.seek(0)
+        state = json.load(output)
+    if state["desktop_ready"]:
+        return
+    if state["password_expired"]:
+        restart(machine)
+    reason = "after repairing password expiry" if state["password_expired"] else "with a non-expired password"
+    guest_script(machine, f"""$ErrorActionPreference='Stop'
+$deadline=(Get-Date).AddSeconds(120)
+while (!(Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue | Where-Object UserName -Like '*\\{USER}')) {{
+    if ((Get-Date) -ge $deadline) {{ throw 'The private user interactive desktop did not start {reason}' }}
+    Start-Sleep 1
+}}
+""", timeout=180)
+
+
 def prepare(machine):
+    prepare_logon(machine)
     script = (GUEST_FILES / "prepare.ps1").read_text()
     if machine.server:
         accounts = ",".join(f"'{account}'" for account in shared_accounts())

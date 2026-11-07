@@ -68,6 +68,8 @@ class CredentialTests(unittest.TestCase):
                 self.assertEqual(len(value), 24)
                 self.assertIn(f"<Value>{value}</Value>", answer.read_text())
                 self.assertNotIn("@PASSWORD@", answer.read_text())
+                self.assertEqual((answer.parent / "password-policy.ps1").read_text(),
+                                 (vm.GUEST_FILES / "password-policy.ps1").read_text())
 
     def test_private_write_rejects_symlinks(self):
         with TemporaryDirectory() as directory:
@@ -99,7 +101,8 @@ class GuestConnectionTests(unittest.TestCase):
             replies = [subprocess.CompletedProcess([], 255, stdout="", stderr="Disconnected"),
                        subprocess.CompletedProcess([], 0, stdout="", stderr=""),
                        subprocess.CompletedProcess([], 0, stdout="old-boot", stderr="")]
-            with patch.object(vm, "guest_script") as prepare, patch.object(vm, "guest", side_effect=replies) as guest:
+            with patch.object(vm, "prepare_logon"), patch.object(vm, "guest_script") as prepare, \
+                    patch.object(vm, "guest", side_effect=replies) as guest:
                 with self.assertRaisesRegex(SystemExit, r"Could not read the owned VM's boot time before restarting it\.$"):
                     vm.prepare(machine)
             prepare.assert_called_once()

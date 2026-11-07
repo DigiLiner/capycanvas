@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+& (Join-Path $PSScriptRoot 'password-policy.ps1') | Out-Null
 $downloads = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'capycanvas-provision')
 
 function Install-Download([string]$Uri, [string]$Name, [string]$Arguments, [int[]]$Success = @(0)) {
