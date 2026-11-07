@@ -3895,6 +3895,12 @@ class AndroidHostTest {
             val surface = bounds("preferences-surface")
             val sidebar = bounds("settings-sidebar")
             val main = bounds("settings-main-pane")
+            val density = compose.activity.resources.displayMetrics.density
+            val contentWidth = (org.json.JSONTokener(Native.dialogUi(obj("kind" to "preferences_content_width",
+                "width" to compose.activity.window.decorView.width / density, "minimum" to 0).toString())).nextValue() as Number).toFloat()
+            assertEquals("Preferences rows use the shared content width", contentWidth, bounds("preference-transparency").width / density, 1f / density)
+            assertEquals("Swatches stay centered in their row", bounds("preference-transparency").center.y,
+                bounds("setting-transparency-circle-0").center.y, 1f)
             assertEquals("Sidebar reaches the top; no global header", surface.top, sidebar.top, 1f)
             assertEquals("Sidebar reaches the bottom", surface.bottom, sidebar.bottom, 1f)
             assertEquals("Panes start at the same height", sidebar.top, main.top, 1f)

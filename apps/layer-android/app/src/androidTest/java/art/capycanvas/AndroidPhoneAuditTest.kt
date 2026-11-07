@@ -1578,7 +1578,40 @@ class AndroidPhoneAuditTest {
         }
         for ((id,rows) in listOf("appearance" to listOf("language","theme"),"canvas" to listOf("wheel_behavior"),"color" to listOf("missing_profile","photo_depth"),
             "input" to listOf("eraser_tool","finger_drawing"),"about" to emptyList())) {
-            state("preferences-$id") { page(id) }
+            state("preferences-$id") {
+                page(id)
+                if (id == "appearance") {
+                    for (label in listOf("transparency", "dark_base", "light_base")) textLayouts("preference-label-$label").forEach { layout ->
+                        assertTrue("$label keeps measured text", layout.size.width > 0)
+                        assertFalse("$label keeps its full height", layout.didOverflowHeight)
+                        var singleLetters = 0
+                        for (line in 0 until layout.lineCount) {
+                            assertFalse("$label wraps without ellipsis", layout.isLineEllipsized(line))
+                            val fragment = layout.layoutInput.text.text.substring(layout.getLineStart(line), layout.getLineEnd(line, true)).trim()
+                            if (fragment.length == 1 && fragment[0].isLetterOrDigit()) singleLetters++
+                        }
+                        assertTrue("$label avoids a character column: size=${layout.size}, lines=${layout.lineCount}", singleLetters <= layout.lineCount / 2)
+                    }
+                    for (tag in listOf("settings-page-title", "setting-choice-language"))
+                        textLayouts(tag).forEach { assertEquals("$tag stays on one line", 1, it.lineCount) }
+                    instrumentation.runOnMainSync {
+                        val row = checkNotNull(findTag("preference-transparency")).second
+                        val density = activity.resources.displayMetrics.density
+                        val width = (org.json.JSONTokener(Native.dialogUi(obj("kind" to "preferences_content_width",
+                            "width" to activity.window.decorView.width / density, "minimum" to 0).toString())).nextValue() as Number).toFloat()
+                        assertEquals("Preferences uses the shared content width", width, row.size.width / density, 1f / density)
+                        val right = row.positionInRoot.x + row.size.width - 14 * activity.resources.displayMetrics.density
+                        fun checkCircles(node: SemanticsNode) {
+                            if (node.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("setting-transparency-circle-") == true) {
+                                assertEquals("Inline transparency choices match the native size", 28 * activity.resources.displayMetrics.density, node.size.width.toFloat(), 1f)
+                                assertTrue("Transparency choices keep their full width inside the row", node.positionInRoot.x + node.size.width <= right + 1)
+                            }
+                            node.children.forEach(::checkCircles)
+                        }
+                        checkCircles(row)
+                    }
+                }
+            }
             for (row in rows) state("preferences-$id-${row.replace('_','-')}") {
                 if(preferences()?.getString("page") != id || findTag("settings-main-pane") == null)page(id)
                 reveal("preference-$row")

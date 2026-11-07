@@ -70,6 +70,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
@@ -159,7 +161,8 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                     Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp)) {
                         Text(detail ?: page?.getString("title") ?: "",
                             Modifier.align(Alignment.Center).fillMaxWidth().padding(horizontal = 88.dp).testTag("settings-page-title").semantics{heading()},
-                            fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                            fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (detail != null || !wide) {
                             IconButton(::back, Modifier.align(Alignment.CenterStart).size(48.dp)) {
                                 SharedIcon("back", host.bootstrap!!.getJSONObject("common").getString("back"), Modifier.size(20.dp))
@@ -185,7 +188,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                         val category = model.shortcutCategory()
                         val page = model.array("pages").objects().find { it.getString("id") == model.getString("page") }
                         Column(Modifier.fillMaxSize().testTag(if(editor!=null)"settings-content-shortcut:"+editor.getString("id") else "settings-content-"+model.getString("page")+"-"+model.getJSONObject("navigation").getJSONArray(if(model.getString("page")=="input")"input" else "shortcuts").let{it.getString(it.length()-1)})
-                            .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+                            .verticalScroll(rememberScrollState()).padding(vertical = 16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally) {
                             val contentWidth=(org.json.JSONTokener(Native.dialogUi(obj("kind" to "preferences_content_width","width" to this@BoxWithConstraints.maxWidth.value,"minimum" to 0f).toString())).nextValue() as Number).toFloat()
                             Column(Modifier.widthIn(max = contentWidth.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -415,13 +418,14 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
         host.preference(obj("type" to "edit", "id" to row.getString("id"), "value" to it))
     } else Modifier
     BoxWithConstraints(Modifier.fillMaxWidth().heightIn(min = 72.dp).then(action)
-        .testTag("preference-" + row.getString("id")).padding(horizontal = 16.dp, vertical = 12.dp)) {
+        .testTag("preference-" + row.getString("id")).padding(horizontal = 14.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
         val controlWidth = maxWidth * .48f
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+        val labelStyle = LocalTextStyle.current.copy(hyphens = Hyphens.Auto, lineBreak = LineBreak.Paragraph)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Column(Modifier.weight(1f).testTag("preference-label-" + row.getString("id")), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(row.getString("title"), fontWeight = FontWeight.Medium, color = if (enabled) colors.text else colors.settingsSecondary)
+                Text(row.getString("title"), style = labelStyle, fontWeight = FontWeight.Medium, color = if (enabled) colors.text else colors.settingsSecondary)
                 row.optString("description").takeIf { it.isNotEmpty() }?.let {
-                    Text(it, color = colors.settingsSecondary, fontSize = 14.sp, lineHeight = 20.sp)
+                    Text(it, style = labelStyle, color = colors.settingsSecondary, fontSize = 14.sp, lineHeight = 20.sp)
                 }
             }
             when (type) {
@@ -447,7 +451,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                                 SharedIcon(it, null, Modifier.size(20.dp))
                             }
                             Text(kind.array("options").getString(selected), Modifier.weight(1f, fill = false),
-                                color = if (enabled) colors.text else colors.settingsSecondary)
+                                color = if (enabled) colors.text else colors.settingsSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             SharedIcon("chevron-down", null, Modifier.size(16.dp), tint = colors.settingsSecondary)
                         }
                         DropdownMenu(open && visible, { open = false }, Modifier.testTag("setting-choice-menu-$id"),
@@ -492,7 +496,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
         kind.array("options").values().forEachIndexed { index, name ->
             val selected = index == kind.getInt("selected")
             val alpha = alphas.getJSONArray(index).getDouble(if (colors.dark) 1 else 0).toFloat()
-            Box(Modifier.size(36.dp).clip(CircleShape)
+            Box(Modifier.size(28.dp).clip(CircleShape)
                 .then(if (selected) Modifier.border(2.dp, colors.text, CircleShape) else Modifier)
                 .selectable(selected, enabled = enabled, role = Role.RadioButton) {
                     host.preference(obj("type" to "edit", "id" to id, "value" to index))
@@ -541,7 +545,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
         swatches.forEachIndexed { index, swatch ->
             val selected = index == active
             val glyph = if (swatch.isNull("icon")) "check".takeIf { selected } else swatch.getString("icon")
-            Box(Modifier.size(if (inline) 36.dp else 40.dp).clip(CircleShape)
+            Box(Modifier.size(if (inline) 28.dp else 32.dp).clip(CircleShape)
                 .then(if (selected) Modifier.border(2.dp, colors.text, CircleShape) else Modifier)
                 .selectable(selected, enabled = enabled, role = Role.RadioButton) {
                     chosen = index
