@@ -1,4 +1,14 @@
+if(!('CapyEnvironment' -as [type])){
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CapyEnvironment {
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    public static extern bool SetEnvironmentVariableW(string name,string value);
+}
+'@
+}
 function Restore-CapyEnvironmentValue([string]$Name,$Value){
-    if($null -eq $Value){Remove-Item -LiteralPath ('Env:'+$Name) -ErrorAction SilentlyContinue}
-    else{[Environment]::SetEnvironmentVariable($Name,$Value,'Process')}
+    $restored=if($null -eq $Value){[CapyEnvironment]::SetEnvironmentVariableW($Name,[NullString]::Value)}else{[CapyEnvironment]::SetEnvironmentVariableW($Name,$Value)}
+    if(!$restored){throw "Could not restore environment variable $Name"}
 }

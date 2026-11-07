@@ -22,9 +22,9 @@ try{
 Write-Output 'Actual icon driver retains owned process identity and native exit on absent terminal receipt'
 
 $statements=$ast.EndBlock.Statements
-$type=$statements|Where-Object {$_.Extent.Text -like "if(!('CapyIconEnvironment'*"}
-if(@($type).Count -ne 1){throw 'Native environment binding must be unique'}
-& ([scriptblock]::Create($type.Extent.Text))
+$helper=@($statements|Where-Object {$_ -is [Management.Automation.Language.PipelineAst] -and $_.Extent.Text -ceq ". (Join-Path `$PSScriptRoot '../scripts/CapyEnvironment.ps1')"})
+if($helper.Count -ne 1){throw 'Actual shared environment helper import must be unique'}
+. (Join-Path $PSScriptRoot '../scripts/CapyEnvironment.ps1')
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -38,7 +38,7 @@ $saveStatement=$statements|Where-Object {$_ -is [Management.Automation.Language.
 $environmentStatement=$statements|Where-Object {$_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -ceq '$environment'}
 $snapshotStatement=$statements|Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Extent.Text.Contains('$saved[$name]')}
 $mainTry=$statements|Where-Object {$_ -is [Management.Automation.Language.TryStatementAst]}
-$clearStatement=$mainTry.Body.Statements|Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Extent.Text -like '*Could not clear icon fixture environment*'}
+$clearStatement=$mainTry.Body.Statements|Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Extent.Text.Contains('Restore-CapyEnvironmentValue $name $null')}
 if(@($environmentStatement).Count -ne 1 -or @($namesStatement).Count -ne 1 -or @($saveStatement).Count -ne 1 -or @($snapshotStatement).Count -ne 1 -or @($clearStatement).Count -ne 1 -or @($mainTry).Count -ne 1){throw 'Actual environment lifecycle must be unique'}
 $clear=[scriptblock]::Create($environmentStatement.Extent.Text+"`n"+$saveStatement.Extent.Text+"`n"+$snapshotStatement.Extent.Text+"`n"+$clearStatement.Extent.Text)
 $restore=[scriptblock]::Create(($mainTry.Finally.Statements|ForEach-Object {$_.Extent.Text}) -join "`n")
@@ -47,10 +47,7 @@ $initialEnvironment=[Environment]::GetEnvironmentVariables('Process')
 $original=@{};foreach($name in $names){$original[$name]=if($initialEnvironment.Contains($name)){$initialEnvironment[$name]}else{$null}}
 try{
     foreach($seed in @($null,'','original-value')){
-        foreach($name in $names){
-            $set=if($null -eq $seed){[CapyIconEnvironment]::SetEnvironmentVariableW($name,[NullString]::Value)}else{[CapyIconEnvironment]::SetEnvironmentVariableW($name,$seed)}
-            if(!$set){throw 'Could not seed native environment'}
-        }
+        foreach($name in $names){Restore-CapyEnvironmentValue $name $seed}
         . $clear
         foreach($name in $names){
             $size=[CapyIconEnvironmentProbe]::GetEnvironmentVariableW($name,[IntPtr]::Zero,0)
@@ -67,8 +64,6 @@ try{
         }
     }
 }finally{
-    foreach($name in $names){
-        if($null -eq $original[$name]){$null=[CapyIconEnvironment]::SetEnvironmentVariableW($name,[NullString]::Value)}else{$null=[CapyIconEnvironment]::SetEnvironmentVariableW($name,$original[$name])}
-    }
+    foreach($name in $names){Restore-CapyEnvironmentValue $name $original[$name]}
 }
 Write-Output 'Actual icon driver deletes native flags and restores absent, empty and populated values exactly'

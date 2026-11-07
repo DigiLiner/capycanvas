@@ -1,5 +1,6 @@
 param([Parameter(Mandatory)][string]$Executable,[Parameter(Mandatory)][string]$Output)
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot '../scripts/CapyEnvironment.ps1')
 if(!$env:CAPY_PRIVATE_DESKTOP){throw 'Icon ORPC regression requires the normal private test desktop.'}
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $Output=Join-Path ([IO.Path]::GetFullPath($Output)) ([guid]::NewGuid().ToString('N'))
@@ -9,20 +10,10 @@ foreach($theme in @('light','dark')){
     if(!(Test-Path -LiteralPath (Join-Path (Split-Path $Executable) "Assets/icons/$theme/layer-undo-symbolic.svg") -PathType Leaf)){throw 'Icon regression asset is missing.'}
 }
 $names=@('CAPY_ICON_ORPC_FIXTURE','CAPY_ICON_ORPC_CONTROL','CAPY_NAVIGATOR_LAYOUT','CAPY_SCROLL_INDICATORS','CAPY_FEEDBACK_SDK')
-if(!('CapyIconEnvironment' -as [type])){
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class CapyIconEnvironment {
-    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
-    public static extern bool SetEnvironmentVariableW(string name,string value);
-}
-'@
-}
 $environment=[Environment]::GetEnvironmentVariables('Process')
 $saved=@{};foreach($name in $names){$saved[$name]=if($environment.Contains($name)){$environment[$name]}else{$null}}
 try {
-    foreach($name in $names){if(![CapyIconEnvironment]::SetEnvironmentVariableW($name,[NullString]::Value)){throw 'Could not clear icon fixture environment'}}
+    foreach($name in $names){Restore-CapyEnvironmentValue $name $null}
     foreach($control in @($true,$false)){
         $name=if($control){'control'}else{'icon'}
         $result=Join-Path $Output ($name+'.json')
@@ -61,8 +52,5 @@ try {
     }
     Write-Output 'Real icon load completes both theme sources without outgoing UI ORPC; calibrated channel hook and no-icon control passed'
 } finally {
-    foreach($name in $names){
-        $restored=if($null -eq $saved[$name]){[CapyIconEnvironment]::SetEnvironmentVariableW($name,[NullString]::Value)}else{[CapyIconEnvironment]::SetEnvironmentVariableW($name,$saved[$name])}
-        if(!$restored){throw 'Could not restore icon fixture environment'}
-    }
+    foreach($name in $names){Restore-CapyEnvironmentValue $name $saved[$name]}
 }

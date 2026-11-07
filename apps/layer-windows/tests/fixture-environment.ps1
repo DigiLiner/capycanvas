@@ -7,12 +7,21 @@ function Assert-FixtureEnvironmentRestore([IO.FileInfo[]]$Files,[string]$Helper)
         $ast=[Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors)
         if($errors.Count){throw "$($file.FullName): $($errors.Message -join '; ')"}
         foreach($call in $ast.FindAll({param($node)
-            $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $node.Static -and
-            $node.Expression -is [Management.Automation.Language.TypeExpressionAst] -and
-            $node.Expression.TypeName.FullName -in @('Environment','System.Environment') -and
-            $node.Member.Value -eq 'SetEnvironmentVariable'
+            $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and
+            $node.Member.Value -match '^SetEnvironmentVariable(?:A|W)?$'
         },$true)){
             $failures.Add("$($file.FullName):$($call.Extent.StartLineNumber): use Restore-CapyEnvironmentValue")
+        }
+        foreach($command in $ast.FindAll({param($node)$node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Add-Type'},$true)){
+            foreach($definition in @($command.CommandElements|Where-Object {$_ -is [Management.Automation.Language.StringConstantExpressionAst] -or $_ -is [Management.Automation.Language.ExpandableStringExpressionAst]})){
+                $code=$definition.Value
+                $direct=[regex]::IsMatch($code,'\b(?:System\.)?Environment\s*\.\s*SetEnvironmentVariable\s*\(')
+                $imports=[regex]::Matches($code,'(?s)\[\s*(?:global::)?(?:\w+\.)*DllImport(?:Attribute)?\s*\((?<arguments>.*?)\)\s*\](?<declaration>[^;{}]*);')
+                foreach($import in $imports){
+                    if($import.Groups['declaration'].Value -match '\bSetEnvironmentVariable(?:A|W)?\s*\(' -or $import.Groups['arguments'].Value -match '\bEntryPoint\s*=\s*(?:"SetEnvironmentVariable(?:A|W)?"|nameof\s*\(\s*SetEnvironmentVariable(?:A|W)?\s*\))'){$direct=$true}
+                }
+                if($direct){$failures.Add("$($file.FullName):$($definition.Extent.StartLineNumber): use Restore-CapyEnvironmentValue")}
+            }
         }
     }
     if($failures.Count){throw ($failures -join "`n")}
@@ -41,12 +50,13 @@ function Test-ShortcutsEnvironmentRestore([string]$Repo,[string]$Directory){
         [pscustomobject]@{Handle=[IntPtr]1}
     }
     $names=@('CAPY_SMOKE_TEST','CAPY_TRACE_UI','CAPY_STORAGE_DIR')
-    $saved=@{};foreach($name in $names+@('CAPY_FIXTURE_CONTEXT')){$saved[$name]=[Environment]::GetEnvironmentVariable($name)}
+    $environment=[Environment]::GetEnvironmentVariables('Process')
+    $saved=@{};foreach($name in $names+@('CAPY_FIXTURE_CONTEXT')){$saved[$name]=if($environment.Contains($name)){$environment[$name]}else{$null}}
     try{
         $env:CAPY_FIXTURE_CONTEXT=Join-Path $Directory 'context.json'
         foreach($initial in @($null,'fixture-original','')){foreach($launchFails in @($false,$true)){
             $expected=@{}
-            foreach($name in $names){Restore-CapyEnvironmentValue $name $initial;$expected[$name]=[Environment]::GetEnvironmentVariable($name)}
+            foreach($name in $names){Restore-CapyEnvironmentValue $name $initial;$expected[$name]=$initial}
             $failure=$null;$arguments=@()
             try{$arguments=@(Start-Shortcuts)}catch{$failure=$_}
             if($launchFails){if(!$failure -or $failure.Exception.Message -ne 'shortcuts-launch-control'){throw "Shortcuts did not preserve the launch failure: $failure"}}
@@ -56,10 +66,11 @@ function Test-ShortcutsEnvironmentRestore([string]$Repo,[string]$Directory){
                 if(($arguments -join '|') -ne ($wanted -join '|')){throw 'Shortcuts changed its generated fixture arguments'}
             }
             $phase=if($launchFails){'launch failure'}else{'success'}
+            $actual=[Environment]::GetEnvironmentVariables('Process')
             foreach($name in $names){
                 if($null -eq $expected[$name]){
-                    if(Test-Path -LiteralPath ('Env:'+$name)){throw "Start-Shortcuts $phase restored absent $name as a present environment variable"}
-                }elseif([Environment]::GetEnvironmentVariable($name) -cne $expected[$name]){throw "Start-Shortcuts $phase changed saved $name"}
+                    if($actual.Contains($name)){throw "Start-Shortcuts $phase restored absent $name as a present environment variable"}
+                }elseif(!$actual.Contains($name) -or $actual[$name] -cne $expected[$name]){throw "Start-Shortcuts $phase changed saved $name"}
             }
         }}
     }finally{foreach($entry in $saved.GetEnumerator()){Restore-CapyEnvironmentValue $entry.Key $entry.Value}}
@@ -78,9 +89,23 @@ try{
         $failure=$null;try{Assert-FixtureEnvironmentRestore @(Get-Item $control) $helper}catch{$failure=$_.Exception.Message}
         if(!$failure -or !$failure.Contains('control.ps1:1: use Restore-CapyEnvironmentValue')){throw "Environment guard accepted $source"}
     }
+    foreach($source in @(
+        '[CapyIconEnvironment]::SetEnvironmentVariableW("name",$null)',
+        'Add-Type -TypeDefinition ''public class Bad { public void Set() { System.Environment.SetEnvironmentVariable("name","value"); } }''',
+        'Add-Type -TypeDefinition ''using System.Runtime.InteropServices; public class Bad { [DllImport("kernel32.dll")] public static extern bool SetEnvironmentVariableW(string name,string value); }''',
+        'Add-Type -TypeDefinition ''public class Bad { [global::System.Runtime.InteropServices.DllImportAttribute("kernel32.dll",EntryPoint="SetEnvironmentVariableA")] public static extern bool Write(string name,string value); }''',
+        'Add-Type -TypeDefinition ''using System.Runtime.InteropServices; public class Bad { [DllImport("kernel32.dll",EntryPoint="SetEnvironmentVariableW")] public static extern bool Delete(string name,string value); }''',
+        'Add-Type -TypeDefinition ''using System.Runtime.InteropServices; public class Bad { [DllImport("kernel32.dll",EntryPoint=nameof(SetEnvironmentVariableW))] public static extern bool Write(string name,string value); }'''
+    )){
+        [IO.File]::WriteAllText($control,$source)
+        $failure=$null;try{Assert-FixtureEnvironmentRestore @(Get-Item $control) $helper}catch{$failure=$_.Exception.Message}
+        if(!$failure -or !$failure.Contains('control.ps1:1: use Restore-CapyEnvironmentValue')){throw "Environment guard accepted $source"}
+    }
+    [IO.File]::WriteAllText($control,'Add-Type -TypeDefinition ''using System.Runtime.InteropServices; public class Read { [DllImport("kernel32.dll",EntryPoint="GetEnvironmentVariableW")] public static extern uint Get(string name,System.IntPtr buffer,uint size); public string Value(string name) { return System.Environment.GetEnvironmentVariable(name); } }''')
+    Assert-FixtureEnvironmentRestore @(Get-Item $control) $helper
     [IO.File]::WriteAllText($control,'# [Environment]::SetEnvironmentVariable("name",$null)' + "`n" + '[Environment]::GetEnvironmentVariable("name")')
     Assert-FixtureEnvironmentRestore @(Get-Item $control) $helper
     Assert-FixtureEnvironmentRestore @(Get-Item $helper) $helper
     Test-ShortcutsEnvironmentRestore $repo $directory
-    'Fixture environment guard rejects direct CLR setters outside the shared helper.'
+    'Fixture environment guard rejects direct and imported setters outside the shared helper; getters remain allowed.'
 }finally{[IO.Directory]::Delete($directory,$true)}
