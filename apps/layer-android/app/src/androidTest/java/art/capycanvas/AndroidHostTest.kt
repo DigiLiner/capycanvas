@@ -3915,6 +3915,7 @@ class AndroidHostTest {
             compose.onNodeWithTag("settings-search").assertHeightIsEqualTo(48.dp)
             compose.onNodeWithTag("settings-done").assertHeightIsEqualTo(40.dp).assertTouchHeightIsEqualTo(48.dp)
             assertTrue("Done belongs to the main pane", bounds("settings-done").left >= main.left)
+            assertTrue("The title keeps a gap before Done", bounds("settings-page-title").right <= bounds("settings-done").left - 6 * density + 1)
             val text = mutableListOf<TextLayoutResult>()
             compose.onNodeWithTag("settings-category-label-appearance", useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(text) }

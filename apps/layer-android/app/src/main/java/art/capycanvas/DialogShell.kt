@@ -335,20 +335,26 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
 
 @Composable internal fun DialogHeader(host: CanvasHost,header: JSONObject,title: String,tag: String,onCancel: () -> Unit,
     onBack: () -> Unit,onPrimary: () -> Unit,primaryEnabled: Boolean,primaryLabel: String,primaryTag: String? = null,cancelTag: String? = null) {
-    Layout(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 8.dp),content = {
+    HeaderBar(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 8.dp),start = {
         Box(Modifier.width(56.dp),contentAlignment = Alignment.CenterStart) {
             if (!header.isNull("start")) IconButton({ if (header.getString("start") == "back") onBack() else onCancel() },Modifier.testTag(cancelTag ?: "$tag-cancel")) {
                 SharedIcon(if (header.getString("start") == "back") "back" else "close",host.bootstrap!!.getJSONObject("common").getString(if (header.getString("start") == "back") "back" else "cancel"))
             }
         }
+    },title = {
         Text(title,Modifier.testTag("$tag-title").semantics {heading()},fontWeight=FontWeight.Bold,textAlign = TextAlign.Center,maxLines = 1,overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    },end = {
         Box(Modifier.widthIn(min = 56.dp),contentAlignment = Alignment.CenterEnd) {
             when (header.optString("end")) {
                 "primary" -> DialogButton(primaryLabel,primaryTag ?: "$tag-confirm",accent = true,enabled = primaryEnabled,onClick = onPrimary)
                 "close" -> DialogButton(host.bootstrap!!.getJSONObject("common").getString("done"),"$tag-done",accent=true,enabled=primaryEnabled,onClick=onCancel)
             }
         }
-    }) { (start,title,end),constraints ->
+    })
+}
+
+@Composable internal fun HeaderBar(modifier: Modifier,start: @Composable () -> Unit,title: @Composable () -> Unit,end: @Composable () -> Unit) {
+    Layout(modifier = modifier,content = {start();title();end()}) { (start,title,end),constraints ->
         val width = if(constraints.hasBoundedWidth)constraints.maxWidth else
             maxOf(start.maxIntrinsicWidth(constraints.maxHeight),end.maxIntrinsicWidth(constraints.maxHeight))*2+title.maxIntrinsicWidth(constraints.maxHeight)
         val startPlace = start.measure(Constraints(maxWidth=56.dp.roundToPx(),maxHeight=constraints.maxHeight))
@@ -366,7 +372,6 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
             endPlace.placeRelative(width-endPlace.width,(height-endPlace.height)/2)
         }
     }
-
 }
 
 @Composable internal fun PickerFooter(tag: String, content: @Composable RowScope.() -> Unit) {

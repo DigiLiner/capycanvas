@@ -158,18 +158,18 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                 Column(Modifier.weight(1f).fillMaxHeight().testTag("settings-main-pane")) {
                     val page = view.array("pages").objects().find { it.getString("id") == view.getString("page") }
                     // Pane controls stay put while only its contents slide.
-                    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp)) {
-                        Text(detail ?: page?.getString("title") ?: "",
-                            Modifier.align(Alignment.Center).fillMaxWidth().padding(horizontal = 88.dp).testTag("settings-page-title").semantics{heading()},
-                            fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (detail != null || !wide) {
-                            IconButton(::back, Modifier.align(Alignment.CenterStart).size(48.dp)) {
+                    HeaderBar(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp),start = {
+                        Box {
+                            if (detail != null || !wide) IconButton(::back, Modifier.size(48.dp).testTag("settings-page-back")) {
                                 SharedIcon("back", host.bootstrap!!.getJSONObject("common").getString("back"), Modifier.size(20.dp))
                             }
                         }
-                        SettingsDone(::close, Modifier.align(Alignment.CenterEnd))
-                    }
+                    },title = {
+                        Text(detail ?: page?.getString("title") ?: "",
+                            Modifier.testTag("settings-page-title").semantics{heading()},
+                            fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    },end = { SettingsDone(::close, Modifier) })
                     AnimatedContent(view, Modifier.weight(1f).fillMaxHeight().clipToBounds(), contentKey = { it.preferencesContentKey() },
                         transitionSpec = {
                             val from = initialState.preferencesDepth()

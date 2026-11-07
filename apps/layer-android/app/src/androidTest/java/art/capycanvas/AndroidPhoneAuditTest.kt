@@ -1586,6 +1586,7 @@ class AndroidPhoneAuditTest {
             "input" to listOf("eraser_tool","finger_drawing"),"about" to emptyList())) {
             state("preferences-$id") {
                 page(id)
+                assertHeaderSpacing("settings-page", "settings-page-back", "settings-done")
                 if (id == "appearance") {
                     for (label in listOf("transparency", "dark_base", "light_base")) textLayouts("preference-label-$label").forEach { layout ->
                         assertTrue("$label keeps measured text", layout.size.width > 0)
