@@ -146,7 +146,7 @@ struct Slot {
     encoded:Option<Arc<()>>,
     samples: Option<Samples>,
 }
-struct RetiredSlot { slot: Slot, retired: Arc<AtomicU64>, bytes: u64, completed: Arc<std::sync::atomic::AtomicBool> }
+struct RetiredSlot { _texture: wgpu::Texture, encoded: Option<Arc<()>>, retired: Arc<AtomicU64>, bytes: u64, completed: Arc<std::sync::atomic::AtomicBool> }
 impl Drop for RetiredSlot {
     fn drop(&mut self) { self.retired.fetch_sub(self.bytes, Ordering::Release); }
 }
@@ -361,14 +361,14 @@ impl DecodedTiles {
     }
     fn reap_retired(&self) {
         self.retired_slots.borrow_mut().retain(|slot| !slot.completed.load(Ordering::Acquire)
-            || slot.slot.encoded.as_ref().is_some_and(|encoded|Arc::strong_count(encoded)>1));
+            || slot.encoded.as_ref().is_some_and(|encoded|Arc::strong_count(encoded)>1));
     }
     fn retire(&mut self, slot: Slot) -> RetirementCompletion {
         let bytes = texture_bytes(&slot.texture);
         let retired = self.retired_bytes.clone();
         retired.fetch_add(bytes, Ordering::Relaxed);
         let completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.retired_slots.get_mut().push(RetiredSlot { slot, retired, bytes, completed: completed.clone() });
+        self.retired_slots.get_mut().push(RetiredSlot { _texture: slot.texture, encoded: slot.encoded, retired, bytes, completed: completed.clone() });
         RetirementCompletion(completed)
     }
     pub(crate) fn flush_retired(&mut self, encoder: &mut crate::submission::CommandEncoder) {

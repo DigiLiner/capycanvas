@@ -1204,3 +1204,87 @@ fn live_admission_submission_retirement_equals_evicted_bytes_until_completion() 
     assert_eq!(cache.retired_bytes.load(Ordering::Acquire),0);
     assert!(cache.retired_slots.borrow().is_empty());
 }
+
+fn assert_promoted_source_reuse_before_completion(hold_encoded: bool) {
+    let source=stored_code_source(SampleDepth::U8,2);
+    let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    let encoded=stored_code_tile(&mut r,&source,0,&mut encoder);
+    assert_eq!(encoded.texture.format(),wgpu::TextureFormat::Rgba8Unorm);
+    r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
+    let encoded_lease=hold_encoded.then(||r.source_tiles.borrow().lease(&encoded.view).unwrap());
+    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    let exact=Scene::promote_source(&mut r,&mut encoder,encoded).unwrap();
+    assert_eq!(exact.texture.format(),wgpu::TextureFormat::Rgba32Float);
+    assert_eq!(encoder.pass_count(),1);
+    if let Some(lease)=&encoded_lease {
+        assert!(Arc::ptr_eq(lease,&r.source_tiles.borrow().lease(&exact.view).unwrap()));
+    }
+    let grant=r.source_tiles.borrow().non_slot_bytes()+NORMALIZED_PAGE_BYTES;
+    r.source_tiles.borrow_mut().admit_limits(grant,16*NORMALIZED_PAGE_BYTES,0);
+    {
+        let cache=r.source_tiles.borrow();
+        assert_eq!(cache.live_bytes(),grant);
+        assert_eq!(cache.retired_bytes.load(Ordering::Acquire),NORMALIZED_PAGE_BYTES/4);
+        assert_eq!(cache.gpu_bytes(),grant+NORMALIZED_PAGE_BYTES/4);
+    }
+    if hold_encoded {
+        assert!(matches!(r.source_tiles.borrow_mut().plan_exact(&r,&source,[1,0]),Err(GpuRasterError::SourceWorkingSetExceeded)),
+            "a real encoded reader must protect the promoted slot");
+    }
+    drop(encoded_lease);
+    {
+        let mut cache=r.source_tiles.borrow_mut();
+        let (replacement,pending)=cache.plan_exact(&r,&source,[1,0])
+            .expect("retirement bookkeeping must not lease the promoted slot after its real readers drop");
+        assert_eq!(replacement.view,exact.view);
+        assert!(pending.is_some());
+        assert_eq!(cache.slots.len(),1);
+        assert_eq!(cache.live_bytes(),grant);
+        assert_eq!(cache.retired_bytes.load(Ordering::Acquire),NORMALIZED_PAGE_BYTES/4);
+        assert_eq!(cache.gpu_bytes(),grant+NORMALIZED_PAGE_BYTES/4,
+            "the old encoded allocation stays charged until GPU completion");
+    }
+    r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
+    let cache=r.source_tiles.borrow();
+    assert_eq!(cache.gpu_bytes(),grant);
+    assert_eq!(cache.retired_bytes.load(Ordering::Acquire),0);
+}
+
+#[test]
+fn stored_source_promotion_retirement_does_not_lease_the_unborrowed_exact_slot() {
+    assert_promoted_source_reuse_before_completion(false);
+}
+
+#[test]
+fn stored_source_promoted_slot_reuses_after_the_real_encoded_reader_drops_before_completion() {
+    assert_promoted_source_reuse_before_completion(true);
+}
+
+#[test]
+fn a_full_promoted_pool_reuses_an_unborrowed_page_without_units_or_required_sources() {
+    let source=stored_code_source(SampleDepth::U8,9);
+    let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    let encoded:Vec<_>=(0..8).map(|x|stored_code_tile(&mut r,&source,x,&mut encoder)).collect();
+    r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
+    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    let exact:Vec<_>=encoded.into_iter().map(|tile|Scene::promote_source(&mut r,&mut encoder,tile).unwrap()).collect();
+    let grant=r.source_tiles.borrow().non_slot_bytes()+8*NORMALIZED_PAGE_BYTES;
+    r.source_tiles.borrow_mut().admit_limits(grant,16*NORMALIZED_PAGE_BYTES,0);
+    {
+        let mut cache=r.source_tiles.borrow_mut();
+        assert!(cache.unit.is_none());
+        assert!(cache.required.is_empty());
+        assert_eq!(cache.slots.len(),8);
+        assert_eq!(cache.live_bytes(),grant);
+        let (replacement,pending)=cache.plan_exact(&r,&source,[8,0])
+            .expect("a full promoted pool must reuse a page without real readers in the same frame");
+        assert_eq!(replacement.view,exact[0].view);
+        assert!(pending.is_some());
+        assert_eq!(cache.slots.len(),8);
+        assert_eq!(cache.live_bytes(),grant);
+    }
+    r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
+    assert_eq!(r.source_tiles.borrow().gpu_bytes(),grant);
+}
