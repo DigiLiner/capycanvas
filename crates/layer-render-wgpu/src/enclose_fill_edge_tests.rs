@@ -3,6 +3,50 @@ use crate::test_support::flush_engine;
 use layer_core::authored::{PaintBase, PaintSource};
 
 #[test]
+fn cold_image_base_fill_reads_only_prepared_pages() {
+    for same_layer in [false,true] {
+        let extent=[384,128];
+        let mut document=paint_document(extent,"Native Fill target");
+        let target=target(&document);
+        placement::set_source(&mut document,layer_core::color::source::rgba8_source(extent,|x,_| {
+            if same_layer && (60..68).contains(&x) {[0,0,0,255]}else{[255;4]}
+        }));
+        let reference=if same_layer {target}else {
+            let image=layer_core::color::source::rgba8_source(extent,|x,_|if (60..68).contains(&x) {[0,0,0,255]}else{[0;4]});
+            let (owner,reference)=placement::append_paint(&mut document,"Generated reference benchmark",PaintSource {
+                domain:extent,color_mode:Default::default(),raster:Default::default(),
+                base:Some(PaintBase::new(image.into())),operations:Default::default()});
+            document.artwork.occurrences.get_mut(owner).unwrap().reference=true;
+            reference
+        };
+        let snapshot=document.snapshot();
+        let mut coverage=layer_core::CoverageSnapshot::reveal_all(document.artwork.coverage.next_handle(),extent,[0;2]);
+        coverage.source.default_coverage=0.;coverage.selection=Some(rectangle([0,0,64,128]));
+        let operation=layer_core::RasterOperation {placement:Affine::IDENTITY,coverage,kind:layer_core::RasterOperationKind::Fill {
+            color:[0.,0.,1.,1.],texture:Default::default(),alpha_locked:false,
+            edges:Some(Box::new(layer_core::FillEdges {translucent_seed:false,snapshot:snapshot.clone(),
+                position:Point {x:32.,y:48.},tolerance:0.1,colour_on_solid:false,
+                lines:vec![layer_core::FillLine {snapshot,scope:layer_core::SceneScope::Raw(reference),fill_above:false}]})),
+            underfill:Some(rectangle([60,0,64,128]))}};
+        let batch=layer_render::DabBatch {kind:layer_render::DabBatchKind::RasterOperation(0),dab_count:0,damage:operation.bounds(extent),
+            ..crate::test_support::dab_batch(target,crate::tests::test_style(layer_core::BrushExecution::Dry),Rect::from_extent(extent))};
+        let layer_core::authored::SourceTarget::Paint(handle)=target else {unreachable!()};
+        let mut source=document.artwork.paint.get(handle).unwrap().clone();source.operations=Arc::new(vec![operation]);
+        document.apply(layer_core::Edit::Paint(layer_core::authored::RecordChange::replace(&document.artwork.paint,handle,Some(source)).unwrap())).unwrap();
+        let mut r=WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
+        let frame=FramePacket {reset_layers:true,dab_batches:std::slice::from_ref(&batch),..packet(document.scene(),extent)};
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(30);
+        loop {
+            r.poll_pending(frame.view).unwrap();
+            if r.can_submit() && r.raster_dependencies_ready(frame,None) {break;}
+            assert!(std::time::Instant::now()<deadline,"cold fill dependencies never became ready: same_layer={same_layer}");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        r.submit(frame).unwrap_or_else(|error|panic!("submit after readiness: same_layer={same_layer}: {error:?}: {error}"));
+    }
+}
+
+#[test]
 fn stored_fill_prepares_cold_reference_tiles_beside_its_seed() {
     let extent=[384,64];
     let mut document=paint_document(extent,"Fill target");

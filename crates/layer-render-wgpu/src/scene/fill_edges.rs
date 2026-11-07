@@ -157,7 +157,8 @@ fn same_edges(a:&layer_core::FillEdges,b:&layer_core::FillEdges)->bool {
             Arc::ptr_eq(&a.snapshot,&b.snapshot) && a.scope==b.scope && a.fill_above==b.fill_above)
 }
 pub(crate) fn read_bounds(operation:&layer_core::RasterOperation,bounds:PixelRect,extent:[u32;2])->PixelRect {
-    if matches!(operation.kind,RasterOperationKind::Fill {edges:Some(_),underfill:Some(_),..}) {bounds.expand(HALO,extent)}else{bounds}
+    let RasterOperationKind::Fill {edges:Some(edges),underfill:Some(_),..}=&operation.kind else {return bounds;};
+    DocRect::from(bounds).aligned(PAGE_SIZE).in_frame(extent).expand(HALO,extent).union(seed_rect(edges.position,extent))
 }
 
 type Texture=(wgpu::Texture,wgpu::TextureView);
