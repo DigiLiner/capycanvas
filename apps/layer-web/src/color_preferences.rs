@@ -46,8 +46,7 @@ impl WebApp {
     }
     pub fn profile_picker_standard(&self, purpose: JsValue) -> Result<JsValue, JsValue> {
         let purpose: layer_ui::profile_library::ProfilePickerPurpose = serde_wasm_bindgen::from_value(purpose).map_err(js)?;
-        serialize(&layer_core::color::RgbSpace::ALL.into_iter().filter(|_|purpose.accepts(layer_core::color::ProfileChannels::Rgb))
-            .map(layer_ui::ExportProfile::builtin).collect::<Vec<_>>())
+        serialize(&purpose.standard())
     }
     pub fn workspace_name_validation(&self, name: &str) -> Result<JsValue, JsValue> {
         serialize(&layer_workspace::name_validation(name, self.session.localization()))

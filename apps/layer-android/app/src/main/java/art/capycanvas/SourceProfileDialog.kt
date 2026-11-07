@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -47,32 +48,53 @@ import org.json.JSONArray
 
 @Composable internal fun SourceProfileDialog(host:CanvasHost,interpretation: JSONObject, onChoose: (JSONObject?) -> Unit) {
     val copy = host.catalog.getJSONObject("profile_copy")
-    var selection by remember { mutableStateOf("Srgb") }
-    var custom by remember { mutableStateOf<JSONObject?>(null) }
+    var selected by remember(interpretation) { mutableStateOf<JSONObject?>(null) }
+    var originalName by remember(interpretation) { mutableStateOf(copy.getString("choose")) }
+    var rawName by remember(interpretation) { mutableStateOf<String?>(null) }
+    var failure by remember(interpretation) { mutableStateOf<Exception?>(null) }
+    val original = interpretation.getJSONObject("profile")
+    LaunchedEffect(interpretation) {
+        try {
+            val raw = withContext(Dispatchers.IO) { Native.profileLibrary(obj("type" to "describe", "profile" to original).toString(),byteArrayOf()) }
+            rawName = org.json.JSONTokener(raw).nextValue() as? String
+        } catch(e:CancellationException){throw e} catch(e:Exception){failure=e}
+    }
+    LaunchedEffect(rawName,host.languageTag) { originalName = profileNameCopy(host,rawName) }
     val cancel={onChoose(null)}
-    val choose={onChoose(if(selection=="custom")custom!!.getJSONObject("profile") else obj("Builtin" to selection))}
+    val choose={onChoose(selected?.getJSONObject("profile") ?: original)}
     DialogShell(host,copy.getJSONObject("dialog"),copy.getString("interpret_title"),onCancel=cancel,onPrimary=choose,
-        primaryLabel=copy.getString("use_profile"),tag="source-profile",
+        primaryLabel=copy.getString("use_profile"),primaryEnabled=failure==null || selected!=null,tag="source-profile",primaryTag="source-profile-use",
         responses=listOf(DialogResponse(copy.getJSONObject("common").getString("cancel"),"source-profile-cancel",action=cancel),
-            DialogResponse(copy.getString("use_profile"),"source-profile-use",accent=true,action=choose)),
+            DialogResponse(copy.getString("use_profile"),"source-profile-use",accent=true,enabled=failure==null || selected!=null,action=choose)),
         body={padding -> Column(Modifier.padding(padding),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text(copy.getString("interpret_help"))
-            ColorChoice(copy.getString("interpret_as"), listOf("Srgb" to "sRGB", "DisplayP3" to "Display P3", "AdobeRgb" to "Adobe RGB (1998)", "ProPhoto" to "ProPhoto RGB") +
-                (custom?.let { listOf("custom" to profileCaption(host, it)) } ?: emptyList()), selection) { selection = it }
-            ImportProfileButton(host) { custom = it; selection = "custom" }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(interpretation.getString("channels"))
-                Text(host.catalog.getJSONObject("export_copy").getString(if (interpretation.getString("depth") == "U16") "depth_16" else "depth_8"))
-            }
+            SourceProfileChoice(host,copy.getString("interpret_as"),obj("kind" to "source","channels" to interpretation.getString("channels")),
+                originalName,original.nullableString("Builtin"),selected) { selected=it }
+            ColorFailureText(host,failure,true)
         } })
 }
 
-@Composable internal fun ImportProfileButton(host:CanvasHost,enabled:Boolean=true,onProfile:(JSONObject)->Unit) {
-    val copy = host.catalog.getJSONObject("profile_copy")
+@Composable internal fun SourceProfileChoice(host:CanvasHost,label:String,purpose:JSONObject,originalName:String,originalBuiltin:String?,
+    selected:JSONObject?,enabled:Boolean=true,onChoose:(JSONObject?)->Unit) {
+    val copy=host.catalog.getJSONObject("profile_copy")
+    var standards by remember {mutableStateOf<List<JSONObject>>(emptyList())}
     var library by remember {mutableStateOf(false)}
-    val accept by rememberUpdatedState<(JSONObject) -> Unit>({ if (enabled) onProfile(it) })
-    Row {ProfileFileButton(host,enabled=enabled,onProfile={accept(it)});TextButton({library=true},enabled=enabled){Text(copy.getString("saved_dialog"))}}
-    if(library)ProfileLibraryDialog(host,{library=false}){profile->accept(profile);library=false}
+    val accept by rememberUpdatedState<(JSONObject?)->Unit>({if(enabled)onChoose(it)})
+    LaunchedEffect(purpose.toString()) {
+        standards=JSONArray(Native.profileLibrary(obj("type" to "standard","purpose" to purpose).toString(),byteArrayOf())).objects()
+    }
+    val builtin=if(selected==null)originalBuiltin else selected.getJSONObject("profile").nullableString("Builtin")
+    val index=standards.indexOfFirst{it.getJSONObject("profile").nullableString("Builtin")==builtin}
+    val originalIndex=standards.indexOfFirst{it.getJSONObject("profile").nullableString("Builtin")==originalBuiltin}
+    val choices=standards.mapIndexed{i,profile->i.toString() to profileCaption(host,profile)}+
+        (if(originalIndex<0)listOf("original" to originalName)else emptyList())+
+        (if(selected!=null && index<0)listOf("custom" to profileCaption(host,selected))else emptyList())
+    val key=if(index>=0)index.toString() else if(selected==null)"original" else "custom"
+    ColorChoice(label,choices,key,enabled,extra={close ->
+        ProfileFileButton(host,enabled=enabled,onProfile={accept(it);close()})
+        TextButton({close();library=true},enabled=enabled){Text(copy.getString("saved_dialog"))}
+    }) { value -> accept(when(value){"original"->null;"custom"->selected;else->standards[value.toInt()]}) }
+    if(library)ProfileLibraryDialog(host,{library=false}){accept(it);library=false}
 }
 
 @Composable internal fun ProfileLibraryDialog(host:CanvasHost,onDismiss:()->Unit,onProfile:((JSONObject)->Unit)?=null) {

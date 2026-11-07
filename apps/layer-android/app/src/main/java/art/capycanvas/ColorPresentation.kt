@@ -1,5 +1,12 @@
 package art.capycanvas
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -61,4 +68,18 @@ internal suspend fun colorFailureCopy(host: CanvasHost, error: Exception, profil
         if (language == host.languageTag) caption = next
     }
     caption?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+}
+
+@Composable internal fun ColorComparison(previews: List<ImageBitmap>, copy: JSONObject) {
+    if(previews.isNotEmpty())BoxWithConstraints(Modifier.fillMaxWidth().testTag("color-comparison")) {
+        val split=Native.dialogUi(obj("kind" to "panes_fit","width" to maxWidth.value,"minimum" to JSONArray(listOf(160,160)),"gap" to 12).toString()).toBoolean()
+        @Composable fun picture(index:Int,modifier:Modifier) {
+            Column(modifier.testTag(if(index==0)"color-comparison-before" else "color-comparison-after"),horizontalAlignment=Alignment.CenterHorizontally) {
+                Text(copy.getString(if(index==0)"before" else "after"))
+                Image(previews[index],copy.getString(if(index==0)"original_composition" else "prepared_composition"),Modifier.fillMaxWidth().heightIn(max=180.dp))
+            }
+        }
+        if(split)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)){previews.indices.forEach{picture(it,Modifier.weight(1f))}}
+        else Column(verticalArrangement=Arrangement.spacedBy(12.dp)){previews.indices.forEach{picture(it,Modifier.fillMaxWidth())}}
+    }
 }

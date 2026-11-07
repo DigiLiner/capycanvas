@@ -514,8 +514,7 @@ impl ProfilePicker {
                         }
                         if inventory.standard {
                             let standard = gio::Menu::new();
-                            for (index, space) in RgbSpace::ALL.into_iter().enumerate() {
-                                let value = ExportProfile::builtin(space);
+                            for (index, value) in state.purpose.picker_purpose().standard().into_iter().enumerate() {
                                 let title = value.name.clone();
                                 item(
                                     &standard,

@@ -47,11 +47,7 @@ impl WebApp {
 #[wasm_bindgen]
 impl WebApp {
     pub fn source_dialog_context(&self, id: u32) -> Result<JsValue, JsValue> {
-        let workflow = SourceWorkflow::begin(&self.session,id).map_err(js)?;
-        let source = &workflow.original.interpretation;
-        let name = match &source.profile { ColorProfile::Builtin(space) => Some(space.name()), _ => None };
-        serialize(&serde_json::json!({"baked":workflow.adds_layer(),"assumed":source.profile_assumed,"name":name,
-            "purpose":layer_ui::profile_library::ProfilePickerPurpose::Source(source.channels)}))
+        serialize(&self.session.source_dialog_context(id).map_err(js)?)
     }
     pub fn prepare_source(
         &self,

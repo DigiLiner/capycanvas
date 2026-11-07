@@ -1,7 +1,6 @@
 package art.capycanvas
 
 import android.graphics.Bitmap
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,10 +27,12 @@ internal class DocumentColorJob(val host: CanvasHost, val id: Int, private val s
     var ready by mutableStateOf(false)
     var error by mutableStateOf<Exception?>(null)
     var clipped by mutableStateOf(0L)
-    var addsLayer by mutableStateOf(false)
     var sourceProfile by mutableStateOf("")
         private set
+    var sourceDescription by mutableStateOf("")
+        private set
     private var sourceProfileName: String? = null
+    private var sourceProfileAssumed = false
     private var copyGeneration = 0L
     var previews by mutableStateOf<List<ImageBitmap>>(emptyList())
     private var task = 0L
@@ -87,7 +88,7 @@ internal class DocumentColorJob(val host: CanvasHost, val id: Int, private val s
                         if (!closing && draft.generation == generation) {
                             val images = if (draft.history) emptyList() else withContext(Dispatchers.IO) { listOf(false, true).map { comparisonBitmap(if (source) Native.sourcePreview(task, it) else Native.colorPreview(task, it)) } }
                             if (!closing && draft.generation == generation) {
-                                clipped = result.optLong("clipped_channels"); addsLayer = result.optBoolean("adds_layer")
+                                clipped = result.optLong("clipped_channels")
                                 sourceProfileName = if (result.isNull("source_profile_name")) null else result.getString("source_profile_name")
                                 previews = images; ready = true; historyReady = draft.history
                             }
@@ -101,14 +102,22 @@ internal class DocumentColorJob(val host: CanvasHost, val id: Int, private val s
             if (historyReady && ready && !closing) apply()
         }
     }
+    fun describeSource(context: JSONObject) {
+        sourceProfileName = context.nullableString("name")
+        sourceProfileAssumed = context.getBoolean("assumed")
+        refreshCopy()
+    }
     fun refreshCopy() {
-        if (!source || !ready || closing || finished) return
+        if (!source || closing || finished) return
         val generation = ++copyGeneration
         val language = host.languageTag
         val retained = sourceProfileName
         host.viewModelScope.launch {
-            val caption = profileNameCopy(host, retained)
-            if (generation == copyGeneration && language == host.languageTag && ready && !closing && !finished) sourceProfile = caption
+            val copy = JSONObject(host.withNative { Native.query(it, obj("type" to "source_profile_copy", "name" to retained, "assumed" to sourceProfileAssumed).toString()) })
+            if (generation == copyGeneration && language == host.languageTag && !closing && !finished) {
+                sourceProfile = copy.getString("name")
+                sourceDescription = copy.getString("description")
+            }
         }
     }
     fun apply() {
@@ -218,17 +227,7 @@ internal class DocumentColorJob(val host: CanvasHost, val id: Int, private val s
                 if (job.busy) { CircularProgressIndicator(); Text(copy.getString("preparing")) }
                 if (job.clipped > 0) Text(copy.getString("outside_gamut"))
                 if(!history)Text(copy.getString("compare_before_apply"))
-                if(job.previews.isNotEmpty())BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val split=Native.dialogUi(obj("kind" to "panes_fit","width" to maxWidth.value,"minimum" to JSONArray(listOf(160,160)),"gap" to 12).toString()).toBoolean()
-                    @Composable fun picture(index:Int,modifier:Modifier) {
-                        Column(modifier,horizontalAlignment=Alignment.CenterHorizontally) {
-                            Text(copy.getString(if(index==0)"before" else "after"))
-                            Image(job.previews[index],copy.getString(if(index==0)"original_composition" else "prepared_composition"),Modifier.fillMaxWidth().heightIn(max=180.dp))
-                        }
-                    }
-                    if(split)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)){job.previews.indices.forEach{picture(it,Modifier.weight(1f))}}
-                    else Column(verticalArrangement=Arrangement.spacedBy(12.dp)){job.previews.indices.forEach{picture(it,Modifier.fillMaxWidth())}}
-                }
+                ColorComparison(job.previews,copy)
                 ColorFailureText(host, job.error)
             }
         })

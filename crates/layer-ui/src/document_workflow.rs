@@ -28,6 +28,16 @@ pub fn document_color_dither(depth: layer_core::color::SampleDepth, active: bool
     let available = depth == SampleDepth::U8;
     DocumentColorDither { available, value: if available && active { OutputDither::Stochastic8 } else { OutputDither::None } }
 }
+impl<R: CanvasRenderer> UiSession<R> {
+    pub fn source_dialog_context(&self, id: u32) -> Result<serde_json::Value, String> {
+        let workflow = SourceWorkflow::begin(self, id)?;
+        let source = &workflow.original.interpretation;
+        let builtin = match &source.profile { ColorProfile::Builtin(space) => Some(*space), _ => None };
+        Ok(serde_json::json!({"baked":workflow.adds_layer(),"assumed":source.profile_assumed,
+            "name":builtin.map(|space|space.name()),"profile_builtin":builtin,
+            "purpose":crate::profile_library::ProfilePickerPurpose::Source(source.channels)}))
+    }
+}
 pub fn color_comparison_needed(original: DocumentColor, change: DocumentColorChange, flattened: bool) -> bool {
     flattened || change.target(original) != original
 }

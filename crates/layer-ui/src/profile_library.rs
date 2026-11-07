@@ -69,6 +69,10 @@ impl ProfilePurpose {
 #[serde(tag = "kind", content = "channels", rename_all = "snake_case")]
 pub enum ProfilePickerPurpose { Output, Proof, Source(layer_core::color::source::SourceChannels) }
 impl ProfilePickerPurpose {
+    pub fn standard(&self) -> Vec<crate::ExportProfile> {
+        layer_core::color::RgbSpace::ALL.into_iter().filter(|_|self.accepts(ProfileChannels::Rgb))
+            .map(crate::ExportProfile::builtin).collect()
+    }
     pub fn accepts(&self, channels: ProfileChannels) -> bool {
         use layer_core::color::source::SourceChannels;
         match self {
@@ -279,6 +283,8 @@ fn saved_ids<'de, D: serde::Deserializer<'de>>(saved: D) -> Result<Vec<String>, 
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProfileLibraryAction {
     Limits,
+    Standard { purpose: ProfilePickerPurpose },
+    Describe { profile: ColorProfile },
     Visibility {
         #[serde(deserialize_with = "saved_ids")]
         hidden: Vec<String>,
@@ -318,6 +324,8 @@ impl ProfileLibraryAction {
         let view = |entry: ProfileEntry| localizer.map_or_else(||json!(&entry), |localizer|entry.localized_view(localizer));
         Ok(match self {
             Self::Limits => json!({"read_bytes": PROFILE_READ_LIMIT, "entries": PROFILE_LIBRARY_ENTRIES}),
+            Self::Standard { purpose } => json!(purpose.standard()),
+            Self::Describe { profile } => json!(layer_color::profile_description_optional(&profile).map_err(ColorFeatureError::Diagnostic)?),
             Self::Visibility { mut hidden, id, visible } => {
                 hidden.retain(|id| valid_profile_id(id));
                 hidden.sort(); hidden.dedup();
@@ -561,6 +569,17 @@ mod picker_tests {
         }
     }
 
+    #[test]
+    fn standard_profile_transport_filters_source_channels_and_keeps_the_shared_order() {
+        for channels in [SourceChannels::Rgba, SourceChannels::Gray, SourceChannels::Cmyk] {
+            let value = ProfileLibraryAction::Standard { purpose: ProfilePickerPurpose::Source(channels) }.execute(&[]).unwrap();
+            let profiles: Vec<crate::ExportProfile> = serde_json::from_value(value).unwrap();
+            let expected: Vec<_> = if channels == SourceChannels::Rgba {
+                layer_core::color::RgbSpace::ALL.into_iter().map(ColorProfile::Builtin).collect()
+            } else { Vec::new() };
+            assert_eq!(profiles.into_iter().map(|profile|profile.profile).collect::<Vec<_>>(), expected);
+        }
+    }
     #[test]
     fn picker_channels_follow_source_samples_and_proof_requires_non_gray() {
         for channels in [ProfileChannels::Rgb,ProfileChannels::Gray,ProfileChannels::Cmyk] {

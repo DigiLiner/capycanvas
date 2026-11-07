@@ -637,6 +637,12 @@ fn source_workflow_requires_current_complete_comparison_and_preserves_original_s
     s.frame(1, 1).unwrap();
     invoke(&mut s, CommandId::RepairSourceProfile);
     let id = s.state.requests.first().unwrap().id;
+    let context = s.source_dialog_context(id).unwrap();
+    assert_eq!(context["name"], "ProPhoto RGB");
+    assert_eq!(context["profile_builtin"], "ProPhoto");
+    assert_eq!(context["assumed"], true);
+    assert_eq!(context["baked"], false);
+    assert_eq!(context["purpose"], serde_json::json!({"kind":"source","channels":"Rgba"}));
     let mut workflow = SourceWorkflow::begin(&s, id).unwrap();
     assert!(!workflow.adds_layer());
     assert_eq!(workflow.resolve_profile(None).unwrap(),Some(source.interpretation.profile.clone()));

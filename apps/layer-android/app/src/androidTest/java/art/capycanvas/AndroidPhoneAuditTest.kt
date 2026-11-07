@@ -50,6 +50,7 @@ import java.io.File
 import kotlin.math.roundToInt
 
 class AndroidPhoneAuditTest {
+    private var tolerateActionError = false
     @get:Rule(order = 0) val device = CapyDeviceRule()
     @get:Rule(order = 1) val compose = createEmptyComposeRule()
 
@@ -212,6 +213,8 @@ class AndroidPhoneAuditTest {
     @Test fun pagesD1() = visit(false, "pagesD1")
     @Test fun dialogsD2() = visit(false, "dialogsD2")
     @Test fun pagesD2() = visit(false, "pagesD2")
+    @Test fun pagesA4() = visit(false, "pagesA4")
+    @Test fun sourcePages() = visit(false, "sourcePages")
     @Test fun ime() = visit(false, "ime")
     @Test fun alertIme() = visit(false, "alertIme")
     @Test fun modalFocus() = visit(false, "modalFocus")
@@ -267,12 +270,13 @@ class AndroidPhoneAuditTest {
             assertTrue("Completed first canvas frame", frameReady)
             fun capture(name: String) {
                 captureName = name
-                report.put("family",if (name == "hidden") "frame" else if (name.startsWith("inventory-")) "inventory" else if(family in listOf("dialogsA2","pagesD1","pagesD2")) "pages" else family)
+                report.put("family",if (name == "hidden") "frame" else if (name.startsWith("inventory-")) "inventory" else if(family in listOf("dialogsA2","pagesD1","pagesD2","pagesA4","sourcePages")) "pages" else family)
                     .put("fixture",host.workspaceManager?.optString("id") ?: "builtin:workspace:painter").put("state", if (admissionOnly) "rest" else name).put("status", "failed").put("passed", false)
                 host.drain()
                 compose.waitForIdle()
                 if (!admissionOnly) awaitCanvasPresentation(host)
-                host.awaitFrame("Brush ready and Compose idle") { host.snapshot?.optBoolean("brush_ready") == true &&
+                if(tolerateActionError)compose.waitUntil(10_000) { host.snapshot?.optBoolean("brush_ready") == true && host.snapshot?.isNull("canvas_notice") == true }
+                else host.awaitFrame("Brush ready and Compose idle") { host.snapshot?.optBoolean("brush_ready") == true &&
                     host.snapshot?.isNull("canvas_notice") == true }
                 compose.waitForIdle()
                 instrumentation.waitForIdleSync()
@@ -326,7 +330,7 @@ class AndroidPhoneAuditTest {
                     surface.getLocationOnScreen(canvasLocation)
                     report.put("canvas_origin_pixels", JSONArray(canvasLocation.toList()))
                     val root = checkNotNull(findTag("workspace"))
-                    collect(if(family == "pagesD1" || family == "pagesD2")root.first.semanticsOwner.unmergedRootSemanticsNode else root.second, allocations)
+                    collect(if(family in listOf("pagesD1","pagesD2","pagesA4","sourcePages"))root.first.semanticsOwner.unmergedRootSemanticsNode else root.second, allocations)
                     report.put("phone_active", host.snapshot?.getJSONObject("layout")?.objectOrNull("phone") != null)
                     report.put("revision", host.snapshot?.getJSONObject("state")?.getLong("revision"))
                     assertEquals("System theme", expectedTheme, host.snapshot?.getJSONObject("state")?.getString("theme"))
@@ -473,6 +477,11 @@ class AndroidPhoneAuditTest {
         }
         if (family == "ime" || family == "modalFocus") {
             visitIme(activity,host,::tap,::state,checkAlert = family == "ime")
+            assertTrue(failures.joinToString("\n"),failures.isEmpty())
+            return
+        }
+        if(family=="pagesA4" || family=="sourcePages") {
+            visitPagesA4(activity,host,::event,::tap,::state,sourceOnly=family=="sourcePages")
             assertTrue(failures.joinToString("\n"),failures.isEmpty())
             return
         }
@@ -914,6 +923,265 @@ class AndroidPhoneAuditTest {
         }
     }
 
+    private fun visitPagesA4(activity: MainActivity,host: CanvasHost,event: (Int,Offset) -> Unit,tap: (String) -> Unit,state: (String,() -> Unit) -> Unit,sourceOnly:Boolean=false) {
+        val decor = activity.window.decorView
+        val fixtures = File(instrumentation.targetContext.getExternalFilesDir(null),"a4-fixtures")
+        fun fixture(name: String) = File(fixtures,name).also { assertTrue("Fixture $name is pushed",it.isFile) }
+        fun shared() = host.snapshot!!.getJSONObject("state")
+        fun invoke(command: String) = host.drain(obj("type" to "invoke","command" to command))
+        fun exists(tag: String) = findTag(tag) != null
+        fun wait(tag: String,timeout: Long = 10_000) = host.awaitFrame("Pages A4 $tag is composed",timeout) { exists(tag) }
+        fun gone(tag: String,timeout: Long = 10_000) = host.awaitFrame("Pages A4 $tag closes",timeout) { !exists(tag) }
+        fun keyboard() = decor.rootWindowInsets.isVisible(WindowInsets.Type.ime())
+        fun hideIme() {
+            instrumentation.runOnMainSync { decor.windowInsetsController?.hide(WindowInsets.Type.ime()) }
+            host.awaitFrame("Keyboard-free page reference") { !keyboard() }
+            compose.waitForIdle()
+        }
+        fun settle() { compose.waitForIdle();if(!sourceOnly)SystemClock.sleep(400);if(keyboard())hideIme() }
+        fun close(tag: String) { if(exists(tag)) { try { tap(tag) } catch(error: Throwable) { predictiveBack(activity,cancel = false) };compose.waitForIdle() } }
+        fun reveal(tag: String) { compose.onNodeWithTag(tag,useUnmergedTree = true).performScrollTo();compose.waitForIdle() }
+        fun tapText(owner: String,prefix: String) {
+            val center = checkNotNull(findTag(owner)).let { (root,node) ->
+                val target = checkNotNull(node.find { it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text.startsWith(prefix) } == true }) { "No \"$prefix\" in $owner" }
+                val screen = IntArray(2);instrumentation.runOnMainSync { root.view.getLocationOnScreen(screen) }
+                target.boundsInRoot.center + Offset(screen[0].toFloat(),screen[1].toFloat())
+            }
+            event(MotionEvent.ACTION_DOWN,center);event(MotionEvent.ACTION_UP,center);host.drain()
+        }
+        fun <T> picking(action: String,uri: android.net.Uri,block: () -> T): T {
+            val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+                override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? =
+                    if(intent.action != action) null else android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_OK,android.content.Intent().setData(uri))
+            }
+            instrumentation.addMonitor(monitor)
+            try { return block() } finally { instrumentation.removeMonitor(monitor) }
+        }
+        fun epoch() = shared().getJSONObject("document_file").getLong("epoch")
+        fun openFile(name: String) = instrumentation.runOnMainSync { assertTrue(host.documents.openUris(listOf(android.net.Uri.fromFile(fixture(name))))) }
+        fun opened(before: Long,timeout: Long = 120_000) = host.awaitFrame("Opened drawing is active",timeout) { epoch() != before && !host.documents.working && !host.drawingTabs.switching }
+        val pick = android.content.Intent.ACTION_OPEN_DOCUMENT
+        val create = android.content.Intent.ACTION_CREATE_DOCUMENT
+        var keyboardHeight = 0
+        fun withKeyboard(tag: String) {
+            if(keyboardHeight == 0) {
+                val palette = checkNotNull(host.palettes.view()?.array("palettes")?.objects()?.firstOrNull()?.getLong("id")) { "No palette" }
+                instrumentation.runOnMainSync { host.palettes.command(obj("command" to "rename_palette","id" to palette)) }
+                host.awaitFrame("Palette name raises the native keyboard") { keyboard() }
+                keyboardHeight = decor.rootWindowInsets.getInsets(WindowInsets.Type.ime()).bottom
+                instrumentation.runOnMainSync { host.palettes.dialog = null };hideIme();gone("palette-name-dialog")
+            }
+            val view = checkNotNull(findTag("workspace")).first.view
+            val original = decor.rootWindowInsets
+            instrumentation.runOnMainSync { view.dispatchApplyWindowInsets(WindowInsets.Builder(original)
+                .setInsets(WindowInsets.Type.ime(),android.graphics.Insets.of(0,0,0,keyboardHeight)).setVisible(WindowInsets.Type.ime(),true).build()) }
+            host.awaitFrame("$tag follows the reduced visible area",diagnostics = { "keyboard=$keyboardHeight bounds=${findTag(tag)?.second?.boundsInRoot}" }) {
+                findTag(tag)?.second?.boundsInRoot?.let { it.bottom <= decor.height-keyboardHeight+1 } == true }
+            compose.waitForIdle()
+        }
+        fun restoreKeyboard() {
+            val view = findTag("workspace")?.first?.view ?: return
+            instrumentation.runOnMainSync { view.dispatchApplyWindowInsets(WindowInsets.Builder(decor.rootWindowInsets)
+                .setInsets(WindowInsets.Type.ime(),android.graphics.Insets.NONE).setVisible(WindowInsets.Type.ime(),false).build()) }
+            compose.waitForIdle()
+        }
+
+        if(!sourceOnly) {
+        invoke("select_all")
+        for ((command,name) in listOf("feather_selection" to "selection-refine","frequency_separation" to "frequency-separation")) {
+            state("$name-ime") { invoke(command);wait("$name-panel");withKeyboard("$name-panel") }
+            restoreKeyboard();close("$name-panel-cancel");gone("$name-panel")
+        }
+        if(shared().array("commands").objects().any { it.optString("id") == "deselect" && it.optBoolean("enabled") })invoke("deselect")
+
+        state("generic-error") {
+            tolerateActionError = true
+            instrumentation.runOnMainSync { host.reportActionError("Could not finish the action.") }
+            compose.waitUntil(10_000) { findTag("action-error-ok") != null };settle()
+        }
+        if(findTag("action-error-ok") != null) { compose.onNodeWithTag("action-error-ok").performSemanticsAction(SemanticsActions.OnClick);compose.waitUntil(10_000) { findTag("action-error") == null } }
+        tolerateActionError = false
+        state("recording-save-error") {
+            tolerateActionError = true
+            picking(create,android.net.Uri.fromFile(File("/proc/version"))) {
+                instrumentation.runOnMainSync { host.strokeRecording.click() }
+                compose.waitUntil(10_000) { host.strokeRecording.status?.optBoolean("recording") == true && !host.strokeRecording.busy }
+                instrumentation.runOnMainSync { host.strokeRecording.click() }
+                compose.waitUntil(20_000) { findTag("action-error-ok") != null }
+            }
+            settle()
+        }
+        if(findTag("action-error-ok") != null) { compose.onNodeWithTag("action-error-ok").performSemanticsAction(SemanticsActions.OnClick);compose.waitUntil(10_000) { findTag("action-error") == null } }
+        tolerateActionError = false
+
+        val paperLayer = shared().array("layers").objects().first { it.optJSONObject("paper")?.optBoolean("editable") == true }.getLong("id")
+        state("paper-import-return") {
+            host.drain(obj("type" to "layer","action" to obj("op" to "select","id" to paperLayer,"mask" to false)))
+            instrumentation.runOnMainSync { host.textureDialog = TextureDialogRequest(paperLayer,false) }
+            host.awaitFrame("Paper picker",20_000,{ "dialog=${host.textureDialog} prefs=${host.snapshot?.objectOrNull("preferences") != null} texture=${exists("texture-dialog")} use=${exists("texture-use")}" }) { exists("texture-import") }
+            picking(pick,android.net.Uri.fromFile(fixture("prophoto16.png"))) { runCatching { reveal("texture-import") };tap("texture-import")
+            host.awaitFrame("Imported paper is applied",60_000) { !exists("texture-dialog") && shared().array("layers").objects().first { it.getLong("id") == paperLayer }.optJSONObject("paper")?.optString("id")?.startsWith("builtin") == false } }
+            settle()
+        }
+        state("paper-rename") {
+            host.drain(obj("type" to "layer","action" to obj("op" to "select","id" to paperLayer,"mask" to false)))
+            instrumentation.runOnMainSync { host.textureDialog = TextureDialogRequest(paperLayer,false) }
+            wait("texture-use")
+            val tile = checkNotNull(findNode({ it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("texture-tile-") == true && it.config.getOrNull(SemanticsProperties.Selected) == true })) { "No selected paper tile" }
+                .second.config[SemanticsProperties.TestTag]
+            compose.onNodeWithTag(tile,useUnmergedTree = true).performScrollTo().performSemanticsAction(SemanticsActions.OnLongClick)
+            wait("texture-action-rename_paper");tap("texture-action-rename_paper");wait("paper-rename-dialog");settle()
+        }
+        close("paper-rename-cancel");instrumentation.runOnMainSync { host.textureDialog = null }
+        state("palette-import-return") {
+            val count = host.palettes.view()?.array("palettes")?.length() ?: 0
+            picking(pick,android.net.Uri.fromFile(fixture("a4-palette.gpl"))) {
+                instrumentation.runOnMainSync { host.palettes.command(obj("command" to "import_palette")) }
+                host.awaitFrame("Imported palette is listed",30_000,{ "message=${host.palettes.message} palettes=${host.palettes.view()?.array("palettes")?.length()}" }) { (host.palettes.view()?.array("palettes")?.length() ?: 0) > count }
+            }
+            settle()
+        }
+        state("keymap-import-chooser") {
+            invoke("keyboard_shortcuts")
+            host.awaitFrame("Shortcuts page") { host.snapshot?.objectOrNull("preferences")?.optString("page") == "shortcuts" && exists("keymap-menu") }
+            reveal("keymap-menu");tap("keymap-menu");wait("keymap-import")
+            picking(pick,android.net.Uri.fromFile(fixture("a4-keymap.json"))) { tap("keymap-import");wait("keymap-import-cancel",30_000) }
+            settle()
+        }
+        close("keymap-import-cancel")
+        if(host.snapshot?.objectOrNull("preferences") != null)host.drain(obj("type" to "close_settings"))
+
+        val toolbar = run {
+            host.drain(obj("type" to "customize","action" to obj("type" to "manage_toolbars")))
+            host.awaitFrame("Toolbar manager view") { host.snapshot?.objectOrNull("toolbar_manager") != null }
+            host.snapshot!!.getJSONObject("toolbar_manager").array("toolbars").objects().first().get("panel").also {
+                host.drain(obj("type" to "customize","action" to obj("type" to "close_toolbar_manager")));gone("toolbar-manager") }
+        }
+        state("delete-toolbar") { host.drain(obj("type" to "customize","action" to obj("type" to "delete_toolbar","panel" to toolbar)));wait("toolbar-prompt");settle() }
+        if(host.snapshot?.objectOrNull("toolbar_prompt") != null)host.drain(obj("type" to "customize","action" to obj("type" to "cancel_toolbar")))
+
+        state("cannot-open-file") {
+            val before = epoch();openFile("broken.png");wait("file-error-ok",60_000);settle()
+            assertEquals("A failed open keeps the drawing",before,epoch())
+        }
+        close("file-error-ok");gone("file-error")
+        state("preserved-package-preview") { openFile("corrupt.capy");wait("preserved-package-preview",60_000);settle() }
+        state("package-copy-return") {
+            if(!exists("preserved-package-preview")) { openFile("corrupt.capy");wait("preserved-package-preview",60_000) }
+            val copy = File(fixtures,"package-copy-${System.nanoTime()}.capy")
+            picking(create,android.net.Uri.fromFile(copy)) { reveal("copy-original-package");tap("copy-original-package")
+                host.awaitFrame("Package copy returns",60_000) { copy.isFile && copy.length() > 0 } }
+            assertTrue("The original package was copied",copy.isFile && copy.length() > 0);copy.delete();settle()
+        }
+        close("package-close");gone("preserved-package-preview",30_000)
+
+        state("document-opening-progress") { openFile("big.png");wait("document-progress",60_000);compose.waitForIdle() }
+        state("document-opening-cancelled") {
+            if(exists("document-progress-cancel"))tap("document-progress-cancel")
+            host.awaitFrame("Open cancels",120_000) { !exists("document-progress") && !host.documents.working };settle()
+        }
+        }
+        state("untagged-source-profile") {
+            host.drain(obj("type" to "preferences","action" to obj("type" to "edit","id" to "missing_profile","value" to 1)))
+            openFile("untagged.png");wait("source-profile",60_000);settle()
+            if(sourceOnly)assertNull("No raw channel caption",findNode(hasLabel("Rgba")))
+        }
+        close("source-profile-cancel");host.awaitFrame("Interpretation prompt closes",60_000) { !exists("source-profile") && !host.documents.working }
+        host.drain(obj("type" to "preferences","action" to obj("type" to "reset","id" to "missing_profile")))
+        if(!sourceOnly) {
+        val bigEpoch = epoch()
+        state("big-opened") { openFile("big.png");opened(bigEpoch,180_000);settle() }
+        state("clipboard-progress") { invoke("copy_merged");wait("clipboard-progress",30_000);compose.waitForIdle() }
+        close("clipboard-progress-cancel");host.awaitFrame("Clipboard progress closes",120_000) { !exists("clipboard-progress") }
+        state("document-color-progress") {
+            invoke("convert_color_space");wait("document-color-apply",30_000)
+            host.awaitFrame("Conversion preview is ready",120_000) { findTag("document-color-apply")?.second?.config?.getOrNull(SemanticsProperties.Disabled) == null }
+            tap("document-color-apply")
+            host.awaitFrame("Conversion progress",30_000) { exists("document-color") && !exists("document-color-apply") };compose.waitForIdle()
+        }
+        close("document-color-cancel");host.awaitFrame("Colour change ends",180_000) { !exists("document-color") }
+        state("image-import-progress") {
+            picking(pick,android.net.Uri.fromFile(fixture("big.png"))) { invoke("import_image");wait("image-import-progress",60_000) }
+            compose.waitForIdle()
+        }
+        close("image-import-progress-cancel");host.awaitFrame("Image import ends",180_000) { !exists("image-import-progress") }
+        }
+        val photoEpoch = epoch()
+        state("photo-opened") { openFile("prophoto16.png");opened(photoEpoch);settle() }
+        for ((command,name,tag) in listOf(Triple("assign_profile","assign-profile","document-color"),Triple("convert_color_space","convert-color-space","document-color"),
+            Triple("change_bit_depth","change-bit-depth","document-color"),Triple("repair_source_profile","repair-source-profile","source-edit"),Triple("rasterize_source","rasterize-source","source-edit")).filter { !sourceOnly || it.third=="source-edit" }) {
+            state(name) {
+                invoke(command);wait(tag,30_000)
+                if(sourceOnly && command=="repair_source_profile") {
+                    val label=host.catalog.getJSONObject("document_color_copy").getString("correct_profile")
+                    wait("color-choice-$label")
+                    val standards=JSONArray(Native.profileLibrary(obj("type" to "standard","purpose" to obj("kind" to "source","channels" to "Rgba")).toString(),byteArrayOf())).objects()
+                    val target=standards.first{it.getJSONObject("profile").nullableString("Builtin")=="Srgb"}.getString("name")
+                    compose.onNodeWithTag("color-choice-$label").performClick()
+                    compose.onNodeWithText(target,useUnmergedTree=true).performClick()
+                }
+                wait("color-comparison-after",120_000);settle()
+                if(sourceOnly) {
+                    val density=activity.resources.displayMetrics.density
+                    val frame=findTag("color-comparison")!!.second.boundsInRoot
+                    val split=Native.dialogUi(obj("kind" to "panes_fit","width" to frame.width/density,"minimum" to JSONArray(listOf(160,160)),"gap" to 12).toString()).toBoolean()
+                    val before=findTag("color-comparison-before")!!.second.boundsInRoot
+                    val after=findTag("color-comparison-after")!!.second.boundsInRoot
+                    if(split) { assertEquals(before.top,after.top,1f);assertTrue(after.left>=before.right) }
+                    else assertTrue(after.top>=before.bottom)
+                    if(command=="repair_source_profile") {
+                        val current=findTag("source-current-description")!!.second.boundsInRoot
+                        val corrected=findTag("color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile"))!!.second.boundsInRoot
+                        assertTrue("Current source precedes the chooser",current.bottom<=corrected.top)
+                    }
+                }
+            }
+            if(sourceOnly && command=="repair_source_profile") {
+                val profileCopy=host.catalog.getJSONObject("profile_copy")
+                state("repair-profile-menu") { tap("color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile"));settle() }
+                state("repair-profile-library") {
+                    compose.onNodeWithText(profileCopy.getString("saved_dialog")).performClick();wait("profile-library",30_000);settle()
+                }
+                state("repair-profile-import-return") {
+                    compose.waitUntil(30_000) { compose.onNodeWithText(profileCopy.getString("import")).fetchSemanticsNode().config.getOrNull(SemanticsProperties.Disabled)==null }
+                    picking(pick,android.net.Uri.fromFile(fixture("proof-p3.icc"))) {
+                        compose.onNodeWithText(profileCopy.getString("import")).performClick()
+                        host.awaitFrame("Imported source profile returns to its comparison",120_000) { !exists("profile-library") && exists("source-edit") && exists("color-comparison-after") }
+                    }
+                    settle()
+                }
+            }
+            close("$tag-cancel");gone(tag,30_000)
+        }
+        if(sourceOnly)return
+        state("proof-profile-picker") {
+            host.drain(obj("type" to "phone","action" to obj("kind" to "panel","panel" to "proof")))
+            host.awaitFrame("Proof drawer",30_000,{ "form=${host.proof.form}" }) { exists("proof-mode-print") }
+            tap("proof-mode-print")
+            host.awaitFrame("Proof profile control",60_000,{ "form=${host.proof.form?.toString()?.take(400)}" }) { exists("proof-profile") }
+            reveal("proof-profile");tap("proof-profile")
+            wait("proof-profile-picker",30_000)
+            compose.waitForIdle();settle()
+        }
+        state("proof-profile-library") {
+            tapText("proof-profile-picker","Manage");wait("profile-library",30_000);settle()
+        }
+        state("proof-library-return") {
+            close("profile-library-done");gone("profile-library");wait("proof-profile");settle()
+        }
+        state("profile-library-import") {
+            if(!exists("profile-library")) { reveal("proof-profile");tap("proof-profile");wait("proof-profile-picker");tapText("proof-profile-picker","Manage");wait("profile-library") }
+            val before = findTag("profile-library")!!.second.let { node -> var count = 0;fun walk(n: SemanticsNode) { count++;n.children.forEach(::walk) };walk(node);count }
+            picking(pick,android.net.Uri.fromFile(fixture("proof-p3.icc"))) { tapText("profile-library","Import")
+            host.awaitFrame("Imported ICC profile appears",30_000) { findTag("profile-library")?.second?.let { node -> var count = 0;fun walk(n: SemanticsNode) { count++;n.children.forEach(::walk) };walk(node);count > before } == true } }
+            settle()
+        }
+        close("profile-library-done");close("proof-profile-done")
+        instrumentation.runOnMainSync { host.proof.action(obj("type" to "mode","mode" to "off")) }
+        if(exists("proof-mode-print"))predictiveBack(activity,cancel = false)
+
+    }
+
     private fun visitPagesD2(activity: MainActivity,host: CanvasHost,event: (Int,Offset) -> Unit,tap: (String) -> Unit,state: (String,() -> Unit) -> Unit) {
         val decor = activity.window.decorView
         fun shared() = host.snapshot!!.getJSONObject("state")
@@ -1189,7 +1457,7 @@ class AndroidPhoneAuditTest {
         }
         fun reveal(tag: String) { compose.onNodeWithTag(tag,useUnmergedTree = true).performScrollTo();compose.waitForIdle() }
         fun type(tag: String,text: String,done: () -> Boolean) {
-            reveal(tag);tap(tag)
+            runCatching { reveal(tag) };tap(tag)
             host.awaitFrame("$tag owns native focus") { findTag(tag)?.second?.find { it.config.getOrNull(SemanticsProperties.Focused) == true } != null }
             pressKey(KeyEvent.KEYCODE_A,KeyEvent.META_CTRL_ON);compose.waitForIdle()
             instrumentation.sendStringSync(text)

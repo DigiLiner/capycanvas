@@ -807,6 +807,9 @@ impl NativeHost {
             ProfileLibraryMatches { entry: layer_ui::profile_library::ProfileEntry, query: String },
             WorkspaceNameValidation { name: String },
             ProfileNameCopy { name: Option<String> },
+            SourceDialogContext { id: u32 },
+            SourceProfileCopy { name: Option<String>, assumed: bool },
+            RasterizeDetails,
             ExportProfileNameCopy { name: String },
             ColorFeatureErrorCopy { reason: layer_ui::ColorFeatureError, profile: Option<bool>, proof: Option<bool> },
             ExportPresetCopy { names: Vec<String> },
@@ -946,6 +949,12 @@ impl NativeHost {
             Query::ProfileLibraryMatches { entry, query } => json!(entry.matches(&query, self.session.localization())),
             Query::ExportProfileNameCopy { name } => json!(layer_ui::ExportProfileCaption::for_name(name).message(self.session.localization())),
             Query::ProfileNameCopy { name } => json!(layer_ui::profile_library::profile_description_name(name, self.session.localization())),
+            Query::SourceDialogContext { id } => self.session.source_dialog_context(id)?,
+            Query::SourceProfileCopy { name, assumed } => json!({
+                "name": layer_ui::profile_library::profile_description_name(name.clone(), self.session.localization()),
+                "description": layer_ui::color_feature_copy::source_description(self.session.localization(), name, assumed),
+            }),
+            Query::RasterizeDetails => json!(layer_ui::color_feature_copy::rasterize_details(self.session.localization(), self.session.engine().document().composition().color)),
             Query::ColorFeatureErrorCopy { reason, profile, proof } => json!(if proof == Some(true) { reason.proof_message(self.session.localization()) } else { match profile {
                 Some(true) => reason.profile_message(self.session.localization()),
                 Some(false) => reason.preset_message(self.session.localization()),
