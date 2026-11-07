@@ -743,10 +743,11 @@ function New-DrawingControl([string]$Id,$Within=$root){
     }
 }
 function New-DrawingPixels([int]$Width,[int]$Height){
-    Wait-Until {(Model).state.new_drawing -and (New-DrawingControl 'document-width') -and (New-DrawingControl 'new-drawing-unit')} 'New drawing did not open' 30
+    $ready=@{unit=$null}
+    Wait-Until {(Model).state.new_drawing -and (New-DrawingControl 'document-width') -and ($ready.unit=New-DrawingControl 'new-drawing-unit')} 'New drawing did not open' 30
     if((Model).state.new_drawing.setup.unit -ne 'px'){
         $index=[array]::IndexOf(@((Model).state.new_drawing.units.value),'px')
-        $unit=New-DrawingControl 'new-drawing-unit'
+        $unit=$ready.unit
         $unit.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
         $choice=@{item=$null};Wait-Until {$choice.item=New-DrawingControl "new-drawing-unit-$index" $unit;$null -ne $choice.item} 'New drawing has no pixel unit'
         $choice.item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()

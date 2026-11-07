@@ -2139,3 +2139,62 @@ Write-Output 'Actual clipboard keyboard preparation waits for its current native
     }
 }
 Write-Output 'Actual clipboard Copy routing rejects stale native context and revisions, waits for a late direct control and invokes direct or genuine overflow exactly once.'
+
+& {
+ $tokens=$null;$errors=$null
+ $drawingAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/CapyUia.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $definition=@($drawingAst.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'New-DrawingPixels'},$true))
+ if($definition.Count -ne 1){throw 'Missing actual New-DrawingPixels helper'}
+ $text=$definition[0].Extent.Text
+ foreach($pattern in 'ExpandCollapsePattern','SelectionItemPattern','ValuePattern'){$text=$text.Replace("System.Windows.Automation.$pattern",'CapyOwnedSearchTest.InvokePattern')}
+ . ([scriptblock]::Create($text))
+ function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Seconds=8){
+  $script:drawingCase.waits.Add([pscustomobject]@{message=$Message;seconds=$Seconds})
+  for($poll=0;$poll -lt 3;$poll++){if(& $Condition){return}}
+  throw $Message
+ }
+ function Model {
+  $script:drawingCase.modelReads++
+  if($script:drawingCase.mode -eq 'missing-model' -or ($script:drawingCase.mode -eq 'delayed-model' -and $script:drawingCase.modelReads -le 2)){return [pscustomobject]@{state=[pscustomobject]@{new_drawing=$null}}}
+  [pscustomobject]@{state=[pscustomobject]@{new_drawing=$script:drawingCase.view}}
+ }
+ function New-DrawingControl($Id,$Within){
+  $case=$script:drawingCase
+  switch($Id){
+   'new-drawing-unit' {$case.unitReads++;if($case.mode -ne 'missing-unit' -and $case.unitReads -eq 1){return $case.unit}}
+   'new-drawing-unit-1' {if($Within -ne $case.unit){throw 'Pixel choice lost its captured unit'};return $case.choice}
+   'document-width' {if($case.mode -ne 'missing-width'){return $case.width}}
+   'document-height' {return $case.height}
+   default {throw "Unexpected drawing control: $Id"}
+  }
+ }
+ function Reset-DrawingCase($Mode){
+  $script:drawingCase=@{mode=$Mode;unitReads=0;modelReads=0;expanded=0;selected=0;focus=[Collections.Generic.List[string]]::new();fields=[Collections.Generic.List[string]]::new();waits=[Collections.Generic.List[object]]::new();view=[pscustomobject]@{setup=[pscustomobject]@{unit='cm'};units=@([pscustomobject]@{value='cm'},[pscustomobject]@{value='px'});values=@(10,20)}}
+  if($Mode -eq 'already-pixels'){$script:drawingCase.view.setup.unit='px'}
+  $unit=[pscustomobject]@{};$unit|Add-Member ScriptMethod GetCurrentPattern {param($Pattern) $this};$unit|Add-Member ScriptMethod Expand {$script:drawingCase.expanded++};$script:drawingCase.unit=$unit
+  $choice=[pscustomobject]@{};$choice|Add-Member ScriptMethod GetCurrentPattern {param($Pattern) $this};$choice|Add-Member ScriptMethod Select {$script:drawingCase.selected++;if($script:drawingCase.mode -ne 'selection-stalled'){$script:drawingCase.view.setup.unit='px'}};$script:drawingCase.choice=$choice
+  foreach($field in @(@('width',0),@('height',1))){
+   $entry=[pscustomobject]@{id=$field[0];index=$field[1]};$entry|Add-Member ScriptMethod GetCurrentPattern {param($Pattern) $this};$entry|Add-Member ScriptProperty Current {$this};$entry|Add-Member ScriptProperty Value {if($script:drawingCase.mode -eq 'sizes-stalled'){'999'}else{[string]$script:drawingCase.view.values[$this.index]}}
+   $entry|Add-Member ScriptMethod SetFocus {$script:drawingCase.focus.Add($this.id)}
+   $entry|Add-Member ScriptMethod SetValue {param($Value) $script:drawingCase.fields.Add($this.id+'='+$Value);if($script:drawingCase.mode -ne 'commit-stalled'){$script:drawingCase.view.values[$this.index]=[int]$Value}}
+   $script:drawingCase[$field[0]]=$entry
+  }
+ }
+ foreach($mode in 'ready','delayed-model','already-pixels'){
+  Reset-DrawingCase $mode
+  New-DrawingPixels 320 240
+  if($script:drawingCase.unitReads -ne 1){throw 'New drawing relooked up the ready unit'}
+  if(($script:drawingCase.fields -join ',') -cne 'width=320,height=240' -or ($script:drawingCase.focus -join ',') -cne 'width,height,width' -or $script:drawingCase.view.values[0] -ne 320 -or $script:drawingCase.view.values[1] -ne 240){throw 'New drawing changed dimension field commits or focus order'}
+  $expected=[int]($mode -ne 'already-pixels');if($script:drawingCase.expanded -ne $expected -or $script:drawingCase.selected -ne $expected){throw 'New drawing changed pixel-unit selection'}
+  if($script:drawingCase.waits[0].message -cne 'New drawing did not open' -or $script:drawingCase.waits[0].seconds -ne 30){throw 'New drawing changed its readiness predicate bound'}
+ }
+ foreach($negative in @(@('missing-model','New drawing did not open'),@('missing-width','New drawing did not open'),@('missing-unit','New drawing did not open'),@('selection-stalled','New drawing did not switch to pixels'),@('sizes-stalled','New drawing did not show pixel sizes'),@('commit-stalled','New drawing did not apply pixel sizes'))){
+  Reset-DrawingCase $negative[0];$caught=$null
+  try{New-DrawingPixels 320 240}catch{$caught=$_.Exception.Message}
+  if($caught -cne $negative[1]){throw "New drawing negative $($negative[0]) reached unexpected predicate: $caught"}
+  if($script:drawingCase.waits[0].seconds -ne 30){throw 'Missing drawing readiness changed its original bound'}
+  if($negative[0] -like 'missing-*' -and ($script:drawingCase.expanded -ne 0 -or $script:drawingCase.fields.Count -ne 0)){throw 'Missing drawing readiness reached creation input'}
+ }
+ 'Actual New-DrawingPixels: captured ready unit once, retained pixel selection and field commits, missing/stalled predicates rejected.'
+}
