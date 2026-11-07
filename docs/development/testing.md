@@ -63,7 +63,9 @@ never move a row to hardware to avoid a check that passes on WARP.
 | Local controls and individual fixture scripts | Complete affected selector families and dependent journeys. |
 
 `smoke` is the single named selector list in `run-fixtures.ps1`; use the alias
-without hand-picking a subset. Follow the
+without hand-picking a subset. With `--warp` or `--runners`, smoke includes the
+marked `drawers` and `drawers:light` rows: reserve one free exclusive pool card
+and two CPU slots; no free card stops all fixture input. Follow the
 [VM matrix commands](windows-vm.md#ui-fixtures-on-the-software-adapter), plus
 the windowless checks above. Fixture routing changes also run
 `tools/windows-vm/test-fixture-routing.ps1` on PowerShell 7 and Windows PowerShell

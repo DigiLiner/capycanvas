@@ -27,16 +27,20 @@ are divided fairly between running agents, and the VMs start and stop by themsel
 `sessions` shows them. `--workers N` caps a run. The first use on a host needs
 `setup --server` and `create --server`.
 
-Use `fixtures --warp` or `fixtures --runners N` when a change must complete on WARP,
-such as brush, blender and frame-path shaders, when a row needs a runner's 8 GiB
-limit, or when no card is free. Marked registry rows then run on the owned primary
-with one pool GPU, and the rest on WARP CPU runners within the budget shown by
-`runners`; reserve only what the list needs. The round GPU holds two ordinary CPU
-slots (8 vCPU / 16 GiB), runs at the CPU runners' 150% scale and always releases its
-card and slots. The coordinator records memory admission and per-row scale evidence;
-wrong scale or mode fails. WARP results do not establish hardware rendering or
-performance. The run releases its runners on completion. Stop retained
-`--keep-runners` VMs when finished.
+Use `fixtures --warp` or `fixtures --runners N` when a change must complete on
+WARP, such as brush, blender and frame-path shaders, when a row needs a
+runner's 8 GiB limit, or when no card is free and the selection has no marked
+rows. Marked registry rows then run on the owned primary with one pool GPU, and
+the rest on WARP CPU runners within the budget shown by `runners`; reserve only
+what the list needs. The round GPU holds two ordinary CPU slots (8 vCPU / 16
+GiB), runs at the CPU runners' 150% scale and always releases its card and
+slots. WARP smoke includes exactly two marked rows, `drawers` and
+`drawers:light`, so it requires one free exclusive card and two CPU slots. If
+no card is free, the run stops before any fixture input. The coordinator
+records memory admission and per-row scale evidence; wrong scale or mode fails.
+WARP results do not establish hardware rendering or performance. The run
+releases its runners on completion. Stop retained `--keep-runners` VMs when
+finished.
 
 Use an exclusive GPU VM below for `gpu-check`, Windows 11, a console desktop or a
 whole card. Sessions do not measure frame rate or presentation.

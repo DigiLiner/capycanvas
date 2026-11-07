@@ -11,7 +11,7 @@ that each own one pool card. Choose a fixture mode by what you need to test:
 | Mode | Command | Use it for |
 | --- | --- | --- |
 | Shared GPU sessions (default) | `fixtures [names]` | UI structure, shared state, injected input and rendered journeys, from one row to the full matrix |
-| WARP CPU runners | `fixtures --warp [names]`, `fixtures --runners N [names]` | Shader and frame-path changes that must complete on WARP, the 8 GiB memory limit of a runner, or when no card is free |
+| WARP CPU runners | `fixtures --warp [names]`, `fixtures --runners N [names]` | Shader and frame-path changes that must complete on WARP, the 8 GiB memory limit of a runner, or selections without marked rows when no card is free |
 | Exclusive GPU VM | `fixtures --hardware-gpu [names]`, `gpu-check` | The renderer suite, Windows 11, a real console desktop or a whole card |
 
 The table below describes what the worktree's own VM can run without a GPU:
@@ -198,7 +198,7 @@ prepared disks persist. Stop retained runners with `--vm <runner> stop`, and use
 
 Crash dumps land in each fixture run's `wer/dumps` evidence directory; the runner restores the per-app LocalDumps key's original values and registry types before retrieval.
 
-Marked registry rows run on one pool GPU VM at 150% scale.
+On `--warp` or `--runners`, marked registry rows run on one pool GPU VM at 150% scale.
 It holds two CPU slots (8 vCPU / 16 GiB), leaving at most 22 CPU runners
 in a 96-vCPU pool. Admission requires `MemAvailable` of at least the total
 memory of VMs being started plus 40 GiB. The card and both slots are always
@@ -430,8 +430,11 @@ coverage in `test-fixture-routing.ps1`.
 
 Follow the [Windows validation scope](testing.md#windows-validation-scope).
 The `smoke` alias selects 40 fixed variants; add affected families in the same
-command. The runner removes duplicate selections. For the full matrix, omit all
-fixture names:
+command. With `--warp` or `--runners`, its `drawers` and `drawers:light` rows
+require one free exclusive pool card and two CPU slots. If no card is free, the
+run stops before any fixture input. Plain `fixtures` uses shared GPU sessions.
+The runner removes duplicate selections. For the full matrix, omit all fixture
+names:
 
 ```sh
 tools/windows-vm/windows-vm.py fixtures smoke navigator

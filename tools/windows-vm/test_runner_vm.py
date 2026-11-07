@@ -299,7 +299,7 @@ class RunnerVmTests(unittest.TestCase):
     def test_mixed_round_partitions_controls_preserves_full_plan_and_always_stops_gpu(self):
         from contextlib import ExitStack
         for cpu, gpu, failure in ((True, True, None), (True, False, None), (False, True, None),
-                                  (False, True, "startup"), (False, True, "scale"), (True, True, "row"), (True, True, "shutdown")):
+                                  (False, True, "startup"), (True, True, "no-card"), (False, True, "scale"), (True, True, "row"), (True, True, "shutdown")):
             with self.subTest(cpu=cpu, gpu=gpu, failure=failure), ExitStack() as stack:
                 artifacts = self.root / f"mixed-{cpu}-{gpu}-{failure}"
                 self.primary.directory.mkdir(exist_ok=True)
@@ -307,6 +307,7 @@ class RunnerVmTests(unittest.TestCase):
                 requirements = {name: {"hardware_gpu": name != "popup", "controls": ["Popup"] if name == "popup" else []} for name in selected}
                 plan = {"runs": selected, "controls": ["Popup"] if cpu else [], "requirements": requirements}
                 records = {}
+                executed = []
                 phase = {"gpu_started": False, "shutdown_failed": False}
                 def build(machine, hashes, no_build, hardware, profile, controls):
                     self.assertEqual(profile, "dev-perf")
@@ -316,6 +317,7 @@ class RunnerVmTests(unittest.TestCase):
                     records[hardware] = record
                     return vm.fixture_directory(hardware, profile), record
                 def execute(machine, args, directory, provenance, names, queue=None):
+                    executed.append(machine.name)
                     hardware = machine is self.primary
                     self.assertEqual(names, ["paint:light"] if hardware else ["popup:default"])
                     self.assertEqual(provenance["hardware_gpu"], hardware)
@@ -329,6 +331,8 @@ class RunnerVmTests(unittest.TestCase):
                             "complete": True, "failure": "Original GPU failure" if hardware and failure == "shutdown" else None, "evidence": str(machine.directory), "plan": {"runs": selection}}
                 def start(args):
                     self.assertTrue(args.round_gpu)
+                    if failure == "no-card":
+                        raise RuntimeError("GPU startup refused: no free card")
                     if failure == "startup":
                         raise RuntimeError("GPU startup failed after launch")
                     phase["gpu_started"] = True
@@ -368,10 +372,12 @@ class RunnerVmTests(unittest.TestCase):
                         vm.sharded_fixtures(args)
                 else:
                     vm.sharded_fixtures(args)
+                if failure == "no-card":
+                    self.assertEqual(executed, [], "Card admission failure allowed fixture input")
                 output = next((artifacts / "owner").glob("shards-*"))
                 self.assertEqual({key: value for key, value in json.loads((output / "plan.json").read_text()).items() if key != "shards"}, plan)
                 self.assertEqual([json.loads(line)["name"] for line in (output / "results.jsonl").read_text().splitlines()], selected)
-                self.assertEqual((output / "cpu-plan.json").exists(), cpu and failure not in ("startup", "scale"))
+                self.assertEqual((output / "cpu-plan.json").exists(), cpu and failure not in ("startup", "no-card", "scale"))
                 self.assertEqual([call.args[0] for call in stop.call_args_list], [self.primary] * (3 if failure == "shutdown" else 2 if gpu else 1))
                 self.assertEqual((output / "complete").exists(), failure is None)
                 if failure == "shutdown":
@@ -379,7 +385,7 @@ class RunnerVmTests(unittest.TestCase):
                     self.assertEqual(shard["failure"], "Original GPU failure; GPU shutdown: GPU stop refused")
                     self.assertEqual(shard["results"], [{"name": "paint:light", "exit": 0}])
                 self.assertEqual(set(records), ({False} if cpu else set()) | ({True} if gpu else set()))
-                self.assertEqual([call.args[1] for call in memory.call_args_list], ["build-primary"] + (["gpu-primary"] if gpu else []) + (["cpu-batch"] if cpu and failure not in ("startup", "scale") else []))
+                self.assertEqual([call.args[1] for call in memory.call_args_list], ["build-primary"] + (["gpu-primary"] if gpu else []) + (["cpu-batch"] if cpu and failure not in ("startup", "no-card", "scale") else []))
 
     def test_round_display_rejects_wrong_scale_mode_and_unapplied_registry(self):
         base = {"success": True, "display": {"adapter": "NVIDIA", "primary": True, "refreshHz": 120,
