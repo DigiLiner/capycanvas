@@ -69,31 +69,27 @@ import org.json.JSONArray
         body={padding -> Column(Modifier.padding(padding),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text(copy.getString("interpret_help"))
             SourceProfileChoice(host,copy.getString("interpret_as"),obj("kind" to "source","channels" to interpretation.getString("channels")),
-                originalName,original.nullableString("Builtin"),selected) { selected=it }
+                originalName,original,selected) { selected=it }
             ColorFailureText(host,failure,true)
         } })
 }
 
-@Composable internal fun SourceProfileChoice(host:CanvasHost,label:String,purpose:JSONObject,originalName:String,originalBuiltin:String?,
+@Composable internal fun SourceProfileChoice(host:CanvasHost,label:String,purpose:JSONObject,originalName:String,original:JSONObject,
     selected:JSONObject?,enabled:Boolean=true,onChoose:(JSONObject?)->Unit) {
-    val copy=host.catalog.getJSONObject("profile_copy")
-    var standards by remember {mutableStateOf<List<JSONObject>>(emptyList())}
+    var open by remember {mutableStateOf(false)}
     var library by remember {mutableStateOf(false)}
+    val initial=remember(originalName,original){obj("name" to originalName,"profile" to original)}
+    val current=selected ?: initial
     val accept by rememberUpdatedState<(JSONObject?)->Unit>({if(enabled)onChoose(it)})
-    LaunchedEffect(purpose.toString()) {
-        standards=JSONArray(Native.profileLibrary(obj("type" to "standard","purpose" to purpose).toString(),byteArrayOf())).objects()
+    Column {
+        Text(label,style=MaterialTheme.typography.labelMedium)
+        Box {
+            OutlinedButton({open=true},enabled=enabled,modifier=Modifier.fillMaxWidth().testTag("color-choice-$label")){Text(if(selected==null)originalName else profileCaption(host,selected))}
+            DropdownMenu(open&&enabled,{open=false}) {
+                ProfileMenu(host,purpose,null,current,{accept(it);open=false},{open=false;library=true})
+            }
+        }
     }
-    val builtin=if(selected==null)originalBuiltin else selected.getJSONObject("profile").nullableString("Builtin")
-    val index=standards.indexOfFirst{it.getJSONObject("profile").nullableString("Builtin")==builtin}
-    val originalIndex=standards.indexOfFirst{it.getJSONObject("profile").nullableString("Builtin")==originalBuiltin}
-    val choices=standards.mapIndexed{i,profile->i.toString() to profileCaption(host,profile)}+
-        (if(originalIndex<0)listOf("original" to originalName)else emptyList())+
-        (if(selected!=null && index<0)listOf("custom" to profileCaption(host,selected))else emptyList())
-    val key=if(index>=0)index.toString() else if(selected==null)"original" else "custom"
-    ColorChoice(label,choices,key,enabled,extra={close ->
-        ProfileFileButton(host,enabled=enabled,onProfile={accept(it);close()})
-        TextButton({close();library=true},enabled=enabled){Text(copy.getString("saved_dialog"))}
-    }) { value -> accept(when(value){"original"->null;"custom"->selected;else->standards[value.toInt()]}) }
     if(library)ProfileLibraryDialog(host,{library=false}){accept(it);library=false}
 }
 

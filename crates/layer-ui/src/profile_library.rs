@@ -285,6 +285,7 @@ pub enum ProfileLibraryAction {
     Limits,
     Standard { purpose: ProfilePickerPurpose },
     Describe { profile: ColorProfile },
+    Picker { purpose: ProfilePickerPurpose, document: Option<ColorProfile>, current: Option<ColorProfile>, saved: Vec<ProfilePickerSaved> },
     Visibility {
         #[serde(deserialize_with = "saved_ids")]
         hidden: Vec<String>,
@@ -326,6 +327,7 @@ impl ProfileLibraryAction {
             Self::Limits => json!({"read_bytes": PROFILE_READ_LIMIT, "entries": PROFILE_LIBRARY_ENTRIES}),
             Self::Standard { purpose } => json!(purpose.standard()),
             Self::Describe { profile } => json!(layer_color::profile_description_optional(&profile).map_err(ColorFeatureError::Diagnostic)?),
+            Self::Picker { purpose, document, current, saved } => json!(picker_inventory(&purpose,document.as_ref(),current.as_ref(),&saved)),
             Self::Visibility { mut hidden, id, visible } => {
                 hidden.retain(|id| valid_profile_id(id));
                 hidden.sort(); hidden.dedup();
@@ -543,6 +545,9 @@ mod picker_tests {
         let purpose = ProfilePickerPurpose::Proof;
         let view = picker_inventory(&purpose,Some(&embedded),Some(&embedded),&saved);
         assert!(view.document && !view.current && view.saved.is_empty() && view.standard);
+        let action: ProfileLibraryAction = serde_json::from_value(serde_json::json!({"type":"picker","purpose":purpose,
+            "document":embedded,"current":embedded,"saved":saved})).unwrap();
+        assert_eq!(action.execute(&[]).unwrap(),serde_json::json!({"document":true,"current":false,"saved":[],"standard":true}));
         let view = picker_inventory(&purpose,Some(&builtin),Some(&other),&saved);
         assert!(!view.document && view.current && view.saved==[0]);
         saved[0].visible=false;

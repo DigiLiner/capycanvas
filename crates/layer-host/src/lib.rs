@@ -808,6 +808,7 @@ impl NativeHost {
             WorkspaceNameValidation { name: String },
             ProfileNameCopy { name: Option<String> },
             SourceDialogContext { id: u32 },
+            SourceDialogProfile { id: u32 },
             SourceProfileCopy { name: Option<String>, assumed: bool },
             RasterizeDetails,
             ExportProfileNameCopy { name: String },
@@ -950,6 +951,7 @@ impl NativeHost {
             Query::ExportProfileNameCopy { name } => json!(layer_ui::ExportProfileCaption::for_name(name).message(self.session.localization())),
             Query::ProfileNameCopy { name } => json!(layer_ui::profile_library::profile_description_name(name, self.session.localization())),
             Query::SourceDialogContext { id } => self.session.source_dialog_context(id)?,
+            Query::SourceDialogProfile { id } => json!(self.session.source_dialog_profile(id)?),
             Query::SourceProfileCopy { name, assumed } => json!({
                 "name": layer_ui::profile_library::profile_description_name(name.clone(), self.session.localization()),
                 "description": layer_ui::color_feature_copy::source_description(self.session.localization(), name, assumed),

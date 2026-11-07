@@ -456,6 +456,7 @@ class AndroidPhoneAuditTest {
                 compose.onNodeWithTag("proof-profile", useUnmergedTree = true).performScrollTo()
                 tap("proof-profile")
                 host.awaitFrame("Proof profile picker opens outside its scroller") { findTag("proof-profile-picker") != null }
+                host.awaitFrame("Proof menu uses shared Standard section",30_000) { findTag("profile-menu-standard") != null }
                 awaitEditorPage(activity, host, "proof-profile-picker")
             }
             tap("proof-profile-picker-done")
@@ -1112,14 +1113,6 @@ class AndroidPhoneAuditTest {
             Triple("change_bit_depth","change-bit-depth","document-color"),Triple("repair_source_profile","repair-source-profile","source-edit"),Triple("rasterize_source","rasterize-source","source-edit")).filter { !sourceOnly || it.third=="source-edit" }) {
             state(name) {
                 invoke(command);wait(tag,30_000)
-                if(sourceOnly && command=="repair_source_profile") {
-                    val label=host.catalog.getJSONObject("document_color_copy").getString("correct_profile")
-                    wait("color-choice-$label")
-                    val standards=JSONArray(Native.profileLibrary(obj("type" to "standard","purpose" to obj("kind" to "source","channels" to "Rgba")).toString(),byteArrayOf())).objects()
-                    val target=standards.first{it.getJSONObject("profile").nullableString("Builtin")=="Srgb"}.getString("name")
-                    compose.onNodeWithTag("color-choice-$label").performClick()
-                    compose.onNodeWithText(target,useUnmergedTree=true).performClick()
-                }
                 wait("color-comparison-after",120_000);settle()
                 if(sourceOnly) {
                     val density=activity.resources.displayMetrics.density
@@ -1138,7 +1131,15 @@ class AndroidPhoneAuditTest {
             }
             if(sourceOnly && command=="repair_source_profile") {
                 val profileCopy=host.catalog.getJSONObject("profile_copy")
-                state("repair-profile-menu") { tap("color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile"));settle() }
+                state("repair-profile-menu") {
+                    tap("color-choice-"+host.catalog.getJSONObject("document_color_copy").getString("correct_profile"))
+                    wait("profile-menu-current",30_000);wait("profile-menu-standard",30_000);settle()
+                    val current=findTag("profile-menu-current")!!.second.boundsInRoot
+                    val standard=findTag("profile-menu-standard")!!.second.boundsInRoot
+                    assertTrue("Current precedes Standard",current.bottom<=standard.top)
+                    val original=findTag("profile-menu-current-item")!!.second.boundsInRoot
+                    assertTrue("Original ICC follows Current",current.bottom<=original.top && original.bottom<=standard.top)
+                }
                 state("repair-profile-library") {
                     compose.onNodeWithText(profileCopy.getString("saved_dialog")).performClick();wait("profile-library",30_000);settle()
                 }

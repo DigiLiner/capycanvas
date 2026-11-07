@@ -23,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
@@ -195,8 +194,6 @@ internal class ProofController(private val host: CanvasHost) {
     val density=LocalDensity.current.density
     val controller=host.proof
     val colors=LocalPalette.current
-    val context=LocalContext.current
-    val scope=rememberCoroutineScope()
     val model=controller.form
     val copy=host.catalog.getJSONObject("proof_copy")
     val profiles=host.catalog.getJSONObject("profile_copy")
@@ -204,16 +201,6 @@ internal class ProofController(private val host: CanvasHost) {
     val mode=model?.optString("mode")?:"off"
     var library by remember{mutableStateOf(false)}
     var picker by remember{mutableStateOf(false)}
-    var saved by remember{mutableStateOf<List<JSONObject>>(emptyList())}
-    var rawSaved by remember{mutableStateOf<List<JSONObject>>(emptyList())}
-    var localError by remember{mutableStateOf<Exception?>(null)}
-    LaunchedEffect(picker){if(picker)try{rawSaved=ProfileStore.list(context)}catch(e:Exception){localError=e}}
-    LaunchedEffect(rawSaved,host.languageTag) {
-        val language=host.languageTag
-        val retained=rawSaved
-        val projected=profileEntriesCopy(host,retained)
-        if(language==host.languageTag && retained===rawSaved)saved=projected
-    }
     LaunchedEffect(mode){if(mode=="sdr")controller.ensureTexture()}
     BoxWithConstraints(modifier) {
         val contentWidth=maxWidth-panelMetrics().inset*2
@@ -251,24 +238,19 @@ internal class ProofController(private val host: CanvasHost) {
                 if(controller.busy)CircularProgressIndicator(Modifier.size(20.dp).align(Alignment.CenterHorizontally))
             }
             } }
-            if (localError != null) ColorFailureText(host,localError,true) else ColorFailureText(host,controller.error,proof=true)
+            ColorFailureText(host,controller.error,proof=true)
         }
     }
-    fun select(profile:JSONObject){controller.edit("profile",profile);picker=false;localError=null}
+    fun select(profile:JSONObject){controller.edit("profile",profile);picker=false}
     if(picker)DialogShell(host,copy.getJSONObject("profile_dialog"),copy.getString("profile_choice"),onCancel={picker=false},tag="proof-profile-picker",
         responses=listOf(DialogResponse(copy.getJSONObject("common").getString("done"),"proof-profile-done",action={picker=false})),body={padding ->
         Column(Modifier.fillMaxWidth().padding(padding)){
-            val original=model?.objectOrNull("print_settings")?.objectOrNull("profile")
-            if(original!=null){Text(profiles.getString("document"));TextButton({select(original)}){Text(profileCaption(host,original))}}
-            Text(profiles.getString("saved"))
-            saved.filter{!it.has("issue")&&it.optBoolean("visible",true)}.forEach{entry->TextButton({scope.launch{try{select(ProfileStore.get(context,entry.getString("id")))}catch(e:Exception){localError=e}}}){Text(entry.getString("name"))}}
-            Text(profiles.getString("standard"))
-            model?.getJSONArray("profiles")?.objects()?.forEach{p->TextButton({select(p)}){Text(p.getString("name"))}}
-            ProfileFileButton(host,host.catalog.getJSONObject("profile_copy").getString("add_profile_dialog")){select(it);scope.launch{rawSaved=ProfileStore.list(context)}}
-            TextButton({picker=false;library=true}){Text(profiles.getString("manage"))}
+            ProfileMenu(host,obj("kind" to "proof"),model?.objectOrNull("print_settings")?.objectOrNull("profile"),settings?.objectOrNull("profile"),
+                ::select,{picker=false;library=true})
         }
     })
-    if(library)ProfileLibraryDialog(host,{library=false;scope.launch{rawSaved=ProfileStore.list(context)}})
+    if(library)ProfileLibraryDialog(host,{library=false})
+
 }
 
 @Composable private fun ProofOptionRow(label:String,labelWidth:Dp,content:@Composable ()->Unit) {

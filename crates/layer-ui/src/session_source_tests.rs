@@ -639,7 +639,7 @@ fn source_workflow_requires_current_complete_comparison_and_preserves_original_s
     let id = s.state.requests.first().unwrap().id;
     let context = s.source_dialog_context(id).unwrap();
     assert_eq!(context["name"], "ProPhoto RGB");
-    assert_eq!(context["profile_builtin"], "ProPhoto");
+    assert_eq!(s.source_dialog_profile(id).unwrap(), source.interpretation.profile);
     assert_eq!(context["assumed"], true);
     assert_eq!(context["baked"], false);
     assert_eq!(context["purpose"], serde_json::json!({"kind":"source","channels":"Rgba"}));

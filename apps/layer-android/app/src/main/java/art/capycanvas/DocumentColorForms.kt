@@ -6,7 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 
-@Composable internal fun ColorChoice(label: String, choices: List<Pair<String, String>>, value: String, enabled: Boolean = true, extra: (@Composable (() -> Unit) -> Unit)? = null, onChange: (String) -> Unit) {
+@Composable internal fun ColorChoice(label: String, choices: List<Pair<String, String>>, value: String, enabled: Boolean = true, onChange: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Column {
         Text(label, style = MaterialTheme.typography.labelMedium)
@@ -16,7 +16,6 @@ import androidx.compose.ui.platform.testTag
             }
             DropdownMenu(open && enabled, { open = false }) {
                 for ((id, title) in choices) DropdownMenuItem(text = { Text(title) }, onClick = { open = false; onChange(id) })
-                extra?.invoke { open = false }
             }
         }
     }

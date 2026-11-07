@@ -29,12 +29,15 @@ pub fn document_color_dither(depth: layer_core::color::SampleDepth, active: bool
     DocumentColorDither { available, value: if available && active { OutputDither::Stochastic8 } else { OutputDither::None } }
 }
 impl<R: CanvasRenderer> UiSession<R> {
+    pub fn source_dialog_profile(&self, id: u32) -> Result<ColorProfile, String> {
+        Ok(SourceWorkflow::begin(self,id)?.initial_profile())
+    }
     pub fn source_dialog_context(&self, id: u32) -> Result<serde_json::Value, String> {
         let workflow = SourceWorkflow::begin(self, id)?;
         let source = &workflow.original.interpretation;
         let builtin = match &source.profile { ColorProfile::Builtin(space) => Some(*space), _ => None };
         Ok(serde_json::json!({"baked":workflow.adds_layer(),"assumed":source.profile_assumed,
-            "name":builtin.map(|space|space.name()),"profile_builtin":builtin,
+            "name":builtin.map(|space|space.name()),
             "purpose":crate::profile_library::ProfilePickerPurpose::Source(source.channels)}))
     }
 }

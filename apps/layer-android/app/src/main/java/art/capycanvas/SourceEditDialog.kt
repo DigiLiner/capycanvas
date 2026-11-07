@@ -14,10 +14,12 @@ import org.json.JSONObject
     val job=remember(id) {DocumentColorJob(host,id,source=true)}
     var selected by remember(id) {mutableStateOf<JSONObject?>(null)}
     var context by remember(id) {mutableStateOf<JSONObject?>(null)}
+    var original by remember(id) {mutableStateOf<JSONObject?>(null)}
     var details by remember(id) {mutableStateOf("")}
     LaunchedEffect(id) {
         try {
             val current=JSONObject(host.withNative {Native.query(it,obj("type" to "source_dialog_context","id" to id).toString())})
+            original=JSONObject(host.withNative{Native.query(it,obj("type" to "source_dialog_profile","id" to id).toString())})
             job.describeSource(current);context=current
         } catch(e:Exception){job.error=e}
     }
@@ -45,7 +47,7 @@ import org.json.JSONObject
             if(!rasterize) {
                 Text(copy.getString("current_source"));Text(job.sourceDescription,Modifier.testTag("source-current-description"))
                 context?.let { current -> SourceProfileChoice(host,copy.getString("correct_profile"),current.getJSONObject("purpose"),
-                    job.sourceProfile,current.nullableString("profile_builtin"),selected,enabled=!job.applying){if(choice?.toString()!=it?.getJSONObject("profile")?.toString()){selected=it;job.invalidate()}} }
+                    job.sourceProfile,original!!,selected,enabled=!job.applying){if(choice?.toString()!=it?.getJSONObject("profile")?.toString()){selected=it;job.invalidate()}} }
             }
             if(job.busy)CircularProgressIndicator()
             if(rasterize)Text(copy.getString(if(job.busy)"rasterize_comparison" else if(job.clipped>0)"source_clipped" else "rasterize_compare"))
