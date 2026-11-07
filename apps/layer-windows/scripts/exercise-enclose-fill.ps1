@@ -19,6 +19,24 @@ try{
     }}}
     $bitmap.Save($reference,[Drawing.Imaging.ImageFormat]::Png)
 }finally{$bitmap.Dispose()}
+function Assert-FillDrawerChoices([long]$HeaderId) {
+    $drawer=(Model).state.customization.drawer
+    $commands=@('fill','lasso_fill','enclose_fill','paint_unfilled')
+    $choices=@(foreach($list in @(@('groups','tool-group-'),@('subtools','tool-subtool-'))){
+        $items=@($drawer.tool_set.($list[0]));for($i=0;$i -lt $items.Count;$i++){[pscustomobject]@{choice=$items[$i];id=$list[1]+$i}}
+    })
+    if($drawer.anchor.kind -ne 'header' -or $drawer.anchor.id -ne $HeaderId -or $choices.Count -ne $commands.Count){throw 'Sketch Fill drawer lost its siblings: anchor/count'}
+    $within=Control 'tool-drawer'
+    for($index=0;$index -lt $commands.Count;$index++){
+        $choice=$choices[$index].choice;$action=$choice.action
+        if($action.type -ne 'choose_tool_variant' -or $action.variant.type -ne 'command' -or $action.variant.command -ne $commands[$index]){throw "Sketch Fill drawer lost its siblings: $index $($commands[$index]) action"}
+        if([string]::IsNullOrWhiteSpace($choice.label)){throw "Sketch Fill drawer lost its siblings: $index $($commands[$index]) label"}
+        if($action.anchor.kind -ne $drawer.anchor.kind -or $action.anchor.id -ne $drawer.anchor.id){throw "Sketch Fill drawer lost its siblings: $index $($commands[$index]) anchor"}
+        if([bool]$choice.selected -ne ($commands[$index] -eq 'enclose_fill')){throw "Sketch Fill drawer lost its siblings: $index $($commands[$index]) selection"}
+        $row=Control ($choices[$index].id) -Within $within -Arranged
+        if($row.Current.Name -ne $choice.label){throw "Sketch Fill drawer lost its siblings: $index $($commands[$index]) name"}
+    }
+}
 function Key([uint16]$Code){[CapyRowPointer]::Key([uint32]$review.Id,$Code)}
 function Chord([uint16[]]$Modifiers,[uint16]$Code){[CapyRowPointer]::Chord([uint32]$review.Id,$Modifiers,$Code)}
 function Command([string]$Id){
@@ -259,7 +277,7 @@ try {
         if($drawer){Wait-Until {(@((Model).state.customization.drawer.columns|ForEach-Object {$_}) -join ',') -eq 'tools,tool_settings'} 'Sketch Fill did not open Tools and Tool settings'}
         else{Wait-Until {((Model).state.commands|Where-Object id -eq 'enclose_fill').selected} 'Sketch Fill did not restore Enclose and Fill'}
     }
-    foreach($index in 0..2){$row=Control ('tool-group-'+$index) -Within (Control 'tool-drawer') -Arranged;if($row.Current.Name -ne @('Fill','Lasso fill','Enclose and Fill')[$index]){throw 'Sketch Fill drawer lost its siblings'}}
+    Assert-FillDrawerChoices $fill.id
     Capture "sketch-fill-$Theme" -WithModel
     Key 0x1B;Wait-Until {$null -eq (Model).state.customization.drawer} 'Sketch Fill drawer did not close'
     $canvas=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle

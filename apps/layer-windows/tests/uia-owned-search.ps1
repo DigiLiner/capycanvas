@@ -2198,3 +2198,51 @@ Write-Output 'Actual clipboard Copy routing rejects stale native context and rev
  }
  'Actual New-DrawingPixels: captured ready unit once, retained pixel selection and field commits, missing/stalled predicates rejected.'
 }
+
+& {
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-enclose-fill.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $definition=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Assert-FillDrawerChoices'},$true)
+ if(!$definition){throw 'Missing actual Assert-FillDrawerChoices helper'}
+ . ([scriptblock]::Create($definition.Extent.Text))
+ $calls=@($source.FindAll({param($n)$n-is[Management.Automation.Language.CommandAst]-and$n.GetCommandName()-eq'Assert-FillDrawerChoices'},$true))
+ if($calls.Count-ne1){throw 'Actual Sketch Fill sibling assertion is not called exactly once'}
+ $actual=[scriptblock]::Create($calls[0].Extent.Text)
+ $expected=@('fill','lasso_fill','enclose_fill','paint_unfilled');$names=@('Fill','Lasso fill','Enclose and Fill','Paint unfilled areas')
+ function Model{$script:fillDrawerModel}
+ function Control($Id,$Within,[switch]$Arranged){
+  if($Id-eq'tool-drawer'){return 'owned-fill-drawer'}
+  if($Within-cne'owned-fill-drawer'-or!$Arranged){throw 'Fill sibling lookup escaped the arranged owned drawer'}
+  $script:fillDrawerLookups.Add($Id)
+  if(!$script:fillDrawerRows.ContainsKey($Id)){throw "Missing control: $Id"}
+  $script:fillDrawerRows[$Id]
+ }
+ foreach($mode in @('valid','group','mixed','missing','misordered','wrong-label','wrong-command','wrong-anchor','wrong-selection','extra')){
+  $anchor=[pscustomobject]@{kind='header';id=10};$choices=@();$script:fillDrawerRows=@{};$script:fillDrawerLookups=[Collections.Generic.List[string]]::new()
+  for($i=0;$i-lt4;$i++){
+   $choice=[pscustomobject]@{label=$names[$i];selected=$i-eq2;action=[pscustomobject]@{type='choose_tool_variant';anchor=$anchor;variant=[pscustomobject]@{type='command';command=$expected[$i]}}};$choices+=,$choice
+   $script:fillDrawerRows['tool-subtool-'+$i]=[pscustomobject]@{Current=[pscustomobject]@{Name=$names[$i]}}
+  }
+  $fill=[pscustomobject]@{id=10};$ids=@('tool-subtool-0','tool-subtool-1','tool-subtool-2','tool-subtool-3')
+  $script:fillDrawerModel=[pscustomobject]@{state=[pscustomobject]@{customization=[pscustomobject]@{drawer=[pscustomobject]@{anchor=$anchor;tool_set=[pscustomobject]@{groups=@();subtools=$choices}}}}}
+  switch($mode){
+   'group'{$script:fillDrawerModel.state.customization.drawer.tool_set.groups=$choices;$script:fillDrawerModel.state.customization.drawer.tool_set.subtools=@();$ids=@('tool-group-0','tool-group-1','tool-group-2','tool-group-3')}
+   'mixed'{$script:fillDrawerModel.state.customization.drawer.tool_set.groups=@($choices[0],$choices[1]);$script:fillDrawerModel.state.customization.drawer.tool_set.subtools=@($choices[2],$choices[3]);$ids=@('tool-group-0','tool-group-1','tool-subtool-0','tool-subtool-1')}
+   'missing'{[void]$script:fillDrawerRows.Remove('tool-subtool-3')}
+   'misordered'{$choices[0].action.variant.command='lasso_fill';$choices[1].action.variant.command='fill'}
+   'wrong-label'{$script:fillDrawerRows['tool-subtool-3'].Current.Name='Different'}
+   'wrong-command'{$choices[3].action.variant.command='selection_visible'}
+   'wrong-anchor'{$choices[3].action.anchor=[pscustomobject]@{kind='header';id=11}}
+   'wrong-selection'{$choices[2].selected=$false}
+   'extra'{$script:fillDrawerModel.state.customization.drawer.tool_set.subtools+=,$choices[0]}
+  }
+  if($mode-in@('group','mixed')){$script:fillDrawerRows=@{};for($i=0;$i-lt4;$i++){$script:fillDrawerRows[$ids[$i]]=[pscustomobject]@{Current=[pscustomobject]@{Name=$names[$i]}}}}
+  $failure=$null;try{& $actual}catch{$failure=$_}
+  if($mode-in@('valid','group','mixed')){
+   if($failure){throw $failure}
+   if(($script:fillDrawerLookups-join',')-cne($ids-join',')){throw 'Actual Fill assertion did not check all four ordered native siblings'}
+  }elseif(!$failure){throw "Actual Fill assertion accepted $mode siblings"}
+ }
+ 'Actual Sketch Fill drawer assertion checks four ordered shared/native choices and rejects invalid rows'
+}
