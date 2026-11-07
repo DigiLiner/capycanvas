@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -75,7 +76,7 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
 @Composable internal fun DialogShell(host: CanvasHost, intent: JSONObject, title: String, subpage: Boolean = false,
     search: SearchState? = null, onCancel: () -> Unit, onBack: () -> Unit = onCancel, onPrimary: () -> Unit = {},
     primaryEnabled: Boolean = true, primaryLabel: String = "", tag: String = "dialog-shell", naturalWidth: Dp = 720.dp,
-    responses: List<DialogResponse> = emptyList(), shown: Boolean = true, scrollBody: Boolean = true, header: Boolean = true, windowed: Boolean = true, primaryTag: String? = null, cancelTag: String? = null,
+    responses: List<DialogResponse> = emptyList(), shown: Boolean = true, page: Any? = null, scrollBody: Boolean = true, header: Boolean = true, windowed: Boolean = true, primaryTag: String? = null, cancelTag: String? = null,
     secondary: (@Composable () -> Unit)? = null, navigation: (@Composable () -> Unit)? = null, keys: ((KeyEvent) -> Boolean)? = null, overlay: (@Composable BoxScope.() -> Unit)? = null, body: @Composable (PaddingValues) -> Unit, actions: (@Composable RowScope.() -> Unit)? = null) {
     val dialogs = LocalDialogLayer.current
     val environment = rememberUpdatedState(currentCompositionLocalContext)
@@ -97,7 +98,8 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
     val parentFocus=remember(active) {ancestor ?: host.dialogFocus.lastOrNull {it !== focus} ?: host.workspaceFocus}
     val opener=remember(active) {host.workspaceOpener}
     val focusManager = LocalFocusManager.current
-    val scroll = rememberScrollState()
+    val scrolls = remember { mutableMapOf<Any?, ScrollState>() }
+    val scroll = scrolls.getOrPut(page) { ScrollState(0) }
     LaunchedEffect(shown) { if(shown)scroll.scrollTo(0) }
     val currentBody by rememberUpdatedState(body)
     val content = remember { movableContentOf<PaddingValues> { currentBody(it) } }

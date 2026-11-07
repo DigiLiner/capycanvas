@@ -79,7 +79,7 @@ import org.json.JSONTokener
     var profileLibrary by remember {mutableStateOf(false)}
     val confirm={if(page=="save_preset")save("save") else choose()}
     DialogShell(host,if(page=="save_preset")copy.getJSONObject("preset_dialog") else model.getJSONObject("dialog"),title,
-        subpage=page!="root",onCancel={if(page=="save_preset")back() else close()},onBack=::back,header=page=="save_preset",tag="export-dialog",onPrimary=confirm,shown=visible,
+        subpage=page!="root",page=page,onCancel={if(page=="save_preset")back() else close()},onBack=::back,header=page=="save_preset",tag="export-dialog",onPrimary=confirm,shown=visible,
         primaryEnabled=if(page=="save_preset")model.getBoolean("name_valid") else model.getBoolean("can_export"),
         primaryLabel=copy.getString(if(page=="save_preset")"save_preset" else "choose_file"),
         responses=if(page!="save_preset")emptyList() else listOf(

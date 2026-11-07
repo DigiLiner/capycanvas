@@ -1795,8 +1795,27 @@ class AndroidPhoneAuditTest {
             compose.waitForIdle()
         }
         fun exportRoot() { if(findTag("export-dialog") == null) { invoke("export_document");wait("export-choose-file") };host.awaitFrame("Export root page") { findTag("export-presets") != null } }
-        state("export-size") { exportRoot();reveal("export-size");tap("export-size");wait("export-fit") }
-        if(findTag("export-fit") != null) { tap("export-back");host.awaitFrame("Export Back returns to its root") { findTag("export-presets") != null } }
+        fun exportOffset() = checkNotNull(checkNotNull(findTag("export-dialog")).second.find {
+            it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+        }).config[SemanticsProperties.VerticalScrollAxisRange].value()
+        var exportRootOffset: Float? = null
+        state("export-size") {
+            exportRoot();reveal("export-size")
+            exportRootOffset=exportOffset()
+            if(decor.height<=320*activity.resources.displayMetrics.density)assertTrue("The narrow root is scrolled to Size",exportRootOffset!!>0)
+            tap("export-size");wait("export-fit")
+            val size=host.catalog.getJSONObject("export_copy").getString("size")
+            val label=checkNotNull(checkNotNull(findTag("export-fit")).second.find {
+                it.config.getOrNull(SemanticsProperties.Text)?.singleOrNull()?.text == size
+            })
+            val header=checkNotNull(findTag("export-back")).second.boundsInRoot
+            assertTrue("Size starts below its header",label.boundsInRoot.top>=header.bottom)
+            assertEquals("The whole Size label is visible",label.size.height.toFloat(),label.boundsInRoot.height,1f)
+        }
+        if(findTag("export-fit") != null) {
+            tap("export-back");host.awaitFrame("Export Back returns to its root") { findTag("export-presets") != null }
+            exportRootOffset?.let { assertEquals("Back preserves the root scroll offset",it,exportOffset(),1f) }
+        }
         state("export-color") {
             exportRoot();reveal("export-color");tap("export-color")
             host.awaitFrame("Export colour page") { findTag("export-presets") == null && placed("export-back") }
