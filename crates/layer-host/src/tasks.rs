@@ -317,6 +317,7 @@ impl SourceTask {
             return Err("Source result was already prepared".into());
         }
         self.prepare_metadata()?;
+        let profile = self.workflow.resolve_profile(profile)?;
         let (source, clipped) = self.workflow.prepare(profile, layer_color::photo::PhotoMemoryBudget::conversion_encode_limit(), cancelled)?;
         self.clipped = clipped;
         self.converted = Some(source);
@@ -500,6 +501,10 @@ mod tests {
             assert_eq!(details["source_profile"], "sRGB"); assert_eq!(details["source_profile_name"], "sRGB");
         }
         task.workflow.original = original;
+        let mut initial = SourceTask::capture(&host.session, None, RgbSpace::Srgb).unwrap();
+        initial.work(None, || false).unwrap();
+        assert_eq!(initial.converted.as_ref().unwrap().interpretation.profile, ColorProfile::Builtin(RgbSpace::Srgb));
+        drop(initial);
         task.work(Some(ColorProfile::Builtin(RgbSpace::DisplayP3)), || false)
             .unwrap();
         task.prepare(&host, false).unwrap();
