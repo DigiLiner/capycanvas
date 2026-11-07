@@ -430,9 +430,13 @@ internal class DocumentController(private val host: CanvasHost, private val appl
             body={Text(recoveryCopy.getString(if(recovery.working)"restoring" else "explanation"))})
     }
     val controller = host.documents
-    if((controller.exporting||controller.opening)&&controller.packagePrompt==null)ProgressDialog(host,
-        if(controller.publishing)host.catalog.getJSONObject("export_copy").getString("writing_image") else if(controller.exportCancelled)host.catalog.getJSONObject("document_delivery_copy").getString("cancelling") else if(controller.opening)host.bootstrap!!.getString("preparing_document") else host.catalog.getJSONObject("export_copy").getString("preparing"),
-        "document-progress",enabled=!controller.publishing&&!controller.exportCancelled,onCancel=controller::cancelExport)
+    if(controller.packagePrompt==null) {
+        if(controller.opening && request!=null)RequestProgressDialog(host,request.getInt("id"),"document-progress",controller.exportCancelled,
+            enabled=!controller.exportCancelled,onCancel=controller::cancelExport)
+        else if(controller.exporting)ProgressDialog(host,
+            if(controller.publishing)host.catalog.getJSONObject("export_copy").getString("writing_image") else if(controller.exportCancelled)host.catalog.getJSONObject("document_delivery_copy").getString("cancelling") else host.catalog.getJSONObject("export_copy").getString("preparing"),
+            "document-progress",enabled=!controller.publishing&&!controller.exportCancelled,onCancel=controller::cancelExport)
+    }
     val packageCopy = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.capycanvas")) {uri -> controller.choosePackageCopy(uri)}
     val packagePreviewExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {uri -> controller.choosePackageCopy(uri,true)}
     controller.packagePrompt?.let {summary ->

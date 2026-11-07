@@ -223,6 +223,9 @@ impl DocumentRequest {
         };
         localization.text(id)
     }
+    pub fn progress_title(&self, localization: &Localizer) -> std::sync::Arc<str> {
+        match self { Self::Open => localization.text(MessageId::COMMON_OPENING_FILES), _ => self.title(localization) }
+    }
     pub fn accept_label(&self, localization: &Localizer) -> std::sync::Arc<str> {
         localization.text(match self {
             Self::ChangeColor { .. } | Self::ColorHistory { .. } | Self::RepairSourceProfile { .. } => MessageId::COMMON_APPLY,
@@ -930,6 +933,17 @@ impl<R: CanvasRenderer> UiSession<R> {
 mod localization_tests {
     use super::*;
     use crate::session::test_support::{Recorder, layer};
+
+    #[test]
+    fn progress_titles_use_the_opening_copy_and_preserve_other_operations() {
+        for language in UiLanguage::ALL {
+            let localization=Localizer::shared(language);
+            assert_eq!(DocumentRequest::Open.progress_title(&localization), crate::bootstrap_view(&localization).opening_files);
+            for request in [DocumentRequest::Place,DocumentRequest::New,DocumentRequest::Copy{merged:true,cut:false,pixels:false}] {
+                assert_eq!(request.progress_title(&localization),request.title(&localization));
+            }
+        }
+    }
 
     #[test]
     fn retired_typed_host_request_failures_follow_language_without_changing_document_or_literal_errors() {

@@ -35,7 +35,8 @@ internal class ImageImportController(private val host: CanvasHost, private val a
     val mimeTypes = formats.flatMap { f -> f.getJSONArray("mime_types").let { a -> (0 until a.length()).map(a::getString) } }.toTypedArray()
     var choosing by mutableStateOf(false); private set
     var pickerLaunched = false
-    var working by mutableStateOf(false); private set
+    var requestId by mutableStateOf<Int?>(null); private set
+    val working get()=requestId!=null
     var cancelled by mutableStateOf(false); private set
     var profilePrompt by mutableStateOf<JSONObject?>(null); private set
     private var selection: CompletableDeferred<List<Uri>?>? = null
@@ -113,10 +114,10 @@ internal class ImageImportController(private val host: CanvasHost, private val a
     }
     fun start(request: JSONObject, paste: Boolean, fromDrop:Boolean=false, clipNonce:String?=null) {
         if (working || (receiving&&!fromDrop)) return
-        working = true; cancelled = false
+        val id=request.getInt("id")
+        requestId=id; cancelled = false
         val drop = incoming; incoming = null
         host.viewModelScope.launch {
-            val id = request.getInt("id")
             var task = 0L
             var adopted=false
             var transitioning=false
@@ -197,7 +198,7 @@ internal class ImageImportController(private val host: CanvasHost, private val a
                 if (control != 0L) Native.captureFree(control)
                 control = 0; providerSignal = null
                 try { if(transitioning)withContext(NonCancellable) { host.drawingTabs.afterAdopt() } }
-                finally { working = false; drop?.release?.invoke();drop?.finished?.invoke(adopted) }
+                finally { requestId = null; drop?.release?.invoke();drop?.finished?.invoke(adopted) }
             }
         }
     }
@@ -209,9 +210,8 @@ internal class ImageImportController(private val host: CanvasHost, private val a
 
 @Composable internal fun ImportAndTransformControls(host: CanvasHost) {
     val images = host.documents.images
-    if(images.working&&!images.choosing)ProgressDialog(host,
-        if(images.cancelled)host.catalog.getJSONObject("document_delivery_copy").getString("cancelling") else host.bootstrap!!.getString("preparing_document"),
-        "image-import-progress",enabled=!images.cancelled,onCancel=images::cancel)
+    images.requestId?.takeUnless{images.choosing}?.let{id->RequestProgressDialog(host,id,"image-import-progress",images.cancelled,
+        enabled=!images.cancelled,onCancel=images::cancel)}
     images.profilePrompt?.let { SourceProfileDialog(host,it, images::chooseProfile) }
     val cancel = host.canvasBar?.array("completion")?.objects()?.mapNotNull { it.getJSONObject("option").optJSONObject("Action")?.getJSONObject("state") }
         ?.any { it.getString("id") == "cancel_transform" && it.getBoolean("enabled") } == true

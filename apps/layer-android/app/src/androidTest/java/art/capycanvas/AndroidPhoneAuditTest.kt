@@ -215,6 +215,7 @@ class AndroidPhoneAuditTest {
     @Test fun pagesD2() = visit(false, "pagesD2")
     @Test fun pagesA4() = visit(false, "pagesA4")
     @Test fun sourcePages() = visit(false, "sourcePages")
+    @Test fun fileProgress() = visit(false, "fileProgress")
     @Test fun ime() = visit(false, "ime")
     @Test fun alertIme() = visit(false, "alertIme")
     @Test fun modalFocus() = visit(false, "modalFocus")
@@ -270,7 +271,7 @@ class AndroidPhoneAuditTest {
             assertTrue("Completed first canvas frame", frameReady)
             fun capture(name: String) {
                 captureName = name
-                report.put("family",if (name == "hidden") "frame" else if (name.startsWith("inventory-")) "inventory" else if(family in listOf("dialogsA2","pagesD1","pagesD2","pagesA4","sourcePages")) "pages" else family)
+                report.put("family",if (name == "hidden") "frame" else if (name.startsWith("inventory-")) "inventory" else if(family in listOf("dialogsA2","pagesD1","pagesD2","pagesA4","sourcePages","fileProgress")) "pages" else family)
                     .put("fixture",host.workspaceManager?.optString("id") ?: "builtin:workspace:painter").put("state", if (admissionOnly) "rest" else name).put("status", "failed").put("passed", false)
                 host.drain()
                 compose.waitForIdle()
@@ -330,7 +331,7 @@ class AndroidPhoneAuditTest {
                     surface.getLocationOnScreen(canvasLocation)
                     report.put("canvas_origin_pixels", JSONArray(canvasLocation.toList()))
                     val root = checkNotNull(findTag("workspace"))
-                    collect(if(family in listOf("pagesD1","pagesD2","pagesA4","sourcePages"))root.first.semanticsOwner.unmergedRootSemanticsNode else root.second, allocations)
+                    collect(if(family in listOf("pagesD1","pagesD2","pagesA4","sourcePages","fileProgress"))root.first.semanticsOwner.unmergedRootSemanticsNode else root.second, allocations)
                     report.put("phone_active", host.snapshot?.getJSONObject("layout")?.objectOrNull("phone") != null)
                     report.put("revision", host.snapshot?.getJSONObject("state")?.getLong("revision"))
                     assertEquals("System theme", expectedTheme, host.snapshot?.getJSONObject("state")?.getString("theme"))
@@ -481,8 +482,8 @@ class AndroidPhoneAuditTest {
             assertTrue(failures.joinToString("\n"),failures.isEmpty())
             return
         }
-        if(family=="pagesA4" || family=="sourcePages") {
-            visitPagesA4(activity,host,::event,::tap,::state,sourceOnly=family=="sourcePages")
+        if(family=="pagesA4" || family=="sourcePages" || family=="fileProgress") {
+            visitPagesA4(activity,host,::event,::tap,::state,sourceOnly=family=="sourcePages",fileOnly=family=="fileProgress")
             assertTrue(failures.joinToString("\n"),failures.isEmpty())
             return
         }
@@ -924,7 +925,7 @@ class AndroidPhoneAuditTest {
         }
     }
 
-    private fun visitPagesA4(activity: MainActivity,host: CanvasHost,event: (Int,Offset) -> Unit,tap: (String) -> Unit,state: (String,() -> Unit) -> Unit,sourceOnly:Boolean=false) {
+    private fun visitPagesA4(activity: MainActivity,host: CanvasHost,event: (Int,Offset) -> Unit,tap: (String) -> Unit,state: (String,() -> Unit) -> Unit,sourceOnly:Boolean=false,fileOnly:Boolean=false) {
         val decor = activity.window.decorView
         val fixtures = File(instrumentation.targetContext.getExternalFilesDir(null),"a4-fixtures")
         fun fixture(name: String) = File(fixtures,name).also { assertTrue("Fixture $name is pushed",it.isFile) }
@@ -939,7 +940,7 @@ class AndroidPhoneAuditTest {
             host.awaitFrame("Keyboard-free page reference") { !keyboard() }
             compose.waitForIdle()
         }
-        fun settle() { compose.waitForIdle();if(!sourceOnly)SystemClock.sleep(400);if(keyboard())hideIme() }
+        fun settle() { compose.waitForIdle();if(!sourceOnly&&!fileOnly)SystemClock.sleep(400);if(keyboard())hideIme() }
         fun close(tag: String) { if(exists(tag)) { try { tap(tag) } catch(error: Throwable) { predictiveBack(activity,cancel = false) };compose.waitForIdle() } }
         fun reveal(tag: String) { compose.onNodeWithTag(tag,useUnmergedTree = true).performScrollTo();compose.waitForIdle() }
         fun tapText(owner: String,prefix: String) {
@@ -987,7 +988,7 @@ class AndroidPhoneAuditTest {
             compose.waitForIdle()
         }
 
-        if(!sourceOnly) {
+        if(!sourceOnly&&!fileOnly) {
         invoke("select_all")
         for ((command,name) in listOf("feather_selection" to "selection-refine","frequency_separation" to "frequency-separation")) {
             state("$name-ime") { invoke(command);wait("$name-panel");withKeyboard("$name-panel") }
@@ -1076,12 +1077,22 @@ class AndroidPhoneAuditTest {
         }
         close("package-close");gone("preserved-package-preview",30_000)
 
-        state("document-opening-progress") { openFile("big.png");wait("document-progress",60_000);compose.waitForIdle() }
+        }
+        fun assertProgress(tag:String,title:String) {
+            host.awaitFrame("$tag shows its operation title") {findTag("$tag-title")?.second?.config?.getOrNull(SemanticsProperties.Text)?.any{it.text==title}==true}
+            compose.onNodeWithTag("$tag-status").assertTextContains(host.bootstrap!!.getString("preparing_document"))
+        }
+        if(!sourceOnly) {
+        state("document-opening-progress") {
+            openFile("big.png");wait("document-progress",60_000)
+            assertProgress("document-progress",host.bootstrap!!.getString("opening_files"));compose.waitForIdle()
+        }
         state("document-opening-cancelled") {
             if(exists("document-progress-cancel"))tap("document-progress-cancel")
             host.awaitFrame("Open cancels",120_000) { !exists("document-progress") && !host.documents.working };settle()
         }
         }
+        if(!fileOnly) {
         state("untagged-source-profile") {
             host.drain(obj("type" to "preferences","action" to obj("type" to "edit","id" to "missing_profile","value" to 1)))
             openFile("untagged.png");wait("source-profile",60_000);settle()
@@ -1089,7 +1100,9 @@ class AndroidPhoneAuditTest {
         }
         close("source-profile-cancel");host.awaitFrame("Interpretation prompt closes",60_000) { !exists("source-profile") && !host.documents.working }
         host.drain(obj("type" to "preferences","action" to obj("type" to "reset","id" to "missing_profile")))
+        }
         if(!sourceOnly) {
+        if(!fileOnly) {
         val bigEpoch = epoch()
         state("big-opened") { openFile("big.png");opened(bigEpoch,180_000);settle() }
         state("clipboard-progress") { invoke("copy_merged");wait("clipboard-progress",30_000);compose.waitForIdle() }
@@ -1101,12 +1114,16 @@ class AndroidPhoneAuditTest {
             host.awaitFrame("Conversion progress",30_000) { exists("document-color") && !exists("document-color-apply") };compose.waitForIdle()
         }
         close("document-color-cancel");host.awaitFrame("Colour change ends",180_000) { !exists("document-color") }
+        }
         state("image-import-progress") {
             picking(pick,android.net.Uri.fromFile(fixture("big.png"))) { invoke("import_image");wait("image-import-progress",60_000) }
-            compose.waitForIdle()
+            val id=checkNotNull(host.documents.images.requestId)
+            val title=runBlocking{host.withNative{Native.documentRequestTitle(it,id)}}!!
+            assertProgress("image-import-progress",title);compose.waitForIdle()
         }
         close("image-import-progress-cancel");host.awaitFrame("Image import ends",180_000) { !exists("image-import-progress") }
         }
+        if(fileOnly)return
         val photoEpoch = epoch()
         state("photo-opened") { openFile("prophoto16.png");opened(photoEpoch);settle() }
         for ((command,name,tag) in listOf(Triple("assign_profile","assign-profile","document-color"),Triple("convert_color_space","convert-color-space","document-color"),

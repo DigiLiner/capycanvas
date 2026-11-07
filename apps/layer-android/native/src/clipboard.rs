@@ -30,7 +30,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentRequestTitle(mut env: 
     crate::jni_entry!(env, handle, capy_app, {
     let owner = &mut *capy_app;
     match owner.host.session.document_request(id as u32) {
-        Ok(request) => string(&mut env, Ok(request.title(owner.host.session.localization()).to_string())),
+        Ok(request) => string(&mut env, Ok(request.progress_title(owner.host.session.localization()).to_string())),
         Err(_) => std::ptr::null_mut(),
     }
     })

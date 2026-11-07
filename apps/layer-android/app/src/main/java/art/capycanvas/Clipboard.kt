@@ -116,12 +116,7 @@ internal class ClipboardController(private val host: CanvasHost, private val app
 @Composable internal fun ClipboardProgress(clipboard: ClipboardController) {
     val host = LocalCanvasHost.current
     val id = clipboard.progress ?: return
-    var label by remember(id) { mutableStateOf("") }
-    LaunchedEffect(id, host.languageTag) {
-        val language = host.languageTag
-        val next = host.withNative { Native.documentRequestTitle(it, id) }.orEmpty()
-        if (language == host.languageTag && id == clipboard.progress) label = next
-    }
+    val label=documentRequestTitle(host,id)
     ProgressDialog(host,if(clipboard.cancelling)host.catalog.getJSONObject("document_delivery_copy").getString("cancelling") else label,
         "clipboard-progress",enabled=!clipboard.cancelling,onCancel=clipboard::cancel)
 }

@@ -253,11 +253,29 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
     })
 }
 
-@Composable internal fun ProgressDialog(host:CanvasHost,label:String,tag:String,enabled:Boolean=true,onCancel:()->Unit) {
+@Composable internal fun documentRequestTitle(host:CanvasHost,id:Int):String {
+    var title by remember(id){mutableStateOf("")}
+    LaunchedEffect(id,host.languageTag) {
+        val language=host.languageTag
+        val next=host.withNative{Native.documentRequestTitle(it,id)}.orEmpty()
+        if(language==host.languageTag)title=next
+    }
+    return title
+}
+
+@Composable internal fun RequestProgressDialog(host:CanvasHost,id:Int,tag:String,cancelling:Boolean,enabled:Boolean=true,onCancel:()->Unit) {
+    ProgressDialog(host,documentRequestTitle(host,id),tag,enabled=enabled,onCancel=onCancel,
+        status=if(cancelling)host.catalog.getJSONObject("document_delivery_copy").getString("cancelling") else host.bootstrap!!.getString("preparing_document"))
+}
+
+@Composable internal fun ProgressDialog(host:CanvasHost,label:String,tag:String,enabled:Boolean=true,status:String?=null,onCancel:()->Unit) {
     val cancel={if(enabled)onCancel()}
     DialogShell(host,host.bootstrap!!.getJSONObject("progress_dialog"),label,onCancel=cancel,tag=tag,
         responses=listOf(DialogResponse(host.bootstrap!!.getJSONObject("common").getString("cancel"),"$tag-cancel",enabled=enabled,action=cancel)),
-        body={CircularProgressIndicator(Modifier.testTag("$tag-progress"))})
+        body={Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            status?.let{Text(it,Modifier.testTag("$tag-status"))}
+            CircularProgressIndicator(Modifier.testTag("$tag-progress"))
+        }})
 }
 
 @Composable private fun AlertShell(host: CanvasHost,title: String,tag: String,preferWide: Boolean,visible: JSONObject,
