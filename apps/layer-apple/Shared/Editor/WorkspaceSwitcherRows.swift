@@ -75,7 +75,7 @@ struct WorkspaceSwitcherRows: View {
                                 .onChange(of:editing) {_,focused in if !focused {workspaces.finishName()}}
                                 .onNativeTextKey(.escape) { workspaces.cancelPrompt(); return .handled }
                         }
-                        }.frame(minHeight:metrics.height).accessibilityIdentifier("workspace-name-slot-"+id)
+                        }.frame(minHeight:metrics.height)
                         if !row["subtitle"].string.isEmpty {Text(row["subtitle"].string).font(.caption).foregroundStyle(.secondary).lineLimit(1).padding(.horizontal,metrics.padding)}
                     }.frame(maxWidth:.infinity,minHeight:rowHeight,alignment:.leading)
                         .contentShape(Rectangle()).onTapGesture {if !renaming && !interaction.contact.consumeClick(){workspaces.select(id)}}.focusable().focused($focus,equals:"row-"+id)
