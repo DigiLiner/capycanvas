@@ -179,6 +179,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn inherit_window_state(&mut self, previous: &Self) -> Result<UiChange, String> {
         let navigation=self.camera_navigation_revision();
         let camera=(!self.initial_fit).then(||self.state.camera.clone());
+        let restored_view=self.restored_view.take();
         self.set_localization(previous.localization().clone());
         self.localization_generation = previous.localization_generation;
         self.preferences_revision = self.preferences_revision.max(previous.preferences_revision);
@@ -228,6 +229,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.camera.revision = self.state.camera.revision.max(previous.state.camera.revision)
             .checked_add(1).ok_or("Camera generation exhausted")?;
         self.automatic_camera_revision=self.state.camera.revision.checked_sub(navigation).ok_or("Camera revision moved backwards")?;
+        self.restored_view=restored_view;
         self.sync_camera();
         self.refresh_layer_presentation();
         self.refresh_commands();
@@ -271,6 +273,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let physical = previous.state.camera.viewport;
             let old_scale = self.logical_viewport.map_or(1.0, |v| self.state.camera.viewport[0] as f32 / v[0]);
             let new_scale = physical[0] as f32 / logical[0];
+            if self.state.camera.viewport != physical {self.restored_view=None;}
             self.state.camera.resize(physical);
             self.logical_viewport = Some(logical);
             if let Some(event) = self.cursor.event.as_mut() {

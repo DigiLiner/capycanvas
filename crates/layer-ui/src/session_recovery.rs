@@ -198,7 +198,7 @@ impl<R:CanvasRenderer> UiSession<R> {
             effect_gesture:_,preview_target:_,paper_preview:_,papers:_,object_motion:_,property_editor:_,sdr_gesture:_,last_proof_mode:_,proof_setup_pending:_,filter_previews:_,
             eyedropper:_,region_tools:_,selection_tools:_,tonal_tools:_,painted_selections:_,vector_lines:_,vector_moves:_,vector_paths:_,vector_points:_,figure_options:_,deferred_edits:_,selection_masks:_,
             canvas_size:_,image_size:_,frequency_separation:_,content_bounds:_,conversion:_,rulers:_,retouch:_,operation:_,objects:_,
-            system_theme:_,system_accent:_,platform_prediction_available:_,logical_viewport:_,initial_fit:_,
+            system_theme:_,system_accent:_,platform_prediction_available:_,logical_viewport:_,initial_fit:_,restored_view:_,
             automatic_camera_revision:_,workspace_view_revision:_,divider_drag:_,edge_contacts:_,floating_resize:_,floating_auto_fit:_,workspace_drag:_,workspace_tab_drag:_,
             workspace_drag_tabs:_,workspace_model_revision:_,workspace_content_revision:_,workspace_history:_,
             workspace_transition:_,workspace_read_only:_,workspace_preview:_,managed_workspace:_,interaction:_,
@@ -216,6 +216,7 @@ impl<R:CanvasRenderer> UiSession<R> {
         self.engine.restore_editor(restore.editor).map_err(error)?;
         self.state.camera=camera;
         self.initial_fit=false;
+        self.restored_view=Some((restore.state.camera.clone(),self.camera_navigation_revision()));
         self.files.saved_checkpoint=restore.state.saved_checkpoint;
         self.files.startup=false;
         self.files.unpublished=restore.state.unpublished || (restore.state.location.is_some()
@@ -852,6 +853,66 @@ pub(crate) mod tests {
         let actual=restored.session_stamp().state.camera;
         assert_eq!(actual.zoom,expected.zoom);assert_eq!(actual.rotation,expected.rotation);
         assert!((actual.center[0]-expected.center[0]).abs()<0.001);assert!((actual.center[1]-expected.center[1]).abs()<0.001);
+    }
+    #[test]
+    fn restored_camera_keeps_its_document_center_while_the_window_layout_settles() {
+        let painter=||crate::PreparedWorkspace::new(crate::WorkspaceCapture::from_template(&crate::WorkspacePreset::Painter.layout(Platform::Windows)).unwrap()).unwrap();
+        let [window_size,maximized]=[[1418u32,988],[2560,1528]];let logical=|size:[u32;2]|size.map(|v|v as f32/1.5);
+        let mut source=session(Platform::Windows);source.adopt_workspace(painter()).unwrap();source.set_viewport(logical(maximized),maximized).unwrap();
+        source.dispatch(UiAction::MeasureHeader {height:64.,items:Vec::new()}).unwrap();source.frame(0,0).unwrap();
+        source.state.camera.zoom_to(1.).unwrap();source.state.camera.center_on([1334.5,800.5]);
+        let expected=source.session_stamp().state.camera;let saved=checkpoint(&source);
+        for workspace_adopted in [true,false] { for provisional_header in [None,Some(48.)] {
+            let mut window=session(Platform::Windows);window.set_viewport(logical(window_size),window_size).unwrap();window.frame(0,0).unwrap();
+            if workspace_adopted {window.adopt_workspace(painter()).unwrap();}
+            if let Some(height)=provisional_header {window.dispatch(UiAction::MeasureHeader {height,items:Vec::new()}).unwrap();}
+            let mut restored=restore(&saved,false);restored.inherit_restored_window_state(&window).unwrap();
+            if !workspace_adopted {
+                let navigation=restored.camera_navigation_revision();let bounds=restored.state.camera.work_area;
+                let change=restored.adopt_workspace(painter()).unwrap();
+                assert_eq!(change.regions & regions::CAMERA!=0,restored.state.camera.work_area!=bounds);
+                assert!(change.canvas_wake);assert_eq!(restored.camera_navigation_revision(),navigation);
+            }
+            let navigation=restored.camera_navigation_revision();let bounds=restored.state.camera.work_area;
+            let change=restored.dispatch(UiAction::MeasureHeader {height:64.,items:Vec::new()}).unwrap();
+            let actual=restored.session_stamp().state.camera;
+            assert_eq!((actual.zoom,actual.rotation),(expected.zoom,expected.rotation));
+            assert!((0..2).all(|axis|(actual.center[axis]-expected.center[axis]).abs()<0.001),
+                "workspace adopted {workspace_adopted}, header {provisional_header:?}: center {:?}, saved {:?}",actual.center,expected.center);
+            let followed=restored.state.camera.work_area!=bounds;
+            assert_eq!(change.regions & regions::CAMERA!=0,followed,"workspace adopted {workspace_adopted}, header {provisional_header:?}: work area {bounds:?} -> {:?}",restored.state.camera.work_area);
+            if followed {assert!(change.canvas_wake);}
+            assert_eq!(restored.camera_navigation_revision(),navigation);
+            let before=restored.state.camera.translation;restored.set_viewport(logical(maximized),maximized).unwrap();
+            assert!((0..2).all(|axis|(restored.state.camera.translation[axis]-before[axis]-(maximized[axis] as f32-window_size[axis] as f32)*0.5).abs()<0.001),
+                "a window resize after the layout settles keeps viewport-centered resizing");
+        }}
+    }
+    #[test]
+    fn restored_camera_stops_following_layout_after_a_person_changes_the_view() {
+        let mut window=session(Platform::Windows);
+        window.set_viewport([900.,700.],[1350,1050]).unwrap();window.frame(0,0).unwrap();
+        window.state.camera.zoom_to(1.).unwrap();window.state.camera.center_on([123.,456.]);
+        let saved=checkpoint(&window);
+        for navigate in [false,true] {
+            let mut restored=restore(&saved,false);restored.inherit_restored_window_state(&window).unwrap();
+            let before=restored.state.camera.translation;
+            if navigate {
+                restored.gesture([100.,100.],[120.,105.],1.,0.).unwrap();
+                assert_ne!(restored.state.camera.translation,before);
+            } else {
+                let bounds=restored.state.camera.work_area;
+                let change=restored.dispatch(UiAction::Customize {action:CustomizationAction::SetPanelVisible {panel:Panel::Toolbar,visible:false}}).unwrap();
+                assert_ne!(change.regions & regions::LAYOUT,0);
+                assert_ne!(restored.state.camera.work_area,bounds);
+                assert_eq!(restored.state.camera.translation,before);
+            }
+            let before=restored.state.camera.translation;
+            let bounds=restored.state.camera.work_area;
+            restored.dispatch(UiAction::MeasureHeader {height:64.,items:Vec::new()}).unwrap();
+            assert_ne!(restored.state.camera.work_area,bounds);
+            assert_eq!(restored.state.camera.translation,before,"navigation {navigate} ends the restored view hold");
+        }
     }
     #[test]
     fn impossible_saved_checkpoint_is_rejected_before_adopting_document() {

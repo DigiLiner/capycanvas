@@ -439,10 +439,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.cursor.hover.reset();
         self.interaction.keep_chrome_until_contact = working.zen_mode;
         self.refresh_tools();
-        self.sync_work_area();
+        let (_, followed) = self.sync_work_area();
         self.refresh_commands();
         Ok(self.changed(
-            regions::LAYOUT | regions::CUSTOMIZATION | regions::BRUSH | regions::COMMANDS,
+            regions::LAYOUT | regions::CUSTOMIZATION | regions::BRUSH | regions::COMMANDS | if followed { regions::CAMERA } else { 0 },
             true,
         ))
     }

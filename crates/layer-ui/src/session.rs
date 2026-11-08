@@ -336,6 +336,7 @@ pub struct UiSession<R: CanvasRenderer> {
     platform_prediction_available: Option<bool>,
     logical_viewport: Option<[f32; 2]>,
     initial_fit: bool,
+    restored_view: Option<(session_recovery::SessionCamera, u64)>,
     automatic_camera_revision: u64,
     workspace_view_revision: Option<u64>,
     divider_drag: Option<(u32, ResizeDrag)>,
@@ -616,6 +617,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             platform_prediction_available: None,
             logical_viewport: None,
             initial_fit: true,
+            restored_view: None,
             automatic_camera_revision: 0,
             workspace_view_revision: None,
             divider_drag: None,
@@ -3283,7 +3285,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             UiAction::RestoreSettings { .. } | UiAction::RestoreSavedSettings { .. }
         );
         let mut save_settings = matches!(&action, UiAction::SetTheme { .. } | UiAction::ZoomTool { .. });
-        let (mut changed, wake) = match action {
+        let host_report=action.is_host_report();
+        let (mut changed, mut wake) = match action {
             UiAction::Phone { action } => {
                 match action {
                     PhoneAction::MenuActivate { .. } => unreachable!(),
@@ -4600,7 +4603,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             changed |= HOST;
         }
         if changed & LAYOUT != 0 {
-            self.sync_work_area();
+            if !host_report {self.restored_view=None;}
+            if self.sync_work_area().1 {changed|=CAMERA;wake=true;}
         }
         if self.engine.document().revision != revision || self.layer_interaction.changed {
             self.layer_interaction.changed = false;
@@ -4956,13 +4960,14 @@ impl<R: CanvasRenderer> UiSession<R> {
                 .map_err(error)?;
             self.state.camera.resize(physical);
             self.touch.clear();
+            self.restored_view = None;
         }
         self.logical_viewport = Some(logical);
         if let Some(event) = self.cursor.event.as_mut() {
             event.surface_position.x *= new_scale / old_scale;
             event.surface_position.y *= new_scale / old_scale;
         }
-        let bounds_changed = self.sync_work_area();
+        let (bounds_changed, followed) = self.sync_work_area();
         let fit = self.initial_fit;
         if fit {
             self.initial_fit = false;
@@ -4976,13 +4981,13 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(self.changed(
             (if resized || fit || bounds_changed { regions::CAMERA } else { 0 })
                 | if transition { regions::LAYOUT | regions::CUSTOMIZATION | regions::COMMANDS | regions::BUBBLES | regions::BRUSH } else { 0 },
-            resized || fit,
+            resized || fit || followed,
         ))
     }
 
-    fn sync_work_area(&mut self) -> bool {
+    fn sync_work_area(&mut self) -> (bool, bool) {
         let Some(logical) = self.logical_viewport else {
-            return false;
+            return (false, false);
         };
         let b = self.layout(logical).work_area;
         let scale = [
@@ -4997,7 +5002,20 @@ impl<R: CanvasRenderer> UiSession<R> {
         ];
         let changed = self.state.camera.work_area != bounds;
         self.state.camera.work_area = bounds;
-        changed
+        (changed, changed && self.follow_restored_view())
+    }
+
+    fn follow_restored_view(&mut self) -> bool {
+        let navigation = self.camera_navigation_revision();
+        let Some(camera) = self.restored_view.as_ref().filter(|(_, at)| *at == navigation)
+            .and_then(|(view, _)| view.restore(&self.state.camera).ok()) else {
+            self.restored_view = None;
+            return false;
+        };
+        self.automatic_camera_revision += camera.revision - self.state.camera.revision;
+        self.state.camera = camera;
+        self.sync_camera();
+        true
     }
 
     fn divider(&self, id: u32, viewport: [f32; 2]) -> Result<Divider, String> {
