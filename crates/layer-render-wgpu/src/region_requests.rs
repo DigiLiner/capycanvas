@@ -845,7 +845,7 @@ impl WgpuRasterizer {
             let prepare_ends=refinement.close_gaps && request.fill.as_ref().is_none_or(|fill|fill.reach!=Some(0));
             startup.compiler.require(regions.raw.pipelines().chain(regions.flood.request_pipelines(refinement,request.enclosure.is_some(),request.contiguous,prepare_ends)),startup::DOCUMENT);
             let mut required=self.artwork_frame.as_ref().map_or_else(startup::Requirements::default,|frame|startup::Requirements::capture_scene(self,frame.scene.view(),true));
-            required.render.extend(self.scene_pipelines.fill_pipelines().into_iter().cloned());
+            required.render.extend(self.scene_pipelines.fill_pipelines(&self.device).into_iter().cloned());
             required.render.push(self.layer_masks.initialize.clone());
             required.compute.extend(self.selection_clip.pipelines().into_iter().cloned());
             required.compute.push(self.selection_clip.resample.clone());

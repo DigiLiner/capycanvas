@@ -119,15 +119,20 @@ fn figure_color(p: vec2<f32>) -> vec4<f32> {
 fn scene_clip(v:Vertex) {
     if any(v.uv<vec2<f32>(0.)) || any(v.uv>vec2<f32>(1.)) {discard;}
 }
+fn fill_line_alpha(v:Vertex)->vec4<f32> {
+    let pixel=textureLoad(front,vec2<i32>(floor(v.position.xy-settings.rect.xy)),0);
+    let seed=textureLoad(front,vec2(0,i32(textureDimensions(front).y)-1),0);
+    return vec4(select(pixel.a,0.,all(pixel==seed)));
+}
+@fragment fn fragment_fill_lines(v:Vertex)->@location(0) vec4<f32> {
+    scene_clip(v);
+    return fill_line_alpha(v);
+}
 @fragment fn fragment_main(v:Vertex)->@location(0) vec4<f32> {
     scene_clip(v);
     let op=u32(settings.options.x);
     if op==0u {return settings.color;}
-    if op==23u {
-        let pixel=textureLoad(front,vec2<i32>(floor(v.position.xy-settings.rect.xy)),0);
-        let seed=textureLoad(front,vec2(0,i32(textureDimensions(front).y)-1),0);
-        return vec4(select(pixel.a,0.,all(pixel==seed)));
-    }
+    if op==23u {return fill_line_alpha(v);}
     let raw=scene_read(front,v);
     var dst=vec4(0.);
     if scene_needs_back(op) {dst=scene_read(back,v);}

@@ -52,20 +52,20 @@ fn fill_plateau(at:vec2<i32>,seed:vec4<f32>)->vec4<f32> {
     return current;
 }
 
-fn fill_line_alpha(at:vec2<i32>)->f32 {
+fn fill_line_coverage(at:vec2<i32>)->f32 {
     if any(at<vec2(0)) || any(at>=vec2<i32>(settings.backdrop.zw)) {return 0.;}
     let own=textureLoad(fill_source,at,0).a;let other=textureLoad(fill_lines,at,0).r;
     return own+other*(1.-own);
 }
 fn fill_profile(at:vec2<i32>,axis:vec2<i32>)->vec2<f32> {
-    let center=fill_line_alpha(at);if center==0. {return vec2(0.);}
+    let center=fill_line_coverage(at);if center==0. {return vec2(0.);}
     var peak=center;var left=0.;var right=0.;
     let radius=i32(settings.operation_linear.y);
     for(var side=-1;side<=1;side+=2) {
         for(var step=1;step<=radius;step++) {
             let p=at+axis*(step*side);
             if any(p<vec2(0)) || any(p>=vec2<i32>(settings.backdrop.zw)) {return vec2(0.);}
-            let alpha=fill_line_alpha(p);if alpha==0. {break;}
+            let alpha=fill_line_coverage(p);if alpha==0. {break;}
             peak=max(peak,alpha);
             if side<0 {left+=alpha;}else{right+=alpha;}
             if step==radius {return vec2(0.);}
@@ -114,7 +114,7 @@ fn fill_edge_input(world:vec2<f32>,paint:vec4<f32>)->FillEdgeInput {
     return FillEdgeInput(local,seed,paint.a*(1.-textureLoad(fill_cover,local,0).r));
 }
 fn fill_alpha_edge_value(world:vec2<f32>,pixel:vec4<f32>,support:bool,input:FillEdgeInput)->vec4<f32> {
-    if (support || (input.seed.a>0. && !fill_near_seed(vec4(0.),input.seed))) && fill_line_alpha(input.local)==0. {return pixel;}
+    if (support || (input.seed.a>0. && !fill_near_seed(vec4(0.),input.seed))) && fill_line_coverage(input.local)==0. {return pixel;}
     let amount=input.amount*(fill_line_middle(world,input.local,support)/max(fill_selection_at(world),.000001));
     return pixel+vec4(settings.color.rgb,1.)*amount*select(1.-pixel.a,0.,settings.options.w>.5);
 }

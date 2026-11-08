@@ -175,7 +175,7 @@ pub(super) struct Requirements {
 impl Requirements {
     pub(super) fn capture_scene(r:&WgpuRasterizer,view:SceneView<'_>,watercolor:bool)->Self {
         let mut required = Self::default();
-        required.render.extend(r.scene_pipelines.for_scene(view).cloned());
+        required.render.extend(r.scene_pipelines.for_scene(&r.device,view).cloned());
         required.compute.push(r.scene_pipelines.constant.2.clone());
         required.compute.extend(r.scene_pipelines.scale_pipelines().into_iter().cloned());
         required.compute.extend(r.transforms.as_ref().unwrap().placement_pipelines());
@@ -466,7 +466,7 @@ impl WgpuRasterizer {
             let mut required = Requirements::default();
             required
                 .render
-                .extend(self.scene_pipelines.for_scene(document.scene()).cloned());
+                .extend(self.scene_pipelines.for_scene(&self.device,document.scene()).cloned());
             if self.device.portable_blend() { required.compute.extend(self.portable_blend.pipelines.iter().cloned()); }
             required.compute.push(self.scene_pipelines.constant.2.clone());
             if shader.key.watercolor {required.compute.push(self.pipelines.watercolor_compute.1.clone());}
@@ -921,7 +921,7 @@ mod tests {
         crate::test_support::submit_ready(&mut reference,crate::test_support::packet(document.scene(),[64;2])).unwrap();
         let mut renderer=crate::test_support::staged_renderer(&reference,Default::default());
         renderer.artwork_frame=reference.artwork_frame.clone();renderer.document_extent=[64;2];
-        assert!(std::ptr::eq(renderer.scene_pipelines.fill_pipelines()[0],&renderer.scene_pipelines.pipeline[10]));
+        assert!(std::ptr::eq(renderer.scene_pipelines.fill_pipelines(&renderer.device)[0],&renderer.scene_pipelines.pipeline[10]));
         let (entered,entry)=mpsc::channel();let (release,held)=mpsc::channel();
         let compiler=&renderer.startup.as_ref().unwrap().compiler;
         compiler.enqueue(DOCUMENT,move||{let _=entered.send(());let _=held.recv();Ok(())});compiler.start();
@@ -929,7 +929,7 @@ mod tests {
         let request=RegionRequest {fill_areas:None,colour_mode:Default::default(),fill:Some(Default::default()),reference_count:None,paper:None,
             enclosure:None,contiguous:true,selection:None,request_id:1,source:RegionSource::Composite,position:[0;2],tolerance:0.,refinement:Default::default(),limit:None};
         let accepted=renderer.request_region(RegionTask::Fill {request,target:document.drawing_content().unwrap(),position:layer_core::Point{x:0.,y:0.}});
-        let [opaque,fill,scalar]=renderer.scene_pipelines.fill_pipelines();
+        let [opaque,fill,scalar]=renderer.scene_pipelines.fill_pipelines(&renderer.device);
         let pipelines=[opaque,fill,scalar,&renderer.pipelines.watercolor_composite,&renderer.layer_masks.initialize];
         let render_required=pipelines.into_iter().all(|pipeline|!pipeline.ready() && pipeline.promote(DOCUMENT).is_none());
         let compute_required=renderer.selection_clip.pipelines().into_iter().chain([&renderer.selection_clip.resample,&renderer.pipelines.watercolor_compute.1])
@@ -1291,7 +1291,7 @@ mod gpu_tests {
         recolored.color_rgba_linear = [8., 0.25, 0.5, 1.];
         assert!(!renderer.startup_needs_update(&document, &recolored, false));
         assert!(renderer.poll_startup().unwrap().brush_ready);
-        assert!(renderer.scene_pipelines.for_scene(document.scene()).all(|p| p.ready()));
+        assert!(renderer.scene_pipelines.for_scene(&renderer.device,document.scene()).all(|p| p.ready()));
         assert!(renderer.scene_pipelines.pipeline.iter().enumerate().all(|(i,pipeline)| i < 3 || i == 6 || !pipeline.ready()));
         let target = document.drawing_target().unwrap();
         let paper = document.nearest_paper_binding(Some(target)).unwrap();
@@ -1312,7 +1312,7 @@ mod gpu_tests {
                 assert!(std::time::Instant::now() < deadline, "flat fill dependencies must prepare without optional compilation");
                 std::thread::sleep(Duration::from_millis(1));
             }
-            assert!(renderer.scene_pipelines.for_scene(document.scene()).all(|pipeline| pipeline.ready()));
+            assert!(renderer.scene_pipelines.for_scene(&renderer.device,document.scene()).all(|pipeline| pipeline.ready()));
             assert!(renderer.scene_pipelines.pipeline[3].ready(), "flat fills must prepare their operation family before submission");
             assert!(renderer.scene_pipelines.pipeline.iter().enumerate().all(|(i,pipeline)| i < 4 || i == 6 || !pipeline.ready()), "flat fills must not prepare other operation families");
         }

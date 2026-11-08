@@ -328,7 +328,7 @@ impl WgpuRasterizer {
             }).collect();
         if requested.is_empty() {self.fill_edges_preflight=None;return true;}
         if let Some(compiler)=self.startup.as_ref().map(|startup|&startup.compiler).or(self.preparation_compiler.as_ref())
-            && !compiler.require([&self.scene_pipelines.pipeline[SCALAR_PIPELINE]],startup::DOCUMENT) {compiler.start();return false;}
+            && !compiler.require([&self.scene_pipelines.pipeline[fill_line_pipeline(&self.device)]],startup::DOCUMENT) {compiler.start();return false;}
         let mut state=if let Some(state)=self.fill_edges_preflight.take().filter(|state|requested.iter().all(|(target,operation,_,external)|
             matches!(&operation.kind,RasterOperationKind::Fill {edges:Some(edges),..} if state.input(*target,edges,external,
                 packet.scene.target_extent(*target),packet.scene.target_offset(*target)).is_some()))) {state}else {
@@ -395,6 +395,33 @@ mod tests {
         let mut source=document.artwork.paint.get(handle).unwrap().clone();source.operations=Arc::new(vec![operation]);
         document.apply(layer_core::Edit::Paint(layer_core::authored::RecordChange::replace(&document.artwork.paint,handle,Some(source)).unwrap())).unwrap();
         batch
+    }
+    #[test]
+    fn fill_line_readiness_matches_the_draw_attachment_without_float32_blending() {
+        let mut results=Vec::new();
+        for omitted in [wgpu::Features::FLOAT32_BLENDABLE,wgpu::Features::empty()] {
+            let reference=WgpuRasterizer::native_headless_without(Default::default(),omitted).unwrap();
+            let mut r=crate::test_support::staged_renderer(&reference,Default::default());
+            let portable=omitted.contains(wgpu::Features::FLOAT32_BLENDABLE);
+            assert_eq!(r.device.portable_blend(),portable);
+            let (mut document,target,operation)=fixture();
+            let batch=commit(&mut document,target,operation);
+            let brush=layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+            r.prepare_startup(&document,&brush,false).unwrap();
+            let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
+            crate::test_support::wait_startup(&mut r,deadline,|progress|progress.brush_ready,
+                format_args!("Fill line startup timed out"));
+            assert_eq!(r.scene_pipelines.pipeline[FILL_LINES_PIPELINE].ready(),!portable,
+                "fill readiness must require the attachment's pipeline");
+            let frame=FramePacket {reset_layers:true,dab_batches:std::slice::from_ref(&batch),..packet(document.scene(),[384;2])};
+            submit_ready(&mut r,frame).unwrap();
+            assert_eq!(r.scene_pipelines.pipeline[FILL_LINES_PIPELINE].ready(),!portable,
+                "portable fill line draws must leave the scalar recipe cold");
+            let pixels=r.readback_srgb_rgba8().unwrap();
+            assert!(pixels[(192*384+240)*4+3]>0,"the edge fill must draw");
+            results.push(pixels);
+        }
+        assert_eq!(results[0],results[1]);
     }
     #[test]
     fn ready_fill_preview_reuses_seed_and_page_steps_at_commit() {

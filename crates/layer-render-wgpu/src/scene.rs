@@ -44,7 +44,7 @@ pub(crate) mod bake_preflight;
 pub(crate) mod resample;
 pub(crate) mod scale;
 
-const SCALAR_PIPELINE:usize=9;
+const FILL_LINES_PIPELINE:usize=9;
 const FRAGMENTS: [(&str, &str); 11] = [
     ("fragment_main", "tile layer composition"),
     ("fragment_main", "tile layer over"),
@@ -55,7 +55,7 @@ const FRAGMENTS: [(&str, &str); 11] = [
     ("fragment_blend", "tile layer blend"),
     ("fragment_image", "tile image placement"),
     ("fragment_tone", "tile tone mapping"),
-    ("fragment_main", "scalar scene over"),
+    ("fragment_fill_lines", "fill line capture"),
     ("fragment_fill_opaque", "raster opaque fill operation"),
 ];
 
@@ -68,10 +68,15 @@ fn fragment_pipeline(operation: u32, over: bool, scalar:bool) -> Option<usize> {
         21 | 22 => 2,
         12 => 7,
         10 => 8,
-        0 | 1 | 2 | 3 | 5 | 7 | 13 | 14 | 16 | 17 | 19 | 20 | 23 => if scalar {SCALAR_PIPELINE}else{usize::from(over)},
+        23 if scalar => FILL_LINES_PIPELINE,
+        0 | 1 | 2 | 3 | 5 | 7 | 13 | 14 | 16 | 17 | 19 | 20 | 23 => usize::from(over),
         4 => 6,
         _ => panic!("Unknown scene draw operation {operation}"),
     })
+}
+
+fn fill_line_pipeline(device:&PipelineDevice)->usize {
+    fragment_pipeline(23,true,!device.portable_blend()).unwrap()
 }
 
 #[derive(Clone)]
@@ -140,6 +145,14 @@ enum Job {
         width: u32,
         height: u32,
     },
+}
+fn needs_blend(device:&PipelineDevice,job:&Job)->bool {
+    device.portable_blend() && matches!(job,Job::Draw {over:true,..}|Job::Watercolor {..})
+}
+fn portable_draw(device:&PipelineDevice,jobs:&[Job],index:usize)->bool {
+    let target=match &jobs[index] {Job::Draw {target,..}|Job::Watercolor {target,..}=>target,_=>return false};
+    needs_blend(device,&jobs[index]) && !(index>0 && matches!(&jobs[index-1],Job::Clear(previous,color)
+        if previous==target && *color==wgpu::Color::TRANSPARENT))
 }
 /// What a draw does to the color it writes (`scene_space` in scene.wgsl).
 /// Layer pixels are linear; a Perceptual composite holds encoded values.
@@ -2202,10 +2215,11 @@ impl Scene {
     fn jobs_ready(&mut self,r:&WgpuRasterizer)->bool {
         self.pending_pipelines = 0;
         let mut effects_ready = self.effects.preparation_ready();
-        for job in &self.jobs {
+        for (i,job) in self.jobs.iter().enumerate() {
             match job {
                 Job::Draw {target,data,over,pipeline,..} => {
-                    if let Some(index) = pipeline.or_else(||fragment_pipeline(data[8] as u32,*over,target.texture().format()==r.device.scalar_format()))
+                    let format=if portable_draw(&r.device,&self.jobs,i) {r.device.working_format()}else{target.texture().format()};
+                    if let Some(index) = pipeline.or_else(||fragment_pipeline(data[8] as u32,*over,format==r.device.scalar_format()))
                         && !self.pipeline[index].ready() && !is_compute(job) {self.pending_pipelines |= 1 << index;}
                 }
                 Job::Effect {prepared,..} => effects_ready &= prepared.pipeline.ready(),
@@ -2532,13 +2546,11 @@ impl Scene {
                 Job::Draw { target, .. }
                 | Job::Effect { target, .. }
                 | Job::Watercolor { target, .. } => {
-                    let needs_blend = |job: &Job| r.device.portable_blend()
-                        && matches!(job, Job::Draw { over: true, .. } | Job::Watercolor { .. });
-                    let end = if needs_blend(job) { i + 1 } else { (i + 1..self.jobs.len())
+                    let end = if needs_blend(&r.device,job) { i + 1 } else { (i + 1..self.jobs.len())
                         .find(|&j| !matches!(&self.jobs[j],
                             Job::Draw { target: next, .. }
                             | Job::Effect { target: next, .. }
-                            | Job::Watercolor { target: next, .. } if next == target) || needs_blend(&self.jobs[j])
+                            | Job::Watercolor { target: next, .. } if next == target) || needs_blend(&r.device,&self.jobs[j])
                             || is_compute(&self.jobs[j]))
                         .unwrap_or(self.jobs.len()) };
                     let load = if i > 0
@@ -2549,8 +2561,7 @@ impl Scene {
                     } else {
                         wgpu::LoadOp::Load
                     };
-                    let portable = needs_blend(job)
-                        && !matches!(load, wgpu::LoadOp::Clear(color) if color == wgpu::Color::TRANSPARENT);
+                    let portable = portable_draw(&r.device,&self.jobs,i);
                     let source = portable.then(|| r.portable_blend.source(&r.device,target,r.device.working_format()));
                     if portable && let wgpu::LoadOp::Clear(color) = load {
                         let attachments = [Some(attachment(target,wgpu::LoadOp::Clear(color)))];
@@ -2673,17 +2684,17 @@ fn shader_source(space: layer_core::color::RgbSpace) -> Cow<'static,str> {
 }
 
 impl Pipelines {
-    pub fn for_scene(&self, scene: SceneView<'_>) -> impl Iterator<Item = &Deferred<wgpu::RenderPipeline>> {
+    pub fn for_scene(&self, device:&PipelineDevice, scene: SceneView<'_>) -> impl Iterator<Item = &Deferred<wgpu::RenderPipeline>> {
         let mut used = [false; FRAGMENTS.len()];
         used[..3].fill(true);
         used[6] = true;
         for operation in scene.targets().filter(|target| !target.is_coverage()).filter_map(|target| scene.operations(target)).flatten() {
             if let Some(pipeline)=operation_pipeline(&operation.kind) {used[pipeline]=true;}
-            if matches!(operation.kind,RasterOperationKind::Fill {edges:Some(_),underfill:Some(_),..}) {used[SCALAR_PIPELINE]=true;}
+            if matches!(operation.kind,RasterOperationKind::Fill {edges:Some(_),underfill:Some(_),..}) {used[fill_line_pipeline(device)]=true;}
         }
         self.pipeline.iter().zip(used).filter_map(|(pipeline,used)| used.then_some(pipeline))
     }
-    pub fn fill_pipelines(&self)->[&Deferred<wgpu::RenderPipeline>;3] { [&self.pipeline[10],&self.pipeline[3],&self.pipeline[SCALAR_PIPELINE]] }
+    pub fn fill_pipelines(&self,device:&PipelineDevice)->[&Deferred<wgpu::RenderPipeline>;3] { [&self.pipeline[10],&self.pipeline[3],&self.pipeline[fill_line_pipeline(device)]] }
     pub fn scale_pipelines(&self) -> [&Deferred<wgpu::ComputePipeline>; 6] {
         [&self.scale.reduce, &self.scale.reduce_phased, &self.scale.reduce_pair, &self.scale.compose, &self.scale.half, &self.resample.area]
     }
@@ -2735,8 +2746,8 @@ impl Pipelines {
                 (device.clone(), pipeline_layout.clone(), shader.clone());
             pipeline.push(Deferred::pipeline(move |mode| {
                 fullscreen_pipeline_recipe(mode, &device, &pipeline_layout, &shader, entry,
-                    (i == 1 || i == SCALAR_PIPELINE).then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    if i == 2 || i==SCALAR_PIPELINE { device.scalar_format() } else { device.working_format() }, label)
+                    (i == 1 || i == FILL_LINES_PIPELINE).then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    if i == 2 || i==FILL_LINES_PIPELINE { device.scalar_format() } else { device.working_format() }, label)
             }));
         }
         let pipeline = pipeline.try_into().ok().unwrap();
@@ -3019,7 +3030,7 @@ mod shader_tests {
     #[test]
     fn fragment_operations_select_only_their_assigned_pipeline() {
         assert_eq!(FRAGMENTS.map(|(entry,_)| entry).as_slice(), ["fragment_main","fragment_main","fragment_coverage",
-            "fragment_fill","fragment_gradient","fragment_figure","fragment_blend","fragment_image","fragment_tone","fragment_main","fragment_fill_opaque"]);
+            "fragment_fill","fragment_gradient","fragment_figure","fragment_blend","fragment_image","fragment_tone","fragment_fill_lines","fragment_fill_opaque"]);
         let expected = [
             [Some(0),Some(1)],
             [Some(0),Some(1)],
@@ -3057,7 +3068,10 @@ mod shader_tests {
                 }
             }
         }
-        assert_eq!(fragment_pipeline(23,true,true),Some(SCALAR_PIPELINE));
+        for operation in [0,1,2,3,5,7,13,14,16,17,19,20] {
+            for over in [false,true] {assert_eq!(fragment_pipeline(operation,over,true),Some(usize::from(over)));}
+        }
+        for over in [false,true] {assert_eq!(fragment_pipeline(23,over,true),Some(FILL_LINES_PIPELINE));}
         let document=layer_core::Document::new(layer_core::PortableId::random(),16,16,
             layer_core::DocumentNames {paint:"Ink".into(),paper:"Paper".into()});
         let mut fill=RasterOperationKind::Fill {color:[1.;4],texture:layer_core::FillTexture {strength:1.,paper:None},
@@ -3087,6 +3101,7 @@ mod shader_tests {
             for (entry, required) in [
                 ("fragment_main", &[][..]),
                 ("fragment_coverage", &[][..]),
+                ("fragment_fill_lines", &[][..]),
                 ("fragment_fill", &["paper_sample"][..]),
                 ("fragment_fill_opaque", &["paper_sample", "fill_plateau", "fill_anchor", "fill_feasible_neighbour", "fill_reconstruct"][..]),
                 ("fragment_gradient", &["gradient_shape", "paper_sample"][..]),
