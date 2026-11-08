@@ -330,3 +330,37 @@ public static class CapyParkProbePointer {
         if($retained.Count -ne 4 -or $history.Snapshot().Count -ne 5){throw 'ItemStatus history mutated an earlier snapshot'}
     }finally{$history.Dispose()}
 }
+
+& {
+    $native=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '../LayerRowDrag.cpp'))
+    $transition=[regex]::Match($native,'(?m)^        rejected\.reset\(\);ignoreClick=false;suppressContext=false;\+\+generation;[^\r\n]*')
+    if(!$transition.Success){throw 'Layer contact generation transition is missing'}
+    $source=Join-Path $OutputDirectory 'layer-generation-trace.cpp'
+    $object=Join-Path $OutputDirectory 'layer-generation-trace.obj'
+    $executable=Join-Path $OutputDirectory 'layer-generation-trace-test.exe'
+    $harness=@'
+#include <cassert>
+#include <optional>
+struct Contact {
+    std::optional<int> rejected=7;
+    bool ignoreClick=true,suppressContext=true,trace=true;
+    unsigned generation=4,published=4;
+    void publish(){published=generation;}
+    void down(){
+'@
+    $harness+="`n"+$transition.Value+"`n    }`n};`n"+@'
+int main(){
+    Contact contact;
+    contact.down();
+    assert(contact.generation==5&&contact.published==5);
+    assert(!contact.rejected&&!contact.ignoreClick&&!contact.suppressContext);
+    contact.trace=false;contact.down();
+    assert(contact.generation==6&&contact.published==5);
+}
+'@
+    [IO.File]::WriteAllText($source,$harness)
+    & cl /nologo /std:c++20 /EHsc /W4 /WX $optimization $source "/Fo$object" "/Fe$executable" /link @manifest
+    if($LASTEXITCODE -ne 0){throw 'Layer contact generation test build failed'}
+    & $executable
+    if($LASTEXITCODE -ne 0){throw 'Layer contact generation trace stayed stale before contact validation'}
+}

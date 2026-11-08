@@ -245,7 +245,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         auto owner=view.lock();if(owner&&owner->data->claimBubbleContact(e))return;
         if(touch(e,L"down"))return;
         if(pointer){if(pointer.PointerId()!=e.Pointer().PointerId())cancel(L"multiple_contacts");return;}
-        rejected.reset();ignoreClick=false;suppressContext=false;++generation;
+        rejected.reset();ignoreClick=false;suppressContext=false;++generation;if(trace)publish();
         auto original=e.OriginalSource().try_as<DependencyObject>();
         if(!owner||!original)return;
         auto point=e.GetCurrentPoint(surface);
