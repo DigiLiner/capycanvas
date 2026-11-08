@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn phone_snapshot_fields_follow_full_and_incremental_layout_transitions() {
-        for platform in [Platform::Gtk,Platform::Web,Platform::Android] {
+        for platform in [Platform::Gtk,Platform::Web,Platform::Android,Platform::Ios] {
             let mut host = host(platform);
             host.dispatch(UiAction::RestoreWorkspace { workspace:Box::new(WorkspaceState {
                 layout:layer_ui::WorkspacePreset::Painter.layout(platform),..Default::default()

@@ -11,12 +11,13 @@ struct ToolbarComponentView: View {
     let tile: JSON
     let size: CGSize
     let vertical: Bool
+    var phone = JSON()
     var body: some View {
         Group {
             if tile["control"]["kind"].string == "tool_options" {
                 ToolOptionsComponent(store: store, panel: panel, tile: tile, size: size, vertical: vertical)
             } else {
-                BrushSliderComponent(store: store, panel: panel, tile: tile, size: size, vertical: vertical)
+                BrushSliderComponent(store: store, panel: panel, tile: tile, size: size, vertical: vertical, phone: phone)
             }
         }.id(tile["component"]["context"].stableKey)
             .accessibilityElement(children: .contain)
@@ -43,12 +44,29 @@ func toolbarTextWidth(_ text: String, size: CGFloat, bold: Bool = false) -> CGFl
     return ceil((text as NSString).size(withAttributes: [.font: font]).width)
 }
 
+struct ToolbarSliderPresentation {
+    static let paint = ToolbarUI.cached(["type": "slider_paint"])
+    let layout: JSON
+    let scale: CGFloat
+    let endInset: CGFloat
+    var thumbLength: CGFloat { Self.paint["thumb"][0].number * scale }
+    func travel(_ length: CGFloat) -> CGFloat { max(0, length - 2 * endInset - thumbLength) }
+    init(size: CGSize, vertical: Bool, style: JSON, sliderStyle: JSON, phone: Bool, language: String) {
+        scale = phone ? ToolbarUI.cached(["type": "slider_scale", "cross": vertical ? size.width : size.height]).number : 1
+        endInset = phone ? 0 : Self.paint["inset"].number
+        layout = ToolbarUI.cached(["type": "slider_layout", "width": size.width, "height": size.height,
+            "axis": vertical ? "vertical" : "horizontal", "style": style.raw,
+            "slider_style": sliderStyle.raw, "grip": !phone], language: language)
+    }
+}
+
 private struct BrushSliderComponent: View {
     @ObservedObject var store: EditorStore
     let panel: JSON
     let tile: JSON
     let size: CGSize
     let vertical: Bool
+    var phone = JSON()
     @StateObject private var session = SliderPreviewSession()
     @State private var frame = CGRect.zero
     private var model: JSON { tile["component"] }
@@ -63,9 +81,9 @@ private struct BrushSliderComponent: View {
     }
     var body: some View {
         let item = toolbarItem(panel, tile)
-        let layout = ToolbarUI.cached(["type": "slider_layout", "width": size.width, "height": size.height,
-            "axis": vertical ? "vertical" : "horizontal", "style": panel["tile_style"].raw,
-            "slider_style": tile["slider_style"].raw], language: store.interfaceLanguage)
+        let presentation = ToolbarSliderPresentation(size: size, vertical: vertical, style: panel["tile_style"],
+            sliderStyle: tile["slider_style"], phone: !phone.isNull, language: store.interfaceLanguage)
+        let layout = presentation.layout
         let shown = ToolbarUI.formatted(spec, value: value, language: store.interfaceLanguage)
         let marks = model["bookmarks"].array
         ZStack(alignment: .topLeading) {
@@ -86,15 +104,18 @@ private struct BrushSliderComponent: View {
                 .accessibilityIdentifier("slider-cap-\(tile["id"].uint)")
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: item, surface: .tile, context: item))
                 .placed(layout["cap"])
-            ToolbarSliderTrack(identity: model["context"].stableKey, fill: shown["fill"].number, marks: marks,
+            ToolbarSliderTrack(identity: model["context"].stableKey + phone.stableKey, fill: shown["fill"].number, marks: marks,
                 opacity: tile["control"]["kind"].string != "brush_size_slider", vertical: vertical,
                 enabled: !field.isNull, label: label, valueText: shown["text"].string,
                 palette: EditorPalette(source: store.state["palette"]), band: frame,
-                viewport: store.snapshot["layout"]["viewport"], stretchDistance: layout["stretch_distance"].number,
-                language: store.interfaceLanguage,
+                viewport: store.snapshot["layout"]["viewport"], stretchDistance: phone.isNull ? layout["stretch_distance"].number
+                    : PhoneUI.resolve(["kind": "slider_stretch_distance", "layout": phone.raw]).number,
+                language: store.interfaceLanguage, presentation: presentation,
                 contact: { down, moved in
                     if down { openPreview() } else if moved { session.close(store.workspace.sliderPreview) }
-                }, change: pick, step: step)
+                }, change: pick, step: step, phase: { phase in
+                    if !phone.isNull { store.dispatch(["type": "phone", "action": ["kind": "slider", "control": tile["control"].raw, "phase": phase]]) }
+                })
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: item, surface: .control, context: item, canDrag: false))
                 .accessibilityIdentifier("component-slider-\(tile["id"].uint)")
                 .placed(layout["track"])
@@ -254,13 +275,16 @@ private struct ToolbarSliderTrack: View {
     let viewport: JSON
     let stretchDistance: Double
     let language: String
+    let presentation: ToolbarSliderPresentation
     let contact: (_ down: Bool, _ moved: Bool) -> Void
     let change: (_ fill: Double, _ snap: Bool, _ travel: Double) -> Void
     let step: (Int) -> Void
+    var phase: (String) -> Void = { _ in }
     @State private var origin: CGPoint?
     @State private var moved = false
     private var insets: EdgeInsets {
-        vertical ? EdgeInsets(top: 2, leading: 5, bottom: 2, trailing: 5) : EdgeInsets(top: 5, leading: 2, bottom: 5, trailing: 2)
+        vertical ? EdgeInsets(top: presentation.endInset, leading: 0, bottom: presentation.endInset, trailing: 0)
+            : EdgeInsets(top: 0, leading: presentation.endInset, bottom: 0, trailing: presentation.endInset)
     }
     var body: some View {
         GeometryReader { geometry in
@@ -271,7 +295,8 @@ private struct ToolbarSliderTrack: View {
                 Canvas { context, _ in
                     var inset = context
                     inset.translateBy(x: insets.leading, y: insets.top)
-                    draw(inset, area)
+                    inset.scaleBy(x: presentation.scale, y: presentation.scale)
+                    draw(inset, CGSize(width: area.width / presentation.scale, height: area.height / presentation.scale))
                 }.allowsHitTesting(false)
                 ParameterInput(region: .rectangle, identity: identity, nudge: { phase, _, delta in
                     if phase == "down" || phase == "move" { step(Int(delta[0] + delta[1])) }
@@ -280,16 +305,17 @@ private struct ToolbarSliderTrack: View {
                     switch phase {
                     case "down":
                         origin = position; moved = false
+                        self.phase("down")
                         contact(true, false)
                         pick(position, track, snap: true)
                     case "move":
                         guard let origin, ToolbarUI.resolve(["type": "slider_dragging", "moved": moved,
-                            "delta": [position.x - origin.x, position.y - origin.y]], language: language).bool else { return }
-                        moved = true
+                            "delta": [(position.x - origin.x) / presentation.scale, (position.y - origin.y) / presentation.scale]], language: language).bool else { return }
+                        moved = true; self.phase("move")
                         pick(position, track, snap: false)
                     case "up", "cancel":
                         guard origin != nil else { return }
-                        origin = nil; contact(false, phase == "cancel" || moved)
+                        origin = nil; self.phase(phase); contact(false, phase == "cancel" || moved)
                     default: break
                     }
                 }.disabled(!enabled).accessibilityHidden(true)
@@ -306,11 +332,11 @@ private struct ToolbarSliderTrack: View {
         }
     }
     private func pick(_ point: CGPoint, _ track: CGRect, snap: Bool) {
+        let half = presentation.thumbLength / 2
         let endpoints = vertical
-            ? [track.maxY - insets.bottom - 6, track.minY + insets.top + 6]
-            : [track.minX + insets.leading + 6, track.maxX - insets.trailing - 6]
-        let length = vertical ? track.height - insets.top - insets.bottom - 12
-            : track.width - insets.leading - insets.trailing - 12
+            ? [track.maxY - insets.bottom - half, track.minY + insets.top + half]
+            : [track.minX + insets.leading + half, track.maxX - insets.trailing - half]
+        let length = presentation.travel(vertical ? track.height : track.width)
         guard length > 0 else { return }
         let fill = ToolbarUI.resolve(["type": "slider_stretch", "geometry": [
             "track": endpoints, "band": vertical ? [band.minX, band.maxX] : [band.minY, band.maxY],
@@ -319,22 +345,25 @@ private struct ToolbarSliderTrack: View {
         change(fill, snap, length)
     }
     private func draw(_ context: GraphicsContext, _ size: CGSize) {
-        let text = palette["text"]
-        let length = (vertical ? size.height : size.width) - 12
+        let text = palette["text"], paint = ToolbarSliderPresentation.paint
+        let along: CGFloat = paint["thumb"][0].number, across: CGFloat = paint["thumb"][1].number
+        let tip: CGFloat = paint["tip"][0].number, bend: CGFloat = paint["tip"][1].number
+        let radius: CGFloat = paint["radius"].number
+        let length = (vertical ? size.height : size.width) - along
         if length >= 4 {
             var track = context
             if vertical {
-                track.translateBy(x: size.width / 2, y: size.height - 6); track.rotate(by: .degrees(-90))
-            } else { track.translateBy(x: 6, y: size.height / 2) }
-            let wide: CGFloat = 8, narrow: CGFloat = opacity ? wide : 2.5
+                track.translateBy(x: size.width / 2, y: size.height - along / 2); track.rotate(by: .degrees(-90))
+            } else { track.translateBy(x: along / 2, y: size.height / 2) }
+            let wide: CGFloat = paint["wide"].number, narrow: CGFloat = opacity ? wide : paint["narrow"].number
             var path = Path()
-            path.move(to: CGPoint(x: 0, y: -narrow)); path.addLine(to: CGPoint(x: length - 3, y: -wide))
-            path.addCurve(to: CGPoint(x: length - 3, y: wide), control1: CGPoint(x: length + 1, y: -wide), control2: CGPoint(x: length + 1, y: wide))
+            path.move(to: CGPoint(x: 0, y: -narrow)); path.addLine(to: CGPoint(x: length - tip, y: -wide))
+            path.addCurve(to: CGPoint(x: length - tip, y: wide), control1: CGPoint(x: length + bend, y: -wide), control2: CGPoint(x: length + bend, y: wide))
             path.addLine(to: CGPoint(x: 0, y: narrow))
-            path.addCurve(to: CGPoint(x: 0, y: -narrow), control1: CGPoint(x: -3, y: narrow), control2: CGPoint(x: -3, y: -narrow))
+            path.addCurve(to: CGPoint(x: 0, y: -narrow), control1: CGPoint(x: -tip, y: narrow), control2: CGPoint(x: -tip, y: -narrow))
             path.closeSubpath()
             track.clip(to: path)
-            let bounds = CGRect(x: -3, y: -wide, width: length + 4, height: wide * 2)
+            let bounds = CGRect(x: -tip, y: -wide, width: length + tip + bend, height: wide * 2)
             if opacity {
                 track.fill(Path(bounds), with: .linearGradient(Gradient(colors: [text.opacity(0.06), text.opacity(0.28)]),
                     startPoint: .zero, endPoint: CGPoint(x: length, y: 0)))
@@ -342,24 +371,24 @@ private struct ToolbarSliderTrack: View {
                 track.fill(Path(bounds), with: .color(text.opacity(0.22)))
             }
         }
-        let along: CGFloat = 12, across: CGFloat = 28
         let thumb = vertical
             ? CGRect(x: (size.width - across) / 2, y: (size.height - along) * (1 - fill), width: across, height: along)
             : CGRect(x: (size.width - along) * fill, y: (size.height - across) / 2, width: along, height: across)
-        context.fill(SquircleShape(6).path(in: thumb), with: .color(palette["thumb"]))
-        context.stroke(SquircleShape(5.5).path(in: thumb.insetBy(dx: 0.5, dy: 0.5)), with: .color(text.opacity(0.6)), lineWidth: 1)
+        context.fill(SquircleShape(radius).path(in: thumb), with: .color(palette["thumb"]))
+        context.stroke(SquircleShape(radius - 0.5).path(in: thumb.insetBy(dx: 0.5, dy: 0.5)), with: .color(text.opacity(0.6)), lineWidth: 1)
         for mark in marks {
             let position = mark["selected"].bool ? fill : mark["fill"].number
             let center = vertical
                 ? CGPoint(x: size.width / 2, y: along / 2 + (size.height - along) * (1 - position))
                 : CGPoint(x: along / 2 + (size.width - along) * position, y: size.height / 2)
+            let half: CGFloat = paint["mark"][0].number / 2
             var line = Path()
             if vertical {
-                line.move(to: CGPoint(x: center.x - 7, y: center.y)); line.addLine(to: CGPoint(x: center.x + 7, y: center.y))
+                line.move(to: CGPoint(x: center.x - half, y: center.y)); line.addLine(to: CGPoint(x: center.x + half, y: center.y))
             } else {
-                line.move(to: CGPoint(x: center.x, y: center.y - 7)); line.addLine(to: CGPoint(x: center.x, y: center.y + 7))
+                line.move(to: CGPoint(x: center.x, y: center.y - half)); line.addLine(to: CGPoint(x: center.x, y: center.y + half))
             }
-            context.stroke(line, with: .color(mark["selected"].bool ? palette["panel"] : text), lineWidth: 2)
+            context.stroke(line, with: .color(mark["selected"].bool ? palette["panel"] : text), lineWidth: paint["mark"][1].number)
         }
     }
 }

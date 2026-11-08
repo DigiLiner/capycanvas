@@ -160,6 +160,9 @@ CapyText capy_apple_numeric_labels(const char *json);
    samples. Owned JSON result; same error and lifetime rules as numeric. */
 CapyText capy_apple_color_ui(const char *json);
 CapyText capy_apple_toolbar_ui(const char *json);
+CapyText capy_apple_phone_ui(const char *json);
+CapyText capy_apple_dialog_ui(const char *json);
+int32_t capy_apple_device_class(CapyApple app, bool phone);
 CapyText capy_apple_bubble_ui(const char *json);
 CapyText capy_apple_drawer_frame(const char *json);
 CapyText capy_apple_settings_search_key(const char *json);

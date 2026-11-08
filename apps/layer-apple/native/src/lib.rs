@@ -309,6 +309,16 @@ pub unsafe extern "C" fn capy_apple_error(app: u64) -> u64 {
         .map_or(0, handles::text)
 }
 /// # Safety
+/// `app` is a live session handle, exclusively accessed on its serial owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_device_class(app: u64, phone: bool) -> i32 {
+    let Some(mut owner) = handles::app(app) else { return -1; };
+    owner.perform(|app| {
+        app.host.set_device_class(if phone { layer_ui::DeviceClass::Phone } else { layer_ui::DeviceClass::Tablet });
+        Ok(())
+    }).map_or(-1, |_| 0)
+}
+/// # Safety
 /// `json` is a NUL-terminated UTF-8 numeric request, valid for this call.
 /// This stateless operation has no session, GPU or file access.
 #[unsafe(no_mangle)]
@@ -361,6 +371,18 @@ pub unsafe extern "C" fn capy_apple_toolbar_ui(json: *const c_char) -> u64 {
             }
         }
     }) }
+}
+/// # Safety
+/// `json` is readable NUL-terminated UTF-8 for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_phone_ui(json: *const c_char) -> u64 {
+    unsafe { stateless_json(json, "Missing phone request", layer_ui::phone_ui) }
+}
+/// # Safety
+/// `json` is readable NUL-terminated UTF-8 for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_dialog_ui(json: *const c_char) -> u64 {
+    unsafe { stateless_json(json, "Missing dialog request", layer_ui::dialog_ui) }
 }
 /// # Safety
 /// `json` is readable NUL-terminated UTF-8 for this call.

@@ -21,6 +21,9 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
     weak var model: (any NativeReorderModel)?
     private weak var attached: UIWindow?
     private weak var touch: UITouch?
+    private weak var phoneTouch: UITouch?
+    private var phoneContacts: PhoneBarContacts?
+    private var phoneInput: PhoneBarInput? { (model as? WorkspaceReorderInteraction)?.phone }
     private var touchStart: TimeInterval = -1
     private var cancelling = false
     private weak var contactScroll: UIScrollView?
@@ -77,6 +80,8 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
         super.didMoveToWindow()
         guard window !== attached else { return }
         detach(); attached = window
+        let phoneContacts = PhoneBarContacts(marker: self)
+        self.phoneContacts = phoneContacts; attached?.addGestureRecognizer(phoneContacts)
         if let layer = model?.layerTouchModel {
             let recognizer = LayerTouchRecognizer(marker: self, model: layer)
             layerTouches = recognizer; attached?.addGestureRecognizer(recognizer)
@@ -91,6 +96,7 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
         releaseKeyboard()
         handledKeys.removeAll()
         cancel(detaching: true); attached?.removeGestureRecognizer(pan); attached?.removeGestureRecognizer(press)
+        if let phoneContacts { phoneContacts.cancel(); attached?.removeGestureRecognizer(phoneContacts); self.phoneContacts = nil }
         attached?.removeGestureRecognizer(secondary); attached = nil
         if let layerTouches { layerTouches.isEnabled = false; layerTouches.view?.removeGestureRecognizer(layerTouches); self.layerTouches = nil }
         if let bubbles { bubbles.view?.removeGestureRecognizer(bubbles); self.bubbles = nil }
@@ -108,6 +114,10 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
             layerTouches = recognizer; attached?.addGestureRecognizer(recognizer)
         }
         updateViewport(); attachEdges(); attachBubbles()
+        if let workspace = model as? WorkspaceReorderInteraction {
+            workspace.updatePhone()
+            if !workspace.enabled { workspace.phone.cancel() }
+        }
         if isFirstResponder, model?.bubbleInput?.acceptsIntensityKeys != true { releaseKeyboard() }
     }
     private func attachEdges() {
@@ -241,6 +251,7 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
         if detaching { model?.nativeInputDetached() } else if all { model?.cancel() } else { model?.cancelReorder() }
         if all { bubbles?.cancel(); edge?.cancel() }
         if all { model?.bubbleInput?.hover(nil) }
+        if all { phoneInput?.cancel() }
         touch = nil; link?.invalidate(); link = nil
         pan.isEnabled = false; press.isEnabled = false
         pan.isEnabled = true; press.isEnabled = true
@@ -288,6 +299,39 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
     private func updateViewport() {
         model?.viewport = scroll.map { convert($0.bounds, from: $0) } ?? bounds
     }
+    private var phoneSurface: UIView? {
+        var node: UIResponder? = self
+        while let current = node {
+            if let controller = current as? UIViewController {
+                return controller.presentedViewController == nil ? controller.viewIfLoaded : nil
+            }
+            node = current.next
+        }
+        return nil
+    }
+    @discardableResult fileprivate func beginPhone(_ incoming: UITouch) -> Bool {
+        guard let workspace = model as? WorkspaceReorderInteraction else { return false }
+        workspace.updatePhone()
+        if workspace.phone.pointerDown {
+            if phoneTouch === incoming { return true }
+            workspace.phone.cancel(); return false
+        }
+        guard workspace.enabled, workspace.menu.isNull, incoming.window === window,
+            let surface = phoneSurface, incoming.view?.isDescendant(of: surface) == true else { return false }
+        let device: ReorderDevice = incoming.type == .pencil ? .pen : incoming.type == .indirectPointer ? .mouse : .touch
+        guard workspace.phone.begin(at: incoming.location(in: self), device: device) else { return false }
+        phoneTouch = incoming
+        workspace.closeMenu()
+        return true
+    }
+    fileprivate func endPhone(_ incoming: UITouch, cancelled: Bool) {
+        guard phoneTouch === incoming, let phoneInput else { return }
+        if cancelled { phoneInput.cancel() } else { phoneInput.finish(at: incoming.location(in: self)) }
+        phoneTouch = nil; phoneInput.endGesture()
+    }
+    fileprivate func cancelPhone() {
+        phoneInput?.cancel(); phoneTouch = nil; phoneInput?.endGesture()
+    }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive incoming: UITouch) -> Bool {
         guard let model, incoming.type == .direct || incoming.type == .pencil || incoming.type == .indirectPointer else { return false }
         // Window-root recognition must not pick rows behind another panel.
@@ -305,6 +349,8 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
             }
             return edge?.candidate(for: incoming)?.contact == .free
         }
+        if beginPhone(incoming) { return true }
+        if phoneInput?.pointerDown == true { return false }
         if touch !== incoming || touchStart != incoming.timestamp {
             guard touch == nil || touch?.phase == .ended || touch?.phase == .cancelled || model.contact.target == nil else { cancel(); return false }
             updateViewport()
@@ -324,6 +370,10 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
         if recognizer === secondary { return model?.enabled == true }
         if recognizer === edgeDoublePress { return model?.enabled == true }
+        if let phoneInput, phoneInput.pointerDown {
+            guard model?.enabled == true, phoneInput.active, phoneInput.valid() else { phoneInput.cancel(); return false }
+            return true
+        }
         guard let model, model.contact.validate() else { return false }
         if recognizer === pan && model.contact.requiresHold && !model.contact.held {
             if model.beginSwipe(at: touch?.location(in: self) ?? recognizer.location(in: self)) { return true }
@@ -345,7 +395,7 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
         // Retain pickup beside SwiftUI's early button recognition, while native
         // scrolling and other manipulation recognizers keep exclusive ownership.
         guard !(other is UIPanGestureRecognizer), !(other is UIPinchGestureRecognizer) else { return false }
-        return (recognizer === pan || recognizer === press) && model?.contact.target != nil
+        return (recognizer === pan || recognizer === press) && (model?.contact.target != nil || phoneInput?.pointerDown == true)
     }
     func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
         // A grip or mouse row gets the first chance at movement. Touch/pen row
@@ -358,6 +408,15 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
         recognizer === pan && other === edge
     }
     @objc private func pressed(_ recognizer: UILongPressGestureRecognizer) {
+        if let phoneInput, phoneInput.pointerDown {
+            switch recognizer.state {
+            case .began: phoneInput.arm()
+            case .ended: phoneInput.finish(at: recognizer.location(in: self))
+            case .cancelled: if pan.state != .began && pan.state != .changed { phoneInput.cancel() }
+            default: break
+            }
+            return
+        }
         switch recognizer.state {
         case .began: edge?.cancel(activate: true); model?.recognizeHold()
         case .ended: finish()
@@ -366,6 +425,15 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
         }
     }
     @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
+        if let phoneInput, phoneInput.pointerDown {
+            switch recognizer.state {
+            case .began, .changed: phoneInput.move(to: recognizer.location(in: self), pastSlop: true)
+            case .ended: phoneInput.finish(at: recognizer.location(in: self))
+            case .cancelled: phoneInput.cancel()
+            default: break
+            }
+            return
+        }
         switch recognizer.state {
         case .began, .changed:
             if model?.swiping == true { edge?.cancel(activate: true); model?.moveSwipe(to: recognizer.location(in: self)); return }
@@ -421,6 +489,33 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate, UIPointerInte
         let next = CGPoint(x: scroll.contentOffset.x, y: max(top, min(bottom, scroll.contentOffset.y + delta)))
         return next == scroll.contentOffset ? nil : (scroll, next)
     }
+}
+
+private final class PhoneBarContacts: UIGestureRecognizer {
+    private weak var marker: ReorderInputView?
+    init(marker: ReorderInputView) {
+        self.marker = marker
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false; delaysTouchesBegan = false; delaysTouchesEnded = false
+        requiresExclusiveTouchType = false
+        allowedTouchTypes = [UITouch.TouchType.direct, .pencil, .indirectPointer].map { NSNumber(value: $0.rawValue) }
+    }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard !event.buttonMask.contains(.secondary) else { return }
+        for touch in touches { marker?.beginPhone(touch) }
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches { marker?.endPhone(touch, cancelled: false) }
+        DispatchQueue.main.async { [weak self] in if self?.numberOfTouches == 0 { self?.state = .failed } }
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches { marker?.endPhone(touch, cancelled: true) }
+        if event.allTouches?.allSatisfy({ $0.phase == .ended || $0.phase == .cancelled }) == true { state = .failed }
+    }
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    func cancel() { marker?.cancelPhone() }
+    override func reset() { super.reset(); cancel() }
 }
 
 private enum EdgeResizeCursor {

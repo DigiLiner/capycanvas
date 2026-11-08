@@ -197,6 +197,12 @@
 			"path" = "Shared/Bridge/ObservedMetalLayer.swift";
 			"sourceTree" = "<group>";
 		};
+		"1EB93E23B8067E51B56673C2" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/Bridge/PhoneBarInput.swift";
+			"sourceTree" = "<group>";
+		};
 		"C55B1402DDFC4116B08E4FF0" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -591,6 +597,12 @@
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
 			"path" = "Shared/Editor/ParameterInput.swift";
+			"sourceTree" = "<group>";
+		};
+		"70150303F48DB137D02B0742" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/Editor/PhoneFrame.swift";
 			"sourceTree" = "<group>";
 		};
 		"742700D6DDEC697C1CB0706E" = {
@@ -1682,6 +1694,10 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "94E1B9967E71895BDF55239D";
 		};
+		"D335F54285B572719BBEAD44" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "1EB93E23B8067E51B56673C2";
+		};
 		"059113AC553D5559882F4D0D" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "C55B1402DDFC4116B08E4FF0";
@@ -1945,6 +1961,10 @@
 		"64C0F4A4151CBE967FC20001" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "8E1B3B7EEA5E3BA40ED0CE4E";
+		};
+		"6B35E0BF5C8C3008334831B9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "70150303F48DB137D02B0742";
 		};
 		"34902025F63DF7CFCF9E6759" = {
 			"isa" = "PBXBuildFile";
@@ -2261,6 +2281,7 @@
 				"6F0060484E19B2CE12D50235",
 				"4B0184040BC6BAE750FE2900",
 				"981BEC56ADF7FA1DBB08BCE4",
+				"D335F54285B572719BBEAD44",
 				"059113AC553D5559882F4D0D",
 				"F50DC2BE26FE8179D64D8A73",
 				"E1E74644A0BBF9E28D85B72B",
@@ -2327,6 +2348,7 @@
 				"2139F485A608CD16C38A9383",
 				"89BDED1445AB5BEA398445BB",
 				"64C0F4A4151CBE967FC20001",
+				"6B35E0BF5C8C3008334831B9",
 				"34902025F63DF7CFCF9E6759",
 				"F31680D516F1F7A69591F945",
 				"687C6943D9D45081CBD1FD4D",
@@ -2431,7 +2453,7 @@
 				"SDKROOT" = "iphoneos";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"CAPY_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
-				"TARGETED_DEVICE_FAMILY" = "2";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"INFOPLIST_FILE" = "iOS/App/Info.plist";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -2478,7 +2500,7 @@
 				"SDKROOT" = "iphoneos";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"CAPY_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
-				"TARGETED_DEVICE_FAMILY" = "2";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"INFOPLIST_FILE" = "iOS/App/Info.plist";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -2867,7 +2889,7 @@
 				"SWIFT_VERSION" = "5.0";
 				"SDKROOT" = "iphoneos";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-				"TARGETED_DEVICE_FAMILY" = "2";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"TEST_TARGET_NAME" = "CapyCanvas-iPad";
@@ -2890,7 +2912,7 @@
 				"SWIFT_VERSION" = "5.0";
 				"SDKROOT" = "iphoneos";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-				"TARGETED_DEVICE_FAMILY" = "2";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"TEST_TARGET_NAME" = "CapyCanvas-iPad";
@@ -3060,6 +3082,10 @@
 		"ADA241F104DC8E76737ECF2C" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "94E1B9967E71895BDF55239D";
+		};
+		"8FA14DD0DBEC592063745AB3" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "1EB93E23B8067E51B56673C2";
 		};
 		"736765C463363001035FF4A0" = {
 			"isa" = "PBXBuildFile";
@@ -3324,6 +3350,10 @@
 		"E77281B3B5316F7F8D2D18A1" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "8E1B3B7EEA5E3BA40ED0CE4E";
+		};
+		"9D91B5521759EFFBD509DD64" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "70150303F48DB137D02B0742";
 		};
 		"8CEA3AAF80A03D9F299B2D00" = {
 			"isa" = "PBXBuildFile";
@@ -3644,6 +3674,7 @@
 				"BF4746BC614320FBC6C4846A",
 				"7852969B3EDA1ED63C590B42",
 				"ADA241F104DC8E76737ECF2C",
+				"8FA14DD0DBEC592063745AB3",
 				"736765C463363001035FF4A0",
 				"CC012D02BB507E3F9DA79ED5",
 				"B5384B08CF7CF7B403ACDF0C",
@@ -3710,6 +3741,7 @@
 				"B6C9C11A402D780A3A8611B3",
 				"4CA9C658A7E8D503D569E6D9",
 				"E77281B3B5316F7F8D2D18A1",
+				"9D91B5521759EFFBD509DD64",
 				"8CEA3AAF80A03D9F299B2D00",
 				"7660C37B78ADE8656E1F446F",
 				"40663C3F2A36AFA1411DCE1F",
@@ -4351,6 +4383,7 @@
 				"1977B5F8C1B2006D6B09AE77",
 				"D7FEF0DF9F40E7CFC526B00E",
 				"94E1B9967E71895BDF55239D",
+				"1EB93E23B8067E51B56673C2",
 				"C55B1402DDFC4116B08E4FF0",
 				"C3FDDA87759819D4E7E73E39",
 				"8E13FAC1E1DACE256A99D467",
@@ -4417,6 +4450,7 @@
 				"86CA9770A2A5CFE70DA07981",
 				"27A958250944A95A0D16F222",
 				"8E1B3B7EEA5E3BA40ED0CE4E",
+				"70150303F48DB137D02B0742",
 				"742700D6DDEC697C1CB0706E",
 				"30D1198AE889354CFA445140",
 				"0C83B16796A216D6BC6EFE19",

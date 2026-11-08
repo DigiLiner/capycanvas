@@ -1,5 +1,8 @@
 import SwiftUI
 import Darwin
+#if os(iOS)
+import UIKit
+#endif
 
 @MainActor final class CameraReadout: ObservableObject {
     @Published var value = JSON()
@@ -11,6 +14,7 @@ import Darwin
     let camera = CameraReadout()
     @Published var displayDetails = DisplayDetails()
     @Published var displayHeadroom: Double = 1
+    @Published var keyboardInset: CGFloat = 0
     @Published var catalog = JSON()
     @Published private(set) var bootstrap = JSON()
     @Published private(set) var interfaceLanguage = ""
@@ -73,6 +77,8 @@ import Darwin
     var systemSceneID: String?
     let sessionIdentity: String
     private var launch: ((JSON?) -> Void)?
+    var phoneMetricsChanged: (() -> Void)?
+    private var phoneMetricsContext: String?
     private(set) var native: NativeOwner?
     private(set) var workspaces: WorkspaceController?
     private var drawingWorkload: DrawingWorkload?
@@ -143,9 +149,14 @@ import Darwin
     private func initialize(platform: UInt32, scene: String, storage: EditorPersistence,
         usesWorkspaceLibrary: Bool, workload: DrawingWorkloadPlan?, screen: JSON?) {
         do {
+            #if os(iOS)
+            let phone: Bool? = UIDevice.current.userInterfaceIdiom == .phone
+            #else
+            let phone: Bool? = nil
+            #endif
             native = try NativeOwner(platform: platform, persistence: storage, screen: screen,
                 traceDuration: workload.map { $0.seconds + ($0.document == nil ? 140 : 240) }, workload: workload?.metadata,
-                managedWorkspaces: usesWorkspaceLibrary) { [weak self] snapshot, failure in
+                managedWorkspaces: usesWorkspaceLibrary, phone: phone) { [weak self] snapshot, failure in
                 DispatchQueue.main.async { self?.receive(snapshot, failure) }
             }
             native?.languageInputBusy = { [weak self] in self?.workspace.languageInputBusy == true }
@@ -203,6 +214,10 @@ import Darwin
             let hadCanvas = snapshot["canvas_ready"].bool
             let documentEpoch = state["document_file"]["epoch"].uint, cursor = navigationCursor
             let update = ui.receive(next)
+            if update == .full || update == .reflow {
+                let context = state["workspace_ready"].bool ? snapshot["layout"]["phone"]["edge"].string : "pending"
+                if phoneMetricsContext != context { phoneMetricsContext = context; phoneMetricsChanged?() }
+            }
             if cursor != navigationCursor { cursorChanged?() }
             switch update {
             case .full:

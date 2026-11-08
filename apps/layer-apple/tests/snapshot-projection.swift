@@ -272,7 +272,42 @@ private final class Changes: @unchecked Sendable {
         precondition(editor.state["workspace"]["layout"]["bands"][0]["extent"].uint == 200)
         precondition(editor.state["workspace"]["layout"]["column_stacks"][0]["column"].uint == 7)
         precondition(editor.snapshot["header_presentation"]["items"][0]["bounds"]["width"].uint == 200)
-        print("Workspace reflow checks passed: retained content, atomic geometry/camera, incomplete/stale packet rejection and full completion")
+        let phoneFields: [String: Any] = ["phone_tools": [["id": "brush"]],
+            "phone_settings": [["id": "size"]], "phone_sliders": [["value": 24]],
+            "capy_caption": ["text": "Draw"]]
+        func phonePacket(_ value: JSON, phone: Bool) -> JSON {
+            var raw = value.object
+            if phone {
+                raw["layout"] = value["layout"].replacing("phone", with: JSON(["hidden": false])).raw
+                for (key, field) in phoneFields { raw[key] = field }
+            }
+            return JSON(raw)
+        }
+        for (revision, phone) in [(14, true), (15, true), (16, false)] {
+            let next = phonePacket(packet(revision, model: revision, content: 13, width: 350 + revision), phone: phone)
+            let coherentPhone = Changes()
+            withObservationTracking({ _ = editor.snapshot["layout"].raw }, onChange: {
+                MainActor.assumeIsolated {
+                    if phoneFields.keys.allSatisfy({ key in
+                        editor.snapshot[key].stableKey == next[key].stableKey
+                            && (editor.snapshot.json.object[key] != nil) == phone
+                    }) { coherentPhone.record() }
+                }
+            })
+            precondition(editor.receive(next) == .reflow)
+            precondition(coherentPhone.value == 1 && editor.state["revision"].uint == 13)
+            let retainedPhone = editor.snapshot.json
+            precondition(editor.receive(JSON(["camera": ["zoom": revision]])) == .camera)
+            for key in phoneFields.keys {
+                precondition(editor.snapshot[key].stableKey == retainedPhone[key].stableKey)
+                precondition((editor.snapshot.json.object[key] != nil) == phone)
+            }
+        }
+        precondition(editor.receive(phonePacket(full(17, width: 200), phone: true)) == .full)
+        for (key, value) in phoneFields { precondition(editor.snapshot[key].stableKey == JSON(value).stableKey) }
+        precondition(editor.receive(full(18, width: 200)) == .full)
+        precondition(phoneFields.keys.allSatisfy { editor.snapshot.json.object[$0] == nil })
+        print("Workspace reflow checks passed: retained content, atomic geometry/camera/phone fields, incomplete/stale packet rejection and full completion")
     }
     @MainActor private static func checkCanvasBarPublication() {
         let editor = EditorSnapshotState()

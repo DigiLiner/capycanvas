@@ -40,9 +40,13 @@ import Foundation
                 // Preserve the content revision and all control indexes. The
                 // live workspace dimensions and camera become visible together.
                 changes = stateFields.stagePatch(["workspace": updatedWorkspace, "camera": next["camera"]])
-                changes += snapshotFields.stagePatch(["state": stateFields.unobserved, "layout": next["layout"],
-                    "header_presentation": next["header_presentation"],
-                    "panel_measurements": next["panel_measurements"], "workspace_update": motion])
+                var retained = snapshotFields.unobserved.object
+                for key in ["layout", "header_presentation", "panel_measurements", "workspace_update",
+                    "phone_tools", "phone_settings", "phone_sliders", "capy_caption"] {
+                    retained[key] = next.object[key]
+                }
+                retained["state"] = stateFields.unobserved.raw
+                changes += snapshotFields.stage(JSON(retained))
                 changes += workspace.stage(motion)
                 kind = .reflow
             } else {

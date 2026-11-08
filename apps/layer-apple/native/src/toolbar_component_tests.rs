@@ -1,6 +1,51 @@
 use super::*;
 
 #[test]
+fn apple_phone_queries_round_trip_without_a_session() {
+    let dock = layer_ui::WorkspacePreset::Painter.layout(layer_ui::Platform::Gtk);
+    let layout = layer_ui::PhoneLayout::resolve(&dock, [402., 874.], [0.; 4], [0.; 2], [0; 2], false, false).unwrap();
+    let hit = layout.tool_hits[0];
+    for request in [
+        json!({"kind":"slider_stretch_distance","layout":layout}),
+        json!({"kind":"bar_begin","layout":layout,"tiles":dock.phone,"point":[hit.x+hit.width/2.,hit.y+hit.height/2.]}),
+    ] {
+        let source = request.to_string();
+        assert_eq!(stateless(capy_apple_phone_ui, source.clone()), layer_ui::phone_ui(&source).unwrap());
+    }
+    assert!(stateless(capy_apple_phone_ui, "{")["error"].is_string());
+    let output = unsafe { capy_apple_phone_ui(std::ptr::null()) };
+    let missing: Value = serde_json::from_slice(handles::take_text(output).to_bytes()).unwrap();
+    assert_eq!(missing["error"], "Missing phone request");
+}
+
+#[test]
+fn apple_dialog_queries_round_trip_without_a_session() {
+    for request in [
+        json!({"kind":"escape","subpage":true,"search_focused":true,"search_has_text":true}),
+        json!({"kind":"color_editor_layout","width":320,"minimum":[128,128]}),
+        json!({"kind":"phone_window","viewport":[402,874]}),
+    ] {
+        let source = request.to_string();
+        assert_eq!(stateless(capy_apple_dialog_ui, source.clone()), layer_ui::dialog_ui(&source).unwrap());
+    }
+    assert!(stateless(capy_apple_dialog_ui, "{")["error"].is_string());
+    let output = unsafe { capy_apple_dialog_ui(std::ptr::null()) };
+    let missing: Value = serde_json::from_slice(handles::take_text(output).to_bytes()).unwrap();
+    assert_eq!(missing["error"], "Missing dialog request");
+}
+
+#[test]
+fn apple_device_class_admits_phone_and_tablet_finger_input() {
+    for phone in [true, false] {
+        let app = App::new(1);
+        assert!(!app.with(|app| app.host.session.finger_drawing()));
+        assert_eq!(unsafe { capy_apple_device_class(app.0, phone) }, 0);
+        assert!(app.with(|app| app.host.session.finger_drawing()));
+    }
+    assert_eq!(unsafe { capy_apple_device_class(0, true) }, -1);
+}
+
+#[test]
 fn apple_enclose_fill_flat_choices_and_source_use_native_transport() {
     for platform in [0, 1] {
         for theme in ["light", "dark"] {

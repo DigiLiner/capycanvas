@@ -20,6 +20,8 @@ final class CanvasView: UIView {
     let store: EditorStore
     private var displayLink: CADisplayLink?
     private var screenReport: ScreenReport?
+    private var phoneMetricsKey = ""
+    private weak var phoneMetricsOwner: NativeOwner?
     private static let longPress = UILongPressGestureRecognizer()
     private lazy var frames = CanvasFrameDriver(store: store)
     private var sceneActive = false
@@ -82,6 +84,7 @@ final class CanvasView: UIView {
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
     }
     private func connectStore() {
+        store.phoneMetricsChanged = { [weak self] in self?.reportPhoneMetrics() }
         store.cursorChanged = { [weak self] in self?.interactions.compactMap { $0 as? UIPointerInteraction }.first?.invalidate() }
         store.bootstrapChanged = { [weak self] in self?.updateAccessibility() }
         updateAccessibility()
@@ -166,6 +169,7 @@ final class CanvasView: UIView {
             if store?.headerLeadingInset != headerInset { store?.headerLeadingInset = headerInset }
         }
         measureWorkspaceBottom()
+        reportPhoneMetrics()
         let details = DisplayDetails(screen: traitCollection.displayGamut == .P3 ? "Wide color (P3)" : "Standard color (sRGB)",
             destination: "iPadOS color management")
         DispatchQueue.main.async { [weak store] in
@@ -190,6 +194,19 @@ final class CanvasView: UIView {
         store.native?.touchPolicy(milliseconds: UInt32(Self.longPress.minimumPressDuration * 1000),
             slop: Float(Self.longPress.allowableMovement * contentScaleFactor))
         wake()
+    }
+    private func reportPhoneMetrics() {
+        guard window != nil, let owner = store.native, store.state["workspace_ready"].bool else { return }
+        let edge = store.snapshot["layout"]["phone"]["edge"].string
+        let insets: UIEdgeInsets
+        if #available(iOS 26.0, *), !edge.isEmpty {
+            insets = edgeInsets(for: .safeArea(cornerAdaptation: edge == "top" ? .horizontal : .vertical))
+        } else { insets = safeAreaInsets }
+        let metrics = JSON(["kind": "metrics", "insets": [insets.left, insets.top, insets.right, insets.bottom],
+            "corners": [0, 0, 0, 0], "native": [0, 0], "native_counts": [0, 0], "movable": false])
+        guard phoneMetricsOwner !== owner || phoneMetricsKey != metrics.stableKey else { return }
+        phoneMetricsOwner = owner; phoneMetricsKey = metrics.stableKey
+        store.dispatch(["type": "phone", "action": metrics.raw])
     }
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
@@ -217,7 +234,13 @@ final class CanvasView: UIView {
     }
     private func measureWorkspaceBottom() {
         guard window != nil, bounds.height > 0 else { return }
-        let inset = keyboardCoversField ? keyboardFrame?.height ?? 0 : 0
+        let keyboardInset = keyboardFrame?.height ?? 0
+        if store.keyboardInset != keyboardInset {
+            DispatchQueue.main.async { [weak store = store] in
+                if store?.keyboardInset != keyboardInset { store?.keyboardInset = keyboardInset }
+            }
+        }
+        let inset = keyboardCoversField ? keyboardInset : 0
         guard inset != workspaceBottom else { return }
         workspaceBottom = inset
         store.dispatch(["type": "measure_workspace_bottom", "inset": Double(inset)])

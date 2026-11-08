@@ -14,6 +14,7 @@ struct WorkspacePanels: View {
     }
     var body: some View {
         ZStack(alignment: .topLeading) {
+            if store.snapshot["layout"]["phone"].isNull {
             WorkspacePanelLabelMeasurements(store: store)
             if !workspace.expansion.isNull {
                 Color.clear.contentShape(Rectangle()).onTapGesture { store.customize(["type": "close_expanded"]) }
@@ -46,13 +47,14 @@ struct WorkspacePanels: View {
                     }
                 }
             }
-            CanvasBarLayer(store: store, presence: store.canvasBar).zIndex(180)
-            CanvasFloorLayer(store: store, presence: store.notice, bar: store.canvasBar).zIndex(181)
             WorkspaceDropIndicator(workspace: workspace, palette: EditorPalette(source: store.state["palette"])).zIndex(300)
             WorkspaceCollapsedColumns(store: store).modifier(WorkspaceChromeVisibility(hidden: store.snapshot["chrome_hidden"].bool))
             WorkspaceBubbleLayer(store: store, bubbles: store.bubbles)
-            WorkspaceContentDrawers(store: store, drawers: store.contentDrawers).environment(\.workspacePanelMeasurementOrigins, [:])
             WorkspaceTabSlideOverlay(store: store, slide: workspace.tabSlide).zIndex(250)
+            }
+            CanvasBarLayer(store: store, presence: store.canvasBar).zIndex(180)
+            CanvasFloorLayer(store: store, presence: store.notice, bar: store.canvasBar).zIndex(181)
+            WorkspaceContentDrawers(store: store, drawers: store.contentDrawers).environment(\.workspacePanelMeasurementOrigins, [:])
             ToolbarSliderPreviewOverlay(preview: workspace.sliderPreview, palette: EditorPalette(source: store.state["palette"])).zIndex(350)
             PaletteDragOverlay(controller: store.palettes, hdr: store.snapshot["color_panel"]["hdr"].bool, viewing: store.colorViewing).zIndex(380)
             WorkspaceContactMenu(interaction: workspace.input, store: store).zIndex(400)

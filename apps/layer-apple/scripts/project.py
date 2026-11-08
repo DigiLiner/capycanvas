@@ -95,7 +95,7 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
         settings.update({"SDKROOT": "iphoneos", "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
             "CAPY_RUST_TARGET[sdk=iphonesimulator*]": "aarch64-apple-ios-sim",
             "CAPY_RUST_BUILD_ROOT": "$(SRCROOT)/../../target/ios-$(IPHONEOS_DEPLOYMENT_TARGET)",
-            "TARGETED_DEVICE_FAMILY": "2", "IPHONEOS_DEPLOYMENT_TARGET": "17.5",
+            "TARGETED_DEVICE_FAMILY": "1,2", "IPHONEOS_DEPLOYMENT_TARGET": "17.5",
             "INFOPLIST_FILE": "iOS/App/Info.plist", "SUPPORTS_MACCATALYST": "NO", "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon"})
     else:
         settings.update({"SDKROOT": "macosx", "SUPPORTED_PLATFORMS": "macosx", "MACOSX_DEPLOYMENT_TARGET": "15.0", "INFOPLIST_FILE": "macOS/App/Info.plist",
@@ -123,7 +123,7 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
         "PRODUCT_NAME": test_name, "PRODUCT_BUNDLE_IDENTIFIER": "$(CAPY_APPLE_BUNDLE_ID).tests",
         "CAPY_APPLE_BUNDLE_ID": settings["CAPY_APPLE_BUNDLE_ID"],
         "CODE_SIGN_STYLE": "Automatic", "SWIFT_VERSION": "5.0", "SDKROOT": "iphoneos",
-        "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator", "TARGETED_DEVICE_FAMILY": "2",
+        "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator", "TARGETED_DEVICE_FAMILY": "1,2",
         "IPHONEOS_DEPLOYMENT_TARGET": "17.5", "GENERATE_INFOPLIST_FILE": "YES",
         "TEST_TARGET_NAME": scheme, "ARCHS": "arm64", "CLANG_ENABLE_MODULES": "YES",
     }

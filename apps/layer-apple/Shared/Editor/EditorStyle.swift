@@ -230,6 +230,8 @@ struct HeaderButtonStyle: ButtonStyle {
     var hovering = false
     var inBar = false
     var drawerOpen = false
+    var face: CGRect? = nil
+    var square: [Bool]? = nil
     let radius: CGFloat
     func makeBody(configuration: Configuration) -> some View { Face(configuration: configuration, style: self) }
     private struct Face: View {
@@ -238,7 +240,9 @@ struct HeaderButtonStyle: ButtonStyle {
         @Environment(\.editorPalette) private var palette
         var body: some View {
             let r = style.radius
-            let shape = style.drawerOpen ? SquircleShape(topLeading: r, topTrailing: r) : SquircleShape(r)
+            let corners = style.square.map { SquircleShape(r, square: $0) }
+                ?? (style.drawerOpen ? SquircleShape(topLeading: r, topTrailing: r) : SquircleShape(r))
+            let shape = HeaderFaceShape(face: style.face, shape: corners)
             configuration.label.background {
                 ZStack {
                     if !style.inBar { shape.fill(style.drawerOpen && !style.selected ? palette.glassPanel : palette.chromeSurface) }
@@ -252,7 +256,7 @@ struct HeaderButtonStyle: ButtonStyle {
                         }
                     }
                 }
-            }.modifier(GlassRegistration(shape: shape, active: !style.inBar))
+            }.modifier(GlassRegistration(shape: corners, active: !style.inBar))
         }
     }
 }
@@ -420,5 +424,34 @@ extension FocusedValues {
     var editorTextCommit: (() -> Void)? {
         get { self[EditorTextCommit.self] }
         set { self[EditorTextCommit.self] = newValue }
+    }
+}
+
+private struct HeaderFaceShape: Shape {
+    let face: CGRect?
+    let shape: SquircleShape
+    func path(in rect: CGRect) -> Path { shape.path(in: face ?? rect) }
+}
+
+struct HeaderTileButton: View {
+    let model: JSON
+    let iconSize: CGFloat
+    let enabled: Bool
+    let style: HeaderButtonStyle
+    let reasonIdentifier: String
+    let action: () -> Void
+    var body: some View {
+        let reason = enabled ? nil : model.disabledReason
+        Button(action: action) {
+            ZStack(alignment: .topLeading) {
+                if let face = style.face {
+                    PanelIcon(name: model["icon"].string, size: iconSize)
+                        .frame(width: face.width, height: face.height).offset(x: face.minX, y: face.minY)
+                } else { PanelIcon(name: model["icon"].string, size: iconSize).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).contentShape(Rectangle())
+        }.buttonStyle(style).disabled(!enabled).opacity(enabled ? 1 : 0.36)
+            .accessibilityLabel(model["label"].string).help(reason ?? model["label"].string)
+            .accessibilityHint(reason ?? "").accessibilityAddTraits(model["selected"].bool ? .isSelected : [])
+            .modifier(DisabledExplanation(reason: reason, identifier: reasonIdentifier))
     }
 }

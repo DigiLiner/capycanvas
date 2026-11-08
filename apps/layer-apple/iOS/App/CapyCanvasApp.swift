@@ -18,6 +18,12 @@ private struct IPadEditorScene: View {
     @StateObject private var store: EditorStore
     @Environment(\.scenePhase) private var phase
     init(scene: String) { _store = StateObject(wrappedValue: EditorStore(platform: 0, scene: scene, deferLaunch: true)) }
+    private var deferredEdges: Edge.Set {
+        var edges: Edge.Set = store.state["workspace"]["zen_mode"].bool ? [.top, .bottom] : []
+        let edge = store.snapshot["layout"]["phone"]["edge"].string
+        if !edge.isEmpty { edges.formUnion(edge == "top" ? [.top, .bottom] : [.leading, .trailing]) }
+        return edges
+    }
     var body: some View {
         // Keep the drawable in full-window coordinates. UIKit's keyboard guide
         // supplies workspace clearance for controls through the shared layout.
@@ -26,7 +32,7 @@ private struct IPadEditorScene: View {
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }.ignoresSafeArea()
             .statusBarHidden()
-            .defersSystemGestures(on: store.state["workspace"]["zen_mode"].bool ? [.top, .bottom] : [])
+            .defersSystemGestures(on: deferredEdges)
             .onChange(of: phase) { _, next in
                 if next != .active {
                     store.input(["type": "blur"])

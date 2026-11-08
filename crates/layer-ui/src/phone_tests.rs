@@ -1074,15 +1074,15 @@ fn phone_presentation_waits_for_each_hosts_capability() {
             s.set_viewport(viewport, viewport.map(|v| v as u32)).unwrap();
             let input = s.layout_resolve_input();
             let resolved = input.resolve(viewport);
-            assert_eq!(resolved.phone.is_some(), matches!(platform, Platform::Gtk | Platform::Web | Platform::Android));
-            assert_eq!(s.phone_layout().is_some(), matches!(platform, Platform::Gtk | Platform::Web | Platform::Android));
-            if !matches!(platform, Platform::Gtk | Platform::Web | Platform::Android) {
+            assert_eq!(resolved.phone.is_some(), matches!(platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Ios));
+            assert_eq!(s.phone_layout().is_some(), matches!(platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Ios));
+            if !matches!(platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Ios) {
                 let desktop = s.state.workspace.layout.resolved(viewport);
                 assert_eq!(resolved.work_area, desktop.work_area);
                 assert_eq!(resolved.groups.len(), desktop.groups.len());
             }
             let rows = s.state.settings.pages(platform).into_iter().flat_map(|page| page.groups).flat_map(|group| group.rows);
-            assert_eq!(rows.into_iter().any(|row| row.id == PreferenceId::FingerDrawing), matches!(platform, Platform::Gtk | Platform::Web | Platform::Android));
+            assert_eq!(rows.into_iter().any(|row| row.id == PreferenceId::FingerDrawing), matches!(platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Ios));
             assert!(s.state.workspace.layout.phone.is_some());
         }
     }

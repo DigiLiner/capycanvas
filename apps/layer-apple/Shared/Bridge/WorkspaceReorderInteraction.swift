@@ -9,10 +9,14 @@ import SwiftUI
     private var menuPoint = CGPoint.zero
     private var menuSource: String?
     private var menuTarget: String?
+    private var phoneMenuLayout: String?
     private var request = UUID()
     let popup = UUID()
     private weak var workspace: WorkspacePresentation?
     private weak var store: EditorStore?
+    lazy var phone = PhoneBarInput(enabled: { [weak self] in self?.enabled == true }, action: { [weak self] action in
+        self?.store?.dispatch(["type": "phone", "action": action.raw])
+    }, menu: { [weak self] target, point in self?.phoneContext(target, at: point) })
     init(workspace: WorkspacePresentation, store: EditorStore?) {
         self.workspace = workspace; self.store = store
     }
@@ -30,8 +34,26 @@ import SwiftUI
         return CGRect(origin: menuPoint, size: CGSize(width: 1, height: 1))
     }
     func validate() {
+        updatePhone()
+        if !enabled { phone.cancel() }
+        if let phoneMenuLayout, phoneMenuLayout != phone.layout.stableKey { closeMenu() }
         if contact.target != nil { _ = contact.validate() }
         if let menuSource, !enabled || workspace?.sourceInstances[menuSource]?.context != menuTarget { closeMenu() }
+    }
+    func updatePhone() {
+        phone.update(layout: store?.snapshot["layout"]["phone"] ?? JSON(),
+            tiles: store?.state["workspace"]["layout"]["phone"] ?? JSON([]))
+    }
+    func phoneContext(_ target: JSON, at point: CGPoint) {
+        guard enabled, let store, !phone.layout.isNull else { return }
+        let generation = UUID(); request = generation
+        menuSource = nil; menuTarget = nil; menuPoint = point
+        phoneMenuLayout = phone.layout.stableKey
+        store.query(["type": "context", "target": target.raw]) { [weak self] result in
+            guard let self, request == generation, enabled,
+                phoneMenuLayout == phone.layout.stableKey else { return }
+            menu = result
+        }
     }
     func source(at point: CGPoint) -> ReorderTarget? {
         guard enabled, viewport.contains(point) else { closeMenu(); return nil }
@@ -98,11 +120,15 @@ import SwiftUI
         }
     }
     func acceptsContext(at point: CGPoint) -> Bool {
-        enabled && viewport.contains(point) && menu.isNull
-            && workspace?.hitSource(at: point)?.1.context != nil
+        updatePhone()
+        return enabled && viewport.contains(point) && menu.isNull
+            && (phone.contextTarget(at: point) != nil
+            || workspace?.hitSource(at: point)?.1.context != nil)
     }
     func context(at point: CGPoint) {
-        guard acceptsContext(at: point), let (id, source) = workspace?.hitSource(at: point) else { return }
+        guard acceptsContext(at: point) else { return }
+        if let target = phone.contextTarget(at: point) { phoneContext(target, at: point); return }
+        guard let (id, source) = workspace?.hitSource(at: point) else { return }
         showMenu(source.context, source: id, at: point)
     }
     func showMenu(_ target: String?, source: String, at point: CGPoint) {
@@ -116,11 +142,11 @@ import SwiftUI
         }
     }
     func closeMenu() {
-        request = UUID(); menuSource = nil; menuTarget = nil
+        request = UUID(); menuSource = nil; menuTarget = nil; phoneMenuLayout = nil
         if !menu.isNull { menu = JSON() }
     }
     func recognizeHold() { contact.recognizeHold(); workspace?.refreshChrome() }
-    func cancelReorder() { contact.cancel(); closeMenu(); workspace?.refreshChrome() }
+    func cancelReorder() { phone.cancel(); contact.cancel(); closeMenu(); workspace?.refreshChrome() }
     func cancel() { cancelReorder(); bubbleInput?.cancel() }
 }
 

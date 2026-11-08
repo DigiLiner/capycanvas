@@ -155,6 +155,7 @@ final class NativeOwner: @unchecked Sendable {
     private var lastTraceState: UInt64?
     private let persistence: EditorPersistence
     private let managedWorkspaces: Bool
+    private let phone: Bool?
     private let observerID = UUID()
     private var settingsRequests = Set<UInt64>()
     private var settingsWrites = 0
@@ -176,7 +177,7 @@ final class NativeOwner: @unchecked Sendable {
     var sessions: URL? { persistence.locations?.sessions }
 
     init(platform: UInt32, persistence: EditorPersistence = .shared, screen: JSON? = nil,
-        traceDuration: TimeInterval? = nil, workload: [String: Any]? = nil, managedWorkspaces: Bool = false,
+        traceDuration: TimeInterval? = nil, workload: [String: Any]? = nil, managedWorkspaces: Bool = false, phone: Bool? = nil,
         receive: @escaping @Sendable (JSON?, String?) -> Void) throws {
         #if DEBUG
         let fixtureActions = try ProcessInfo.processInfo.environment["CAPY_INITIAL_ACTIONS"].map { try JSON.decode($0).array } ?? []
@@ -185,7 +186,7 @@ final class NativeOwner: @unchecked Sendable {
         let preferredLanguages = Locale.preferredLanguages
         self.queue = queue; self.receive = receive
         self.persistence = persistence; self.managedWorkspaces = managedWorkspaces
-        self.platform = platform
+        self.platform = platform; self.phone = phone
         launchSessionPending = persistence.locations != nil
         #if DEBUG
         initialActions = fixtureActions
@@ -238,7 +239,9 @@ final class NativeOwner: @unchecked Sendable {
         handle = nativeHandle(capy_apple_launch(platform,nativeValue(prepared), &bootstrap, &error))
 
         let launchError = takeNativeText(error)
-        if let bootstrap = takeNativeText(bootstrap) {
+        let bootstrapText = takeNativeText(bootstrap)
+        if let handle, let phone { try check(capy_apple_device_class(nativeValue(handle), phone)) }
+        if let bootstrap = bootstrapText {
             let view = try JSON.decode(bootstrap)
             let catalog = handle == nil ? nil : try request(2, JSON(["type": "catalog"]))
             catalogLoaded = catalog?.isNull == false
