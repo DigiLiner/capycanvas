@@ -92,6 +92,7 @@ struct GradientEditor: View {
             .onChange(of: ownerKey, initial: true) { _, next in
                 if owner != next { cancel(); selected = 0; owner = next }
             }
+            .onChange(of: stops.count) { _, _ in revision &+= 1 }
             .onDisappear(perform: cancel)
             .modifier(BubbleNativeControl(cancel: cancel))
     }
