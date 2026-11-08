@@ -51,7 +51,7 @@ async fn read_source(file: JsValue, photo_policy: layer_ui::PhotoOpenPolicy, sou
         artwork_transfer::OpenOptions {
             dimension: layer_core::ProjectLimits::default().dimension,
             photo_policy,
-            names: layer_ui::photo_document_names(&name, localization),
+            name: layer_ui::photo_name(&name, localization),
             intent: layer_ui::ImportIntent::Place,
             source_bytes: Some(source_bytes),
         },Some(cancelled.as_ref().unchecked_ref::<js_sys::Function>().clone()),

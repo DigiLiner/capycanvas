@@ -169,7 +169,7 @@ def validate_setup(info, requested):
     workload = requested.get("workload", "ordinary")
     effect_count = int(workload in ("blurred-base", "objects-effects")) + int(bool(requested.get("live_filter")))
     expected.update(layers=requested.get("fixture_layers", requested["photo_layers"] +
-                                            (1 if requested.get("paint_layer_name") else 2) + effect_count),
+                                            (0 if requested.get("paint_layer_name") else 1) + effect_count),
                     diameter=requested["brush_size"], selected_preset=requested["preset"],
                     feedback=requested["prediction"])
     actual.update(layers=len(state["layers"]), diameter=state["brush"]["diameter"],

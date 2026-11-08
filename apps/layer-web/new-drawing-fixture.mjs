@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+import {readyCanvas,waitForPixels} from './canvas-pixels-fixture.mjs';
 import {chooseDropdown} from './dropdown-fixture.mjs';
 // An in-page script that fills the open New drawing dialog through its
 // controls and, unless `create` is false, presses Create. Sizes are in
@@ -26,4 +28,29 @@ export function createDrawing({width = 2048, height = 1536, resolution = null, s
     while(view()){if(performance.now()>end)throw Error('New drawing did not create');await new Promise(r=>setTimeout(r,20));}
     return setup;
   })()`;
+}
+
+export async function checkPngPaperRows({call,evaluate,settle,wait,click,capture},theme) {
+  const tabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');
+  await evaluate(`(async()=>{const canvas=new OffscreenCanvas(128,64),context=canvas.getContext('2d');context.fillStyle='#468CD2';context.fillRect(0,0,128,64);const blob=await canvas.convertToBlob({type:'image/png'});window.paperOpenPicker=window.showOpenFilePicker;window.showOpenFilePicker=async()=>[{name:'paper-check.png',async getFile(){return new File([blob],'paper-check.png')}}];layerApp.dispatch({type:'preferences',action:{type:'edit',id:'missing_profile',value:0}});layerApp.dispatch({type:'invoke',command:'open_document'});})()`);
+  try {
+    await wait(`!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.state().tabs[0].width===128&&layerApp.app.document_tabs(0).tabs.length===${tabs+1}&&layerApp.app.brush_ready()`,60000);
+    await readyCanvas({evaluate,settle});
+    assert.equal(await evaluate('layerApp.state().layers.some(l=>l.paper)'),false,'Opening PNG creates no Paper layer');
+    await wait(`!!document.querySelector('#layer-add-paper')`);
+    const pixel=async()=>{
+      const {data}=await call('Page.captureScreenshot',{format:'png'});
+      return evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${data}';await image.decode();const canvas=new OffscreenCanvas(image.width,image.height),context=canvas.getContext('2d'),bounds=document.querySelector('#canvas').getBoundingClientRect();context.drawImage(image,0,0);const camera=layerApp.state().camera,scale=image.width/innerWidth,x=bounds.x+(camera.translation[0]+64*camera.zoom)*bounds.width/camera.viewport[0],y=bounds.y+(camera.translation[1]+32*camera.zoom)*bounds.height/camera.viewport[1];return Array.from(context.getImageData(Math.floor(x*scale),Math.floor(y*scale),1,1).data);})()`);
+    };
+    await waitForPixels(pixel,settle,pixels=>pixels.every((value,index)=>Math.abs(value-[70,140,210,255][index])<=8),'The opened PNG is presented before Add Paper');
+    await capture(`${theme}-png-no-paper`);
+    await click('#layer-add-paper');
+    await wait(`layerApp.state().layers.some(l=>l.paper)&&!document.querySelector('#layer-add-paper')`);
+    await readyCanvas({evaluate,settle});
+    await capture(`${theme}-png-add-paper`);
+    await evaluate('layerApp.documents.close(layerApp.app.document_tabs(0).selected)');
+    await wait("!![...document.querySelectorAll('dialog[open] button')].find(button=>button.textContent==='Discard Changes')");
+    await evaluate("[...document.querySelectorAll('dialog[open] button')].find(button=>button.textContent==='Discard Changes').click()");
+    await wait(`layerApp.app.document_tabs(0).tabs.length===${tabs}&&!layerApp.documents.busy()&&layerApp.app.brush_ready()`,60000);
+  } finally {await evaluate('window.showOpenFilePicker=paperOpenPicker;delete window.paperOpenPicker');}
 }

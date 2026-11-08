@@ -144,6 +144,7 @@ function Test-PaperTexture{
     $edit=Texture-Span 'edit-color'
     Invoke 'edit-color-cancel';Wait-Until {!(Find 'edit-color-apply')} 'Edit Color did not close'
 
+    [CapyLayersCapture]::SetForegroundWindow($drawingWindow)|Out-Null
     Texture-Click "layer-texture-$paper"
     Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $paper -and (Texture-Control)} 'The texture thumbnail did not select the Paper'
     Texture-Ready;$revision=(Model).state.document_file.revision
@@ -155,7 +156,6 @@ function Test-PaperTexture{
     if([Math]::Abs($span.button/$scale-34) -gt .5 -or [Math]::Abs($preview.Width/$scale-96) -gt .5){throw 'Footer buttons or texture previews are not at their native size'}
     Capture "texture-dialog-$theme" -WithModel
     Wait-Until {(Control "texture-tile-$current").Current.HasKeyboardFocus} 'The pending tile did not take keyboard focus'
-    [CapyLayersCapture]::SetForegroundWindow($drawingWindow)|Out-Null
     [CapyRowPointer]::Key([uint32]$review.Id,$(if($current -eq 0){0x27}else{0x25}))
     $focused=$(if($current -eq 0){1}else{$current-1})
     Wait-Until {(Control "texture-tile-$focused").Current.HasKeyboardFocus} 'Arrow keys did not move between tiles'
@@ -292,6 +292,16 @@ function Paper-ScaleRelief{
     Relationship-Layers;Relationship-Reveal "layer-$paper-name";Invoke "layer-$paper-name"
     Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $paper} 'Paper selection did not publish before Scale'
     if(!@((Model).layout.groups|Where-Object {$_.active -eq 'properties'}).Count){Invoke 'Properties' -Name}
+    if((Relationship-Layer $paper).paper.id -eq 'none'){
+        foreach($key in @('scale','relief','light','through_paint')){if(!(Lighting-Property $key).disabled){throw "None did not disable $key before the textured Scale check"}}
+        if((Control 'property-scale-slider').Current.IsEnabled){throw 'None left the native Scale slider enabled'}
+        Capture "paper-none-disabled-$theme" -WithModel
+        $tiles=Texture-Tiles;$rough=0;while($rough -lt $tiles.Count -and $tiles[$rough].id -ne 'rough'){$rough++}
+        if($rough -eq $tiles.Count){throw 'The textured Scale check has no Rough entry'}
+        Texture-Open 'property-texture';Invoke "texture-tile-$rough";Invoke 'texture-apply';Texture-Closed 'Rough did not close Choose Texture before Scale'
+        Wait-Until {(Relationship-Layer $paper).paper.id -eq 'rough' -and !(Lighting-Property 'scale').disabled} 'Rough did not enable the textured Scale check'
+        Wait-Until {@((Relief-Samples "rough-chosen-$theme") | Select-Object -Unique).Count -eq 1} 'The chosen Rough preview did not fade before the Scale baseline' (3*$script:CapyWaitSeconds)
+    }
     $originalRelief=Lighting-Value 'relief'
     if($originalRelief -ne 0){Lighting-Relief '0' {(Lighting-Value 'relief') -eq 0}}
     $track=(Control 'property-scale-slider' -Arranged).Current.BoundingRectangle;$y=[int]($track.Y+$track.Height/2)

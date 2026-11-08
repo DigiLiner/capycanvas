@@ -863,9 +863,14 @@ try {
     $viewport=Layer-Viewport
     [CapyRowPointer]::Hover([int]($viewport.Right-4),[int]($viewport.Y+$viewport.Height*.5))
     Wait-Until {@(Layer-Scrollbars).Count -gt 0} 'Mouse did not show the native layer scrollbar'
-    $bar=@(Layer-Scrollbars)[0].Current.BoundingRectangle
-    $percent=$scroll.Current.VerticalScrollPercent
-    [CapyRowPointer]::Down('mouse',[int]($bar.X+$bar.Width*.5),[int]($bar.Y+$bar.Height*.8))
+    $scrollbar=@(Layer-Scrollbars)[0];$bar=$scrollbar.Current.BoundingRectangle
+    $metrics=$scroll.Current;$top=$bar.Top+$bar.Width;$bottom=$bar.Bottom-$bar.Width
+    $thumbHeight=($bottom-$top)*$metrics.VerticalViewSize/100
+    $thumbTop=$top+($bottom-$top-$thumbHeight)*$metrics.VerticalScrollPercent/100;$thumbBottom=$thumbTop+$thumbHeight
+    $trackY=if($thumbTop-$top -gt $bottom-$thumbBottom){($top+$thumbTop)/2}else{($thumbBottom+$bottom)/2}
+    if($trackY -le $top -or $trackY -ge $bottom -or ($trackY -ge $thumbTop -and $trackY -le $thumbBottom)){throw 'Native layer scrollbar has no free track outside its thumb'}
+    $percent=$metrics.VerticalScrollPercent
+    [CapyRowPointer]::Down('mouse',[int]($bar.X+$bar.Width*.5),[int]$trackY)
     Start-Sleep -Milliseconds 35
     [CapyRowPointer]::Up()
     Wait-Until {[Math]::Abs($scroll.Current.VerticalScrollPercent-$percent) -gt .5} 'Mouse scrollbar interaction did not scroll the native list'

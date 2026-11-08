@@ -890,7 +890,7 @@ fn native_export_keeps_camera_lens_and_copyright_without_location() {
         &camera,
         layer_ui::DocumentLocation { uri: gtk::gio::File::for_path(&camera).uri().into(), name: "camera.jpg".into() },
         Default::default(),
-        layer_ui::photo_document_names("camera.jpg", &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)),
+        layer_ui::photo_name("camera.jpg", &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)),
         Default::default(),
     )
     .unwrap();

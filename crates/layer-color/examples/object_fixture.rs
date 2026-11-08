@@ -1,4 +1,4 @@
-use layer_core::{DocumentNames, Editor, EvaluationContext, SourceTarget, authored::{Affine64, Image, ImageInterpolation, ImageObject}, color::SampleDepth};
+use layer_core::{Editor, EvaluationContext, SourceTarget, authored::{Affine64, Image, ImageInterpolation, ImageObject}, color::SampleDepth};
 use std::{fs::File, io::{BufReader, BufWriter, Write}, sync::{Arc, atomic::AtomicBool}};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let source = decode()?;
     let extent = source.extent;
     let mut document = layer_color::photo_project(source, Default::default(),
-        DocumentNames {paint:"Photo".into(),paper:"Paper".into()}, SampleDepth::U8)?;
+        "Photo".into(), SampleDepth::U8)?;
     let SourceTarget::Paint(paint) = document.working.target.ok_or("Photo paint target is unavailable")? else { return Err("Photo source is not paint".into()); };
     let image = document.artwork.paint.get(paint).and_then(|paint|paint.base.as_ref()).ok_or("Photo base image is unavailable")?.image.clone();
     let mut layers=Vec::new();

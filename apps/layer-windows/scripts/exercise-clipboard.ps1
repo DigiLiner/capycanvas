@@ -212,9 +212,9 @@ function New-Image([scriptblock]$Action,[string]$Extent,[string]$Name,[int]$Obje
   $expected|Set-Content (Join-Path $run 'authored-source-identity.json');$actual|Set-Content (Join-Path $run 'authored-copy-identity.json')
   if($actual -ne $expected){throw 'New Image changed authored layer properties, raster tiles or material'}
   $layers=@($copied.manifest.objects|Where-Object type -eq 'capy.occurrence/3')
-  if($layers.Count -ne 2 -or @($layers|Where-Object {$_.data.content.effect -and $_.data.visible -eq $false}).Count -ne 1){throw 'Authored New Image did not retain one paint layer and transparent paper'}
+  if($layers.Count -ne 1 -or @($layers|Where-Object {$_.data.content.effect}).Count -or !(Model).state.layer_tools.add_paper){throw 'Authored New Image did not retain one paint layer without Paper'}
   if((Model).state.document_file.modified -or !(Model).state.document_file.location){throw 'Saving the authored New Image did not establish its own clean file'}
-  $checks.authored_layer_retained='paint source and exact raster payloads; opacity and other authored properties; transparent paper'
+  $checks.authored_layer_retained='paint source and exact raster payloads; opacity and other authored properties; no Paper; Add Paper available'
  }
  if($Sources.Count){
   $manifest=(Package $saved).manifest

@@ -1,4 +1,4 @@
-use layer_core::{DocumentNames, Editor, EvaluationContext, SourceTarget, authored::*, color::SampleDepth};
+use layer_core::{Editor, EvaluationContext, SourceTarget, authored::*, color::SampleDepth};
 use std::{fs::File, io::{BufReader, BufWriter, Write}, sync::atomic::AtomicBool};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = args.get(1).ok_or("OUTPUT.capy is required")?;
     let offset = [args.get(2).ok_or("X is required")?.parse()?, args.get(3).ok_or("Y is required")?.parse()?];
     let source = layer_color::photo::read_photo(BufReader::new(File::open(input)?), layer_color::photo::DecodeLimits::from_memory_budget(layer_color::photo::PhotoMemoryBudget::from_limit(1 << 30)))?;
-    let document = layer_color::photo_project(source, Default::default(), DocumentNames {paint:"Photo".into(),paper:"Paper".into()}, SampleDepth::U8)?;
+    let document = layer_color::photo_project(source, Default::default(), "Photo".into(), SampleDepth::U8)?;
     let SourceTarget::Paint(paint) = document.working.target.ok_or("Photo paint target is unavailable")? else { return Err("Photo source is not paint".into()); };
     let base = document.scene().source_owner(SourceTarget::Paint(paint)).ok_or("Photo layer is unavailable")?;
     let mut artwork = document.artwork.clone();

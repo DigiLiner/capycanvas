@@ -73,7 +73,7 @@ class SetupTests(unittest.TestCase):
         self.info = {key: self.requested[key] for key in
                      ("preset", "brush_size", "mode", "prediction", "speed", "duration_ms", "repeats", "stats_panel")}
         self.info.update(radii=[240, 140], state={"camera": {"work_area": [632, 153, 754, 1037], "zoom": 1},
-                         "layers": [{}] * 6, "brush": {"diameter": 1024, "preset": 1},
+                         "layers": [{}] * 5, "brush": {"diameter": 1024, "preset": 1},
                          "settings": {"feedback": True, "prediction_ms": 16}})
 
     def test_accepts_matched_and_work_area_clamped_trajectories(self):
@@ -81,6 +81,22 @@ class SetupTests(unittest.TestCase):
         self.requested["radii"] = [520, 299]
         self.info["radii"] = [754 * .45, 299]
         validate_setup(self.info, self.requested)
+
+    def test_opened_photo_has_only_the_photo_and_new_paint_layer(self):
+        self.requested["photo_layers"] = 1
+        self.info["state"]["layers"] = [dict(label="Ink"), dict(label="Photo")]
+        validate_setup(self.info, self.requested)
+        self.info["state"]["layers"].append(dict(label="Paper"))
+        with self.assertRaisesRegex(ValueError, "layers"):
+            validate_setup(self.info, self.requested)
+
+    def test_explicit_fixture_layer_count_still_controls_admission(self):
+        self.requested["fixture_layers"] = 7
+        self.info["state"]["layers"] = [{}] * 7
+        validate_setup(self.info, self.requested)
+        self.info["state"]["layers"].pop()
+        with self.assertRaisesRegex(ValueError, "layers"):
+            validate_setup(self.info, self.requested)
 
     def test_reconstruct_rejects_missing_unchanged_or_unsettled_seed_sessions(self):
         self.requested["preset"] = self.info["preset"] = self.info["state"]["brush"]["preset"] = 64
@@ -161,7 +177,7 @@ class SetupTests(unittest.TestCase):
         self.info.update(live_filter_fixture=dict(paint=3,effect=4,effect_id="threshold",disabled=False,
                          values={"colors":{"kind":"choice","value":1}}))
         self.info["state"].update(layer_properties={"layer":3},layers=[dict(id=4,relationship=dict(kind="effect",target=3),visible=True),
-                                dict(id=3,selected=True),dict(id=2),dict(id=1)])
+                                dict(id=3,selected=True),dict(id=2)])
         validate_setup(self.info,self.requested)
         for change,field in [(lambda d:d["live_filter_fixture"].update(paint=2),"changing_filter_input"),
                              (lambda d:d["live_filter_fixture"].update(values={}),"live_filter_values"),
@@ -177,7 +193,7 @@ class SetupTests(unittest.TestCase):
             self.info.update(workload=workload, attachment_fixture=dict(paint=3, base=2, effect=4 if effect else None,
                              effect_id="gaussian_blur" if effect else None, sigma=8 if effect else None))
             self.info["state"]["layers"] = [dict(id=3, relationship=dict(kind="clip",target=2), selected=True)] + (
-                [dict(id=4, relationship=dict(kind="effect",target=2))] if effect else []) + [dict(id=2), dict(id=1)]
+                [dict(id=4, relationship=dict(kind="effect",target=2))] if effect else []) + [dict(id=2)]
             validate_setup(self.info, self.requested)
             for change, field in [(lambda d: d.pop("workload"), "workload"),
                                   (lambda d: d.pop("attachment_fixture"), "attachment_handles"),
@@ -199,25 +215,29 @@ class SetupTests(unittest.TestCase):
 
     def test_requires_the_paint_layer_at_the_requested_position(self):
         self.requested["paint_layer_index"] = 3
-        self.info["state"]["layers"] = [dict(selected=i == 3) for i in range(6)]
+        self.info["state"]["layers"] = [dict(selected=i == 3) for i in range(5)]
         validate_setup(self.info, self.requested)
         for selected in ([0], [], [0, 3]):
-            self.info["state"]["layers"] = [dict(selected=i in selected) for i in range(6)]
+            self.info["state"]["layers"] = [dict(selected=i in selected) for i in range(5)]
             with self.assertRaisesRegex(ValueError, "paint_layer_index"):
                 validate_setup(self.info, self.requested)
 
     def test_named_photo_target_requires_the_selected_existing_layer(self):
         self.requested.update(photo_layers=1, paint_layer_name="Photo")
-        self.info["state"]["layers"] = [dict(label="Photo", selected=True), dict(label="Paper")]
+        self.info["state"]["layers"] = [dict(label="Photo", selected=True)]
         validate_setup(self.info, self.requested)
-        for layers, field in [([dict(label="Photo"), dict(label="Paper", selected=True)], "paint_layer_name"),
-                              ([dict(label="Photo", selected=True), dict(label="Paper", selected=True)], "paint_layer_name"),
-                              ([dict(label="Photo", selected=True), dict(label="Paper"), {}], "layers")]:
+        for layers, field in [([dict(label="Wrong", selected=True)], "paint_layer_name"),
+                              ([dict(label="Photo", selected=False)], "paint_layer_name"),
+                              ([dict(label="Photo", selected=True), dict(label="Paper")], "layers")]:
             with self.subTest(field=field):
                 info = copy.deepcopy(self.info)
                 info["state"]["layers"] = layers
                 with self.assertRaisesRegex(ValueError, field):
                     validate_setup(info, self.requested)
+        self.requested["fixture_layers"] = 2
+        self.info["state"]["layers"] = [dict(label="Photo", selected=True), dict(label="Ink", selected=True)]
+        with self.assertRaisesRegex(ValueError, "paint_layer_name"):
+            validate_setup(self.info, self.requested)
 
     def test_rejects_missing_or_unmatched_contact_timing(self):
         for key in ("pause_ms", "contact_ms", "settle_delay_ms"):
@@ -247,7 +267,7 @@ class SetupTests(unittest.TestCase):
     def test_object_workloads_require_actual_image_identity_sharing(self):
         self.requested.update(workload="objects",photo_layers=2,image_count=4,image_sources="shared",paint_layer_index=1)
         self.info.update(workload="objects",object_fixture=[dict(image="same",source_owner=0,paint_base_image_shared=True,paint_base_source_shared=True) for _ in range(4)])
-        self.info["state"]["layers"] = [dict(selected=i==1) for i in range(4)]
+        self.info["state"]["layers"] = [dict(selected=i==1) for i in range(3)]
         validate_setup(self.info,self.requested)
         missing_owner = copy.deepcopy(self.info)
         for image in missing_owner["object_fixture"]:
@@ -261,7 +281,7 @@ class SetupTests(unittest.TestCase):
         validate_setup(self.info,self.requested)
         self.requested["workload"] = "objects-effects"
         self.info["workload"] = "objects-effects"
-        self.info["state"]["layers"] = [dict(selected=i==2) for i in range(5)]
+        self.info["state"]["layers"] = [dict(selected=i==2) for i in range(4)]
         validate_setup(self.info,self.requested)
         self.info["object_fixture"].pop()
         with self.assertRaisesRegex(ValueError,"image_count"):

@@ -894,7 +894,8 @@ mod clipboard_checks {
         assert_eq!(s.engine.document().scene().order().len(), count);
         let opened = copied.document(s.localization()).unwrap();
         assert_eq!(opened.composition().size, [400, 300]);
-        assert_eq!(opened.scene().order().len(), 3, "copied layers and transparent paper");
+        assert_eq!(opened.scene().order().len(), 2, "copied layers without paper");
+        assert_eq!(opened.bottom_paper(), None);
         assert!(opened.artwork.paint.iter().all(|(_, _, paint)| paint.base.is_none()));
         for platform in Platform::ALL {
             let mut pasted = UiSession::from_project(Recorder::default(), opened.clone(), None, [800, 600], platform).unwrap();
@@ -1625,7 +1626,8 @@ mod clipboard_checks {
         assert!(Arc::ptr_eq(base.image.storage(), &copied.source));
         assert_eq!(base.policy, copied.policy);
         assert_eq!(base.offset, [0, 0]);
-        assert!(!document.scene().occurrence(document.scene().order()[1]).unwrap().visible);
+        assert_eq!(document.scene().order().len(), 1);
+        assert_eq!(document.bottom_paper(), None);
         let mut object = layer_core::ImageObject::new(copied.source.clone().into());
         object.affine = layer_core::Affine64([1., 0., 0., 1., -10., 23.]);
         retain_image_layers(&mut copied, vec![("Original".into(), object.clone())]);
@@ -1636,7 +1638,8 @@ mod clipboard_checks {
         assert_eq!(kept.image.interpretation, object.image.interpretation);
         assert_eq!(kept.image.tiles.values().next().unwrap().owner_identity(), object.image.tiles.values().next().unwrap().owner_identity());
         assert_eq!(objects.selected_objects().len(), 1);
-        assert_eq!(objects.scene().order().len(), 2);
+        assert_eq!(objects.scene().order().len(), 1);
+        assert_eq!(objects.bottom_paper(), None);
         assert!(objects.artwork.paint.is_empty());
         objects.validate(Default::default()).unwrap();
     }

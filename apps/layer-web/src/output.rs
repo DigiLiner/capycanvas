@@ -184,7 +184,7 @@ pub(super) async fn render_output(
     )).flatten();
     let mut packed = if let Some(original) = original {
         let project =
-            layer_color::photo_project((*original).clone(), Default::default(), layer_core::DocumentNames { paint: "Original".into(), paper: "".into() }, metadata.color.depth)
+            layer_color::photo_project((*original).clone(), Default::default(), "Original".into(), metadata.color.depth)
                 .map_err(js)?;
         let packed = artwork_transfer::pack(project.artwork).await?;
         metadata.original = Some(

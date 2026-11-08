@@ -82,7 +82,7 @@ pub fn serve(input: File, output: &mut impl Write, limits: DecodeLimits) -> Resu
     let cancel = AtomicBool::new(false);
     let photo = layer_color::photo::read_photo_detailed_with_cancel(BufReader::new(input), limits, &cancel)?;
     let depth = photo.source.interpretation.depth;
-    let document = layer_color::photo_project(photo.source, photo.metadata, layer_core::DocumentNames { paint: "Photo".into(), paper: "Paper".into() }, depth)?;
+    let document = layer_color::photo_project(photo.source, photo.metadata, "Photo".into(), depth)?;
     let capture = layer_core::Editor::new(document).capture(1, Default::default()).map_err(|e| e.to_string())?;
     let package = layer_core::package::codec::PreparedPackage::prepare(&capture, None, &cancel)?;
     output.write_all(&[u8::from(photo.first_frame) | u8::from(photo.primary_image) << 1]).map_err(|e| e.to_string())?;

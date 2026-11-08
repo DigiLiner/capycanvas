@@ -2,7 +2,7 @@
 //! URI permissions cannot grant overwrite authority to an imported photograph.
 use crate::{DocumentLocation, MissingProfilePolicy, PhotoOpenPolicy};
 use layer_core::{
-    Document, DocumentNames, ProjectLimits,
+    Document, ProjectLimits,
     color::{ColorProfile, source::SourceImage},
 };
 use serde::{Deserialize, Serialize};
@@ -102,11 +102,8 @@ impl ImportSource {
         }
     }
 }
-pub fn photo_document_names(name: &str, localization: &crate::Localizer) -> DocumentNames {
-    DocumentNames {
-        paint: if name.is_empty() { localization.text(crate::MessageId::DOCUMENTS_PHOTO_NAME) } else { name.into() },
-        paper: localization.text(crate::MessageId::DOCUMENTS_PAPER),
-    }
+pub fn photo_name(name: &str, localization: &crate::Localizer) -> Arc<str> {
+    if name.is_empty() { localization.text(crate::MessageId::DOCUMENTS_PHOTO_NAME) } else { name.into() }
 }
 
 impl PhotoOpenPolicy {
@@ -117,10 +114,10 @@ impl PhotoOpenPolicy {
         self,
         source: SourceImage,
         metadata: layer_core::PhotoMetadata,
-        names: DocumentNames,
+        paint: Arc<str>,
     ) -> Result<Document, String> {
         let depth = self.editing_depth(source.interpretation.depth);
-        layer_color::photo_project(source, metadata, names, depth)
+        layer_color::photo_project(source, metadata, paint, depth)
     }
 }
 #[derive(Clone)]
@@ -164,11 +161,7 @@ impl ImportedDocument {
         let occurrence = scene.occurrence(handle).ok_or("Photo source unavailable")?;
         let source = scene.paint_source(handle).and_then(|p| p.base.as_ref().map(|base| base.image.storage())).ok_or("Photo source unavailable")?;
         let source = layer_color::assume_source_profile((**source).clone(), profile)?;
-        let names = DocumentNames {
-            paint: occurrence.name.clone(),
-            paper: scene.order().get(1).and_then(|h| scene.occurrence(*h)).map_or_else(|| "".into(), |o| o.name.clone()),
-        };
-        self.project = layer_color::photo_project(source, (*self.project.artwork.metadata).clone(), names, self.project.composition().color.depth)?;
+        self.project = layer_color::photo_project(source, (*self.project.artwork.metadata).clone(), occurrence.name.clone(), self.project.composition().color.depth)?;
         Ok(())
     }
 }
@@ -205,32 +198,32 @@ pub fn read_import(
     input: impl Read + Seek,
     intent: ImportIntent,
     policy: PhotoOpenPolicy,
-    names: DocumentNames,
+    name: Arc<str>,
     project_limits: ProjectLimits,
     photo_limits: layer_color::photo::DecodeLimits,
     cancelled: &AtomicBool,
 ) -> Result<ImportOutcome, String> {
-    read_import_with_decoder(input,intent,policy,names,project_limits,photo_limits,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
+    read_import_with_decoder(input,intent,policy,name,project_limits,photo_limits,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
 }
 #[expect(clippy::too_many_arguments,reason="The decoder supplies transport while import policy stays shared")]
 pub fn read_import_with_decoder<R:Read+Seek>(
-    input:R,intent:ImportIntent,policy:PhotoOpenPolicy,names:DocumentNames,project_limits:ProjectLimits,
+    input:R,intent:ImportIntent,policy:PhotoOpenPolicy,name:Arc<str>,project_limits:ProjectLimits,
     photo_limits:layer_color::photo::DecodeLimits,cancelled:&AtomicBool,
     decode:impl FnOnce(BufReader<R>,layer_color::photo::DecodeLimits,&AtomicBool)->Result<layer_color::photo::DecodedPhoto,String>,
 )->Result<ImportOutcome,String> {
-    read_import_input(ImportInput {reader:input,backing:None},intent,policy,names,project_limits,photo_limits,cancelled,decode)
+    read_import_input(ImportInput {reader:input,backing:None},intent,policy,name,project_limits,photo_limits,cancelled,decode)
 }
 pub fn read_import_backing(
     backing: layer_core::package::ImmutableBacking,
     intent: ImportIntent,
     policy: PhotoOpenPolicy,
-    names: DocumentNames,
+    name: Arc<str>,
     project_limits: ProjectLimits,
     photo_limits: layer_color::photo::DecodeLimits,
     cancelled: &AtomicBool,
 ) -> Result<ImportOutcome, String> {
     let reader=layer_core::package::transport::BackingReader::new(&backing,cancelled);
-    read_import_input(ImportInput {reader,backing:Some(backing.clone())},intent,policy,names,project_limits,photo_limits,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
+    read_import_input(ImportInput {reader,backing:Some(backing.clone())},intent,policy,name,project_limits,photo_limits,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
 }
 struct ImportInput<R> {reader:R,backing:Option<layer_core::package::ImmutableBacking>}
 #[expect(clippy::too_many_arguments,reason="The decoder supplies transport while import policy stays shared")]
@@ -238,7 +231,7 @@ fn read_import_input<R:Read+Seek>(
     input:ImportInput<R>,
     intent: ImportIntent,
     policy: PhotoOpenPolicy,
-    mut names: DocumentNames,
+    name: Arc<str>,
     project_limits: ProjectLimits,
     photo_limits: layer_color::photo::DecodeLimits,
     cancelled:&AtomicBool,
@@ -285,9 +278,9 @@ fn read_import_input<R:Read+Seek>(
         ImportSource::Photo => {
             let mut photo=decode(reader,photo_limits,cancelled)?;
             let reservation=photo.reservation.take();
-            let stem = names.paint.rsplit_once('.').map_or(names.paint.as_ref(), |(stem, _)| stem);
-            names.paint = photo.display_name(stem).into();
-            let mut document = policy.photo_project(photo.source, photo.metadata, names)?;
+            let stem = name.rsplit_once('.').map_or(name.as_ref(), |(stem, _)| stem);
+            let paint = photo.display_name(stem).into();
+            let mut document = policy.photo_project(photo.source, photo.metadata, paint)?;
             if reservation.is_some() { document=document.with_memory(layer_core::DocumentMemory::new(layer_core::MemoryBudget::process(),reservation)); }
             document.reserve_import()?;
             document
@@ -681,6 +674,7 @@ mod tests {
         assert!(ImportSource::Master.admit_input_bytes(u64::MAX, project, photo).is_ok());
     }
     use super::*;
+    use layer_core::DocumentNames;
 
     use crate::session::test_support::{package_bytes, package_roundtrip};
     #[test]
@@ -738,10 +732,42 @@ mod tests {
     }
     fn open(bytes: &[u8], intent: ImportIntent, policy: PhotoOpenPolicy, name: &str) -> Result<ImportedDocument, String> {
         match read_import(std::io::Cursor::new(bytes), intent, policy,
-            photo_document_names(name, &crate::Localizer::shared(crate::UiLanguage::English)),
+            photo_name(name, &crate::Localizer::shared(crate::UiLanguage::English)),
             Default::default(), photo_limits(), &Default::default())? {
             ImportOutcome::Editable(document) => Ok(document),
             ImportOutcome::Package(outcome) => Err(format!("Expected editable artwork: {outcome:?}")),
+        }
+    }
+    #[test]
+    fn opened_images_have_no_paper() {
+        use crate::{Platform, UiAction, UiSession, session::test_support::Recorder};
+        let localization = crate::Localizer::shared(crate::UiLanguage::English);
+        let mut source = source();
+        source.resolution = Some(layer_core::ImageResolution::ppi(254));
+        let mut old = Document::new(layer_core::PortableId::random(), source.extent[0], source.extent[1],
+            DocumentNames { paint: "Photo".into(), paper: "Paper".into() });
+        old.artwork.compositions.get_mut(old.artwork.root).unwrap().resolution = source.resolution;
+        old.fit_papers_to_resolution();
+        let paper = old.bottom_paper().unwrap();
+        old.artwork.occurrences.get_mut(paper).unwrap().visible = false;
+        let binding = old.paper_binding(old.drawing_target().unwrap());
+        let saved = open(&native_bytes(&old), ImportIntent::Open, Default::default(), "Saved.capy").unwrap().project;
+        assert!(!saved.scene().visible(saved.bottom_paper().unwrap()));
+        let mut png = Vec::new();
+        layer_color::photo::write_png(&mut png, &source).unwrap();
+        let opened = open(&png, ImportIntent::Open, Default::default(), "Photo.png").unwrap().project;
+        let one = crate::clipboard_document(vec![("One".into(), source.clone())], Default::default(), &localization).unwrap();
+        let two = crate::clipboard_document(vec![("One".into(), source.clone()), ("Two".into(), source)], Default::default(), &localization).unwrap();
+        for document in [opened, one, two] {
+            assert_eq!(document.bottom_paper(), None);
+            assert_eq!(&document.paper(None), binding.surface.as_ref());
+            let target = document.artwork.paint.iter().next().map(|(handle, _, _)| layer_core::SourceTarget::Paint(handle));
+            if let Some(target) = target { assert_eq!(document.paper_binding(target), binding); }
+            let renderer = Recorder { tiled_sources: true, color: document.composition().color, ..Default::default() };
+            let mut session = UiSession::from_project(renderer, document, None, [800, 600], Platform::Gtk).unwrap();
+            let action = session.state().layer_tools.add_paper.as_ref().unwrap().action.clone();
+            session.dispatch(UiAction::Effect { action }).unwrap();
+            assert!(session.engine().document().bottom_paper().is_some());
         }
     }
 
@@ -804,10 +830,10 @@ mod tests {
 
     #[test]
     fn native_packages_bypass_the_external_photo_decoder() {
-        let names=DocumentNames {paint:"Local".into(),paper:"Paper".into()};
-        let document=PhotoOpenPolicy::default().photo_project(source(),Default::default(),names.clone()).unwrap();
+        let name: Arc<str> = "Local".into();
+        let document=PhotoOpenPolicy::default().photo_project(source(),Default::default(),name.clone()).unwrap();
         let result=read_import_with_decoder(std::io::Cursor::new(native_bytes(&document)),ImportIntent::Open,
-            Default::default(),names,Default::default(),photo_limits(),&AtomicBool::new(false),
+            Default::default(),name,Default::default(),photo_limits(),&AtomicBool::new(false),
             |_,_,_|Err("A native package reached the photo decoder".into())).unwrap();
         let ImportOutcome::Editable(imported)=result else {panic!("Editable native package");};
         assert_eq!(imported.source,ImportSource::Master);
@@ -816,11 +842,11 @@ mod tests {
 
     #[test]
     fn immutable_import_keeps_the_original_backing_instead_of_spooling_it_again() {
-        let names=photo_document_names("Immutable",&crate::Localizer::shared(crate::UiLanguage::English));
-        let document=PhotoOpenPolicy::default().photo_project(source(),Default::default(),names.clone()).unwrap();
+        let name=photo_name("Immutable",&crate::Localizer::shared(crate::UiLanguage::English));
+        let document=PhotoOpenPolicy::default().photo_project(source(),Default::default(),name.clone()).unwrap();
         let bytes:std::sync::Arc<[u8]>=native_bytes(&document).into();
         let backing=layer_core::package::ImmutableBacking::new(std::sync::Arc::new(bytes)).unwrap();
-        let imported=read_import_backing(backing.clone(),ImportIntent::Open,Default::default(),names,Default::default(),photo_limits(),&Default::default()).unwrap();
+        let imported=read_import_backing(backing.clone(),ImportIntent::Open,Default::default(),name,Default::default(),photo_limits(),&Default::default()).unwrap();
         let ImportOutcome::Editable(imported)=imported else {panic!("Editable native package");};
         assert_eq!(imported.native.as_ref().unwrap().source.identity(),backing.identity());
         assert_eq!(imported.project.composition().color,document.composition().color);
@@ -840,12 +866,12 @@ mod tests {
             }
         }
         let calls=Arc::new(AtomicUsize::new(0));
-        let names=photo_document_names("Immutable",&crate::Localizer::shared(crate::UiLanguage::English));
+        let name=photo_name("Immutable",&crate::Localizer::shared(crate::UiLanguage::English));
         let backing=ImmutableBacking::new(Arc::new(Source(calls.clone()))).unwrap();
-        let result=read_import_backing(backing.clone(),ImportIntent::Open,Default::default(),names.clone(),Default::default(),photo_limits(),&AtomicBool::new(true));
+        let result=read_import_backing(backing.clone(),ImportIntent::Open,Default::default(),name.clone(),Default::default(),photo_limits(),&AtomicBool::new(true));
         assert!(result.is_err());assert_eq!(calls.load(Ordering::Relaxed),0);
         let limits=layer_color::photo::DecodeLimits {codec_bytes:1000,..photo_limits()};
-        let result=read_import_backing(backing,ImportIntent::Open,Default::default(),names,Default::default(),limits,&Default::default());
+        let result=read_import_backing(backing,ImportIntent::Open,Default::default(),name,Default::default(),limits,&Default::default());
         assert!(result.err().unwrap().contains("encoded image exceeds"));
         assert_eq!(calls.load(Ordering::Relaxed),1);
     }
@@ -866,7 +892,7 @@ mod tests {
         let limits = ProjectLimits { layers: 1, ..Default::default() };
         document.validate_integrity().unwrap();
         assert!(document.admit(limits).is_err());
-        let outcome = read_import(std::io::Cursor::new(&bytes), ImportIntent::Open, Default::default(), DocumentNames { paint: "".into(), paper: "".into() }, limits, photo_limits(), &AtomicBool::new(false)).unwrap();
+        let outcome = read_import(std::io::Cursor::new(&bytes), ImportIntent::Open, Default::default(), "".into(), limits, photo_limits(), &AtomicBool::new(false)).unwrap();
         let ImportOutcome::Package(OpenOutcome::Preserved { source, preview: representation, outputs, .. }) = outcome else { panic!("valid package over aggregate admission must remain preserved") };
         assert_eq!(representation.unwrap().encoded(), preview.encoded());
         assert_eq!(outputs[0].id, document.artwork.outputs.id(document.artwork.default_output).unwrap());
@@ -888,17 +914,17 @@ mod tests {
             InputMember { name: "preview.png", length: preview.encoded().len() as u64, crc32: checksum(preview.encoded()), input: &mut preview_reader },
         ];
         let mut corrupted = Vec::new(); write_archive(&mut corrupted, &mut members, ProjectLimits::default().metadata_bytes as usize).unwrap();
-        let outcome = read_import(std::io::Cursor::new(&corrupted), ImportIntent::Open, Default::default(), DocumentNames { paint: "".into(), paper: "".into() }, Default::default(), photo_limits(), &AtomicBool::new(false)).unwrap();
+        let outcome = read_import(std::io::Cursor::new(&corrupted), ImportIntent::Open, Default::default(), "".into(), Default::default(), photo_limits(), &AtomicBool::new(false)).unwrap();
         let ImportOutcome::Package(OpenOutcome::RecoveredView { source, preview: representation, .. }) = outcome else { panic!("invalid required payload must recover only its verified representation") };
         assert_eq!(representation.encoded(), preview.encoded());
         let mut copied = Vec::new(); layer_core::package::codec::copy_original(&source, &mut copied, &AtomicBool::new(false)).unwrap();
         assert_eq!(copied, corrupted);
-        assert!(read_import(std::io::Cursor::new(&corrupted), ImportIntent::Open, Default::default(), DocumentNames { paint: "".into(), paper: "".into() }, Default::default(), photo_limits(), &AtomicBool::new(true)).is_err());
+        assert!(read_import(std::io::Cursor::new(&corrupted), ImportIntent::Open, Default::default(), "".into(), Default::default(), photo_limits(), &AtomicBool::new(true)).is_err());
     }
     #[test]
     fn native_candidate_retains_original_bytes_until_execution_admission() {
         let policy = PhotoOpenPolicy::default();
-        let document = policy.photo_project(source(), Default::default(), photo_document_names("Native photo", &crate::Localizer::new(crate::UiLanguage::English))).unwrap();
+        let document = policy.photo_project(source(), Default::default(), photo_name("Native photo", &crate::Localizer::new(crate::UiLanguage::English))).unwrap();
         let preview = layer_core::package::preview::Preview::from_rgba([1, 1], vec![7, 19, 31, 255].into()).unwrap();
         let bytes = native_with_preview(&document, preview.clone());
         let cancelled = AtomicBool::new(false);
@@ -921,41 +947,41 @@ mod tests {
         let mut builder = SourceBuilder::new([1, 1], SourceInterpretation { channels: SourceChannels::Rgba, depth: SampleDepth::F32, profile: ColorProfile::Builtin(RgbSpace::Srgb), profile_assumed: false }, 1024 * 1024).unwrap();
         let samples = [2f32, 0.25, 0.5, 1.].into_iter().flat_map(f32::to_le_bytes).collect::<Vec<_>>();
         builder.push_row(&samples).unwrap();
-        let mut document = layer_color::photo_project(builder.finish().unwrap(), Default::default(), photo_document_names("Unsupported HDR placement", &crate::Localizer::new(crate::UiLanguage::English)), SampleDepth::F32).unwrap();
+        let mut document = layer_color::photo_project(builder.finish().unwrap(), Default::default(), photo_name("Unsupported HDR placement", &crate::Localizer::new(crate::UiLanguage::English)), SampleDepth::F32).unwrap();
         document.artwork.compositions.get_mut(document.artwork.root).unwrap().color.depth = SampleDepth::U16;
         document.validate(Default::default()).unwrap();
         assert!(layer_color::validate_document_color(&document).is_err());
         let bytes = native_bytes(&document);
-        let outcome = read_import(std::io::Cursor::new(&bytes), ImportIntent::Open, policy, DocumentNames { paint: "".into(), paper: "".into() }, Default::default(), photo_limits(), &AtomicBool::new(false)).unwrap();
+        let outcome = read_import(std::io::Cursor::new(&bytes), ImportIntent::Open, policy, "".into(), Default::default(), photo_limits(), &AtomicBool::new(false)).unwrap();
         let ImportOutcome::Package(layer_core::package::codec::OpenOutcome::Preserved { source, preview, outputs, reason }) = outcome else { panic!("unsupported execution must preserve native artwork") };
         assert!(preview.is_none());
         assert!(!reason.is_empty());
         assert_eq!(outputs.len(), document.artwork.outputs.len());
         let mut copied = Vec::new(); layer_core::package::codec::copy_original(&source, &mut copied, &AtomicBool::new(false)).unwrap();
         assert_eq!(copied, bytes);
-        assert!(read_import(std::io::Cursor::new(&bytes), ImportIntent::Open, policy, DocumentNames { paint: "".into(), paper: "".into() }, Default::default(), photo_limits(), &AtomicBool::new(true)).is_err());
+        assert!(read_import(std::io::Cursor::new(&bytes), ImportIntent::Open, policy, "".into(), Default::default(), photo_limits(), &AtomicBool::new(true)).is_err());
     }
     #[test]
     fn photo_creation_and_reinterpretation_keep_supplied_names_and_source_pixels() {
         let localization = crate::Localizer::shared(crate::UiLanguage::Japanese);
         let literal = "  Photo { $name }「写真」🖼️\u{2068}literal\u{2069}  ";
         let source = source();
-        let names = photo_document_names(literal, &localization);
-        assert_eq!(names.paint.as_ref(), literal);
-        assert_eq!(names.paper.as_ref(), "用紙");
-        let fallback = photo_document_names("", &localization);
-        assert_eq!(fallback.paint, localization.text(crate::MessageId::DOCUMENTS_PHOTO_NAME));
+        let name = photo_name(literal, &localization);
+        assert_eq!(name.as_ref(), literal);
+        let fallback = photo_name("", &localization);
+        assert_eq!(fallback, localization.text(crate::MessageId::DOCUMENTS_PHOTO_NAME));
         let policy = PhotoOpenPolicy { promote_to_16: true, missing_profile: MissingProfilePolicy::Ask };
-        let mut imported = ImportedDocument::new(policy.photo_project(source.clone(), Default::default(), names).unwrap(), ImportSource::Photo);
+        let mut imported = ImportedDocument::new(policy.photo_project(source.clone(), Default::default(), name).unwrap(), ImportSource::Photo);
         let document = &imported.project;
         assert_eq!(document.scene().occurrence(document.scene().order()[0]).unwrap().name.as_ref(), literal);
-        assert_eq!(document.scene().occurrence(document.scene().order()[1]).unwrap().name.as_ref(), "用紙");
-        assert!(!document.scene().occurrence(document.scene().order()[1]).unwrap().visible);
+        assert_eq!(document.scene().order().len(), 1);
+        assert_eq!(document.bottom_paper(), None);
         let source_before = photo_source(document).clone();
         imported.interpret(ColorProfile::Builtin(RgbSpace::DisplayP3)).unwrap();
         let document = &imported.project;
         assert_eq!(document.scene().occurrence(document.scene().order()[0]).unwrap().name.as_ref(), literal);
-        assert_eq!(document.scene().occurrence(document.scene().order()[1]).unwrap().name.as_ref(), "用紙");
+        assert_eq!(document.scene().order().len(), 1);
+        assert_eq!(document.bottom_paper(), None);
         let source_after = photo_source(document);
         assert_eq!(source_after.tiles.len(), source_before.tiles.len());
         assert!(source_after.tiles.iter().all(|(position, tile)|
@@ -974,7 +1000,7 @@ mod tests {
             promote_to_16: true,
             missing_profile: MissingProfilePolicy::Ask,
         };
-        let mut photo = ImportedDocument::new(policy.photo_project(source.clone(), Default::default(), photo_document_names("photo", &crate::Localizer::shared(crate::UiLanguage::English))).unwrap(), ImportSource::Photo);
+        let mut photo = ImportedDocument::new(policy.photo_project(source.clone(), Default::default(), photo_name("photo", &crate::Localizer::shared(crate::UiLanguage::English))).unwrap(), ImportSource::Photo);
         assert!(photo.interpretation_required(policy).is_some());
         assert!(
             photo

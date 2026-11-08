@@ -275,7 +275,7 @@ pub(crate) fn new_drawing_at(width: u32, height: u32, depth: layer_core::color::
 
 fn open_native_document(input: impl std::io::Read + std::io::Seek) -> layer_core::Document {
     crate::storage::roots();
-    let outcome = layer_ui::read_import(input, layer_ui::ImportIntent::Open, Default::default(), layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() }, Default::default(), layer_ui::photo_decode_limits(), &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let outcome = layer_ui::read_import(input, layer_ui::ImportIntent::Open, Default::default(), "Current ink".into(), Default::default(), layer_ui::photo_decode_limits(), &std::sync::atomic::AtomicBool::new(false)).unwrap();
     let layer_ui::ImportOutcome::Editable(imported) = outcome else { panic!("Expected editable drawing") };
     imported.project
 }

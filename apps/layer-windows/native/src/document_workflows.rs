@@ -1226,7 +1226,7 @@ mod tests {
                 std::fs::File::open(&path).unwrap(),
                 layer_ui::ImportIntent::Open,
                 Default::default(),
-                layer_ui::photo_document_names("Delivery", &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)),
+                layer_ui::photo_name("Delivery", &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)),
                 Default::default(),
                 layer_color::photo::DecodeLimits::from_memory_budget(layer_color::photo::PhotoMemoryBudget::from_limit(1 << 30)),
                 &Default::default(),

@@ -16,7 +16,7 @@ pub(super) async fn prepare(
     file: gio::File,
     policy: layer_ui::PhotoOpenPolicy,
     working: layer_core::color::RgbSpace,
-    names: layer_core::DocumentNames,
+    name: Arc<str>,
     localization: &Arc<layer_ui::Localizer>,
 ) -> Result<Option<(layer_ui::ImportedDocument, Option<DocumentLocation>)>, String> {
     let path = file.path().ok_or_else(|| layer_ui::DocumentHostError::ChooseDeviceFile.message(localization))?;
@@ -24,7 +24,7 @@ pub(super) async fn prepare(
         uri: file.uri().into(),
         name: path.file_name().ok_or_else(|| layer_ui::DocumentHostError::ChooseFilename.message(localization))?.to_string_lossy().into_owned(),
     };
-    let Some((outcome, location)) = run(window, workspace, path, location, policy, names, localization).await? else {
+    let Some((outcome, location)) = run(window, workspace, path, location, policy, name, localization).await? else {
         return Ok(None);
     };
     if !window.is_visible() { return Ok(None); }
@@ -41,12 +41,9 @@ pub(super) async fn prepare(
             .ok_or_else(|| localization.text(layer_ui::MessageId::DOCUMENTS_ERROR_MISSING_SOURCE).to_string())?;
         let source = Arc::unwrap_or_clone(source);
         let metadata = (*project.artwork.metadata).clone();
-        let names = layer_core::DocumentNames {
-            paint: project.scene().order().first().and_then(|h| project.scene().occurrence(*h)).map_or_else(|| "Photo".into(), |o| o.name.clone()),
-            paper: layer_core::paper::paper_occurrence(project.scene(), None).and_then(|h| project.scene().occurrence(h)).map(|o| o.name.clone()).unwrap_or_default(),
-        };
+        let paint = project.scene().order().first().and_then(|h| project.scene().occurrence(*h)).map_or_else(|| "Photo".into(), |o| o.name.clone());
         let Some(source) = interpret_window(window, workspace, source, policy, working, localization).await? else { return Ok(None); };
-        imported.project = gio::spawn_blocking(move || policy.photo_project(source, metadata, names))
+        imported.project = gio::spawn_blocking(move || policy.photo_project(source, metadata, paint))
             .await.map_err(|_| layer_ui::ColorFeatureError::Diagnostic("Profile reader failed".into()).profile_message(workspace.map(|w| w.localization()).as_deref().unwrap_or(localization)))?
             .map_err(|detail| layer_ui::ColorFeatureError::Diagnostic(detail).profile_message(workspace.map(|w| w.localization()).as_deref().unwrap_or(localization)))?;
     }
@@ -59,7 +56,7 @@ async fn run(
     path: PathBuf,
     location: DocumentLocation,
     policy: layer_ui::PhotoOpenPolicy,
-    names: layer_core::DocumentNames,
+    name: Arc<str>,
     localization: &Arc<layer_ui::Localizer>,
 ) -> Result<Option<(layer_ui::ImportOutcome, Option<DocumentLocation>)>, String> {
     let copy = layer_ui::bootstrap_view(localization);
@@ -90,7 +87,7 @@ async fn run(
     let control = cancelled.clone();
     // Await acknowledgement even after Cancel. A successor cannot overlap a
     // detached decoder, and a cancelled candidate never reaches a new window.
-    let result = gio::spawn_blocking(move || read(&path, location, policy, names, control))
+    let result = gio::spawn_blocking(move || read(&path, location, policy, name, control))
         .await
         .map_err(|_| "Document reader failed".to_string())
         .and_then(|result| result);
@@ -189,13 +186,13 @@ pub(crate) fn read(
     path: &Path,
     location: DocumentLocation,
     policy: layer_ui::PhotoOpenPolicy,
-    names: layer_core::DocumentNames,
+    name: Arc<str>,
     cancelled: Arc<AtomicBool>,
 ) -> Result<(layer_ui::ImportOutcome, Option<DocumentLocation>), String> {
     let file = super::reader::cancellable_file(path, cancelled.clone())
         .map_err(|e| e.to_string())?;
     let imported = layer_ui::read_import_with_decoder(file, layer_ui::ImportIntent::Open, policy,
-        names, Default::default(), layer_ui::photo_decode_limits(), &cancelled,crate::photo_reader::read)?;
+        name, Default::default(), layer_ui::photo_decode_limits(), &cancelled,crate::photo_reader::read)?;
     let location = match &imported {
         layer_ui::ImportOutcome::Editable(imported) => imported.source.adoption_location(Some(location)),
         layer_ui::ImportOutcome::Package(_) => None,
@@ -339,7 +336,7 @@ mod tests {
                 name: "Ordinary.jpg".into(),
             },
             Default::default(),
-            layer_ui::photo_document_names("Ordinary.jpg", &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)),
+            layer_ui::photo_name("Ordinary.jpg", &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)),
             Default::default(),
         )
         .unwrap();

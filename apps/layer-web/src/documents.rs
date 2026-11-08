@@ -353,7 +353,7 @@ impl WebApp {
                         artwork_transfer::OpenOptions {
                             dimension: limits.dimension,
                             photo_policy,
-                            names: layer_ui::photo_document_names(&source_name, &localization),
+                            name: layer_ui::photo_name(&source_name, &localization),
                             intent: if placing { layer_ui::ImportIntent::Place } else { layer_ui::ImportIntent::Open },
                             source_bytes: None,
                         },cancelled.clone(),

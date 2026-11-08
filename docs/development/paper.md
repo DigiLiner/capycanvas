@@ -144,11 +144,9 @@ for Gradient Fill
 tooth follows the marks. Image Rotate offers only quarter turns and flips, so
 the baked tile always stays aligned with the pixel grid.
 
-`Document::new` creates a white Paper. One scene query, the nearest Paper at or
-below a target, finds the paper for
-[document creation](../../crates/layer-ui/src/document_creation.rs),
-[photo projects](../../crates/layer-color/src/photo_project.rs), whose Paper is
-hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
+`Document::new` creates a white Paper.
+[Photo projects](../../crates/layer-color/src/photo_project.rs) open without
+Paper; existing drawings and recovery copies keep their saved hidden Paper.
 
 ### Which paper a stroke uses
 

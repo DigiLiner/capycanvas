@@ -9,6 +9,52 @@ is 4248 × 2832.
 - Geometry measurements use the 12 MP photo at Fit zoom. Older UI-only rows
   name their own canvas sizes.
 
+## Paper without texture
+
+Measured 2026-11-09 against `0d5dee316`: optimized benchmark APKs in ABBA
+order, with candidate production matching `6ddb2ee03`. Each motion row has
+six six-second contacts per build, factory density 320/font scale 1 and
+thermal status 0. The initial control has no Paper; the candidate has visible
+White None Paper. Painting and navigation use Full HD (1920 × 1080), so
+these results do not qualify the 12 MP target. Brushes use pressure 1 and
+zero tilt; Pastel Block replaces the unavailable Soft Pastel.
+
+| Row | Mean Hz, control → candidate | Worst contact p99 gap ms, control → candidate | Candidate/control |
+| --- | ---: | ---: | ---: |
+| Pencil 9 px, completed updates | 183.269 → 182.393 | 10.110 → 10.267 | 99.522% |
+| Pencil 36 px, completed updates | 183.006 → 180.622 | 9.689 → 9.864 | 98.697% |
+| Pastel Block, completed updates | 179.754 → 176.208 | 9.765 → 11.681 | 98.028% |
+| Pan, canvas presents | 60.023 → 60.023 | 16.698 → 16.833 | 100.000% |
+| Pinch, no Paper control → None | 60.023 → 57.787 | 16.857 → 33.368 | **96.276% — below 97%** |
+| Pinch, Fine tooth relief 0 control → None | 57.787 → 57.787 | 33.374 → 33.368 | 100.000% |
+
+Fresh input completion rates for Pencil 9 px, Pencil 36 px and Pastel Block
+are 180.303 → 179.289, 179.682 → 178.350 and 176.706 → 173.881 Hz.
+Their worst fresh input p99 gaps are 11.905 → 12.328, 11.373 → 11.643 and
+11.975 → 12.671 ms respectively.
+
+Both candidate pinch legs reproduce the slowdown against both No Paper
+controls. The other motion rows meet the relative gate. The added equal-work
+`0d5dee316` arm uses visible Fine tooth Paper, relief 0 and White, with six
+contacts in two groups. Its full setup signatures match the retained None
+contacts. Mean rates are 57.787081670 → 57.787093033 Hz: the absolute
+difference of 0.000011363 Hz is within the predeclared control range of
+0.000546621 Hz. This is the requested opaque-sheet cost, with no slower
+None-specific behavior. No renderer optimization followed.
+
+The 4248 × 2832 photo has two observations per build. Internal decode-to-adopt
+means are 1639.494 → 1618.868 ms; decode-to-ready means are
+1683.364 → 1663.069 ms; first observed GPU completion means are
+91.124 → 82.766 ms. Each meets control mean plus its observed range
+(2.471, 2.366 and 5.832 ms respectively). These internal proxies do not
+measure picker-to-photon or physical pen latency. S7 measurements were not
+run because the device disconnected from USB.
+
+Per-contact metrics, command receipts, artifact identities and photo ranges
+remain in the [matched results](../../artifacts/paper-texture-none/m3-android/tcl-matched-summary.json).
+The [equal-work comparison](../../artifacts/paper-texture-none/m3-android/equal-work/comparison.json)
+retains its contact timings, setup checks and spread classification.
+
 ## Stored image-source format comparison
 
 Measured 2026-11-06–07: frozen `01fe577d9` → format commit 1 candidate APK

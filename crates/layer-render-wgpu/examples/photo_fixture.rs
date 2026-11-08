@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         source.push_row(&row)?;
     }
     let mut project = layer_color::photo_project(source.finish()?, Default::default(),
-        layer_core::DocumentNames { paint: "Synthetic 61 MP source".into(), paper: "Paper".into() }, SampleDepth::U8)?;
+        "Synthetic 61 MP source".into(), SampleDepth::U8)?;
     let source_layer=std::env::args().any(|arg|arg=="--source-layer");
     let paint=RecordChange::insert(&project.artwork.paint,PaintSource {color_mode:Default::default(),domain:[width,height],raster:Default::default(),base:None,operations:Default::default()});
     let occurrence=RecordChange::insert(&project.artwork.occurrences,Occurrence::new(OccurrenceContent::Paint(paint.handle),"Benchmark ink"));

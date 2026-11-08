@@ -1774,8 +1774,8 @@ class AndroidCanvasBarBenchmarkTest {
             }
             if (wanted("paper")) {
                 photoDocument()
+                action(obj("type" to "effect", "action" to state().getJSONObject("layer_tools").getJSONObject("add_paper").getJSONObject("action")))
                 val paper = state().array("layers").objects().last().getLong("id")
-                action(obj("type" to "set_layer_visibility", "id" to paper, "visible" to true))
                 action(obj("type" to "select_layer", "id" to paper))
                 fun effect(op: JSONObject) = action(obj("type" to "effect", "action" to op))
                 effect(obj("op" to "set", "layer" to paper, "key" to "texture", "value" to obj("kind" to "choice", "value" to 2)))

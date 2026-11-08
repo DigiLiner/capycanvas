@@ -67,7 +67,7 @@ impl PixelClip {
     }
     pub fn document(&self, localization: &Localizer) -> Result<layer_core::Document, String> {
         let mut document = layer_color::photo_project((*self.source).clone(), Default::default(),
-            photo_document_names(&self.name, localization), self.color.depth)?;
+            photo_name(&self.name, localization), self.color.depth)?;
         let composition = document.artwork.compositions.get_mut(document.artwork.root).unwrap();
         composition.color = self.color;
         composition.blend = self.blend;
@@ -106,7 +106,7 @@ pub fn clipboard_document(sources: impl Into<crate::PreparedImages>, policy: Pho
     let (name, first) = sources.first().ok_or("Copy an image to paste")?;
     let extent = sources.iter().fold([0, 0], |extent, (_, source)| std::array::from_fn(|i| extent[i].max(source.extent[i])));
     let depth = sources.iter().map(|(_, source)| policy.editing_depth(source.interpretation.depth)).max_by_key(|depth| (depth.is_float(), depth.bits())).unwrap();
-    let mut document = layer_color::photo_project(first.clone(), Default::default(), photo_document_names(name, localization), depth)?;
+    let mut document = layer_color::photo_project(first.clone(), Default::default(), photo_name(name, localization), depth)?;
     if sources.len() > 1 {
         document.artwork.compositions.get_mut(document.artwork.root).unwrap().size = extent;
         let objects = sources.into_iter().map(|(name, source)| {

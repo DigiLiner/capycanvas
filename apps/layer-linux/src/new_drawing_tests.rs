@@ -216,21 +216,51 @@ fn native_new_drawing_dialog_review() {
         assert!(part::<gtk::Widget>(&w, "new-drawing-browser").is_visible(), "the preview opens all presets");
         press(&w, "new-drawing-browser-cancel");
         press(&w, "new-drawing-presets-button");
+        tab(&w, "Digital");
         let tiles = part::<gtk::FlowBox>(&w, "new-drawing-presets");
         let across = (0..8).filter_map(|index| tiles.child_at_index(index)).filter(|tile| tile.compute_bounds(&tiles).is_some_and(|bounds| bounds.y() < 1.)).count();
         assert_eq!(across, 5, "five presets across on desktop");
         shot("2-presets");
-        tab(&w, "Digital");
         let digital = part::<gtk::FlowBox>(&w, "new-drawing-presets");
         assert_eq!(digital.observe_children().n_items(), 10);
-        let full_hd = digital.child_at_index(1).unwrap();
-        input.click(screen_point(full_hd.upcast_ref(), &w.window, [0.5, 0.5]));
-        input.click(screen_point(part::<gtk::Button>(&w, "new-drawing-select").upcast_ref(), &w.window, [0.5, 0.5]));
-        pump(200);
-        assert_eq!(state(&w).new_drawing.as_ref().unwrap().setup.paper.texture.as_deref(), Some(layer_core::paper::NO_TEXTURE));
-        shot("2-digital-none");
-        input.click(screen_point(part::<gtk::Button>(&w, "new-drawing-presets-button").upcast_ref(), &w.window, [0.5, 0.5]));
-        pump(200);
+        for (index, id) in [(1, "full-hd"), (4, "cinematic")] {
+            let tile = part::<gtk::FlowBox>(&w, "new-drawing-presets").child_at_index(index).unwrap();
+            input.click(screen_point(tile.upcast_ref(), &w.window, [0.5, 0.5]));
+            press(&w, "new-drawing-select");
+            let view = state(&w).new_drawing.unwrap();
+            assert_eq!(view.setup.paper.texture.as_deref(), Some(layer_core::paper::NO_TEXTURE));
+            assert_eq!(view.sheet.color, layer_ui::built_in(id, None).unwrap().paper.color);
+            assert!(view.sheet.shown && view.paper_color_enabled && view.sheet.grain.is_none());
+            shot(&format!("2-{id}-none"));
+            press(&w, "new-drawing-create");
+            until(|| created.borrow().is_some(), "the Digital drawing");
+            let (project, location) = created.borrow_mut().take().unwrap();
+            assert!(location.is_none());
+            let paper = project.bottom_paper().unwrap();
+            assert_eq!(project.scene().effect(paper).unwrap().constant_color(), Some(layer_ui::built_in(id, None).unwrap().paper.color));
+            let drawing = Workspace::with_project(&app, Some((project, None)));
+            drawing.window.present();
+            ready(&drawing);
+            capture_ui(&drawing, &output, &format!("{theme}-2-{id}-created.png"));
+            if id == "full-hd" && theme == "light" {
+                invoke(&drawing, CommandId::SaveDocument);
+                let save = super::new_photo::chooser();
+                #[allow(deprecated)]
+                {
+                    save.set_current_folder(Some(&gtk::gio::File::for_path(&output))).unwrap();
+                    save.set_current_name(&format!("full-hd-none-{}.capy", std::process::id()));
+                    pump(200);
+                    save.response(gtk::ResponseType::Accept);
+                }
+                super::new_photo::finish(&drawing);
+                assert!(!state(&drawing).document_file.modified);
+            }
+            drawing.window.destroy();
+            w.window.present();
+            open_new_drawing(&w);
+            press(&w, "new-drawing-presets-button");
+            tab(&w, "Digital");
+        }
         tab(&w, "Mixed media");
         shot("2-presets-mixed-media");
         tab(&w, "Pastel");
@@ -323,6 +353,24 @@ fn native_new_drawing_dialog_review() {
         part::<gtk::DropDown>(&w, "new-drawing-depth").set_selected(0);
         click(&part::<gtk::Button>(&w, "new-drawing-cancel"));
         until(|| w.window.visible_dialog().is_none(), "New drawing closes");
+        let path = output.join(format!("photo-{theme}.png"));
+        layer_color::photo::write_png(std::fs::File::create(&path).unwrap(), &super::place_source::source()).unwrap();
+        invoke(&w, CommandId::OpenDocument);
+        let chooser = super::new_photo::chooser();
+        #[allow(deprecated)]
+        { chooser.set_file(&gtk::gio::File::for_path(&path)).unwrap(); pump(200); chooser.response(gtk::ResponseType::Accept); }
+        super::new_photo::finish(&w);
+        super::new_photo::ready_presentation(&w);
+        assert!(ui_session(&w).engine().document().bottom_paper().is_none());
+        let add = widgets(w.window.upcast_ref()).find(|node| node.widget_name() == "layer-add-paper" && node.is_mapped()).unwrap();
+        shot("10-png-no-paper");
+        if compositor { input.perform(serde_json::json!([{ "capture": format!("{theme}-png-no-paper") }])); }
+        input.click(screen_point(&add, &w.window, [0.5, 0.5]));
+        ready(&w);
+        assert!(ui_session(&w).engine().document().bottom_paper().is_some());
+        assert!(state(&w).layer_tools.add_paper.is_none());
+        shot("11-png-add-paper");
+        if compositor { input.perform(serde_json::json!([{ "capture": format!("{theme}-png-add-paper") }])); }
     }
 
     invoke(&w, CommandId::NewDocument);
@@ -333,8 +381,8 @@ fn native_new_drawing_dialog_review() {
     until(|| created.borrow().is_some(), "the new drawing");
     let (project, location) = created.borrow_mut().take().unwrap();
     assert!(location.is_none());
-    assert_eq!(project.composition().resolution, Some(layer_core::ImageResolution::ppi(300)));
-    assert_eq!(state(&w).settings.new_document.recent.first(), Some(&layer_ui::PresetKey::BuiltIn("sketchbook-a4".into())));
+    assert_eq!(project.composition().resolution, Some(layer_core::ImageResolution::ppi(layer_ui::SCREEN_PPI)));
+    assert_eq!(state(&w).settings.new_document.recent.first(), Some(&layer_ui::PresetKey::BuiltIn("cinematic".into())));
 
     w.window.unmaximize();
     w.window.set_default_size(620, 860);

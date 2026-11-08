@@ -50,6 +50,10 @@ pub(crate) fn ready(w: &Rc<Workspace>) {
         assert!(Instant::now() < deadline, "ready: {}", readiness_facts(w));
     }
 }
+pub(super) fn ready_presentation(w: &Rc<Workspace>) {
+    ready(w);
+    until(|| ui_session(w).engine().backend().stats.lock().unwrap().presented.iter().any(|frame| frame[3] == 1), "a canvas frame is presented");
+}
 #[track_caller]
 pub(super) fn finish(w: &Rc<Workspace>) {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -327,6 +331,7 @@ fn native_new_presets_and_profiled_photo_master() {
     std::fs::create_dir_all(output).unwrap();
     let output = output.canonicalize().unwrap();
     let w = Workspace::with_project(&app, Some((new_drawing(256, 256, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)));
+    apply_fixture_theme(&w);
     let created = Rc::new(RefCell::new(None));
     let result = created.clone();
     *w.open_document.borrow_mut() = Some(Rc::new(move |project, location| {
@@ -416,7 +421,13 @@ fn native_new_presets_and_profiled_photo_master() {
     pump(200);
     open.response(gtk::ResponseType::Accept);
     finish(&w);
-    ready(&w);
+    ready_presentation(&w);
+    let compositor_input = std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").map(|_| {
+        let mut input = RemoteInput::new().timeout_secs(30);
+        input.ready();
+        input.perform(serde_json::json!([{ "capture": "photo-open-before-edit" }]));
+        input
+    });
     assert_eq!(w.documents.len(), 2);
     let opened = w.documents.selected();
     assert_ne!(opened, incumbent);
@@ -542,5 +553,6 @@ fn native_new_presets_and_profiled_photo_master() {
     for window in [&restored, &photo] {
         window.window.destroy();
     }
+    if let Some(input) = compositor_input { input.finish(); }
     pump(100);
 }

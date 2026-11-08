@@ -82,7 +82,7 @@ impl OpenEnvironment {
             input,
             intent,
             self.photo_policy,
-            layer_ui::photo_document_names(name, &self.localization),
+            layer_ui::photo_name(name, &self.localization),
             self.limits(),
             layer_ui::photo_decode_limits(),
             cancel,

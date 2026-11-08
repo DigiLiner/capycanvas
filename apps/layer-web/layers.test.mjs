@@ -1,3 +1,4 @@
+import {checkPngPaperRows} from './new-drawing-fixture.mjs';
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {execFile} from "node:child_process";
@@ -413,6 +414,7 @@ async function checkPaperLighting({call,evaluate,settle,theme,directory}) {
   const paper=await evaluate('Number(layerApp.state().layers.find(l=>l.paper).id)');
   await send({type:'layer',action:{op:'select',id:paper,mask:false}});
   await wait(`!!${field('light')}?.querySelector('.number-dial-face')`);
+  await send({type:'effect',action:{op:'set',layer:paper,key:'relief',value:{kind:'number',value:0}}});
   assert.equal(await value('relief'),0,'Paper starts flat');
   const flat=await lighting();
   assert.deepEqual([flat.disabled,flat.opacity,flat.tab,flat.ariaDisabled,flat.role],[[true,true],.4,-1,'true','slider'],'A flat paper dims Light and Shows through paint');
@@ -484,7 +486,7 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
     await evaluate(`document.querySelector('.color-dialog[open] .color-cancel').click()`);await wait(`!document.querySelector('.color-dialog[open]')`);
     return shell;
   };
-  const layout=()=>evaluate(`(()=>{const d=document.querySelector('${dialog}'),r=d.getBoundingClientRect(),title=d.querySelector('.dialog-title'),t=title.getBoundingClientRect(),tiles=[...d.querySelectorAll('.texture-tile')],frame=n=>n.querySelector('.texture-frame'),top=tiles[0].getBoundingClientRect().top,preview=frame(tiles[0]).querySelector('canvas'),p=preview.getBoundingClientRect(),footer=d.querySelector('.dialog-footer'),page=d.querySelector('.dialog-page');
+  const layout=()=>evaluate(`(()=>{const d=document.querySelector('${dialog}'),r=d.getBoundingClientRect(),title=d.querySelector('.dialog-title'),t=title.getBoundingClientRect(),tiles=[...d.querySelectorAll('.texture-tile')],frame=n=>n.querySelector('.texture-frame'),top=tiles[0].getBoundingClientRect().top,preview=frame(tiles[0]).querySelector('canvas'),p=preview.getBoundingClientRect(),footer=d.querySelector('footer'),page=d.querySelector('.dialog-page');
     return{shell:{x:r.x,y:r.y,width:r.width,height:r.height},title:title.textContent,titleCenter:t.left+t.width/2-(r.left+r.width/2),columns:tiles.filter(n=>n.getBoundingClientRect().top===top).length,frames:tiles.every(n=>frame(n).getBoundingClientRect().width===102&&frame(n).getBoundingClientRect().height===102),preview:[p.width,p.height,preview.width],
       rings:tiles.map(n=>getComputedStyle(frame(n)).outlineStyle==='solid'&&getComputedStyle(frame(n)).outlineWidth==='2px'),captions:tiles.map(n=>n.querySelector('.texture-caption').textContent),focused:tiles.indexOf(document.activeElement),
       buttons:[...footer.querySelectorAll('button')].filter(n=>!n.hidden).map(n=>[n.textContent,n.getBoundingClientRect().height]),divider:getComputedStyle(footer).borderTopWidth,scrolls:page.scrollHeight>page.clientHeight,
@@ -546,12 +548,29 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
   await click(thumbnail);await wait(opened);await key(step,step);await key('Enter','Enter');await wait(closed);
   assert.equal((await texture()).value,initial.value+offset,'Enter uses the pending texture');
   await invoke('undo');assert.equal((await texture()).value,initial.value);
+  for(const [key,value] of [['relief',150],['through_paint',40]])await send({type:'effect',action:{op:'set',layer:paper,key,value:{kind:'number',value}}});
+  const kept=await evaluate('layerApp.state().layer_properties.controls.map(c=>c.value)');
+  for(const id of ['rough','none']) {
+    const index=await evaluate(`layerApp.state().layer_properties.controls.find(c=>c.paper).paper.tiles.findIndex(t=>t.id===${JSON.stringify(id)})`);
+    if(id==='none')assert.equal(index,0,'None is the first texture tile');
+    await click('#property-texture');await wait(opened);await click(tile(index));await click(`${dialog} #texture-apply`);await wait(closed);
+    assert.equal((await texture()).value,index);
+    const controls=await evaluate('layerApp.state().layer_properties.controls.map(c=>({value:c.value,disabled:c.disabled}))');
+    assert.deepEqual(controls.slice(2).map(c=>c.value),kept.slice(2),'Texture choices retain authored numeric values');
+    assert.deepEqual(controls.map(c=>c.disabled),id==='none'?[false,false,true,true,true,true]:[false,false,false,false,false,false]);
+    if(id==='none') {
+      assert.deepEqual(await evaluate(`['scale','relief','light','through_paint'].map(k=>document.querySelector('[data-property-key="'+k+'"]').classList.contains('disabled'))`),[true,true,true,true]);
+      assert.equal(await evaluate(`['#property-texture','${thumbnail}'].every(selector=>{const c=document.querySelector(selector+' canvas'),d=c?.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height).data;return d&&d.every((v,i)=>v===d[i%4]);})`),true,'None thumbnails are flat');
+    }
+    await capture(`texture-${id}-retained-${theme}`);
+  }
+  for(let i=0;i<4;i++)await invoke('undo');
   const german=await readFile(new URL('../../assets/locales/de/resources.ftl',import.meta.url),'utf8'),copy=name=>german.split('\n').find(line=>line.startsWith(`${name} = `)).slice(name.length+3);
   const settings=await evaluate('JSON.stringify(layerApp.state().settings)'),language=async(saved,tag)=>{await send({type:'restore_saved_settings',saved});await wait(`!layerApp.app.language_pending()&&document.documentElement.lang===${JSON.stringify(tag)}`,30000);await settle();};
   await click(thumbnail);await wait(opened);await click(tile(0));
   await evaluate(`window.textureDialogNode=document.querySelector('${dialog}')`);
   await language(await evaluate(`JSON.stringify({...layerApp.state().settings,language:{Explicit:'de'}})`),'de');
-  const relabeled=await evaluate(`(()=>{const d=document.querySelector('${dialog}');return{same:d===textureDialogNode,title:d.querySelector('.dialog-title').textContent,label:d.ariaLabel,buttons:[...d.querySelectorAll('.dialog-footer button:not([hidden])')].map(n=>n.textContent),captions:[...d.querySelectorAll('.texture-caption')].map(n=>n.textContent),labels:layerApp.state().layer_properties.controls.find(c=>c.paper).paper.tiles.map(t=>t.label),cancel:layerApp.app.bootstrap_view().common.cancel,focused:document.activeElement?.dataset.textureTile}})()`);
+  const relabeled=await evaluate(`(()=>{const d=document.querySelector('${dialog}');return{same:d===textureDialogNode,title:d.querySelector('.dialog-title').textContent,label:d.ariaLabel,buttons:[...d.querySelectorAll('footer button:not([hidden])')].map(n=>n.textContent),captions:[...d.querySelectorAll('.texture-caption')].map(n=>n.textContent),labels:layerApp.state().layer_properties.controls.find(c=>c.paper).paper.tiles.map(t=>t.label),cancel:layerApp.app.bootstrap_view().common.cancel,focused:document.activeElement?.dataset.textureTile}})()`);
   assert.deepEqual(relabeled,{same:true,title:copy('resources-paper-choose'),label:copy('resources-paper-choose'),buttons:[...(initial.import?[copy('resources-paper-import')]:[]),relabeled.cancel,copy('resources-paper-use')],captions:relabeled.labels,labels:relabeled.labels,cancel:relabeled.cancel,focused:'0'},'A language change relabels the open dialog');
   assert.notDeepEqual(relabeled.captions,initial.labels);assert.equal(await pending(),0,'Relabeling keeps the pending texture');
   await capture(`texture-dialog-de-${theme}`);
@@ -572,7 +591,7 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
   const contextMenu=`document.querySelector('.panel-context-menu:popover-open')`,maskLabel=await evaluate(`layerApp.app.layer_menu(layerApp.state().layers.find(l=>Number(l.id)===${paper}).id,false).sections.flat().find(i=>i.sections?.flat().some(s=>s.action?.action?.op==='add_mask')).label`);
   await wait(`!!${contextMenu}`);
   await press(`[...${contextMenu}.querySelectorAll('button')].find(n=>n.querySelector('.menu-label')?.textContent===${JSON.stringify(maskLabel)})`);
-  const maskItems=()=>evaluate(`[...${contextMenu}.querySelectorAll(':scope > button:not(.submenu-back)')].map(n=>[n.querySelector('.menu-label').textContent,n.disabled])`);
+  const maskItems=()=>evaluate(`[...${contextMenu}.querySelectorAll(':scope > .context-menu-body > button:not(.submenu-back)')].map(n=>[n.querySelector('.menu-label').textContent,n.disabled])`);
   const refused=[['Add mask',true],['Mask: reveal selection',true],['Mask: hide selection',true],['Paste mask',true]];
   assert.deepEqual(await maskItems(),refused,'The Paper Mask submenu offers nothing');
   await capture(`texture-row-mask-menu-${theme}`);
@@ -605,7 +624,7 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
   const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
   const layer=action=>send({type:'layer',action});
   const invoke=command=>send({type:'invoke',command});
-  const wait=condition=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+5000;function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
+  const wait=(condition,timeout=5000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
   const rows=()=>evaluate('layerApp.state().layers.map(l=>({id:Number(l.id),label:l.label,drawing:l.drawing,mask_selected:l.mask_selected}))');
   const missing=()=>evaluate("!!document.querySelector('#layer-add-paper')");
   const mouse=async(type,x,y)=>{await call('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount:1});await settle();};
@@ -740,6 +759,10 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
     assert.equal(await missing(),false);assert.equal((await rows()).at(-1).label,'Paper');
     for(const row of (await rows()).filter(l=>l.label!=='Paper'))await layer({op:'delete',id:row.id});
     await layer({op:'new',group:false,clipped:false});
+  }
+  for(const theme of ['light','dark']) {
+    await send({type:'set_theme',theme});
+    await checkPngPaperRows({call,evaluate,settle,wait,click:async selector=>{const p=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await mouse('mousePressed',p.x,p.y);await mouse('mouseReleased',p.x,p.y);},capture:async name=>writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'))},theme);
   }
   console.log('PASS: Paper lighting (disabled while flat, Light dial row geometry, press, drag past the dial, keys, focus ring and double-click reset as single Undo steps, snapped and Shift scrubs); Scale relief while dragging and hidden after release; Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, no Paper mask, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
 }

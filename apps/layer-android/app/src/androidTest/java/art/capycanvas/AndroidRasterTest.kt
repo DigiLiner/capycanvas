@@ -111,6 +111,67 @@ class AndroidRasterTest {
         }
         finally { Native.captureFree(control) }
     }
+    @Test fun pencilOnTextureNoneMatchesDrawingWithoutPaper() {
+        fun sourcePixels(name: String): IntArray {
+            var task = 0L
+            var clip = 0L
+            val control = Native.captureControl()
+            val file = File(activity.getExternalFilesDir(null), "validation/paper/$name.png").apply { parentFile!!.mkdirs() }
+            try {
+                val id = native { handle -> request(handle, "copy_pixels").first.also { task = Native.clipTask(handle, it) } }
+                val consumed = task; task = 0
+                clip = Native.clipRun(consumed, control, name)
+                Native.clipWritePng(clip, file.absolutePath)
+                val adopted = clip; clip = 0
+                native { Native.clipAdopt(it, id, adopted) }
+                val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath, android.graphics.BitmapFactory.Options().apply { inPremultiplied = false })!!
+                try { return IntArray(bitmap.width * bitmap.height).also { bitmap.getPixels(it, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height) } }
+                finally { bitmap.recycle() }
+            } finally {
+                if (task != 0L) Native.clipTaskFree(task)
+                if (clip != 0L) Native.clipFree(clip)
+                Native.captureFree(control)
+            }
+        }
+        for (theme in listOf("light", "dark")) {
+            send(obj("type" to "set_theme", "theme" to theme))
+            if (native { state(it).array("layers").objects().none { row -> !row.isNull("paper") } }) {
+                val add = native { state(it).getJSONObject("layer_tools").getJSONObject("add_paper").getJSONObject("action") }
+                send(obj("type" to "effect", "action" to add))
+            }
+            val paper = native { state(it).array("layers").objects().single { row -> !row.isNull("paper") }.getLong("id") }
+            send(obj("type" to "select_layer", "id" to paper))
+            send(obj("type" to "effect", "action" to obj("op" to "set", "layer" to paper, "key" to "texture", "value" to obj("kind" to "choice", "value" to 0))))
+            val ink = native { state(it).array("layers").objects().first { row -> row.getBoolean("drawing") }.getLong("id") }
+            send(obj("type" to "select_layer", "id" to ink))
+            invoke("pencil")
+            send(obj("type" to "set_brush_size", "value" to 9))
+            send(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(0.0, 0.0, 0.0, 1.0))))
+            fun paint() {
+                val before = native { state(it).getJSONObject("document_file").getLong("revision") }
+                native { handle ->
+                    val viewport = state(handle).getJSONObject("camera").getJSONArray("viewport")
+                    val now = System.nanoTime()
+                    val samples = (0..7).flatMap { step -> listOf(viewport.getDouble(0) * (.45 + step * .01), viewport.getDouble(1) * .5,
+                        if (step == 7) 0.0 else .7, 0.0, 0.0, 0.0, 0.0, (now + step * 10_000_000L).toDouble(),
+                        when (step) { 0 -> 1.0; 7 -> 3.0; else -> 2.0 }) }.toDoubleArray()
+                    Native.pointer(handle, 72, 0, 0, samples, samples.size, false, 0)
+                }
+                compose.waitUntil(120_000) { drawingSettled() && native { state(it).getJSONObject("document_file").getLong("revision") } > before }
+            }
+            val blank = native { state(it).array("layers").objects().first { row -> row.getBoolean("drawing") }.getLong("paint_revision") }
+            paint()
+            val plain = sourcePixels("none-$theme")
+            assertTrue("The Pencil line has source pixels", plain.any { android.graphics.Color.alpha(it) > 0 })
+            invoke("undo")
+            assertEquals(blank, native { state(it).array("layers").objects().first { row -> row.getBoolean("drawing") }.getLong("paint_revision") })
+            send(obj("type" to "layer", "action" to obj("op" to "delete", "id" to paper)))
+            paint()
+            assertArrayEquals("$theme Pencil SOURCE pixels on None equal pixels without Paper", plain, sourcePixels("no-paper-$theme"))
+            invoke("undo")
+        }
+    }
+
     @Test fun paperTextureChangesRetainImmediatePencilContacts() {
         val evidence = org.json.JSONArray()
         val output = File(activity.getExternalFilesDir(null), "validation/paper-texture-race/events.json").apply { parentFile!!.mkdirs() }

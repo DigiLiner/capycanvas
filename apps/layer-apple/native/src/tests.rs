@@ -248,7 +248,7 @@ fn write_document(document: &layer_core::Document, output: &mut impl std::io::Wr
 }
 fn read_document(input: impl std::io::Read + std::io::Seek) -> layer_core::Document {
     layer_core::temp_files::set_directory(std::env::temp_dir()).unwrap();
-    let outcome = layer_ui::read_import(input, layer_ui::ImportIntent::Open, Default::default(), layer_core::DocumentNames { paint: "Paint".into(), paper: "Paper".into() }, Default::default(), photo_limits(), &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let outcome = layer_ui::read_import(input, layer_ui::ImportIntent::Open, Default::default(), "Paint".into(), Default::default(), photo_limits(), &std::sync::atomic::AtomicBool::new(false)).unwrap();
     let layer_ui::ImportOutcome::Editable(imported) = outcome else { panic!("Expected editable artwork") };
     imported.project
 }

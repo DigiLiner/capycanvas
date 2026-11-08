@@ -365,6 +365,37 @@ function New-Journey([string]$Theme,[switch]$Full) {
         Press 'new-drawing-save-cancel';Wait-Until {!(Drawer).save} 'Cancel did not leave the naming row'
         Press 'new-drawing-browser-cancel';Wait-Until {!(Drawer)} 'Cancel did not close the presets'
     }
+    foreach($preset in @('Full HD','Cinematic')){
+        Open-Drawer 'new-drawing-presets-button' 'presets'
+        Type-Text 'new-drawing-search' $preset
+        Wait-Until {$browser=Drawer;$browser.query -eq $preset -and @($browser.tiles).Count -eq 1 -and $browser.tiles[0].name -eq $preset} "Digital preset search did not find $preset"
+        $expectedColor=if($preset -eq 'Full HD'){'255,255,255,255'}else{'211,211,208,255'}
+        $sheet=(Drawer).tiles[0].sheet
+        if((@($sheet.color.rgba|ForEach-Object {[int][Math]::Round($_*255)}) -join ',') -ne $expectedColor){throw "$preset browser thumbnail lost its authored sheet color"}
+        if($sheet.texture -ne 'none' -or $sheet.grain -or !$sheet.shown){throw "$preset browser thumbnail did not retain a plain Paper"}
+        Press 'new-drawing-preset-0';Press 'new-drawing-select'
+        Wait-Until {$view=Drawing;!$view.drawer -and $view.page.preset -eq $preset -and $view.setup.paper.texture -eq 'none' -and $view.sheet.shown -and !$view.sheet.grain -and $null -eq $view.page.relief} "$preset did not select None with a visible plain sheet"
+        if((@((Drawing).sheet.color.rgba|ForEach-Object {[int][Math]::Round($_*255)}) -join ',') -ne $expectedColor){throw "$preset main preview lost its authored sheet color"}
+        Open-Drawer 'new-drawing-texture' 'paper'
+        Wait-Until {$drawer=Drawer;$drawer.tiles[1].id -eq 'none' -and $drawer.tiles[1].label -eq 'None' -and $drawer.tiles[1].selected -and !$drawer.relief.enabled} "$preset did not select None after No paper"
+        New-Capture ('digital-'+$preset.Replace(' ','-'))
+        Press 'new-drawing-paper-cancel';Wait-Until {!(Drawer)} 'Digital texture drawer did not close'
+        if($preset -eq 'Cinematic'){
+            $original=(Model).windows_tabs.selected;$count=@((Model).windows_tabs.tabs).Count
+            Press 'new-drawing-create'
+            Wait-Until {$view=Model;!$view.state.new_drawing -and @($view.windows_tabs.tabs).Count -eq $count+1 -and $view.canvas_ready -and $view.brush_ready -and !$view.state.document_file.busy} 'Cinematic did not create a ready drawing' 60
+            $papers=@((Model).state.layers|Where-Object paper)
+            if($papers.Count -ne 1 -or $papers[0].paper.id -ne 'none' -or $papers[0].paper.label -ne 'None'){throw 'Created Cinematic did not retain one plain None Paper'}
+            Wait-PresentedFrame -Idle
+            $point=Clear-CanvasPoint 'title-bar'
+            $null=[TabFrames]::DwmFlush();$sample=[TabFrames]::Grab($point[0],$point[1],1,1)
+            try{$pixel=$sample.GetPixel(0,0);if([Math]::Abs($pixel.R-211) -gt 3 -or [Math]::Abs($pixel.G-211) -gt 3 -or [Math]::Abs($pixel.B-208) -gt 3){throw "Created Cinematic did not show Pearl: $pixel"}}finally{$sample.Dispose()}
+            Capture ("cinematic-created-$Theme") -Composed -WithModel
+            File-Command 'close_document'
+            Wait-Until {(Model).windows_tabs.selected -eq $original -and @((Model).windows_tabs.tabs).Count -eq $count} 'Closing Cinematic did not restore the original drawing'
+            Open-NewDrawing
+        }
+    }
     Open-Drawer 'new-drawing-presets-button' 'presets'
     Type-Text 'new-drawing-search' 'chalk'
     Wait-Until {$browser=Drawer;$browser.query -eq 'chalk' -and @($browser.tiles).Count -ge 1 -and $browser.tiles[0].name -eq 'Chalkboard'} 'Preset search did not find Chalkboard'
@@ -390,6 +421,12 @@ function New-Journey([string]$Theme,[switch]$Full) {
     Wait-Until {$drawer=Drawer;$drawer.tiles[0].selected -and !$drawer.relief.enabled -and !(Owned 'new-drawing-paper-relief').Current.IsEnabled} 'No paper did not disable Texture visibility'
     New-Capture 'paper-none'
     Press 'new-drawing-paper-use' {$view=Drawing;!$view.drawer -and !$view.setup.paper.texture -and $null -eq $view.page.relief -and !(Find 'new-drawing-texture-relief' -Within $root)} 'No paper kept the texture visibility line'
+    Open-Drawer 'new-drawing-texture' 'paper'
+    $plain=Item-Index (Drawer).tiles {param($item)$item.id -eq 'none'}
+    Press "new-drawing-paper-tile-$plain"
+    Wait-Until {$drawer=Drawer;$plain -eq 1 -and $drawer.tiles[$plain].selected -and !$drawer.relief.enabled -and $drawer.relief.value -eq 50} 'None did not retain the disabled texture visibility value'
+    Press 'new-drawing-paper-use' {$view=Drawing;!$view.drawer -and $view.setup.paper.texture -eq 'none' -and $view.sheet.shown -and !$view.sheet.grain -and $view.setup.paper.relief -eq 50 -and $null -eq $view.page.relief} 'None did not restore the plain Paper with retained texture visibility'
+    New-Capture 'paper-plain'
     Open-Drawer 'new-drawing-texture' 'paper'
     $paper=Item-Index (Drawer).tiles {param($item)$item.id -eq 'cold_press'}
     Press "new-drawing-paper-tile-$paper"
@@ -485,9 +522,10 @@ function New-Journey([string]$Theme,[switch]$Full) {
     Wait-Until {$view=Drawing;$view.setup.blend_space -eq 'Linear' -and $view.blending_note -and !(Owned 'document-blending').Current.IsEnabled} 'Float did not force Linear blending'
     Pick-Choice 'document-depth' (Value-Index $view.depths 'U8')
     Wait-Until {$view=Drawing;$view.setup.blend_space -eq 'Perceptual' -and !$view.blending_note -and (Owned 'document-blending').Current.IsEnabled} 'Leaving Float lost the Perceptual blending choice'
+    $invalidEpoch=(Model).state.document_file.epoch
     Type-Text 'document-width' '2+'
     Press 'new-drawing-create';Start-Sleep -Milliseconds 800
-    if(!(Drawing) -or [string]::IsNullOrWhiteSpace((Owned 'document-width').Current.HelpText) -or (Model).state.document_file.epoch -ne 0){throw 'An invalid size expression did not keep the dialog open with its refusal'}
+    if(!(Drawing) -or [string]::IsNullOrWhiteSpace((Owned 'document-width').Current.HelpText) -or (Model).state.document_file.epoch -ne $invalidEpoch){throw 'An invalid size expression did not keep the dialog open with its refusal'}
     Close-NewDrawing 'new-drawing-cancel'
     Open-NewDrawing
     Wait-Until {(Field-Value 'document-width') -eq (Drawing).values[0] -and [string]::IsNullOrWhiteSpace((Owned 'document-width').Current.HelpText)} 'Reopening New drawing retained the canceled width draft or refusal'
@@ -905,6 +943,24 @@ function Test-GpuUnavailableSave([switch]$CurrentReview) {
     Wait-Closed 'Reopened recovery project close did not finish'
     if((Get-Item -LiteralPath $stderr).Length){throw 'Reopened recovery project reported stderr'}
 }
+function Test-PhotoPaper {
+    $original=(Model).windows_tabs.selected;$count=@((Model).windows_tabs.tabs).Count
+    File-Command 'open_document';Picker 'Open';Choose-Path $imageSource
+    Wait-Until {$view=Model;@($view.windows_tabs.tabs).Count -eq $count+1 -and $view.brush_ready -and !$view.state.document_file.busy} 'PNG did not open as a ready drawing' 60
+    Use-PaintWorkspace
+    if(!@((Model).layout.groups|Where-Object {$_.active -eq 'layers'}).Count){Invoke-Control 'Layers'}
+    Wait-Until {$state=(Model).state;@($state.layers).Count -eq 1 -and !@($state.layers|Where-Object paper).Count -and $state.layer_tools.add_paper -and (Control 'layer-add-paper' -Arranged)} 'Opened PNG did not expose Add Paper without a Paper layer'
+    Capture ('photo-without-paper-'+(Model).state.theme) -Composed -WithModel
+    Press 'layer-add-paper'
+    Wait-Until {$state=(Model).state;@($state.layers).Count -eq 2 -and @($state.layers|Where-Object paper).Count -eq 1 -and !$state.layer_tools.add_paper} 'Add Paper did not create one Paper under the PNG'
+    Capture ('photo-add-paper-'+(Model).state.theme) -Composed -WithModel
+    Invoke-Control 'Undo'
+    Wait-Until {$state=(Model).state;@($state.layers).Count -eq 1 -and !@($state.layers|Where-Object paper).Count -and $state.layer_tools.add_paper} 'One Undo did not remove the PNG Paper'
+    File-Command 'close_document'
+    Wait-Until {$view=Model;$view.windows_tabs.selected -eq $original -or @($view.state.requests|Where-Object {$_.kind.request.type -eq 'confirm_close'}).Count} 'PNG close did not complete or request confirmation'
+    if((Model).windows_tabs.selected -ne $original){Confirm-Dialog;Invoke-Control 'Discard Changes';$script:scope=$root}
+    Wait-Until {(Model).windows_tabs.selected -eq $original -and @((Model).windows_tabs.tabs).Count -eq $count} 'PNG close did not restore the original drawing'
+}
 function Test-LightNewDrawing {
     $env:CAPY_STORAGE_DIR=Join-Path $run 'light-profile'
     [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme='light'}|ConvertTo-Json -Depth 4))
@@ -916,6 +972,7 @@ function Test-LightNewDrawing {
     Bind-ReviewWindow 'No light review window'
     Wait-Until {$model=Model;$model.brush_ready -and $model.state.theme -eq 'light'} 'Light review did not start' 45
     if($Journey -eq 'paper-color'){Test-PaperColorReopen}elseif($Journey -eq 'new-drawing-problem'){Test-NewDrawingProblem 'light'}else{New-Journey 'light'}
+    if($Journey -eq 'new-drawing'){Test-PhotoPaper}
     if($Journey -eq 'full'){Color-Workflows}
     Request-Close;Wait-Closed 'Light review close did not finish'
     if((Get-Item -LiteralPath $stderr).Length){throw 'Light native review reported stderr'}
@@ -965,6 +1022,7 @@ if($transition){
     return
 }
 if($Journey -in @('new-drawing','new-drawing-problem','paper-color')){
+    if($Journey -eq 'new-drawing'){Test-PhotoPaper}
     Request-Close;Wait-Closed 'New drawing review close did not finish'
     if((Get-Item -LiteralPath $stderr).Length){throw 'New drawing native review reported stderr'}
     Test-LightNewDrawing

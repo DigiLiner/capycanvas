@@ -855,6 +855,96 @@ class AndroidFeatureParityTest {
         }
     }
 
+    @Test fun digitalPaperPresetsCreateVisiblePlainSheetsInBothThemes() {
+        for (theme in listOf("light", "dark")) for ((preset, rgb) in listOf("Full HD" to listOf(255, 255, 255), "Cinematic" to listOf(211, 211, 208))) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            openNewDrawing()
+            compose.onNodeWithTag("new-drawing-presets-button").performClick()
+            field("new-drawing-search").performTextReplacement(preset)
+            awaitDrawing("$preset found") { it.getJSONObject("drawer").getJSONArray("tiles").getJSONObject(0).getString("name") == preset }
+            compose.onNodeWithTag("new-drawing-preset-0").performScrollTo().performClick()
+            compose.onNodeWithTag("new-drawing-select").performClick()
+            awaitDrawing("$preset has a visible plain sheet") { it.isNull("drawer") && it.getJSONObject("sheet").getBoolean("shown") && it.getJSONObject("sheet").isNull("grain") &&
+                it.getJSONObject("setup").getJSONObject("paper").getString("texture") == "none" }
+            val rgba = drawing()!!.getJSONObject("sheet").getJSONObject("color").getJSONArray("rgba")
+            rgb.forEachIndexed { i, v -> assertEquals(v / 255.0, rgba.getDouble(i), .000001) }
+            val count = host.drawingTabs.rows.size
+            compose.onNodeWithTag("new-drawing-create").performClick()
+            val extent = if (preset == "Full HD") 1920 to 1080 else 3840 to 1608
+            compose.waitUntil(60_000) { drawing() == null && host.drawingTabs.rows.size == count + 1 && request() == null && !host.documents.working && state().array("tabs").objects().any {
+                it.optBoolean("active") && it.getInt("width") == extent.first && it.getInt("height") == extent.second
+            } && compose.onAllNodesWithTag("document-progress").fetchSemanticsNodes().isEmpty() }
+            host.awaitReady(compose = compose)
+            compose.waitForIdle()
+            val paper = state().array("layers").objects().single { !it.isNull("paper") }
+            assertTrue("$preset keeps Paper visible", paper.getBoolean("visible"))
+            assertEquals("none", paper.getJSONObject("paper").getString("id"))
+            capture("digital-$preset-$theme")
+        }
+    }
+
+    @Test fun paperNoneKeepsRetainedControlsAndLayerPickerInBothThemes() {
+        fun controls() = state().getJSONObject("layer_properties").array("controls").objects()
+        fun control(key: String) = controls().single { it.getString("key") == key }
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            val paper = state().array("layers").objects().single { !it.isNull("paper") }.getLong("id")
+            action(obj("type" to "select_layer", "id" to paper))
+            fun texture(id: String) {
+                val index = control("texture").getJSONObject("paper").array("tiles").objects().indexOfFirst { it.optString("id") == id }
+                assertTrue("Texture $id exists", index >= 0)
+                action(obj("type" to "effect", "action" to obj("op" to "set", "layer" to paper, "key" to "texture", "value" to obj("kind" to "choice", "value" to index))))
+            }
+            texture("rough")
+            for ((key, value) in listOf("relief" to 150, "through_paint" to 40))
+                action(obj("type" to "effect", "action" to obj("op" to "set", "layer" to paper, "key" to key, "value" to obj("kind" to "number", "value" to value))))
+            val retained = listOf("scale", "relief", "light", "through_paint").associateWith { control(it).getJSONObject("value").getDouble("value") }
+            texture("none")
+            for ((key, value) in retained) {
+                assertTrue("None disables $key", control(key).getBoolean("disabled"))
+                assertEquals("None retains $key", value, control(key).getJSONObject("value").getDouble("value"), 0.0)
+            }
+            assertTrue(state().array("layers").objects().single { it.getLong("id") == paper }.getBoolean("visible"))
+            compose.onNodeWithTag("layer-rows").performScrollToIndex(state().array("layers").objects().indexOfFirst { it.getLong("id") == paper })
+            compose.onNodeWithTag("layer-texture-$paper").assertIsDisplayed().performClick()
+            shown("texture-dialog")
+            assertEquals("none", control("texture").getJSONObject("paper").getJSONArray("tiles").getJSONObject(0).getString("id"))
+            compose.onNodeWithTag("texture-tile-0").assertIsSelected()
+            capture("none-layer-picker-$theme")
+            compose.onNodeWithTag("texture-cancel").performClick()
+            texture("rough")
+            for ((key, value) in retained) {
+                assertFalse("Rough enables $key", control(key).getBoolean("disabled"))
+                assertEquals("Rough restores $key", value, control(key).getJSONObject("value").getDouble("value"), 0.0)
+            }
+            capture("rough-retained-$theme")
+        }
+    }
+
+    @Test fun openedPngOmitsPaperAndNativeAddPaperWorksInBothThemes() {
+        val file = java.io.File(device.root, "plain-photo.png")
+        val bitmap = Bitmap.createBitmap(64, 48, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(android.graphics.Color.rgb(90, 120, 150))
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            host.openDocument(file)
+            compose.waitForIdle()
+            assertEquals(1, state().array("layers").length())
+            assertTrue(state().array("layers").getJSONObject(0).isNull("paper"))
+            compose.onNodeWithTag("layer-rows").performScrollToIndex(1)
+            compose.onNodeWithTag("layer-add-paper").assertIsDisplayed().performClick()
+            compose.waitUntil(30_000) {
+                val paper = state().array("layers").objects().firstOrNull { !it.isNull("paper") }
+                paper != null && compose.onAllNodesWithTag("layer-row-${paper.getLong("id")}").fetchSemanticsNodes().isNotEmpty() &&
+                    compose.onAllNodesWithTag("layer-add-paper").fetchSemanticsNodes().isEmpty()
+            }
+            assertEquals(2, state().array("layers").length())
+            capture("png-add-paper-$theme")
+        }
+    }
+
     @Test fun newDrawingDialogJourneyInBothThemes() {
         fun shot(theme: String, name: String) = screenshot("new-drawing/$theme-$name.png")
         fun tap(tag: String, scroll: Boolean = false) {

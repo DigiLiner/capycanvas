@@ -1,3 +1,4 @@
+import {clickDropdownChoice} from './dropdown-fixture.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {createDrawing} from './new-drawing-fixture.mjs';
@@ -41,7 +42,7 @@ export async function checkBlending({call,evaluate,settle}) {
   const drawing='#new-drawing-dialog[open]',opened=`!!document.querySelector('${drawing}')&&!!layerApp.state().new_drawing`;
   const blending=`document.querySelector('${drawing} #new-drawing-blending')`;
   const setup=()=>evaluate('layerApp.state().new_drawing.setup');
-  const choice=async(id,key,value)=>{await evaluate(`(n=>{n.value=String(layerApp.state().new_drawing.${key}.findIndex(c=>c.value===${JSON.stringify(value)}));n.dispatchEvent(new Event('change',{bubbles:true}));})(document.querySelector('${drawing} #new-drawing-${id}'))`);await settle();};
+  const choice=async(id,key,value)=>{const index=await evaluate(`layerApp.state().new_drawing.${key}.findIndex(c=>c.value===${JSON.stringify(value)})`);await clickDropdownChoice({call,evaluate,settle},`${drawing} #new-drawing-${id}`,index,'index');};
   const cancel=async()=>{await evaluate(`document.querySelector('${drawing} #new-drawing-cancel').click()`);await wait(`!document.querySelector('${drawing}')`);};
   const theme=await evaluate('layerApp.state().settings.theme ?? null');
   await wait(`(()=>{[...document.querySelectorAll('${dialog} button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('${dialog}');})()`);
@@ -56,7 +57,7 @@ export async function checkBlending({call,evaluate,settle}) {
     assert.equal(await evaluate(selected('blend_linear')),false,'one undo step restores Perceptual');
 
     await invoke('document_properties');
-    await wait(`[...document.querySelectorAll('${dialog} h3')].some(h=>h.textContent==='Blending'&&h.nextElementSibling?.textContent==='Perceptual Blending')`);
+    await wait(`[...document.querySelectorAll('${dialog} .settings-info label')].some(h=>h.textContent==='Blending'&&h.nextElementSibling?.textContent==='Perceptual Blending')`);
     await capture('properties',`document.querySelector('${dialog}')`);
     await evaluate(`[...document.querySelectorAll('${dialog} button')].find(b=>b.textContent==='Done').click()`);
     await wait(`!document.querySelector('${dialog}')`);

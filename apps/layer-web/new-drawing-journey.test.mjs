@@ -2,7 +2,7 @@ import {dropdownChoice,clickDropdownChoice,captureDropdowns} from './dropdown-fi
 import {checkSearchField} from './control-style-fixture.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
-import {createDrawing} from './new-drawing-fixture.mjs';
+import {createDrawing,checkPngPaperRows} from './new-drawing-fixture.mjs';
 
 const dialog='#new-drawing-dialog[open]';
 
@@ -56,7 +56,7 @@ export async function checkNewDrawing({call,evaluate,settle}) {
   for(const theme of ['light','dark']) {
     await evaluate(`layerApp.dispatch({type:'set_theme',theme:'${theme}'})`);await settle();
     if(theme==='light')await capture('startup-light');
-    const tabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');
+    let tabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');
     await open();
     const opened=await view();
     assert.equal(opened.untitled,await evaluate('layerApp.app.document_tabs(0).upcoming_untitled'),'The next untitled name opens the dialog');
@@ -72,10 +72,10 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     await captureDropdowns({call,evaluate,settle},dialog,directory,`${theme}-main`);
     const nextUnit=opened.units.findIndex(unit=>unit.value!==opened.setup.unit);
     await click('#new-drawing-unit');
-    assert.equal(await evaluate(`document.querySelector('.panel-context-menu:popover-open').closest('dialog')===document.querySelector('${dialog}')`),true,'The menu belongs to the active modal');
+    assert.equal(await evaluate(`(window.newDrawingUnitMenu=document.querySelector('.panel-context-menu:popover-open')).closest('dialog')===document.querySelector('${dialog}')`),true,'The menu belongs to the active modal');
     await key('Escape','Escape',27);await clickDropdownChoice({call,evaluate,settle},'#new-drawing-unit',nextUnit);
     assert.equal((await view()).setup.unit,opened.units[nextUnit].value,'A real Chrome row click changes the modal value');
-    assert.equal(await evaluate(`document.querySelector('.panel-context-menu').parentElement.id`),'workspace','Selecting returns the menu to the workspace');
+    assert.equal(await evaluate(`window.newDrawingUnitMenu.parentElement.id`),'workspace','Selecting returns the menu to the workspace');
     await choose('#new-drawing-unit',opened.units.find(unit=>unit.value===opened.setup.unit).label);
     await click('#new-drawing-unit');await key('Escape','Escape',27);
     assert.equal(await evaluate(`!!document.querySelector('${dialog}')&&document.activeElement.id==='new-drawing-unit'&&!document.querySelector('.panel-context-menu:popover-open')`),true,'Escape closes only the menu and focuses its trigger');
@@ -141,6 +141,30 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     await key('Escape','Escape',27);await shut('new-drawing-browser');
     assert.ok(await view(),'Closing the browser keeps the New drawing page');
     await click('#new-drawing-presets-button');await slid('new-drawing-browser');
+    const digital=(await drawer()).tabs.findIndex(t=>t.label==='Digital');
+    await click(`#new-drawing-tabs [data-new-drawing-tab="${digital}"]`);
+    const digitalTabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');
+    for(const [name,color] of [['Full HD',[1,1,1,1]],['Cinematic',[211/255,211/255,208/255,1]]]) {
+      const index=(await drawer()).tiles.findIndex(t=>t.name===name);
+      await click(`#new-drawing-presets [data-new-drawing-preset="${index}"]`);
+      await click('#new-drawing-select');await shut('new-drawing-browser');
+      const selected=await view();
+      assert.equal(selected.setup.paper.texture,'none');
+      assert.deepEqual(selected.sheet.color.rgba,color.map(Math.fround),'Digital presets retain their stored paper color');
+      assert.ok(selected.sheet.shown&&selected.paper_color_enabled&&(selected.sheet.grain??null)===null);
+      assert.equal(await evaluate(`getComputedStyle(document.querySelector('.new-drawing-main .new-drawing-grain')).backgroundImage`),'none');
+      await capture(`${theme}-2-${name.replaceAll(' ','-')}-none`);
+      await click('#new-drawing-create');
+      await wait(`!document.querySelector('${dialog}')&&!layerApp.documents.busy()&&layerApp.app.document_tabs(0).tabs.length===${digitalTabs+1}&&layerApp.app.brush_ready()`,60000);
+      assert.equal(await evaluate('layerApp.state().layers.some(l=>l.paper)'),true,'Creating a Digital preset retains Paper');
+      await capture(`${theme}-2-${name.replaceAll(' ','-')}-created`);
+      await evaluate('layerApp.documents.close(layerApp.app.document_tabs(0).selected)');
+      await wait(`layerApp.app.document_tabs(0).tabs.length===${digitalTabs}&&!layerApp.documents.busy()&&layerApp.app.brush_ready()`,60000);
+      await open();await click('#new-drawing-presets-button');await slid('new-drawing-browser');
+      const currentDigital=(await drawer()).tabs.findIndex(t=>t.label==='Digital');
+      await click(`#new-drawing-tabs [data-new-drawing-tab="${currentDigital}"]`);
+    }
+    tabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');
     const pastel=(await drawer()).tabs.findIndex(t=>t.label==='Pastel');
     await click(`#new-drawing-tabs [data-new-drawing-tab="${pastel}"]`);
     browser=await drawer();assert.equal(browser.tabs[pastel].selected,true,'A tab shows its presets');
@@ -240,7 +264,7 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     assert.equal((await drawer()).relief.enabled,false,'None disables Texture visibility');
     await click('#new-drawing-paper-use');await shut('new-drawing-paper-drawer');
     const plain=await view();
-    assert.deepEqual([plain.sheet.texture,plain.sheet.grain,plain.sheet.shown,plain.paper_color_enabled,plain.page.relief],['none',null,true,true,null]);
+    assert.deepEqual([plain.sheet.texture,plain.sheet.grain??null,plain.sheet.shown,plain.paper_color_enabled,plain.page.relief??null],['none',null,true,true,null]);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.new-drawing-main .new-drawing-grain')).backgroundImage`),'none','None draws no sheet grain');
     await capture(`${theme}-6d-none`);
     await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
@@ -325,7 +349,7 @@ export async function checkNewDrawing({call,evaluate,settle}) {
 
     await click('#new-drawing-unit');await evaluate(`document.querySelector('#new-drawing-cancel').click()`);await settle();
     await wait(`!document.querySelector('${dialog}')&&!layerApp.state().new_drawing&&!layerApp.state().requests.some(r=>r.kind.type==='document')`);
-    assert.equal(await evaluate(`document.querySelector('.panel-context-menu').parentElement.id==='workspace'&&!document.querySelector('.panel-context-menu:popover-open')`),true,'Closing a dialog with a menu open returns it to the workspace');
+    assert.equal(await evaluate(`window.newDrawingUnitMenu.parentElement.id==='workspace'&&!document.querySelector('.panel-context-menu:popover-open')`),true,'Closing a dialog with a menu open returns it to the workspace');
     assert.equal(await evaluate('layerApp.app.document_tabs(0).tabs.length'),tabs,'Cancel creates nothing');
 
     await open();await click('#new-drawing-presets-button');await slid('new-drawing-browser');
@@ -351,6 +375,8 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     await wait(`!document.querySelector('${dialog}')&&!layerApp.documents.busy()&&layerApp.app.document_tabs(0).tabs.length===${tabs+1}`,60000);
     const created=await evaluate('(t=>({title:t.tabs.find(tab=>String(tab.id)===String(t.selected)).title,size:[layerApp.state().tabs[0].width,layerApp.state().tabs[0].height]}))(layerApp.app.document_tabs(0))');
     assert.deepEqual(created,{title:name,size:[640,480]},'Create opens a named drawing at the typed size');
+    await checkPngPaperRows({call,evaluate,settle,wait,click,capture},theme);
+
   }
   await evaluate('layerApp.documents.autosave()');
   const reloadedFrom=await evaluate('performance.timeOrigin');

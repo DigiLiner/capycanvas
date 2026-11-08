@@ -30,7 +30,7 @@ try {
     const storage=createStoreWorker(()=>{}),files=createRasterWorker(module,()=>{},storage);
     const file=new File([await(await fetch('/fixture.capy')).blob()],'leased.capy');
     const registered=await storage({operation:'register_blob',file});
-    const opened=await files({source_key:registered.key,operation:'read',metadata:JSON.stringify({dimension:16384,photo_policy:{},names:{paint:'Ink',paper:'Paper'},intent:'Open'}),buffers:[],file});
+    const opened=await files({source_key:registered.key,operation:'read',metadata:JSON.stringify({dimension:16384,photo_policy:{},name:'Ink',intent:'Open'}),buffers:[],file});
     if(opened.package)throw Error('Fixture unexpectedly preserved: '+JSON.stringify(opened.package));
     const envelope=JSON.parse(opened.metadata),references=envelope.transfer.backings;
     const tiles=Object.entries(envelope.transfer.resources).filter(([,resource])=>resource.kind==='tile_range');
