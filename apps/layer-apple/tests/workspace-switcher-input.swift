@@ -23,6 +23,26 @@ import SwiftUI
         try require(measured > CGFloat(ids.count) * 56 && viewport + 0.5 >= measured,
             "A 40-point manager must fit its measured rows: viewport=\(viewport), rows=\(measured), count=\(ids.count)")
         note("PASS: manager viewport fits rows measured above the 56-point fallback at 40-point text")
+        try await workspaces.perform(["type": "open", "page": "this_workspace"])
+        func searchField(_ view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.isEditable { return field }
+            return view.subviews.lazy.compactMap(searchField).first
+        }
+        var search: NSTextField?
+        try await wait("Native toolbar manager search") { host.layoutSubtreeIfNeeded(); search = searchField(host); return search != nil }
+        try require(window.makeFirstResponder(search), "The real toolbar search must acquire native focus")
+        try await wait("Native toolbar search field editor") { search?.currentEditor() != nil }
+        guard let field = search?.currentEditor() as? NSTextView else { throw HostFailure(message: "Missing native toolbar search editor") }
+        field.insertText("missing-toolbar", replacementRange: field.selectedRange())
+        try await wait("Native search reaches the shared workspace query") { workspaces.view["query"].string == "missing-toolbar" }
+        try key("\u{1b}", code: 53, window: window)
+        try await wait("First Escape clears focused search without leaving the manager") {
+            workspaces.presented && workspaces.view["query"].string.isEmpty && field.string.isEmpty
+        }
+        try key("\u{1b}", code: 53, window: window)
+        try await wait("Second Escape closes the empty-search manager") { !workspaces.presented }
+        try await workspaces.perform(["type": "open", "page": "workspaces"])
+        note("PASS: native focused manager search clears before Escape cancels")
     }
     @MainActor static func penChecks(marker: ReorderInputView, workspaces: WorkspaceController) async throws {
         let model = marker.model as! WorkspaceRowInteraction, window = marker.window!

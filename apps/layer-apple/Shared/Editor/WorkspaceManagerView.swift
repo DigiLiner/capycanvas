@@ -49,11 +49,13 @@ struct WorkspaceManagerView: View {
     @Environment(\.capyInterfaceLanguage) private var language
     @ObservedObject var workspaces: WorkspaceController
     @State private var query = ""
-    @State private var optionCaptions: [String: String] = [:]
+    @FocusState private var searchFocused: Bool
     @State private var workspaceRowHeights: [String: CGFloat] = [:]
     private var header: JSON { nativeCopy["header"] }
     private var view: JSON { workspaces.view }
-    private var toolbarMode: Bool { ["this_workspace", "toolbar_library"].contains(workspaces.page) }
+    private var toolbarMode: Bool { workspaces.toolbarMode }
+    private var singlePane: Bool { workspaces.dialogLayout["single_pane"].bool }
+    private var subpage: Bool { workspaces.dialogLayout["subpage"].bool }
     private var workspaceRowsHeight: CGFloat {
         view["rows"].array.prefix(7).reduce(0) { height, row in
             height + max(56, workspaceRowHeights[row["id"].string] ?? 56)
@@ -66,11 +68,15 @@ struct WorkspaceManagerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
-                Text(view["prompt"].isNull || workspaces.inlineRename ? view["title"].string : view["prompt"]["title"].string)
+                if subpage {
+                    Button { workspaces.pageList() } label: { SharedIcon(name: "go-previous") }
+                        .accessibilityLabel(common["back"].string).accessibilityIdentifier("workspace-manager-back")
+                }
+                Text(subpage ? view["details"]["title"].string : view["prompt"].isNull || workspaces.inlineRename ? view["title"].string : view["prompt"]["title"].string)
                     .font(.title2).fontWeight(.semibold)
                 Spacer()
                 if view["prompt"].isNull && toolbarMode {
-                    Button(common["close"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
+                    Button(common["close"].string, role: .cancel) { workspaces.dismiss() }
                         .disabled(workspaces.busy).accessibilityIdentifier("workspace-manager-close")
                 }
             }
@@ -81,18 +87,23 @@ struct WorkspaceManagerView: View {
                 }
                 if workspaces.page == "history" { history } else { browser }
             }
-        }.padding(20).frame(minWidth: 340, idealWidth: workspaces.page == "workspaces" ? 460 : workspaces.page == "history" ? 480 : 620, maxWidth: workspaces.page == "workspaces" ? 620 : 800,
-            minHeight: workspaces.page == "workspaces" ? 0 : 360, idealHeight: workspaces.page == "workspaces" ? workspaceRowsHeight+176 : 600, maxHeight: 900)
-            .onNativeTextKey(.escape) { if workspaces.inlineRename { workspaces.cancelPrompt() } else { workspaces.dismiss() }; return .handled }
+        }.padding(20).frame(idealWidth: workspaces.page == "workspaces" ? 460 : workspaces.page == "history" ? 480 : 620, maxWidth: workspaces.page == "workspaces" ? 620 : 800,
+            idealHeight: workspaces.page == "workspaces" ? workspaceRowsHeight+176 : 600, maxHeight: 900)
+            .onNativeTextKey(.escape) {
+                if workspaces.inlineRename { workspaces.cancelPrompt() }
+                else {
+                    switch DialogUI.resolve(["kind": "escape", "subpage": subpage,
+                        "search_focused": searchFocused, "search_has_text": !query.isEmpty]).string {
+                    case "clear_search": query = ""
+                    case "back": workspaces.pageList()
+                    default: workspaces.dismiss()
+                    }
+                }
+                return .handled
+            }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in workspaces.refreshLayout() }
             .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-manager")
             .onChange(of: workspaces.page) { _, _ in query = "" }
-            .onChange(of: [language] + view["rows"].array.map { $0["title"].string }, initial: true) { _, _ in refreshCaptions() }
-    }
-    private func refreshCaptions() {
-        optionCaptions = Dictionary(view["rows"].array.map { row in
-            let title = row["title"].string
-            return (title, NativeTextContext.caption(["type": "options_for", "title": title], language: language))
-        }, uniquingKeysWith: { first, _ in first })
     }
     private func rememberWorkspaceRowHeights(_ heights: [String: CGFloat]) {
         var measured = workspaceRowHeights
@@ -110,7 +121,7 @@ struct WorkspaceManagerView: View {
                 }
             }
             if toolbarMode { HStack {
-                TextField(header["search"].string, text: $query).editorSearchInput().textFieldStyle(.roundedBorder)
+                TextField(header["search"].string, text: $query).editorSearchInput().textFieldStyle(.roundedBorder).focused($searchFocused)
                     .onChange(of: query) { _, value in workspaces.search(value) }.accessibilityIdentifier("workspace-manager-search")
                 if workspaces.page == "this_workspace" {
                     Button(header["new_toolbar_action"].string) { workspaces.form(["type": "new_toolbar", "value": NSNull()]) }
@@ -129,16 +140,24 @@ struct WorkspaceManagerView: View {
                             .buttonStyle(.plain).disabled(workspaces.busy && !workspaces.inlineRename || action?["enabled"].bool != true).accessibilityLabel(common["delete"].string).accessibilityIdentifier("workspace-action-delete")
                     }
                 }
-            } else { EditorScrollView {
+            } else { HStack(alignment: .top, spacing: 16) {
+                if !subpage { EditorScrollView {
                 LazyVStack(spacing: 8) {
                     if view["rows"].array.isEmpty { Text(nativeCopy["header"]["no_items"].string).foregroundStyle(.secondary).padding(20) }
                     ForEach(view["rows"].array, id: \.managerID) { row in
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 14) { selectableRow(row); rowActions(row) }
-                            VStack(alignment: .leading, spacing: 10) { selectableRow(row); rowActions(row) }
-                        }.padding(12).background(view["selected"].string == row["id"].string ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                        selectableRow(row).padding(12).background(view["selected"].string == row["id"].string ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
                             .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-item-" + row["id"].string)
                     }
+                }
+                } }
+                if toolbarMode && (!singlePane || subpage), !view["details"].isNull {
+                    EditorScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(view["details"]["title"].string).font(.headline)
+                            Text(view["details"]["description"].string)
+                            ForEach(view["details"]["actions"].array, id: \.managerActionID) { button in action(button) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.accessibilityIdentifier("workspace-manager-details")
                 }
             } }
             if !toolbarMode {
@@ -157,7 +176,7 @@ struct WorkspaceManagerView: View {
         }
     }
     private func selectableRow(_ row: JSON) -> some View {
-        Button { workspaces.select(row["id"].string) } label: { rowLabel(row).contentShape(Rectangle()) }
+        Button { if toolbarMode { workspaces.openDetails(row["id"].string) } else { workspaces.select(row["id"].string) } } label: { rowLabel(row).contentShape(Rectangle()) }
             .buttonStyle(.plain).accessibilityIdentifier("workspace-select-" + row["id"].string)
     }
     private func rowLabel(_ row: JSON) -> some View {
@@ -165,18 +184,6 @@ struct WorkspaceManagerView: View {
             Text(row["title"].string).fontWeight(.medium).fixedSize(horizontal: false, vertical: true)
             if !row["subtitle"].string.isEmpty { Text(row["subtitle"].string).font(.caption).foregroundStyle(.secondary) }
         }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-    private func rowActions(_ row: JSON) -> some View {
-        HStack {
-            ForEach(row["actions"].array.filter { $0["primary"].bool }, id: \.managerActionID) { button in action(button) }
-            let secondary = row["actions"].array.filter { !$0["primary"].bool }
-            if !secondary.isEmpty {
-                EditorMenuButton(menu: {
-                    AppleContextMenu(JSON(["sections": [secondary.map(\.raw)]])) { workspaces.activate($0) }
-                }) { SharedIcon(name: "more").frame(width: 20) }
-                    .accessibilityLabel(optionCaptions[row["title"].string] ?? "")
-            }
-        }.fixedSize(horizontal: true, vertical: false)
     }
     private func action(_ button: JSON) -> some View {
         Button(button["label"].string, role: button["action"]["type"].string.hasPrefix("delete") ? .destructive : nil) {

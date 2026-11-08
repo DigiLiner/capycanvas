@@ -611,6 +611,10 @@ pub unsafe extern "C" fn capy_apple_request(
                 },
                 Some("bootstrap") => serde_json::to_value(a.host.bootstrap_view()).map_err(|e| e.to_string())?,
                 Some("document_tabs") => a.tabs_request(value)?,
+                Some("workspace_dialog_layout") => {
+                    let page = a.host.session.state().dialog_presentation(layer_ui::DialogRole::Editor, a.host.logical).single_pane();
+                    serde_json::to_value(a.workspaces.as_ref().map(|controller| controller.view.dialog_layout(page))).map_err(|e| e.to_string())?
+                },
                 Some("touch_policy") => {
                     let tap_ms = value["tap_ms"].as_u64().and_then(|ms| u32::try_from(ms).ok()).ok_or("Missing touch timing")?;
                     let slop = value["slop"].as_f64().ok_or("Missing touch slop")? as f32;

@@ -235,7 +235,14 @@ import SwiftUI
         let workspaces = editor.workspaces!
         try await workspaces.answer(["type": "new_toolbar", "value": NSNull()], name: "Ink Tools")
         try await workspaces.perform(["type": "open", "page": "this_workspace"])
+        precondition(workspaces.toolbarMode, "The published toolbar page determines its presentation without a later layout query")
         let toolbar = workspaces.view["rows"].array.first { $0["title"].string == "Ink Tools" }!
+        workspaces.openDetails(toolbar["id"].string)
+        try await workspaces.settle()
+        precondition(workspaces.view["details_requested"].bool && workspaces.view["details"]["title"].string == "Ink Tools")
+        workspaces.pageList(); try await workspaces.settle()
+        precondition(!workspaces.view["details_requested"].bool && !workspaces.dialogLayout["subpage"].bool,
+            "Back returns from toolbar details to the same list")
         let panel = try JSON.decode(toolbar["id"].string)
         try await workspaces.answer(["type": "save_toolbar", "value": panel.raw], name: "Saved Ink")
         try await workspaces.perform(["type": "open", "page": "toolbar_library"])

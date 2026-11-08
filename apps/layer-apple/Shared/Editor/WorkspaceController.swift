@@ -4,6 +4,8 @@ import SwiftUI
 /// runs it on the drawing owner; SQLite stays on its storage worker.
 @MainActor final class WorkspaceController: ObservableObject {
     @Published private(set) var view = JSON()
+    @Published private(set) var dialogLayout = JSON()
+    private var layoutRequest = UUID()
     @Published var formName = ""
     @Published private(set) var nameError: String?
     @Published private(set) var validatingName = false
@@ -31,6 +33,7 @@ import SwiftUI
     func dismissError() { dismissedError = error }
     var presented: Bool { !view["page"].isNull || !view["prompt"].isNull }
     var page: String { view["page"].string }
+    var toolbarMode: Bool { ["this_workspace", "toolbar_library"].contains(page) }
     var hasUnsavedChanges: Bool { !ready || busy || view["dirty"].bool || view["saving"].bool }
 
     init(store: EditorStore, directory: URL, scene: String) {
@@ -55,6 +58,7 @@ import SwiftUI
     func receiveLanguage(_ next: JSON) {
         let wasReady = ready, revision = view["switcher_revision"].uint
         view = next
+        refreshLayout()
         readyChanged(wasReady: wasReady, revision: revision)
     }
     func tick() { send(["type": "tick"]) }
@@ -79,6 +83,16 @@ import SwiftUI
     func form(_ action: [String: Any]) { send(["type": "form", "action": action]) }
     func open(_ page: String) { send(["type": "open", "page": page]) }
     func select(_ id: String?) { send(["type": "select", "id": id as Any? ?? NSNull()]) }
+    func openDetails(_ id: String) { select(id); send(["type": "open_details"]) }
+    func pageList() { send(["type": "page_list"]) }
+    func refreshLayout() {
+        let request = UUID()
+        layoutRequest = request
+        store?.query(["type": "workspace_dialog_layout"]) { [weak self] result in
+            guard let self, layoutRequest == request else { return }
+            if !SnapshotProjection.equal(dialogLayout.raw, result.raw) { dialogLayout = result }
+        }
+    }
     func search(_ query: String) { send(["type": "search", "query": query]) }
     func switchTo(_ id: String) { send(["type": "switch", "id": id]) }
     func dismiss() { if presented { send(["type": "dismiss"]) } }
@@ -147,6 +161,7 @@ import SwiftUI
         let wasReady = view["ready"].bool, revision = view["switcher_revision"].uint
         if view["error"].string != next["error"].string { dismissedError = nil }
         view = next
+        refreshLayout()
         let key = next["prompt"].isNull ? "" : next["prompt_action"].stableKey + next["page"].string
         if !next["busy"].bool && !next["error"].isNull { submittedName = false }
         if key != promptKey {
