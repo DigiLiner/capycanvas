@@ -7,9 +7,6 @@ using namespace CapyUi;
 using Windows::Foundation::Point;
 namespace NativeInput=Microsoft::UI::Input;
 namespace {
-bool inside(DependencyObject node,DependencyObject const& parent){
-    while(node){if(node==parent)return true;node=VisualTreeHelper::GetParent(node);}return false;
-}
 ScrollViewer scrollIn(DependencyObject const& node){
     if(auto scroll=node.try_as<ScrollViewer>())return scroll;
     for(int i=0;i<VisualTreeHelper::GetChildrenCount(node);++i)
@@ -145,12 +142,12 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         ignoreClick=false;suppressContext=false;++generation;
         if(!available())return;
         auto original=e.OriginalSource().try_as<DependencyObject>();if(!original)return;
-        for(auto const& row:rows)if(auto item=row.item.get();item&&inside(original,item)){
+        for(auto const& row:rows)if(auto item=row.item.get();item&&descendantOf(original,item)){
             auto point=e.GetCurrentPoint(surface);
             if(!PointerGesture::PrimaryContact(point))return;
             source=row;pointer=e.Pointer();device=point.PointerDeviceType();
-            origin=position=point.Position();grip=inside(original,row.grip.get());
-            child=inside(original,row.more.get())||inside(original,row.pin.get())||bool(original.try_as<TextBox>());
+            origin=position=point.Position();grip=descendantOf(original,row.grip.get());
+            child=descendantOf(original,row.more.get())||descendantOf(original,row.pin.get())||bool(original.try_as<TextBox>());
             ignoreClick=grip||child;
             owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
             auto node=original;

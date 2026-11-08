@@ -44,6 +44,9 @@ using A=JsonArray;
 using V=IJsonValue;
 }
 namespace CapyUi {
+inline bool descendantOf(DependencyObject node,DependencyObject const& parent){
+    while(node){if(node==parent)return true;node=VisualTreeHelper::GetParent(node);}return false;
+}
 struct StrokeRecording;
 struct ScopeFeed;
 struct ColorStrip;

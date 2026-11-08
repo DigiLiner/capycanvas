@@ -514,6 +514,10 @@ try {
    Wait-Until {(Model).windows_tabs.selected -eq $id -and (Model).brush_ready -and (Model).windows_tabs.available} 'Native short tab tap did not select its drawing' 60
    Write-Output "$device phase: tab acknowledged context"
    $selected=(Model).windows_tabs.selected;$button=Control 'drawing-tab-1' -Within $tabStrip -Arranged;$bounds=$button.Current.BoundingRectangle;$x=[int]($bounds.X+$bounds.Width/2);$y=[int]($bounds.Y+$bounds.Height/2)
+   if($device -eq 'touch'){
+    $holdFocus=Control 'drawing-tab-2' -Within $tabStrip -Arranged;$holdFocus.SetFocus()
+    Wait-Until {$holdFocus.Current.HasKeyboardFocus} 'Sibling drawing tab did not take focus before native tab hold'
+   }
    if($device -eq 'mouse'){[CapyRowPointer]::RightClick($x,$y)}else{
     [CapyRowPointer]::Down($device,$x,$y)
     Wait-Until {$null -ne (Find 'drawing-order-undo')} 'Native tab hold did not open its context menu'

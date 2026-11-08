@@ -268,7 +268,10 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
         PointerGesture::OnCompleted(root,[weak](PointerRoutedEventArgs const& e,bool cancel){if(auto s=weak.lock();s&&!s->releasing&&s->pointer==e.Pointer().PointerId()){
             if(cancel)s->cancel();else s->up(e);
         }},PointerCaptureLoss::CompleteLift);
-        root.LostFocus([weak](auto&&,auto&&){if(auto s=weak.lock();s&&s->pointer&&!s->held&&!s->releasing)s->cancel();});
+        root.LostFocus([weak](auto&&,auto&&){if(auto s=weak.lock();s&&s->pointer&&!s->held&&!s->releasing){
+            auto xaml=s->root.XamlRoot();
+            if(!xaml||!descendantOf(Input::FocusManager::GetFocusedElement(xaml).try_as<DependencyObject>(),s->root))s->cancel();
+        }});
         root.Unloaded([weak](auto&&,auto&&){if(auto s=weak.lock()){s->cancel();s->rowDrag->Cancel();}});
         root.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(e.Key()==Windows::System::VirtualKey::Escape)if(auto s=weak.lock();s&&s->pointer){s->cancel();e.Handled(true);}});
         refresh();
