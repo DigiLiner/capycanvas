@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum ToolbarUI {
     static let metrics = resolve(["type": "metrics"])
@@ -12,13 +13,15 @@ enum ToolbarUI {
             return try JSON.decode(response)
         } catch { return JSON(["error": error.localizedDescription]) }
     }
-    @MainActor private static var cache: [String: JSON] = [:]
-    @MainActor static func cached(_ request: [String: Any], language: String = "en") -> JSON {
+    private static let cache = OSAllocatedUnfairLock(initialState: [String: JSON]())
+    static func cached(_ request: [String: Any], language: String = "en") -> JSON {
         let key = language + ":" + JSON(request).stableKey
-        if let value = cache[key] { return value }
-        if cache.count > 512 { cache.removeAll() }
+        if let value = cache.withLock({ $0[key] }) { return value }
         let value = resolve(request, language: language)
-        cache[key] = value
+        cache.withLock {
+            if $0.count > 512 { $0.removeAll() }
+            $0[key] = value
+        }
         return value
     }
     static func formatted(_ control: JSON, value: Double, units: Bool = true, language: String = "en") -> JSON {

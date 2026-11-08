@@ -1,70 +1,90 @@
 import SwiftUI
 
-/// Tool families, subtools and settings are live shared models, also used by
-/// the desktop host. This includes non-paint tools and their command actions.
 struct ToolSetControls: View {
     @ObservedObject var store: EditorStore
     var panel = "brushes"
-    var drawerToolSet = JSON()
+    var drawerAnchor = JSON()
+    @State private var projection: (key: String, model: JSON)?
+    private var phone: Bool { drawerAnchor["kind"].string == "phone" }
     private var model: JSON {
-        drawerToolSet.isNull ? panel == "brushes" ? store.state["tool_set"] : store.state["tool_panels"][panel] : drawerToolSet
+        if phone, let projection, projection.key == requestKey { return projection.model }
+        let published = store.state["tool_panels"][panel]
+        let customization = store.state["customization"]
+        let drawer = ([customization["drawer"]] + customization["column_drawers"].array)
+            .first { !drawerAnchor.isNull && $0["anchor"].stableKey == drawerAnchor.stableKey }?["tool_set"] ?? JSON()
+        let view = !drawer.isNull ? drawer : published.isNull ? store.state["tool_set"] : published
+        let metrics = ToolbarUI.cached(["type": "tool_set_presentation", "panel": panel,
+            "actions": view["subtools"].array.map { $0["action"].raw }])
+        return JSON(view.object.merging(metrics.object) { _, next in next })
     }
-    private var sets: Bool { panel == "brush_sets" || panel == "sculpt_sets" }
+    private var requestKey: String {
+        JSON([panel, drawerAnchor.raw, store.state["tool_set"].raw,
+            store.state["tool_panels"].raw, store.state["customization"]["drawer"].raw, store.languageGeneration]).stableKey
+    }
     var body: some View {
-        VStack(spacing: 6) {
-            if sets {
-                VStack(spacing: 2) { items(model["groups"], group: true) }
-            } else {
-                ToolGroupsLayout { items(model["groups"], group: true) }
+        let model = model
+        VStack(spacing: model["gap"].number) {
+            ToolGroupsLayout(rows: model["groups_are_rows"].bool, spacing: model["spacing"].number) {
+                items(model["groups"], group: true, model: model)
             }
-            if !model["groups"].array.isEmpty && !model["subtools"].array.isEmpty {
-                Rectangle().fill(EditorPalette(source: store.state["palette"])["text"].opacity(0.3)).frame(height: 1).padding(.horizontal, 4)
+            if model["subtools_visible"].bool {
+                if !model["groups"].array.isEmpty && !model["subtools"].array.isEmpty {
+                    Rectangle().fill(EditorPalette(source: store.state["palette"])["text"].opacity(0.3))
+                        .frame(height: 1).padding(.horizontal, 4)
+                }
+                VStack(spacing: model["spacing"].number) { items(model["subtools"], group: false, model: model) }
             }
-            VStack(spacing: 2) { items(model["subtools"], group: false) }
+        }.task(id: phone ? requestKey : "") {
+            guard phone else { return }
+            let key = requestKey
+            let next: JSON = await withCheckedContinuation { continuation in
+                store.query(["type": "tool_panel", "panel": panel, "anchor": drawerAnchor.raw]) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            if !Task.isCancelled { projection = (key, next) }
         }
     }
-
-    private func items(_ items: JSON, group: Bool) -> some View {
+    private func caption(_ item: JSON, group: Bool, model: JSON) -> some View {
+        let preview = !group && !item["preview"].isNull
+        let palette = EditorPalette(source: store.state["palette"])
+        let fill = (item["selected"].bool ? palette.active : palette["panel"])
+            .opacity(preview ? store.catalog["tool_preview_metrics"]["caption_opacity"].number : 0)
+        return HStack(spacing: model["gap"].number) {
+            SharedIcon(name: item["icon"].string)
+                .frame(width: preview ? store.panelMetrics.height : nil, height: preview ? store.panelMetrics.height : nil)
+                .background(fill, in: SquircleShape.control)
+            Text(item["label"].string).fontWeight(.bold).lineLimit(group ? 1 : 2).truncationMode(.tail)
+                .padding(.horizontal, preview ? store.panelMetrics.padding : 0)
+                .frame(minHeight: preview ? store.panelMetrics.height : nil)
+                .background(fill, in: SquircleShape.control)
+                .frame(maxWidth: .infinity, alignment: group || item["preview"].isNull ? .leading : .trailing)
+        }
+    }
+    private func items(_ items: JSON, group: Bool, model: JSON) -> some View {
         ForEach(items.array.indices, id: \.self) { index in
             let item = items[index]
             let command = item["action"]["type"].string == "invoke"
                 ? store.command(item["action"]["command"].string) : JSON()
             let enabled = item["enabled"].bool && (command.isNull || command["enabled"].bool)
             let reason = item["disabled_reason"].isNull ? command.disabledReason : item["disabled_reason"].string
-            let identifier = sets ? "\(panel)-\(item["label"].string)" : item["preview"].isNull ? "tool-\(group ? "group" : "subtool")-\(index)" : "brush-\(item["preview"].uint)"
+            let identifier = model["groups_are_rows"].bool ? "\(panel)-\(item["label"].string)" : item["preview"].isNull ? "tool-\(group ? "group" : "subtool")-\(index)" : "brush-\(item["preview"].uint)"
             Button { if !store.bubbles.input.consumeClick() { store.dispatch(item["action"]) } } label: {
                 Group {
-                    if group && sets {
-                        HStack(spacing: 8) {
-                            SharedIcon(name: item["icon"].string)
-                            Text(item["label"].string).fontWeight(.bold).lineLimit(1)
-                            Spacer(minLength: 0)
-                        }.padding(.horizontal, 6).frame(minHeight: 44)
-                    } else if group {
-                        HStack(spacing: 6) {
-                            SharedIcon(name: item["icon"].string)
-                            Text(item["label"].string).fontWeight(.bold).lineLimit(1).truncationMode(.tail)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }.padding(.horizontal, 6).frame(maxHeight: .infinity)
-                    } else {
-                        VStack(spacing: 0) {
-                            if !item["preview"].isNull {
-                                BundledPreview(name: "preview-\(item["preview"].uint)-\(store.state["theme"].string)")
-                                    .frame(height: 40)
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                            }
-                            HStack(spacing: 6) {
-                                SharedIcon(name: item["icon"].string)
-                                Text(item["label"].string).fontWeight(.bold)
-                                    .lineLimit(2).truncationMode(.tail)
-                                    .frame(maxWidth: .infinity, minHeight: item["preview"].isNull ? store.catalog["text_size_pt"].number * 4 / 3 * 1.66 : 18,
-                                        alignment: item["action"]["type"].string == "color_picker" ? .leading : .trailing)
-                            }
+                    if group {
+                        caption(item, group: true, model: model).padding(.horizontal, model["gap"].number)
+                            .frame(height: model["group_height"].number)
+                    } else if !item["preview"].isNull {
+                        ToolPreviewLayout(inset: model["gap"].number) {
+                            BundledPreview(name: "preview-\(item["preview"].uint)-\(store.state["theme"].string)")
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            caption(item, group: false, model: model)
                         }
+                    } else {
+                        caption(item, group: false, model: model).padding(.horizontal, 6).padding(.vertical, 3)
+                            .frame(minHeight: model["plain_height"].number)
                     }
-                }.padding(.horizontal, group ? 0 : 6).padding(.vertical, group ? 0 : 3)
-                    .frame(maxWidth: .infinity, minHeight: group ? nil : item["preview"].isNull ? (store.tonalActive ? 36 : 44) : 64)
-                    .opacity(enabled && reason != nil ? 0.36 : 1)
+                }.frame(maxWidth: .infinity).opacity(enabled && reason != nil ? 0.36 : 1)
                     .contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle(selected: item["selected"].bool))
                 .modifier(BubbleChoiceSource(action: item["action"]))
@@ -96,29 +116,6 @@ struct ActionHelp: ViewModifier {
     }
 }
 
-/// Group buttons are three toolbar tiles wide and one tall, wrapping with
-/// the toolbar tile gap, as GTK's tool panels and the web lay them out.
-private struct ToolGroupsLayout: Layout {
-    private static let tile: CGFloat = 36, gap: CGFloat = 2
-    private func item(_ width: CGFloat) -> (width: CGFloat, columns: Int) {
-        let natural = 3 * Self.tile + 2 * Self.gap
-        return (min(natural, width), max(1, Int((width + Self.gap) / (natural + Self.gap))))
-    }
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let requested = proposal.width ?? 226
-        let width = requested.isFinite ? max(0, requested) : 226
-        let rows = (subviews.count + item(width).columns - 1) / item(width).columns
-        return CGSize(width: width, height: CGFloat(rows) * Self.tile + CGFloat(max(0, rows - 1)) * Self.gap)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let (width, columns) = item(bounds.width)
-        for index in subviews.indices {
-            subviews[index].place(at: CGPoint(x: bounds.minX + CGFloat(index % columns) * (width + Self.gap),
-                y: bounds.minY + CGFloat(index / columns) * (Self.tile + Self.gap)),
-                anchor: .topLeading, proposal: ProposedViewSize(width: width, height: Self.tile))
-        }
-    }
-}
 
 struct ToolSettingsControls: View {
     @ObservedObject var store: EditorStore

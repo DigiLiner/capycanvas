@@ -24,7 +24,7 @@ struct PanelControls: View {
     var scrollable = true
     var measureForWorkspace = true
     var splitFilters = false
-    var drawerToolSet = JSON()
+    var drawerAnchor = JSON()
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var fitsColorWheel: Bool {
         panel["id"].string == "color" && panel["controls"].array.filter { $0["visible_in_panel"].bool }.map { $0["control"].string } == ["color_wheel"]
@@ -93,7 +93,7 @@ struct PanelControls: View {
     @ViewBuilder func control(_ item: JSON, maximumHeight: CGFloat? = nil) -> some View {
         switch item["control"].string {
         case "brushes", "brush_sets", "sculpt_sets", "tools":
-            ToolSetControls(store: store, panel: panel["id"].string, drawerToolSet: drawerToolSet)
+            ToolSetControls(store: store, panel: panel["id"].string, drawerAnchor: drawerAnchor)
         case "tool_settings": ToolSettingsControls(store: store)
         // Match the shared panel's fit-to-viewport wheel while retaining its
         // readable minimum size and scrolling for smaller/customized panels.

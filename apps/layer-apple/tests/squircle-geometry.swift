@@ -14,7 +14,13 @@ import SwiftUI
         }
         return points
     }
-    @MainActor static func main() {
+    @MainActor static func main() async throws {
+        try await Task.detached {
+            var error: UInt64 = 0
+            let prepared = #"{"saved":"","preferred_languages":["en"]}"#.withCString { capy_apple_prepare_launch($0, &error) }
+            guard prepared != 0 else { throw HostFailure(message: takeNativeText(error) ?? "Geometry localization failed") }
+            capy_apple_launch_free(prepared)
+        }.value
         let anchor = CGRect(x: 100, y: 20, width: 36, height: 36)
         let bridge = CGRect(x: 92, y: 48, width: 52, height: 8)
         let placement = JSON(["anchor": ["x": anchor.minX, "y": anchor.minY, "width": anchor.width, "height": anchor.height]])
@@ -95,18 +101,46 @@ import SwiftUI
         precondition(clip.contains(CGPoint(x: 1.5, y: 1.5)) == false && clip.contains(CGPoint(x: 3.5, y: 3.5)),
             "Fitted clips are circles of 0.54r that meet the squircle at 45°")
 
+        let sizes: [CGFloat] = [75, 122, 84, 83, 93]
+        let colors: [Color] = [.red, .green, .blue, .orange, .purple]
+        for rows in [false, true] {
+            let renderer = ImageRenderer(content: ToolGroupsLayout(rows: rows, spacing: 2) {
+                ForEach(sizes.indices, id: \.self) { index in
+                    colors[index].frame(minWidth: 0, idealWidth: sizes[index], maxWidth: .infinity,
+                        minHeight: 20, maxHeight: 20)
+                }
+            }.frame(width: rows ? 128 : 380))
+            guard let image = renderer.cgImage else { preconditionFailure("Tool groups must render") }
+            precondition(image.width == (rows ? 128 : 380) && image.height == (rows ? 108 : 42),
+                "Shared columns use native item heights and preserve set rows")
+            if !rows {
+                let bitmap = NSBitmapImageRep(cgImage: image)
+                precondition(bitmap.colorAt(x: 111, y: 10)!.redComponent > 0.9
+                    && bitmap.colorAt(x: 114, y: 10)!.greenComponent > 0.4
+                    && bitmap.colorAt(x: 267, y: 10)!.blueComponent > 0.9,
+                    "Wrapped tool groups align to shared 112/151/113 columns")
+            }
+        }
+        let preview = ImageRenderer(content: ToolPreviewLayout(inset: 6) {
+            Color.red
+            Color.green.frame(height: 32)
+        }.frame(width: 200))
+        guard let previewImage = preview.cgImage else { preconditionFailure("Tool preview must render") }
+        precondition(previewImage.width == 200 && previewImage.height == 72,
+            "A wrapped caption adds its measured height below the shared 40-point preview")
+
         let toolbar = CGRect(x: 10, y: 10, width: 300, height: 36)
         let end = DrawerSource(direction: "bottom", bounds: CGRect(x: 274, y: 10, width: 36, height: 36))
-        precondition(DrawerSource.square(toolbar, radius: 18, sources: [end]) == [false, false, true, false],
+        precondition(DrawerSource.square(toolbar, sources: [end]) == [false, false, true, false],
             "Only the facing corner the source reaches flattens")
         let middleTile = DrawerSource(direction: "bottom", bounds: CGRect(x: 140, y: 10, width: 36, height: 36))
-        precondition(DrawerSource.square(toolbar, radius: 18, sources: [middleTile]) == [false, false, false, false])
+        precondition(DrawerSource.square(toolbar, sources: [middleTile]) == [false, false, false, false])
         let padded = CGRect(x: 4, y: 4, width: 312, height: 48)
-        precondition(DrawerSource.square(padded, radius: 18, sources: [end]) == [false, false, false, false],
+        precondition(DrawerSource.square(padded, sources: [end]) == [false, false, false, false],
             "A padded container's edge does not touch the source")
         let left = DrawerSource(direction: "left", bounds: CGRect(x: 10, y: 10, width: 36, height: 36))
-        precondition(DrawerSource.square(toolbar, radius: 18, sources: [left]) == [true, false, false, true])
-        precondition(DrawerSource.square(toolbar, radius: 18, sources: [], joined: JSON([false, true, false, false])) == [false, true, false, false])
+        precondition(DrawerSource.square(toolbar, sources: [left]) == [true, false, false, true])
+        precondition(DrawerSource.square(toolbar, sources: [], joined: JSON([false, true, false, false])) == [false, true, false, false])
         print("Squircle geometry checks passed")
     }
 }

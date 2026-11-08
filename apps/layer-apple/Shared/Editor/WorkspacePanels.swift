@@ -137,7 +137,7 @@ private struct WorkspacePanelGroupContent: View {
         let sources = Array(store.contentDrawers.sources.values)
         let connected = expansion.isNull && store.glass.panelGroupConnected(group["id"].uint)
         let sharedRadii = store.glass.panelGroupRadii(group["id"].uint)
-        let square = sharedRadii == nil ? DrawerSource.square(group["bounds"].rect, radius: radius, sources: sources) : []
+        let square = sharedRadii == nil ? DrawerSource.square(group["bounds"].rect, sources: sources) : []
         let shape = sharedRadii.map { SquircleShape(topLeading: $0[0], topTrailing: $0[1], bottomTrailing: $0[2], bottomLeading: $0[3]) }
             ?? SquircleShape(radius, square: square)
         ZStack(alignment: .topLeading) {

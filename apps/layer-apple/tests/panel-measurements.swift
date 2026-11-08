@@ -90,6 +90,11 @@ import Darwin
             cache.receive(tagged)
         }
         try await wait("Initial editor") { !store.state.isNull && !store.catalog.isNull }
+        for panel in ["brush_sets", "sculpt_sets", "tools"] {
+            let controls = NSHostingView(rootView: ToolSetControls(store: store, panel: panel).frame(width: 240))
+            precondition(controls.fittingSize.height >= 26,
+                "Published tool panels must have content before asynchronous projection tasks run")
+        }
         do {
             let bar = store.barMetrics, textSize: CGFloat = 16
             func size(_ labels: [String], selected: Int = 0) -> CGSize {

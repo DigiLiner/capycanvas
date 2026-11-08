@@ -165,7 +165,7 @@ private struct WorkspaceContentDrawer: View {
                                             let panel = drawer.panel(drawer.model["columns"][index][row])
                                             DrawerPanelBody(store: store, panel: panel, width: bounds.rect.width,
                                                 splitFilters: drawer.model["columns"].array.contains { $0.array.contains { $0.string == "filter_types" } },
-                                                toolSet: drawer.model["tool_set"])
+                                                anchor: drawer.model["anchor"])
                                         }
                                     }.frame(maxWidth: .infinity, alignment: .topLeading)
                                         .background(GeometryReader { body in
@@ -279,7 +279,7 @@ private struct DrawerPanelBody: View {
     let panel: JSON
     let width: CGFloat
     let splitFilters: Bool
-    let toolSet: JSON
+    var anchor = JSON()
     @State private var tiles = JSON()
     private var tileKey: String { JSON([panel["id"].raw, panel["tiles"].array.map { [$0["id"].raw, $0["control"].raw, $0["slider_style"].raw] }, panel["tile_style"].raw, width]).stableKey }
     var body: some View {
@@ -295,7 +295,7 @@ private struct DrawerPanelBody: View {
                     }
             } else {
                 PanelControls(store: store, panel: panel, scrollable: false, measureForWorkspace: false, splitFilters: splitFilters,
-                    drawerToolSet: toolSet)
+                    drawerAnchor: anchor)
                     .frame(height: ["layers", "adjustments", "filter_types"].contains(panel["id"].string) ? 480 : panel["id"].string == "navigator" ? 240 : nil)
             }
         }
@@ -306,7 +306,7 @@ private struct DrawerHeights: PreferenceKey {
     static var defaultValue: [Int: CGFloat] { [:] }
     static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) { value.merge(nextValue(), uniquingKeysWith: max) }
 }
-private struct DrawerContainerSurface: ViewModifier {
+struct DrawerContainerSurface: ViewModifier {
     @ObservedObject var drawers: ContentDrawersPresentation
     let bounds: CGRect
     var cuts: [CGRect] = []
@@ -323,7 +323,7 @@ private struct DrawerContainerSurface: ViewModifier {
         let sources = drawers.sources.filter { $0.key != excluding }.map(\.value) + extra
         let shape = sharedRadii.map { SquircleShape(topLeading: $0[0], topTrailing: $0[1], bottomTrailing: $0[2], bottomLeading: $0[3]) }
             ?? SquircleShape(SquircleShape.surfaceRadius,
-                square: DrawerSource.square(bounds, radius: SquircleShape.surfaceRadius, sources: sources, joined: joined))
+                square: DrawerSource.square(bounds, sources: sources, joined: joined))
         ZStack(alignment: .topLeading) {
             if !gpuSurface {
                 OutsideShadow(shape: shape, opacity: shadowOpacity, radius: shadow, y: 2,

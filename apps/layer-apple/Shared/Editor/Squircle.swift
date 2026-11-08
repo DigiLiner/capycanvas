@@ -116,23 +116,11 @@ struct DrawerSource: Equatable {
     func opens(tile: JSON, in panel: JSON) -> Bool {
         anchor["kind"].string == "tile" && anchor["panel"].string == panel["id"].string && anchor["tile"].uint == tile["id"].uint
     }
-    static func square(_ container: CGRect, radius: CGFloat, sources: [DrawerSource], joined: JSON = JSON()) -> [Bool] {
-        let corners = [CGPoint(x: container.minX, y: container.minY), CGPoint(x: container.maxX, y: container.minY),
-            CGPoint(x: container.maxX, y: container.maxY), CGPoint(x: container.minX, y: container.maxY)]
-        return corners.indices.map { index in
-            let point = corners[index]
-            return joined[index].bool || sources.contains { source in
-                let facing: [Int] = switch source.direction {
-                case "top": [0, 1]
-                case "right": [1, 2]
-                case "bottom": [2, 3]
-                default: [0, 3]
-                }
-                let vertical = source.direction == "top" || source.direction == "bottom"
-                let reachX = vertical ? radius : 0.5, reachY = vertical ? 0.5 : radius, a = source.bounds
-                return facing.contains(index) && point.x >= a.minX - reachX && point.x <= a.maxX + reachX
-                    && point.y >= a.minY - reachY && point.y <= a.maxY + reachY
-            }
+    static func square(_ container: CGRect, sources: [DrawerSource], joined: JSON = JSON()) -> [Bool] {
+        sources.reduce((0..<4).map { joined[$0].bool }) { corners, source in
+            let shared = ToolbarUI.cached(["type": "drawer_source_corners", "anchor": JSON(source.bounds).raw,
+                "direction": source.direction, "container": JSON(container).raw]).array.map(\.bool)
+            return zip(corners, shared).map { $0 || $1 }
         }
     }
 }
