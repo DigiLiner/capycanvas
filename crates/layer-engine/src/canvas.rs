@@ -147,7 +147,7 @@ pub struct CanvasEngine<B: CanvasRenderer> {
     dab_generator: DabGenerator,
     finalized_real_points: usize,
     active_stroke: Option<ActiveStroke>,
-    pending_up: Option<(PenEvent, u32)>,
+    pending_up: Option<(PenEvent, u64)>,
     frame_clock_ns: Option<u64>,
     completed_stroke: Option<Stroke>,
     completed_at: Option<web_time::Instant>,
@@ -1860,16 +1860,16 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 let event = self.input.pop().unwrap();
                 self.process_captured_event(event)?;
             }
-            let ready = self.pending_up.unwrap().1;
-            let now = self.builder.elapsed_micros_at(self.frame_clock_ns.unwrap_or(up.timestamp_ns)).unwrap_or(ready);
+            let parked = self.pending_up.unwrap().1;
+            let settled = self.frame_clock_ns.map_or(u32::MAX, |now| (now.saturating_sub(parked) / 1_000).min(u64::from(u32::MAX)) as u32);
             let active = self.active_stroke.as_ref().unwrap();
             let duration = active.momentum.as_ref().map_or_else(
                 || pen_up_settlement_micros(&active.brush.stabilization),
                 |(tail, _)| (tail.len() as u32 * 1_000_000).div_ceil(60));
             let interrupted = self.input.peek().is_some_and(|event| event.phase != PenPhase::Hover && !event.flags.contains(SampleFlags::CORRECTION));
-            let finish = self.frame_clock_ns.is_none() || now.saturating_sub(ready) >= duration || interrupted
+            let finish = self.frame_clock_ns.is_none() || settled >= duration || interrupted
                 || active.momentum.as_ref().is_some_and(|(tail, emitted)| *emitted == tail.len());
-            self.advance_momentum(if finish { u32::MAX } else { now.saturating_sub(ready) });
+            self.advance_momentum(if finish { u32::MAX } else { settled });
             if finish && self.backend.can_capture_raster() {
                 self.process_captured_event(up)?;
             }
@@ -1939,9 +1939,8 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         }
         if event.flags.contains(SampleFlags::CORRECTION) {
             let changed = self.correct_input(event)?;
-            if changed && let Some((_, ready)) = &mut self.pending_up {
-                let now = self.builder.elapsed_micros_at(self.frame_clock_ns.unwrap_or(event.timestamp_ns)).unwrap();
-                *ready = now;
+            if changed && let Some((_, parked)) = &mut self.pending_up {
+                *parked = self.frame_clock_ns.unwrap_or(event.timestamp_ns);
             }
             return Ok(());
         }
@@ -2141,13 +2140,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                             self.dab_generator.frozen()
                         };
                         if !frozen {
-                            let now = self
-                                .builder
-                                .elapsed_micros_at(
-                                    self.frame_clock_ns.unwrap_or(event.timestamp_ns),
-                                )
-                                .unwrap();
-                            self.pending_up = Some((event, now));
+                            self.pending_up = Some((event, self.frame_clock_ns.unwrap()));
                             return Ok(());
                         }
                     }
@@ -2168,7 +2161,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     if !tail.is_empty() {
                         self.active_stroke.as_mut().unwrap().momentum = Some((tail, 0));
                         if let Some(now) = self.frame_clock_ns {
-                            self.pending_up = Some((event, self.builder.elapsed_micros_at(now).unwrap()));
+                            self.pending_up = Some((event, now));
                             return Ok(());
                         }
                         self.advance_momentum(u32::MAX);
@@ -2453,7 +2446,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             },
             platform: self.builder.predicted_points(), brush: &active.brush, feedback: active.feedback,
             transform: self.view.document_to_surface, now: now_elapsed, requested: requested_elapsed,
-            ending: self.pending_up.map(|(_, ready)| ready),
+            ending: self.pending_up.and_then(|(_, parked)| self.builder.elapsed_micros_at(parked)),
         };
         let source = active.tip.build(&self.dab_generator, input, start, &mut self.dabs);
         self.push_active_preview(start);
@@ -6441,6 +6434,10 @@ mod tests {
     }
 
     fn settling_stroke() -> (InputProducer<PenEvent>, CanvasEngine<RecordingRenderer>, PenEvent) {
+        settling_stroke_with_frame_offset(0)
+    }
+
+    fn settling_stroke_with_frame_offset(frame_offset_ns: u64) -> (InputProducer<PenEvent>, CanvasEngine<RecordingRenderer>, PenEvent) {
         let (mut input, mut engine) = engine("settling", 2048, 512);
         let mut brush = default_brush(DefaultBrushPreset::GPen);
         brush.diameter = 8.;
@@ -6454,7 +6451,7 @@ mod tests {
                 phase: if index == 0 { PenPhase::Down } else { PenPhase::Move },
                 surface_position: Point { x: 100. + index as f32 * 4., y: 100. }, ..last };
             input.push(last).unwrap();
-            engine.render_frame_for(last.timestamp_ns, last.timestamp_ns + 8_000_000).unwrap();
+            engine.render_frame_for(last.timestamp_ns + frame_offset_ns, last.timestamp_ns + frame_offset_ns + 8_000_000).unwrap();
         }
         let committed = engine.backend.persistent.clone();
         last.phase = PenPhase::Up;
@@ -6463,10 +6460,24 @@ mod tests {
         last.sequence += 1;
         last.timestamp_ns += 1_000_000;
         input.push(last).unwrap();
-        engine.render_frame_for(last.timestamp_ns, last.timestamp_ns + 8_000_000).unwrap();
+        engine.render_frame_for(last.timestamp_ns + frame_offset_ns, last.timestamp_ns + frame_offset_ns + 8_000_000).unwrap();
         assert!(engine.pending_up.is_some());
         assert_eq!(engine.backend.persistent, committed);
         (input, engine, last)
+    }
+
+    #[test]
+    fn pen_up_settlement_uses_frame_clock_with_old_event_times() {
+        let offset = 30 * 24 * 60 * 60 * 1_000_000_000;
+        let (_, mut engine, up) = settling_stroke_with_frame_offset(offset);
+        assert!(engine.pending_up.is_some());
+        engine.render_frame_at(up.timestamp_ns + offset + 1_000_000).unwrap();
+        assert!(engine.has_active_stroke());
+        assert_eq!(engine.metrics.committed_strokes, 0);
+        engine.render_frame_at(up.timestamp_ns + offset + 40_000_000).unwrap();
+        assert!(!engine.has_active_stroke());
+        assert_eq!(engine.metrics.committed_strokes, 1);
+        assert!(engine.can_undo());
     }
 
     #[test]
@@ -6540,7 +6551,7 @@ mod tests {
     fn only_changed_sensor_corrections_restart_pen_up_settlement() {
         for correction_kind in 0..3 {
             let (mut input, mut engine, up) = settling_stroke();
-            let original_ready = engine.pending_up.unwrap().1;
+            let original_parked = engine.pending_up.unwrap().1;
             let mut correction = up;
             correction.flags = SampleFlags::CORRECTION;
             if correction_kind == 0 { correction.sequence += 100; }
@@ -6548,7 +6559,7 @@ mod tests {
             input.push(correction).unwrap();
             engine.render_frame_at(up.timestamp_ns + 20_000_000).unwrap();
             assert_eq!(engine.builder.real_points().len(), 201);
-            assert_eq!(engine.pending_up.unwrap().1, original_ready + if correction_kind == 2 { 20_000 } else { 0 });
+            assert_eq!(engine.pending_up.unwrap().1, original_parked + if correction_kind == 2 { 20_000_000 } else { 0 });
             engine.render_frame_at(up.timestamp_ns + 32_000_000).unwrap();
             if correction_kind == 2 {
                 assert_eq!(engine.metrics.committed_strokes, 0);
