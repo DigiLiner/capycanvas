@@ -155,7 +155,8 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
 
             });
             let task = ProjectJob::new(&app, false);
-            let request = app.state()["requests"][0]["id"].clone();
+            let request = app.state()["requests"].as_array().unwrap().iter()
+                .find(|request| request["kind"]["type"] == "document").unwrap()["id"].clone();
             let mut file = fixtures::tempfile();
             let fd = file.as_raw_fd();
             let pointer = task.0;
@@ -173,7 +174,8 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
             assert_eq!(app.state()["workspace"], state["workspace"]);
             assert_eq!(app.state()["brush"], state["brush"]);
             assert_eq!(app.state()["camera"], state["camera"]);
-            assert_eq!(app.state()["requests"][0]["id"], request);
+            assert!(app.state()["requests"].as_array().unwrap().iter()
+                .any(|pending| pending["id"] == request && pending["kind"]["type"] == "document"));
             // Retired callbacks and the old unfinished contact cannot affect
             // the new device or insert a history entry.
             device.destroy();

@@ -249,7 +249,7 @@ fn apple_fill_selection_survives_background_checkpoint_undo_redo_and_restart() {
         }
         app.invoke("deselect");
         checkpoint(&app, 0, false);
-        let document = app.document().clone();
+        let document = app.document().with_memory(Default::default());
         assert_eq!(app.state()["layers"].as_array().unwrap().len(), 3);
         drop(app);
         let restored = launch(platform, &path);
@@ -334,7 +334,7 @@ fn apple_unreadable_sessions_preserve_copies_and_allow_editing_checkpointing_and
             assert_eq!(app.borrow().window.documents.order().len(), 1);
             assert!(!failed.blocked.contains(&app.borrow().window.documents.selected()));
             app.invoke("add_layer"); app.draw_until_idle();
-            let live = app.document().clone();
+            let live = app.document().with_memory(Default::default());
             checkpoint(&app, 0, true);
             assert_eq!(std::fs::read(&metadata_path).unwrap(), incompatible);
             assert_eq!(std::fs::read(&head_path).unwrap(), incompatible_head);
@@ -417,7 +417,7 @@ fn apple_explicit_failed_entry_discard_preserves_live_history_and_other_failed_c
         app.stroke(); app.draw_until_idle();
         let painted = app.pixels();
         assert_ne!(painted, blank);
-        let document = app.borrow().host.session.engine().document().clone();
+        let document = app.document().with_memory(Default::default());
         checkpoint(&app, 0, true);
         drop(app);
         let index = path.join("window.json");
@@ -605,7 +605,7 @@ fn apple_session_stale_startup_appends_without_overwriting_new_input() {
         let app = launch(platform, &path);
         app.invoke("add_layer");
         app.draw_until_idle();
-        let saved = app.document().clone();
+        let saved = app.document().with_memory(Default::default());
         checkpoint(&app, 0, false);
         drop(app);
         let app = App::unbound(platform);
@@ -617,7 +617,7 @@ fn apple_session_stale_startup_appends_without_overwriting_new_input() {
         app.stroke(); app.draw_until_idle();
         let selected = app.borrow().window.documents.selected();
         let pixels = app.pixels();
-        let current = app.document().clone();
+        let current = app.document().with_memory(Default::default());
         task.run();
         assert_eq!(unsafe { capy_apple_session_adopt(app.0, task.0) }, 0, "{:?}", app.borrow().error);
         if interrupted_publication {
@@ -888,10 +888,10 @@ fn apple_unrelated_cleanup_failure_does_not_block_restoration_or_new_checkpoints
             app.invoke("add_layer"); app.draw_until_idle();
             let task = checkpoint(&app, 0, true);
             let warning = task.error();
-            assert!(warning.as_ref().is_some_and(|warning| warning.contains("Invalid drawing retirement intent")), "{warning:?}");
+            assert!(warning.as_ref().is_some_and(|warning| warning.contains("Invalid drawing retirement marker")), "{warning:?}");
             assert_stored_files_preserved(&path, &preserved);
         }
-        let document = app.document().clone();
+        let document = app.document().with_memory(Default::default());
         drop(app);
         let app = launch(platform, &path);
         assert_saved_document(&app.document(), &document);
