@@ -89,7 +89,9 @@ private struct BrushSliderComponent: View {
             ToolbarSliderTrack(identity: model["context"].stableKey, fill: shown["fill"].number, marks: marks,
                 opacity: tile["control"]["kind"].string != "brush_size_slider", vertical: vertical,
                 enabled: !field.isNull, label: label, valueText: shown["text"].string,
-                palette: EditorPalette(source: store.state["palette"]),
+                palette: EditorPalette(source: store.state["palette"]), band: frame,
+                viewport: store.snapshot["layout"]["viewport"], stretchDistance: layout["stretch_distance"].number,
+                language: store.interfaceLanguage,
                 contact: { down, moved in
                     if down { openPreview() } else if moved { session.close(store.workspace.sliderPreview) }
                 }, change: pick, step: step)
@@ -248,6 +250,10 @@ private struct ToolbarSliderTrack: View {
     let label: String
     let valueText: String
     let palette: EditorPalette
+    let band: CGRect
+    let viewport: JSON
+    let stretchDistance: Double
+    let language: String
     let contact: (_ down: Bool, _ moved: Bool) -> Void
     let change: (_ fill: Double, _ snap: Bool, _ travel: Double) -> Void
     let step: (Int) -> Void
@@ -260,6 +266,7 @@ private struct ToolbarSliderTrack: View {
         GeometryReader { geometry in
             let area = CGSize(width: max(0, geometry.size.width - insets.leading - insets.trailing),
                 height: max(0, geometry.size.height - insets.top - insets.bottom))
+            let track = geometry.frame(in: .named("editor-workspace"))
             ZStack {
                 Canvas { context, _ in
                     var inset = context
@@ -269,15 +276,17 @@ private struct ToolbarSliderTrack: View {
                 ParameterInput(region: .rectangle, identity: identity, nudge: { phase, _, delta in
                     if phase == "down" || phase == "move" { step(Int(delta[0] + delta[1])) }
                 }) { phase, _, point, _ in
+                    let position = CGPoint(x: track.minX + point.x, y: track.minY + point.y)
                     switch phase {
                     case "down":
-                        origin = point; moved = false
+                        origin = position; moved = false
                         contact(true, false)
-                        pick(CGPoint(x: point.x - insets.leading, y: point.y - insets.top), area, snap: true)
+                        pick(position, track, snap: true)
                     case "move":
-                        guard let origin, moved || hypot(point.x - origin.x, point.y - origin.y) >= 3 else { return }
+                        guard let origin, ToolbarUI.resolve(["type": "slider_dragging", "moved": moved,
+                            "delta": [position.x - origin.x, position.y - origin.y]], language: language).bool else { return }
                         moved = true
-                        pick(CGPoint(x: point.x - insets.leading, y: point.y - insets.top), area, snap: false)
+                        pick(position, track, snap: false)
                     case "up", "cancel":
                         guard origin != nil else { return }
                         origin = nil; contact(false, phase == "cancel" || moved)
@@ -296,11 +305,18 @@ private struct ToolbarSliderTrack: View {
             }
         }
     }
-    private func pick(_ point: CGPoint, _ area: CGSize, snap: Bool) {
-        let length = (vertical ? area.height : area.width) - 12
+    private func pick(_ point: CGPoint, _ track: CGRect, snap: Bool) {
+        let endpoints = vertical
+            ? [track.maxY - insets.bottom - 6, track.minY + insets.top + 6]
+            : [track.minX + insets.leading + 6, track.maxX - insets.trailing - 6]
+        let length = vertical ? track.height - insets.top - insets.bottom - 12
+            : track.width - insets.leading - insets.trailing - 12
         guard length > 0 else { return }
-        let fill = vertical ? 1 - (point.y - 6) / length : (point.x - 6) / length
-        change(min(1, max(0, fill)), snap, length)
+        let fill = ToolbarUI.resolve(["type": "slider_stretch", "geometry": [
+            "track": endpoints, "band": vertical ? [band.minX, band.maxX] : [band.minY, band.maxY],
+            "extent": viewport[vertical ? 1 : 0].number, "transition": stretchDistance],
+            "point": vertical ? [point.y, point.x] : [point.x, point.y]], language: language).number
+        change(fill, snap, length)
     }
     private func draw(_ context: GraphicsContext, _ size: CGSize) {
         let text = palette["text"]

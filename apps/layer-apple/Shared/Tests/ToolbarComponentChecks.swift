@@ -55,6 +55,45 @@ extension XCTestCase {
         workspaceActivate(bookmark)
         expectation(for: NSPredicate(format: "label == %@", "Bookmark this value"), evaluatedWith: bookmark)
         waitForExpectations(timeout: 10)
+        let previous = editorText(caption)
+        tap(size, CGVector(dx: 0.5, dy: 0.5))
+        expectation(for: NSPredicate { _, _ in self.editorText(caption) != previous }, evaluatedWith: caption)
+        waitForExpectations(timeout: 10)
+        let midpoint = editorText(caption)
+        let vertical = size.frame.height > size.frame.width
+        let viewport = workspaceViewport(in: app)
+        let alongOffset = vertical ? abs(size.frame.midY - viewport.frame.midY) : abs(size.frame.midX - viewport.frame.midX)
+        XCTAssertGreaterThan(alongOffset, (vertical ? size.frame.height : size.frame.width) * 0.1,
+            "The fixture separates local track and whole-window mapping")
+        let far = vertical
+            ? CGVector(dx: size.frame.midX < viewport.frame.midX ? 0.98 : 0.02, dy: 0.5)
+            : CGVector(dx: 0.5, dy: size.frame.midY < viewport.frame.midY ? 0.98 : 0.02)
+        let destination = viewport.coordinate(withNormalizedOffset: far)
+        let cross = vertical ? viewport.frame.minX + viewport.frame.width * far.dx
+            : viewport.frame.minY + viewport.frame.height * far.dy
+        XCTAssertGreaterThan(vertical ? max(size.frame.minX - cross, cross - size.frame.maxX)
+            : max(size.frame.minY - cross, cross - size.frame.maxY),
+            (vertical ? size.frame.width : size.frame.height) * 4)
+        let quarter = vertical ? CGVector(dx: 0.5, dy: 0.25) : CGVector(dx: 0.25, dy: 0.5)
+        tap(size, quarter)
+        expectation(for: NSPredicate { _, _ in self.editorText(caption) != midpoint }, evaluatedWith: caption)
+        waitForExpectations(timeout: 10)
+        let handle = size.coordinate(withNormalizedOffset: quarter)
+        #if os(macOS)
+        handle.click(forDuration: 0.05, thenDragTo: destination)
+        #else
+        handle.press(forDuration: 0.05, thenDragTo: destination)
+        #endif
+        XCTAssertTrue(preview.waitForNonExistence(timeout: 10), "A stretched drag closes its preview")
+        workspaceActivate(sizeCap)
+        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        let stretched = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.editorText(caption) == midpoint }, object: caption)
+        XCTAssertEqual(XCTWaiter.wait(for: [stretched], timeout: 10), .completed,
+            "Stretched Size uses the whole-window axis: expected \(midpoint), actual \(editorText(caption))")
+        tap(size, CGVector(dx: 0.5, dy: 0.5))
+        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        XCTAssertEqual(editorText(caption), midpoint, "A tap at the current handle preserves its value")
+        attachEditor(in: app, name: "brush-size-stretched-\(theme)")
         workspaceActivate(sketch)
         expectation(for: NSPredicate(format: "exists == NO"), evaluatedWith: preview)
         waitForExpectations(timeout: 10)
