@@ -35,6 +35,7 @@ foreach($shell in @((Get-Process -Id $PID).Path,(Join-Path $env:SystemRoot 'Syst
 $iconBuildDirectory=Join-Path $testBuildDirectory 'tests/icon-orpc-app'
 & (Join-Path $PSScriptRoot 'build.ps1') -Configuration $Configuration -Architecture $build.architecture -ControlFixture Feedback -SkipRust -SkipRestore -OutputDirectory $iconBuildDirectory -IntermediateDirectory ($iconBuildDirectory+'.obj')
 & (Join-Path $PSScriptRoot 'test-desktop.ps1') -Script (Join-Path $PSScriptRoot '../tests/icon-orpc.ps1') -Parameters @{Executable=(Join-Path $iconBuildDirectory 'CapyCanvas.exe');Output=(Join-Path $testBuildDirectory 'tests/icon-orpc')}
+& (Join-Path $PSScriptRoot 'test-desktop.ps1') -Script (Join-Path $PSScriptRoot '../tests/workflow-layout.ps1') -Parameters @{Executable=(Join-Path $iconBuildDirectory 'CapyCanvas.exe');Output=(Join-Path $testBuildDirectory 'tests/workflow-layout')}
 & (Join-Path $PSScriptRoot '../tests/runtime-staging.ps1') -Output (Join-Path $testBuildDirectory ('runtime-staging-'+[guid]::NewGuid().ToString('N')))
 & (Join-Path $PSScriptRoot '../tests/architecture.ps1')
 & (Join-Path $PSScriptRoot '../tests/application-menu-query.ps1')

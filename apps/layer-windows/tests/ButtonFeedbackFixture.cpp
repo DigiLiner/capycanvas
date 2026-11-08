@@ -5,6 +5,7 @@
 #include "NavigatorLayoutFixture.h"
 #include "ScrollIndicatorsFixture.h"
 #include "IconOrpcFixture.h"
+#include "WorkflowLayoutFixture.h"
 #include "WorkspaceDrawers.h"
 #include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <chrono>
@@ -17,6 +18,7 @@ using namespace Microsoft::UI::Xaml::Media;
 namespace {
 std::shared_ptr<NavigatorLayoutFixture> navigatorFixture;
 std::shared_ptr<CapyTests::IconOrpcFixture> iconOrpcFixture;
+std::shared_ptr<CapyTests::WorkflowLayoutFixture> workflowLayoutFixture;
 struct App:ApplicationT<App,Markup::IXamlMetadataProvider>{
     XamlTypeInfo::XamlControlsXamlMetaDataProvider metadata;
     Window window{nullptr};Grid root;ContentDialog dialog{nullptr};Flyout flyout;
@@ -64,6 +66,7 @@ struct App:ApplicationT<App,Markup::IXamlMetadataProvider>{
     }
     void OnLaunched(LaunchActivatedEventArgs const&){
         Resources().MergedDictionaries().Append(XamlControlsResources());Resources().MergedDictionaries().Append(CapyUi::paletteResources());
+        if(workflowLayoutFixture){workflowLayoutFixture->open();return;}
         if(iconOrpcFixture){iconOrpcFixture->open();return;}
         if(GetEnvironmentVariableW(L"CAPY_SCROLL_INDICATORS",nullptr,0)){indicators=std::make_shared<ScrollIndicatorsFixture>();indicators->open();return;}
         if(GetEnvironmentVariableW(L"CAPY_NAVIGATOR_LAYOUT",nullptr,0)){navigatorFixture=std::make_shared<NavigatorLayoutFixture>(context);navigatorFixture->open();return;}
@@ -103,6 +106,11 @@ struct App:ApplicationT<App,Markup::IXamlMetadataProvider>{
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     ControlContext context;if(GetEnvironmentVariableW(L"CAPY_NAVIGATOR_LAYOUT",nullptr,0))context=fixtureContext(L"CAPY_NAVIGATOR_LAYOUT");
     init_apartment(apartment_type::single_threaded);
+    if(GetEnvironmentVariableW(L"CAPY_WORKFLOW_LAYOUT_FIXTURE",nullptr,0)){
+        workflowLayoutFixture=std::make_shared<CapyTests::WorkflowLayoutFixture>();
+        try{Application::Start([context](auto&&){make<App>(context);});return workflowLayoutFixture->finish();}
+        catch(hresult_error const& error){return workflowLayoutFixture->finish(CapyTests::WorkflowLayoutFixture::describe(error));}
+    }
     if(GetEnvironmentVariableW(L"CAPY_ICON_ORPC_FIXTURE",nullptr,0)){
         iconOrpcFixture=std::make_shared<CapyTests::IconOrpcFixture>();
         try{iconOrpcFixture->calibrate();Application::Start([context](auto&&){make<App>(context);});return iconOrpcFixture->finish();}

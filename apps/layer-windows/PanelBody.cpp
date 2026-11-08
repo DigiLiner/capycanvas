@@ -160,7 +160,7 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
             double inset=data->panelMetric(L"inset");
             contentHeight=[content](double){return content.IsLoaded()&&content.Visibility()==Visibility::Visible&&Primitives::LayoutInformation::GetAvailableSize(content).Width>0?double(content.DesiredSize().Height):-1.;};
             content.Padding(Thickness{inset,inset,inset,inset});
-            if(panelId==L"proof"){content.VerticalAlignment(VerticalAlignment::Top);content.Children().Append(ProofPanel(data,bindings));}
+            if(panelId==L"proof"){content.VerticalAlignment(VerticalAlignment::Top);content.Children().Append(ProofPanel(data,bindings,layoutChanged));}
             FrameworkElement fittedControl{nullptr};std::function<double(double)> fittedHeight;size_t visibleControls=0;
             for(auto value:array(panel,L"controls"))if(flag(value.GetObject(),L"visible_in_panel"))visibleControls++;
             auto brushValue=[data=data](wchar_t const* key){return num(object(data->state,L"brush"),key);};

@@ -10,7 +10,7 @@ struct WorkflowPages : std::enable_shared_from_this<WorkflowPages> {
     int selected=-1;
     uint64_t serial=0;
     void append(FrameworkElement const& page){page.Visibility(Visibility::Collapsed);pages.push_back(page);root.Children().Append(page);}
-    void show(int index,bool slide=false,bool vertical=false){
+    void show(int index,bool slide=false,bool vertical=false,std::function<void()> settled={}){
         if(index==selected)return;
         auto previous=selected;selected=index;auto generation=++serial;auto from=root.ActualHeight();
         auto enteringOpacity=pages[index].Visibility()==Visibility::Visible?pages[index].Opacity():0.;
@@ -22,10 +22,11 @@ struct WorkflowPages : std::enable_shared_from_this<WorkflowPages> {
         if(motion){motion.Stop();motion=nullptr;}
         root.ClearValue(FrameworkElement::HeightProperty());
         for(int i=0;i<int(pages.size());++i){auto page=pages[i];page.Visibility(i==previous||i==index?Visibility::Visible:Visibility::Collapsed);page.Opacity(1);page.RenderTransform(nullptr);page.IsHitTestVisible(i==index);}
-        auto settle=[self=shared_from_this(),generation]{
+        auto settle=[self=shared_from_this(),generation,settled=std::move(settled)]{
             if(self->serial!=generation)return;
             for(int i=0;i<int(self->pages.size());++i){auto page=self->pages[i];page.Visibility(i==self->selected?Visibility::Visible:Visibility::Collapsed);page.Opacity(1);page.RenderTransform(nullptr);}
             self->root.ClearValue(FrameworkElement::HeightProperty());self->root.Clip(nullptr);self->motion=nullptr;
+            if(settled)settled();
         };
         if(previous<0||!winrt::Windows::UI::ViewManagement::UISettings().AnimationsEnabled()){settle();return;}
         auto outgoing=pages[previous],incoming=pages[index];

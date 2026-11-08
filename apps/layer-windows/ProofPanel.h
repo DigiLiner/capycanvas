@@ -6,7 +6,7 @@
 
 namespace CapyUi {
 // Each retained panel/drawer owns native controls; Rust owns mode and edit policy.
-inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings){
+inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,std::function<void()> layoutChanged){
     StackPanel root;root.Spacing(data->panelMetric(L"control_spacing"));
     auto form=[data]{return object(data->model,L"windows_proof_form");};
     auto copy=[form](wchar_t const* key){return str(object(form(),L"copy"),key);};
@@ -62,7 +62,7 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
     auto gamut=compactCheck(data,box_value(copy(L"gamut_warning")));AutomationProperties::SetName(gamut,copy(L"gamut_warning"));AutomationProperties::SetAutomationId(gamut,L"proof-panel-gamut");
     gamut.Click([data](auto&&,auto&&){if(!data->updating)data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"gamut_warning")}}));});print.Children().Append(gamut);
     auto status=label(data,L"");status.TextWrapping(TextWrapping::Wrap);status.Visibility(Visibility::Collapsed);root.Children().Append(status);
-    bindings.emplace_back([data,form,copy,mode,modes,arrangeModes,modeHdr,pages,sdrGate,print,printControls,printGate,printKey,printForm,gamut,status]{
+    bindings.emplace_back([data,form,copy,mode,modes,arrangeModes,modeHdr,pages,layoutChanged,sdrGate,print,printControls,printGate,printKey,printForm,gamut,status]{
         auto value=form();auto selected=str(value,L"mode");bool hdr=flag(value,L"hdr");
         bool available=!flag(object(data->state,L"document_file"),L"busy")&&!flag(data->model,L"windows_rendering_suspended");
         if(hdr!=*modeHdr){*modeHdr=hdr;arrangeModes(hdr);}
@@ -74,7 +74,7 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
             choice.Background(pressed?Brush(data->tint(L"text",31)):Brush(clear()));
             AutomationProperties::SetItemStatus(choice,pressed?data->caption(L"search",L"selected"):hstring());
         }
-        sdrGate.IsEnabled(available);pages->show(selected==L"print"?2:hdr&&selected==L"sdr"?1:0,true);
+        sdrGate.IsEnabled(available);pages->show(selected==L"print"?2:hdr&&selected==L"sdr"?1:0,true,false,layoutChanged);
         auto settings=object(value,L"print_settings"),document=object(value,L"document_profile");
         auto key=array(value,L"identity").Stringify()+settings.Stringify()+document.Stringify()+array(value,L"library").Stringify()+data->language();
         if(array(value,L"profiles").Size()&&key!=*printKey&&!flag(value,L"preparing")){
