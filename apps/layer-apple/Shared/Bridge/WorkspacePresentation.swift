@@ -136,12 +136,13 @@ import SwiftUI
     func hasPopover(excluding id: UUID) -> Bool { popovers.values.contains { $0.owner != id } }
     private var facts: JSON {
         guard let store else { return JSON() }
-        let tool = store.contentDrawers.items["tool"]?.geometry ?? JSON()
+        let menu = store.contentDrawers.menu.geometry
+        let content = menu.isNull ? store.contentDrawers.items["tool"]?.geometry ?? JSON() : menu
         let modal = ["picker", "toolbar_prompt", "toolbar_manager", "preferences"].contains { !store.snapshot[$0].isNull }
             || !store.state["customization"]["control"].isNull
         return JSON(["held": headerHeld || (inputState?.contact.held ?? false), "dragging": drag?.item["kind"].string == "tile", "popup_open": modal || !popovers.isEmpty,
-            "expanded_panel": expansion.raw, "content_drawer": tool["placement"]["bounds"].raw,
-            "drawer_connection": tool["connection"]["bounds"].raw])
+            "expanded_panel": expansion.raw, "content_drawer": content["placement"]["bounds"].raw,
+            "drawer_connection": content["connection"]["bounds"].raw])
     }
     func dismissTransients(at point: CGPoint?) { sliderPreview.dismiss(outside: point) }
     func chrome(_ event: [String: Any]) {

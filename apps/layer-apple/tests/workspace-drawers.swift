@@ -7,6 +7,10 @@ import SwiftUI
     @MainActor static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        let binding = JSON(["key": "z", "control": true, "shift": true, "alt": false])
+        precondition(menuBindingMatches(binding, key: "я", latin: "z", command: true, shift: true, alt: false))
+        precondition(!menuBindingMatches(binding, key: "z", latin: nil, command: true, shift: false, alt: false))
+        precondition(!menuBindingMatches(binding, key: "z", latin: nil, command: true, shift: true, alt: true))
         let store = EditorStore(platform: 1, persistence: EditorPersistence(root: nil))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 870),
             styleMask: [.borderless], backing: .buffered, defer: true)
@@ -110,6 +114,108 @@ import SwiftUI
             store.contentDrawers.items["4"]?.interactive != true
                 && !store.workspace.sourceInstances.values.contains { $0.item == item.stableKey && $0.layer >= 200 }
         }
-        print("PASS: SwiftUI drawer geometry, tab/header drag sources, reorder, restored drop targets and closing hit-test retirement")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("phone-drawers-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let phone = EditorStore(platform: 0, persistence: EditorPersistence(root: directory))
+        try await wait("Phone drawer owner") { !phone.state.isNull }
+        try await phone.workspaces!.started()
+        try await phone.workspaces!.perform(["type": "switch", "id": "builtin:workspace:painter"])
+        phone.native?.resize(width: 375, height: 667, scale: 1)
+        try await wait("Shared phone layout") { !phone.snapshot["layout"]["phone"].isNull }
+        phone.customize(["type": "close_expanded"])
+        phone.dispatch(["type": "phone", "action": ["kind": "capy"]])
+        window.setContentSize(NSSize(width: 375, height: 667))
+        let presenter = PhoneMenuPresentation(store: phone)
+        window.contentView = NSHostingView(rootView: PhoneMenu(store: phone, input: presenter)
+            .frame(width: 375, height: 667).coordinateSpace(name: "editor-workspace"))
+        try await wait("Phone menu native width and row measurements publish the constrained height probe") {
+            phone.state["phone"]["menu"].bool && phone.contentDrawers.sources["menu"] != nil
+        }
+        precondition(phone.contentDrawers.sources["menu"]!.anchor["anchor"]["kind"].string == "capy")
+        try await wait("Previous tool drawer retires before menu contact") { phone.contentDrawers.items["tool"] == nil }
+        try await wait("The common drawer owner completes the menu opening") {
+            presenter.frame["placement"].stableKey == presenter.target.stableKey
+        }
+        precondition(presenter.drawer === phone.contentDrawers.menu && presenter.focused == nil,
+            "Touch opens the common menu without a keyboard focus highlight")
+        let openedHeight = presenter.frame["placement"]["bounds"]["height"].number
+        phone.dispatch(["type": "phone", "action": ["kind": "capy"]])
+        try await wait("The common menu owner starts closing") {
+            !presenter.drawer.interactive && !presenter.frame["placement"].isNull
+                && presenter.frame["placement"]["bounds"]["height"].number < openedHeight
+        }
+        presenter.refresh(layout: phone.snapshot["layout"]["phone"], phone: phone.state["phone"])
+        phone.dispatch(["type": "phone", "action": ["kind": "capy"]])
+        try await wait("Reopening interrupts closing at the unchanged menu placement") {
+            phone.state["phone"]["menu"].bool && presenter.drawer.interactive
+                && presenter.frame["placement"].stableKey == presenter.target.stableKey
+        }
+        let menuBounds = presenter.frame["placement"]["bounds"].rect
+        phone.workspace.chrome(["kind": "contact", "position": [menuBounds.midX, menuBounds.midY], "canvas": false])
+        let contacted: JSON = await withCheckedContinuation { continuation in
+            phone.query(["type": "document_tabs", "op": "phone_menu"]) { continuation.resume(returning: $0) }
+        }
+        precondition(!contacted.isNull, "A contact inside the native menu frame must preserve the shared menu")
+        var fileHit = JSON(), fileRoute = JSON()
+        for (section, rows) in presenter.page["sections"].array.enumerated() {
+            for (index, row) in rows.array.enumerated() where row["target"]["page"]["kind"].string == "application"
+                && row["target"]["page"]["menu"].string == "file" {
+                fileHit = PhoneMenuPresentation.hit("row", [section, index]); fileRoute = row["target"]
+            }
+        }
+        precondition(!fileHit.isNull)
+        let rootList = presenter.geometry["list"].rect.offsetBy(dx: presenter.target["bounds"]["x"].number,
+            dy: presenter.target["bounds"]["y"].number)
+        let clippedRow = CGRect(x: rootList.minX, y: rootList.maxY - 4, width: rootList.width, height: presenter.rowHeight)
+        presenter.allocated(fileHit, clippedRow)
+        let inside = CGPoint(x: rootList.midX, y: rootList.maxY - 2)
+        presenter.contact.prepare(presenter.source(at: inside)!, device: .touch, origin: inside)
+        precondition(presenter.pressed == fileHit.stableKey && presenter.focused == nil,
+            "Pressing a partly clipped row must not scroll keyboard focus to it")
+        presenter.contact.cancel(); presenter.cancelPress()
+        precondition(presenter.source(at: CGPoint(x: rootList.midX, y: rootList.maxY + 2))?.id != fileHit.stableKey,
+            "The hidden part of a row cannot receive a press under the separator or strip")
+        presenter.key("arrowdown", latin: nil, command: false, shift: false, alt: false)
+        precondition(presenter.focused == presenter.order.first)
+        let rootPhone = phone.state["phone"]
+        let rootRoute = rootPhone["menu_route"].stableKey
+        presenter.activate(fileHit, semantic: true)
+        try await wait("The native File row selects the shared route after chrome admission") {
+            phone.state["phone"]["menu"].bool && phone.state["phone"]["menu_route"].stableKey == fileRoute.stableKey
+                && presenter.route.stableKey == fileRoute.stableKey
+        }
+        let filePhone = phone.state["phone"]
+        let placement = presenter.frame["placement"]
+        let list = PhoneUI.resolve(["kind": "menu_geometry", "layout": phone.snapshot["layout"]["phone"].raw,
+            "placement": placement.raw, "row_height": presenter.rowHeight])["list"].rect
+            .offsetBy(dx: placement["bounds"]["x"].number, dy: placement["bounds"]["y"].number)
+        let origin = CGPoint(x: list.minX + list.width * 0.25, y: list.midY)
+        presenter.contact.prepare(presenter.source(at: origin)!, device: .touch, origin: origin)
+        let released = CGPoint(x: origin.x + list.width * 0.6, y: origin.y)
+        precondition(presenter.beginSwipe(at: released), "The shared swipe claims the measured menu list")
+        presenter.finishSwipe(cancelled: false)
+        presenter.contact.release(at: released)
+        try await wait("The retained native menu input lets the shared Back settle complete") {
+            if presenter.route.stableKey == fileRoute.stableKey {
+                precondition(presenter.swiping && presenter.progress == 1 && !presenter.enabled,
+                    "A completed swipe retains the parent preview until the shared route changes")
+            }
+            return phone.state["phone"]["menu"].bool && phone.state["phone"]["menu_route"].stableKey == rootRoute
+        }
+        for next in [filePhone, rootPhone] {
+            let layout = phone.snapshot["layout"]["phone"]
+            let observation = presenter.objectWillChange.sink { _ in
+                precondition(presenter.route.stableKey == next["menu_route"].stableKey
+                    && presenter.open == next["menu"].bool && presenter.layout.stableKey == layout.stableKey,
+                    "Native menu refresh must stage its complete route before publishing")
+            }
+            presenter.refresh(layout: layout, phone: next)
+            observation.cancel()
+        }
+        window.contentView = nil
+        try await wait("The phone menu relinquishes its common chrome frame") {
+            phone.contentDrawers.menu.geometry.isNull && phone.contentDrawers.sources["menu"] == nil
+        }
+        print("PASS: SwiftUI drawer geometry, tab/header drag sources, reorder, restored drop targets, closing retirement and phone menu measurement/contact publication")
     }
 }

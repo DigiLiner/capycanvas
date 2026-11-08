@@ -21,7 +21,11 @@ fn apple_phone_queries_round_trip_without_a_session() {
 #[test]
 fn apple_dialog_queries_round_trip_without_a_session() {
     for request in [
+        json!({"kind":"header","intent":layer_ui::DialogIntent::editor(Some(layer_ui::DialogPrimary::Action)),"subpage":false}),
+        json!({"kind":"header","intent":layer_ui::DialogIntent::editor(Some(layer_ui::DialogPrimary::Close)),"subpage":true}),
         json!({"kind":"escape","subpage":true,"search_focused":true,"search_has_text":true}),
+        json!({"kind":"escape","subpage":true,"search_focused":true,"search_has_text":false}),
+        json!({"kind":"escape","subpage":false,"search_focused":false,"search_has_text":false}),
         json!({"kind":"color_editor_layout","width":320,"minimum":[128,128]}),
         json!({"kind":"phone_window","viewport":[402,874]}),
     ] {
@@ -32,6 +36,44 @@ fn apple_dialog_queries_round_trip_without_a_session() {
     let output = unsafe { capy_apple_dialog_ui(std::ptr::null()) };
     let missing: Value = serde_json::from_slice(handles::take_text(output).to_bytes()).unwrap();
     assert_eq!(missing["error"], "Missing dialog request");
+}
+
+#[test]
+fn apple_phone_menu_contact_retires_press_on_scroll_and_route_change() {
+    let route = json!({"page":{"kind":"application","menu":"file"},"path":[]});
+    let hit = json!({"kind":"row","position":[0,0]});
+    let input = |contact: Value, route: &Value, input: Value| stateless(capy_apple_phone_ui,
+        json!({"kind":"menu_input","contact":contact,"route":route,"can_back":true,"input":input}).to_string());
+    let pressed = input(json!({}), &route, json!({"kind":"press","hit":hit}));
+    assert_eq!(input(pressed["contact"].clone(), &route, json!({"kind":"release","hit":hit,"inside":true}))["reply"]["accepted"], true);
+    let scrolled = input(pressed["contact"].clone(), &route, json!({"kind":"cancel_press"}));
+    assert_eq!(input(scrolled["contact"].clone(), &route, json!({"kind":"release","hit":hit,"inside":true}))["reply"]["accepted"], false);
+    assert_eq!(input(pressed["contact"].clone(), &json!({"page":null,"path":[]}), json!({"kind":"release","hit":hit,"inside":true}))["reply"]["accepted"], false);
+}
+
+#[test]
+fn apple_dialog_pages_and_alerts_preserve_visible_bounds() {
+    for (platform,viewport) in [(0,[402,874]),(0,[874,402]),(0,[1024,768]),(1,[402,874])] {
+        let app = App::new(platform);
+        let policy = app.borrow().host.session.state().platform;
+        app.action(json!({"type":"restore_workspace","workspace":layer_ui::WorkspaceState {
+            layout:layer_ui::WorkspacePreset::Painter.layout(policy),..Default::default()
+        }}));
+        assert_eq!(unsafe { capy_apple_resize(app.0, viewport[0], viewport[1], 1.) }, 0);
+        app.action(json!({"type":"phone","action":{"kind":"metrics","native":[0,0],"native_counts":[0,0],"insets":[3,7,5,11],"corners":[0,0,0,0]}}));
+        let visible = layer_ui::Bounds { x:3.,y:7.,width:viewport[0] as f32-6.,height:viewport[1] as f32-140. };
+        let state = app.state();
+        for role in [layer_ui::DialogRole::Editor,layer_ui::DialogRole::Alert,layer_ui::DialogRole::CanvasPanel] {
+            let expected = app.with(|app| app.host.session.state().dialog_presentation_in(role,app.host.logical,visible));
+            assert_eq!(app.request(2,json!({"type":"dialog_presentation","role":role,"visible":visible})).unwrap(),json!(expected));
+            assert_eq!(app.request(2,json!({"type":"dialog_bounds","role":role,"visible":visible,"measured":[600.,200.]})).unwrap(),json!(expected.bounds(|| [600.,200.])));
+            if role == layer_ui::DialogRole::Editor {
+                assert_eq!(expected.single_pane(), platform == 0 && viewport[0].min(viewport[1]) < 480);
+            }
+            if role == layer_ui::DialogRole::Alert { assert_eq!(expected,layer_ui::DialogPresentation::Floating); }
+        }
+        assert_eq!(app.state(),state);
+    }
 }
 
 #[test]

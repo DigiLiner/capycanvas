@@ -54,7 +54,7 @@ import QuartzCore
             precondition(store.recovery.visibleError == nil && store.recovery.restoreError != nil)
             let closed = await withCheckedContinuation { done in store.recovery.close { done.resume(returning: $0) } }
             precondition(closed && store.recovery.error == nil)
-            let directories = try FileManager.default.contentsOfDirectory(at: native.sessions!, includingPropertiesForKeys: nil)
+            let directories = try FileManager.default.contentsOfDirectory(at: native.sessions!.appendingPathComponent("packed"), includingPropertiesForKeys: nil)
             let preserved = directories.first { FileManager.default.fileExists(atPath: $0.appendingPathComponent("drawing/head.json").path) }!
             let retained = try Data(contentsOf: preserved.appendingPathComponent("drawing/head.json"))
             precondition(retained == bytes)
@@ -209,7 +209,8 @@ import QuartzCore
                 try await invoke("fit_canvas")
                 print("Apple \(platform) \(theme): shared adjacent requests, custom/disabled/restored shortcuts and Hand page aliases passed")
             }
-            try await select(1)
+            try await store.apply(["type": "phone", "action": ["kind": "drawing", "id": 1, "close": false]])
+            try await settledDrawing(1, "phone drawing selection")
             precondition(store.state["layers"].stableKey == firstLayers)
             try await invoke("add_layer"); try await invoke("save_document")
             let savedFirst = try Data(contentsOf: a)
@@ -218,13 +219,13 @@ import QuartzCore
             try await invoke("add_layer")
             let recovered = await withCheckedContinuation { done in store.recovery.flush { done.resume(returning: $0) } }
             precondition(recovered && store.recovery.hasCurrentCopy)
-            store.drawingTabs.close(2)
-            try await wait("close prompt") { store.projectFiles.confirming }
+            try await store.apply(["type": "phone", "action": ["kind": "drawing", "id": 2, "close": true]])
+            try await wait("close prompt") { store.projectFiles.confirming && store.state["requests"].array.allSatisfy { $0["kind"]["type"].string != "select_drawing" } }
             store.projectFiles.choose("cancel")
             try await wait("close cancellation") { !store.projectFiles.busy }
             precondition(store.drawingTabs.rows.count == 2)
-            store.drawingTabs.close(2)
-            try await wait("second close prompt") { store.projectFiles.confirming }
+            try await store.apply(["type": "phone", "action": ["kind": "drawing", "id": 2, "close": true]])
+            try await wait("second close prompt") { store.projectFiles.confirming && store.state["requests"].array.allSatisfy { $0["kind"]["type"].string != "select_drawing" } }
             store.projectFiles.choose("discard")
             try await wait("close tab") { store.drawingTabs.rows.count == 1 && !store.drawingTabs.busy }
             precondition(store.drawingTabs.selected == 1)

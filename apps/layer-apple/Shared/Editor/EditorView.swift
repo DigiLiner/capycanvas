@@ -45,6 +45,7 @@ struct EditorView<Canvas: View>: View {
                         .modifier(WorkspaceChromeVisibility(hidden: store.snapshot["chrome_hidden"].bool))
                 }
                 WorkspacePanels(store: store, workspace: store.workspace)
+                if !store.snapshot["layout"]["phone"].isNull { PhoneMenu(store: store).zIndex(220) }
                 PenResponseCalibration(store: store)
             }
             FillGestureOverlay(view: store.snapshot["color_preview"]["fill_gesture"], palette: palette)

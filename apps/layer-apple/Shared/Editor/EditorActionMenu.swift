@@ -130,20 +130,13 @@ struct EditorActionMenu: View {
         }
     }
     private func itemLabel(_ item: AppleContextMenu.Item) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark").frame(width: 16).opacity(item.selected == true ? 1 : 0)
-            if !item.icon.isEmpty { SharedIcon(name: item.icon) }
-            Text(item.label).frame(maxWidth: .infinity, alignment: .leading)
-            if item.marker { ToolGroupMarker() }
-            if !item.hint.isEmpty { Text(item.hint).foregroundStyle(.secondary).font(.caption) }
-            if !item.sections.isEmpty { Image(systemName: "chevron.right").font(.caption) }
-        }.padding(.horizontal, 10).frame(minHeight: 36).contentShape(Rectangle())
+        EditorMenuRowLabel(label: item.label, icon: item.icon, selected: item.selected, marker: item.marker,
+            hint: item.hint, submenu: !item.sections.isEmpty)
     }
     private func key(_ key: String, latin: String?, command: Bool, shift: Bool, alt: Bool) {
         if let item = model.actions.first(where: { item in
             item.enabled && item.bindings.contains { binding in
-                NativeTextContext.shortcutKeyIs(key, latin: latin, binding["key"].string) && (binding["command"].bool || binding["control"].bool) == command
-                    && binding["shift"].bool == shift && binding["alt"].bool == alt
+                menuBindingMatches(binding, key: key, latin: latin, command: command, shift: shift, alt: alt)
             }
         }) { if !item.keepOpen { dismiss() }; item.action?(); return }
         guard !command && !alt else { return }
@@ -172,5 +165,34 @@ struct EditorActionMenu: View {
         guard item.enabled else { return }
         if !item.sections.isEmpty { pages.append(index); focus = initialFocus }
         else { if !item.keepOpen { dismiss() }; item.action?() }
+    }
+}
+
+func menuBindingMatches(_ binding: JSON, key: String, latin: String?, command: Bool, shift: Bool, alt: Bool) -> Bool {
+    NativeTextContext.shortcutKeyIs(key, latin: latin, binding["key"].string)
+        && (binding["command"].bool || binding["control"].bool) == command
+        && binding["shift"].bool == shift && binding["alt"].bool == alt
+}
+
+struct EditorMenuRowLabel: View {
+    let label: String
+    var icon = ""
+    var selected: Bool? = nil
+    var checks = true
+    var marker = false
+    var hint = ""
+    var submenu = false
+    var singleLine = false
+    var middleEllipsis = false
+    var body: some View {
+        HStack(spacing: 8) {
+            if checks { Image(systemName: "checkmark").frame(width: 16).opacity(selected == true ? 1 : 0) }
+            if !icon.isEmpty { SharedIcon(name: icon) }
+            Text(label).lineLimit(singleLine ? 1 : nil).truncationMode(middleEllipsis ? .middle : .tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if marker { ToolGroupMarker() }
+            if !hint.isEmpty { Text(hint).foregroundStyle(.secondary).font(.caption) }
+            if submenu { Image(systemName: "chevron.right").font(.caption) }
+        }.padding(.horizontal, 10).frame(minHeight: 36).contentShape(Rectangle())
     }
 }

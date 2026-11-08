@@ -41,12 +41,15 @@ import UniformTypeIdentifiers
             }
             closeTitles = titles; closeCaptions = captions
         }
-        guard let command = store.state["requests"].array.first(where: { ["drawings", "adjacent_drawing"].contains($0["kind"]["type"].string) }) else { request = nil; return }
+        guard let command = store.state["requests"].array.first(where: { ["drawings", "adjacent_drawing", "select_drawing"].contains($0["kind"]["type"].string) }) else { request = nil; return }
         guard request != command["id"].uint else { return }
         request = command["id"].uint
         store.dispatch(["type": "complete_request", "id": command["id"].uint, "error": NSNull()])
         if command["kind"]["type"].string == "drawings" { presented = true }
-        else { adjacent(command["kind"]["forward"].bool) }
+        else if command["kind"]["type"].string == "select_drawing" {
+            let kind = command["kind"]
+            if kind["close"].bool { close(kind["id"].uint) } else { select(kind["id"].uint) }
+        } else { adjacent(command["kind"]["forward"].bool) }
     }
     func select(_ id: UInt64, completion: @escaping (Bool) -> Void = { _ in }) {
         guard let store, let native = store.native, !busy, !store.projectFiles.busy else { completion(false); return }

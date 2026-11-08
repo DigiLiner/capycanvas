@@ -336,7 +336,7 @@ struct DrawerContainerSurface: ViewModifier {
         }
     }
 }
-private struct DrawerBridge: Shape {
+struct DrawerBridge: Shape {
     let connection: JSON
     func path(in rect: CGRect) -> Path {
         let l = connection["length"].number, d = connection["depth"].number

@@ -22,6 +22,7 @@ import SwiftUI
     private struct Request {
         let token = UUID()
         let from: JSON
+        let placement: JSON?
         let heights: [CGFloat]
         let closing: Bool
         let animate: Bool
@@ -53,8 +54,24 @@ import SwiftUI
         guard key != nextKey else { return }; key = nextKey
         let pageTo: CGFloat = model["layer_properties"].bool ? 1 : 0
         let pageChange = !model["layer_properties"].isNull && !next.isNull && pagePosition != pageTo
-        latest = Request(from: geometry["placement"], heights: measured, closing: next.isNull,
+        latest = Request(from: geometry["placement"], placement: nil, heights: measured, closing: next.isNull,
             animate: changed || pageChange, pageFrom: pageChange ? pagePosition : nil, pageTo: pageTo)
+        start()
+    }
+    func present(_ next: JSON, placement: JSON) {
+        let closing = next.isNull
+        if interactive != !closing { interactive = !closing }
+        if !closing, model.stableKey != next.stableKey { model = next }
+        let target = closing ? geometry["placement"] : placement
+        guard !target.isNull else { if closing { store?.contentDrawers.remove(id) }; return }
+        let nextKey = JSON([closing ? JSON().raw : target.raw, closing]).stableKey
+        guard key != nextKey else { return }; key = nextKey
+        latest = Request(from: geometry["placement"], placement: target, heights: [], closing: closing,
+            animate: true, pageFrom: nil, pageTo: 0)
+        start()
+    }
+    private func start() {
+        guard let store else { return }
         guard task == nil else { return }
         task = Task { [weak self] in
             let duration = max(0.001, store.catalog["panel_expansion_ms"].number / 1000)
@@ -62,6 +79,7 @@ import SwiftUI
                 guard let self, let request = self.latest else { return }
                 let target: JSON
                 if request.closing { target = request.from }
+                else if let placement = request.placement { target = placement }
                 else {
                     let page = request.pageTo == 1 ? 1 : 0
                     let heights = !self.model["layer_properties"].isNull && self.layerSizes["heights"].array.count == 2
@@ -94,7 +112,7 @@ import SwiftUI
             }
         }
     }
-    private static func frame(_ request: [String: Any]) -> JSON {
+    static func frame(_ request: [String: Any]) -> JSON {
         do {
             let text = try JSON(request).encoded()
             guard let response = text.withCString({ takeNativeText(capy_apple_drawer_frame($0)) }) else { return JSON() }
@@ -112,17 +130,19 @@ import SwiftUI
     }
     func toggleLayerProperties() { store?.customize(["type": "toggle_layer_drawer_properties"]) }
     func stop() { latest = nil; task?.cancel(); task = nil }
+    func retire() { stop(); key = ""; model = JSON(); geometry = JSON(); interactive = false }
 }
 
 @MainActor final class ContentDrawersPresentation: ObservableObject {
     @Published private(set) var items: [String: ContentDrawerPresentation] = [:]
     @Published private(set) var sources: [String: DrawerSource] = [:]
+    let menu: ContentDrawerPresentation
     private weak var store: EditorStore?
     private var tilesKey = ""
     private var columnsKey = ""
     private var columns: [UInt64: CGRect] = [:]
     private(set) var tileRevision = 0
-    init(store: EditorStore) { self.store = store }
+    init(store: EditorStore) { self.store = store; menu = ContentDrawerPresentation(id: "menu", store: store) }
     func refresh() {
         guard let store else { return }
         var models: [String: JSON] = [:]
@@ -141,7 +161,8 @@ import SwiftUI
         sources[id] = next
     }
     func remove(_ id: String) {
-        items.removeValue(forKey: id)?.stop()
+        if id == menu.id { menu.retire() }
+        else { items.removeValue(forKey: id)?.stop() }
         source(id, geometry: JSON())
         store?.workspace.refreshChrome()
     }
