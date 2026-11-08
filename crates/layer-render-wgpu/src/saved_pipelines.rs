@@ -37,7 +37,7 @@ impl SavedPipelines {
         let mut published = data.as_ref().map(|data| (data.len(), crc32fast::hash(data)));
         let create = |data: Option<&[u8]>| {
             let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            // SAFETY: These bytes came from get_data of this app version for this adapter
+            // SAFETY: These bytes came from get_data of this app for this adapter
             // key and passed length and CRC checks. wgpu validates adapter and driver
             // keys and falls back to an empty cache.
             let cache = unsafe { device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
@@ -82,18 +82,24 @@ fn cache_path(directory: &Path, info: &wgpu::AdapterInfo) -> Option<PathBuf> {
         wgpu::Backend::Vulkan => "vulkan", wgpu::Backend::Dx12 => "dx12", wgpu::Backend::Metal => "metal",
         _ => return None,
     };
-    Some(directory.join(format!("pipelines-{}-{}-{:x}-{:x}.bin", env!("CARGO_PKG_VERSION"), backend, info.vendor, info.device)))
+    let mut driver = crc32fast::Hasher::new();
+    driver.update(info.driver.as_bytes());
+    driver.update(&[0]);
+    driver.update(info.driver_info.as_bytes());
+    Some(directory.join(format!("pipelines-{}-{:x}-{:x}-{:08x}.bin", backend, info.vendor, info.device, driver.finalize())))
 }
 
 fn read_file(directory: &Path, info: &wgpu::AdapterInfo) -> Option<Vec<u8>> {
     let path = cache_path(directory, info)?;
-    let prefix = format!("pipelines-{}-", env!("CARGO_PKG_VERSION"));
+    let (gpu, driver) = path.file_stem()?.to_str()?.rsplit_once('-')?;
+    let prefix = format!("{gpu}-");
     if let Ok(entries) = std::fs::read_dir(directory) {
         for entry in entries.flatten() {
             if !entry.file_type().is_ok_and(|kind| kind.is_file()) { continue; }
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if (name.starts_with("pipelines-") && !name.starts_with(&prefix))
+            if (name.starts_with("pipelines-") && !matches!(name.split('-').nth(1), Some("vulkan" | "dx12" | "metal")))
+                || name.strip_prefix(&prefix).is_some_and(|file| file.split('.').next() != Some(driver))
                 || (name.contains(".tmp") && entry.metadata().and_then(|metadata| metadata.modified()).ok()
                     .and_then(|modified| modified.elapsed().ok()).is_some_and(|age| age > Duration::from_secs(3600))) {
                 let _ = std::fs::remove_file(entry.path());

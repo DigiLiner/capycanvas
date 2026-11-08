@@ -151,8 +151,9 @@ codec admission, not an operating-system process memory limit. Regression:
 the D3D12 pipeline cache; D3D12 re-validates the bytecode when creating pipelines.
 Shader keys hash the generated source, entry point, stage and shader model with
 two fixed-prefix deterministic 64-bit hashes. The validation key uses the same
-128-bit hash for `wgpu-hal dx12 dxil v1`, the compiler kind (FXC, dynamic DXC or
-static DXC) and the device's maximum shader model. Cache records are checked for
+128-bit hash for `wgpu-hal dx12 dxil v2`, the compiler kind (FXC, dynamic DXC or
+static DXC), the queried DXC version and commit, the shared compile arguments
+and the device's maximum shader model. Cache records are checked for
 complete keys, lengths and bytecode, and serialized in key order.
 `wgpu-core-dx12-pipeline-cache.patch` enables D3D12 vendor/device cache headers
 while retaining the separate backend check.

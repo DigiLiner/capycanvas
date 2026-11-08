@@ -1,12 +1,12 @@
 use alloc::{string::String, vec::Vec};
 use core::ffi::CStr;
-use std::path::PathBuf;
+use std::{hash::{Hash, Hasher}, path::PathBuf};
 
 use crate::auxil::dxgi::result::HResult;
 use thiserror::Error;
 use windows::{
     core::{Interface, PCSTR, PCWSTR},
-    Win32::Graphics::Direct3D::{Dxc, Fxc, ID3DBlob, D3D_SHADER_MACRO},
+    Win32::{Graphics::Direct3D::{Dxc, Fxc, ID3DBlob, D3D_SHADER_MACRO}, System::Com::CoTaskMemFree},
 };
 
 pub(super) enum CompilerContainer {
@@ -22,6 +22,7 @@ pub(super) struct CompilerFxc {
 
 pub(super) struct CompilerDynamicDxc {
     max_shader_model: wgt::DxcShaderModel,
+    identity: CompilerIdentity,
     compiler: Dxc::IDxcCompiler3,
     // Has to be held onto for the lifetime of the device otherwise shaders will fail to compile.
     // Only needed when using dynamic linking.
@@ -30,6 +31,7 @@ pub(super) struct CompilerDynamicDxc {
 
 pub(super) struct CompilerStaticDxc {
     max_shader_model: wgt::DxcShaderModel,
+    identity: CompilerIdentity,
     compiler: Dxc::IDxcCompiler3,
 }
 
@@ -52,16 +54,11 @@ impl CompilerContainer {
 
         let compiler = dxc.create_instance::<Dxc::IDxcCompiler3>()?;
 
-        let (mut major, mut minor) = (1, 0);
-        // DXC 1.0 didn't support this. If the cast fails assume it is DXC 1.0.
-        if let Ok(version_info) = compiler.cast::<Dxc::IDxcVersionInfo>() {
-            unsafe {
-                version_info.GetVersion(&mut major, &mut minor).unwrap();
-            }
-        }
+        let identity = compiler_identity(&compiler);
 
         Ok(Self::DynamicDxc(CompilerDynamicDxc {
-            max_shader_model: wgt::DxcShaderModel::from_dxc_version(major, minor),
+            max_shader_model: wgt::DxcShaderModel::from_dxc_version(identity.major, identity.minor),
+            identity,
             compiler,
             _dxc: dxc,
         }))
@@ -82,6 +79,7 @@ impl CompilerContainer {
 
                 Ok(CompilerContainer::StaticDxc(CompilerStaticDxc {
                     max_shader_model: wgt::DxcShaderModel::V6_7,
+                    identity: compiler_identity(&compiler),
                     compiler,
                 }))
             }
@@ -104,6 +102,20 @@ impl CompilerContainer {
         }
     }
 
+    fn arguments(&self, device: &super::Device) -> CompilerArguments {
+        compile_arguments(!matches!(self, Self::Fxc(_)), device.shared.private_caps.instance_flags,
+            device.shared.private_caps.workarounds.avoid_shader_debug_info, device.features)
+    }
+
+    pub(super) fn pipeline_cache_validation_key(&self, device: &super::Device) -> [u8; 16] {
+        let (kind, identity) = match self {
+            Self::Fxc(_) => ("fxc", None),
+            Self::DynamicDxc(compiler) => ("dynamic dxc", Some(&compiler.identity)),
+            Self::StaticDxc(compiler) => ("static dxc", Some(&compiler.identity)),
+        };
+        cache_validation_key(kind, identity, &self.arguments(device), device.shared.private_caps.shader_model)
+    }
+
     pub(super) fn compile(
         &self,
         device: &super::Device,
@@ -113,28 +125,96 @@ impl CompilerContainer {
         stage_bit: wgt::ShaderStages,
         full_stage: &str,
     ) -> Result<super::CompiledShader, crate::PipelineError> {
-        match self {
-            CompilerContainer::Fxc(CompilerFxc { fxc }) => compile_fxc(
-                device,
+        match (self, self.arguments(device)) {
+            (CompilerContainer::Fxc(CompilerFxc { fxc }), CompilerArguments::Fxc(flags)) => compile_fxc(
                 source,
                 source_name,
                 raw_ep,
                 stage_bit,
                 full_stage,
                 fxc,
+                flags,
             ),
-            CompilerContainer::DynamicDxc(CompilerDynamicDxc { compiler, .. })
-            | CompilerContainer::StaticDxc(CompilerStaticDxc { compiler, .. }) => compile_dxc(
-                device,
+            (CompilerContainer::DynamicDxc(CompilerDynamicDxc { compiler, .. })
+            | CompilerContainer::StaticDxc(CompilerStaticDxc { compiler, .. }), CompilerArguments::Dxc(arguments)) => compile_dxc(
                 source,
                 source_name,
                 raw_ep,
                 stage_bit,
                 full_stage,
                 compiler,
+                &arguments,
             ),
+            _ => unreachable!(),
         }
     }
+}
+
+#[derive(Clone, Hash)]
+struct CompilerIdentity {
+    major: u32,
+    minor: u32,
+    commit: Option<(u32, Vec<u8>)>,
+}
+
+fn compiler_identity(compiler: &Dxc::IDxcCompiler3) -> CompilerIdentity {
+    let version = compiler.cast::<Dxc::IDxcVersionInfo>().ok().and_then(|version| {
+        let (mut major, mut minor) = (0, 0);
+        unsafe { version.GetVersion(&mut major, &mut minor) }.ok().map(|()| (major, minor))
+    });
+    let (major, minor) = version.unwrap_or((1, 0));
+    let commit = if let Ok(version) = compiler.cast::<Dxc::IDxcVersionInfo2>() {
+        let mut count = 0;
+        let mut hash = core::ptr::null_mut();
+        let result = unsafe { version.GetCommitInfo(&mut count, &mut hash) };
+        let commit = if result.is_ok() && !hash.is_null() {
+            Some((count, unsafe { CStr::from_ptr(hash) }.to_bytes().to_vec()))
+        } else { None };
+        if !hash.is_null() { unsafe { CoTaskMemFree(Some(hash.cast())) }; }
+        commit
+    } else { None };
+    CompilerIdentity { major, minor, commit }
+}
+
+#[derive(Clone)]
+enum CompilerArguments {
+    Fxc(u32),
+    Dxc(arrayvec::ArrayVec<PCWSTR, 7>),
+}
+impl Hash for CompilerArguments {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            Self::Fxc(flags) => flags.hash(state),
+            Self::Dxc(arguments) => {
+                arguments.len().hash(state);
+                for argument in arguments { unsafe { argument.as_wide() }.hash(state); }
+            }
+        }
+    }
+}
+
+fn compile_arguments(dxc: bool, flags: wgt::InstanceFlags, avoid_debug: bool, features: wgt::Features) -> CompilerArguments {
+    if !dxc {
+        let mut arguments = Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
+        if flags.contains(wgt::InstanceFlags::DEBUG) {
+            arguments |= Fxc::D3DCOMPILE_DEBUG | Fxc::D3DCOMPILE_SKIP_OPTIMIZATION;
+        }
+        return CompilerArguments::Fxc(arguments);
+    }
+    let mut arguments = arrayvec::ArrayVec::new();
+    arguments.extend([windows::core::w!("-HV"), windows::core::w!("2018"), windows::core::w!("-no-warnings"), Dxc::DXC_ARG_ENABLE_STRICTNESS]);
+    if flags.contains(wgt::InstanceFlags::DEBUG) && !avoid_debug {
+        arguments.extend([Dxc::DXC_ARG_DEBUG, Dxc::DXC_ARG_SKIP_OPTIMIZATIONS]);
+    }
+    if features.intersects(wgt::Features::SHADER_F16 | wgt::Features::SHADER_I16) {
+        arguments.push(windows::core::w!("-enable-16bit-types"));
+    }
+    CompilerArguments::Dxc(arguments)
+}
+
+fn cache_validation_key(kind: &str, identity: Option<&CompilerIdentity>, arguments: &CompilerArguments, model: naga::back::hlsl::ShaderModel) -> [u8; 16] {
+    super::device::pipeline_cache_key(&("wgpu-hal dx12 dxil v2", kind, identity, arguments, model))
 }
 
 type D3DCompileFn = unsafe extern "system" fn(
@@ -220,25 +300,15 @@ impl FxcLib {
 }
 
 fn compile_fxc(
-    device: &super::Device,
     source: &str,
     source_name: Option<&CStr>,
     raw_ep: &str,
     stage_bit: wgt::ShaderStages,
     full_stage: &str,
     fxc: &FxcLib,
+    compile_flags: u32,
 ) -> Result<super::CompiledShader, crate::PipelineError> {
     profiling::scope!("compile_fxc");
-    let mut compile_flags = Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
-    if device
-        .shared
-        .private_caps
-        .instance_flags
-        .contains(wgt::InstanceFlags::DEBUG)
-    {
-        compile_flags |= Fxc::D3DCOMPILE_DEBUG | Fxc::D3DCOMPILE_SKIP_OPTIMIZATION;
-    }
-
     let mut shader_data = None;
     let mut error = None;
     let hr = fxc.compile(
@@ -363,13 +433,13 @@ fn as_err_str(blob: &Dxc::IDxcBlobUtf8) -> Result<&str, crate::DeviceError> {
 }
 
 fn compile_dxc(
-    device: &crate::dx12::Device,
     source: &str,
     source_name: Option<&CStr>,
     raw_ep: &str,
     stage_bit: wgt::ShaderStages,
     full_stage: &str,
     compiler: &Dxc::IDxcCompiler3,
+    arguments: &[PCWSTR],
 ) -> Result<crate::dx12::CompiledShader, crate::PipelineError> {
     profiling::scope!("compile_dxc");
 
@@ -390,33 +460,8 @@ fn compile_dxc(
         raw_ep.ptr(),
         windows::core::w!("-T"),
         full_stage.ptr(),
-        windows::core::w!("-HV"),
-        windows::core::w!("2018"), // Use HLSL 2018, Naga doesn't supported 2021 yet.
-        windows::core::w!("-no-warnings"),
-        Dxc::DXC_ARG_ENABLE_STRICTNESS,
     ]);
-
-    if device
-        .shared
-        .private_caps
-        .instance_flags
-        .contains(wgt::InstanceFlags::DEBUG)
-        && !device
-            .shared
-            .private_caps
-            .workarounds
-            .avoid_shader_debug_info
-    {
-        compile_args.push(Dxc::DXC_ARG_DEBUG);
-        compile_args.push(Dxc::DXC_ARG_SKIP_OPTIMIZATIONS);
-    }
-
-    if device
-        .features
-        .intersects(wgt::Features::SHADER_F16 | wgt::Features::SHADER_I16)
-    {
-        compile_args.push(windows::core::w!("-enable-16bit-types"));
-    }
+    compile_args.extend(arguments.iter().copied());
 
     let buffer = Dxc::DxcBuffer {
         Ptr: source.as_ptr().cast(),
@@ -447,4 +492,70 @@ fn compile_dxc(
     let blob = get_output::<Dxc::IDxcBlob>(&compile_res, Dxc::DXC_OUT_OBJECT)?;
 
     Ok(crate::dx12::CompiledShader::Dxc(blob))
+}
+
+#[cfg(test)]
+mod cache_validation_tests {
+    use super::*;
+
+    #[test]
+    fn dxc_validation_covers_compiler_identity_and_every_constant_argument() {
+        let identity = CompilerIdentity { major: 1, minor: 8, commit: Some((42, b"abcdef12".to_vec())) };
+        let arguments = compile_arguments(true, wgt::InstanceFlags::DEBUG, false, wgt::Features::SHADER_F16);
+        for kind in ["dynamic dxc", "static dxc"] {
+            let key = cache_validation_key(kind, Some(&identity), &arguments, naga::back::hlsl::ShaderModel::V6_7);
+            assert_eq!(key, cache_validation_key(kind, Some(&identity.clone()), &arguments.clone(), naga::back::hlsl::ShaderModel::V6_7));
+            for changed in [
+                CompilerIdentity { major: 2, ..identity.clone() },
+                CompilerIdentity { minor: 9, ..identity.clone() },
+                CompilerIdentity { commit: Some((43, b"abcdef12".to_vec())), ..identity.clone() },
+                CompilerIdentity { commit: Some((42, b"abcdef13".to_vec())), ..identity.clone() },
+            ] {
+                assert_ne!(key, cache_validation_key(kind, Some(&changed), &arguments, naga::back::hlsl::ShaderModel::V6_7));
+            }
+            assert_ne!(key, cache_validation_key(kind, Some(&CompilerIdentity { commit: None, ..identity.clone() }), &arguments, naga::back::hlsl::ShaderModel::V6_7));
+            assert_ne!(key, cache_validation_key(kind, Some(&identity), &arguments, naga::back::hlsl::ShaderModel::V6_6));
+            let CompilerArguments::Dxc(values) = &arguments else { panic!("DXC arguments required") };
+            for index in 0..values.len() {
+                let mut changed = values.clone();
+                changed[index] = windows::core::w!("changed");
+                assert_ne!(key, cache_validation_key(kind, Some(&identity), &CompilerArguments::Dxc(changed), naga::back::hlsl::ShaderModel::V6_7));
+            }
+            let owned: Vec<Vec<u16>> = values.iter().map(|value| {
+                let mut text = unsafe { value.as_wide() }.to_vec(); text.push(0); text
+            }).collect();
+            let copied = CompilerArguments::Dxc(owned.iter().map(|value| PCWSTR(value.as_ptr())).collect());
+            assert_eq!(key, cache_validation_key(kind, Some(&identity), &copied, naga::back::hlsl::ShaderModel::V6_7));
+        }
+        assert_ne!(cache_validation_key("dynamic dxc", Some(&identity), &arguments, naga::back::hlsl::ShaderModel::V6_7),
+            cache_validation_key("static dxc", Some(&identity), &arguments, naga::back::hlsl::ShaderModel::V6_7));
+    }
+
+    #[test]
+    fn compiler_arguments_preserve_debug_workaround_and_sixteen_bit_flags() {
+        for debug in [false, true] { for avoid_debug in [false, true] { for features in [wgt::Features::empty(), wgt::Features::SHADER_F16, wgt::Features::SHADER_I16] {
+            let flags = if debug { wgt::InstanceFlags::DEBUG } else { wgt::InstanceFlags::empty() };
+            let CompilerArguments::Dxc(arguments) = compile_arguments(true, flags, avoid_debug, features) else { panic!("DXC arguments required") };
+            let mut expected = vec!["-HV", "2018", "-no-warnings", "-Ges"];
+            if debug && !avoid_debug { expected.extend(["-Zi", "-Od"]); }
+            if !features.is_empty() { expected.push("-enable-16bit-types"); }
+            let actual: Vec<_> = arguments.iter().map(|value| String::from_utf16(unsafe { value.as_wide() }).unwrap()).collect();
+            assert_eq!(actual, expected);
+            let CompilerArguments::Fxc(fxc) = compile_arguments(false, flags, avoid_debug, features) else { panic!("FXC flags required") };
+            assert_eq!(fxc, Fxc::D3DCOMPILE_ENABLE_STRICTNESS | if debug { Fxc::D3DCOMPILE_DEBUG | Fxc::D3DCOMPILE_SKIP_OPTIMIZATION } else { 0 });
+        }}}
+    }
+
+    #[test]
+    fn fxc_validation_covers_its_compile_flags() {
+        let arguments = compile_arguments(false, wgt::InstanceFlags::empty(), false, wgt::Features::empty());
+        let key = cache_validation_key("fxc", None, &arguments, naga::back::hlsl::ShaderModel::V5_1);
+        assert_eq!(key, cache_validation_key("fxc", None, &arguments, naga::back::hlsl::ShaderModel::V5_1));
+        let debug = compile_arguments(false, wgt::InstanceFlags::DEBUG, false, wgt::Features::empty());
+        assert_ne!(key, cache_validation_key("fxc", None, &debug, naga::back::hlsl::ShaderModel::V5_1));
+        let CompilerArguments::Fxc(flags) = arguments else { panic!("FXC flags required") };
+        for flag in [Fxc::D3DCOMPILE_ENABLE_STRICTNESS, Fxc::D3DCOMPILE_DEBUG, Fxc::D3DCOMPILE_SKIP_OPTIMIZATION] {
+            assert_ne!(key, cache_validation_key("fxc", None, &CompilerArguments::Fxc(flags ^ flag), naga::back::hlsl::ShaderModel::V5_1));
+        }
+    }
 }

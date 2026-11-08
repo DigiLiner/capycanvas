@@ -40,7 +40,7 @@ use crate::{
 // this has to match Naga's HLSL backend, and also needs to be null-terminated
 const NAGA_LOCATION_SEMANTIC: &[u8] = c"LOC".to_bytes();
 
-fn pipeline_cache_key(value: &impl Hash) -> [u8; 16] {
+pub(super) fn pipeline_cache_key(value: &impl Hash) -> [u8; 16] {
     let mut key = [0; 16];
     for (chunk, prefix) in key.chunks_exact_mut(8).zip([0u64, 1]) {
         let mut hash = DefaultHasher::new();
@@ -2343,16 +2343,7 @@ impl crate::Device for super::Device {
         Ok(super::PipelineCache::from_data(desc.data.unwrap_or_default()))
     }
     fn pipeline_cache_validation_key(&self) -> Option<[u8; 16]> {
-        let compiler = match &*self.compiler_container {
-            shader_compilation::CompilerContainer::Fxc(_) => "fxc",
-            shader_compilation::CompilerContainer::DynamicDxc(_) => "dynamic dxc",
-            shader_compilation::CompilerContainer::StaticDxc(_) => "static dxc",
-        };
-        Some(pipeline_cache_key(&(
-            "wgpu-hal dx12 dxil v1",
-            compiler,
-            self.shared.private_caps.shader_model,
-        )))
+        Some(self.compiler_container.pipeline_cache_validation_key(self))
     }
     unsafe fn pipeline_cache_get_data(&self, cache: &super::PipelineCache) -> Option<Vec<u8>> {
         cache.data()

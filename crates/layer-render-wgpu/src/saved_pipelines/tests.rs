@@ -26,6 +26,76 @@ impl Drop for Directory {
 }
 
 #[test]
+fn cache_paths_are_stable_across_app_updates() {
+    let directory = Directory::new();
+    let mut info = directory.info();
+    for (backend, name) in [(wgpu::Backend::Vulkan, "vulkan"), (wgpu::Backend::Dx12, "dx12"), (wgpu::Backend::Metal, "metal")] {
+        info.backend = backend;
+        assert_eq!(cache_path(&directory.0, &info).unwrap(), directory.0.join(format!("pipelines-{name}-1-2-d202ef8d.bin")));
+    }
+}
+
+#[test]
+fn driver_paths_use_crc32_with_a_zero_separator() {
+    let directory = Directory::new();
+    let mut info = directory.info();
+    for (driver, driver_info, hash) in [("driver", "version", "f6e556c9"), ("ab", "c", "3d3660d6"), ("a", "bc", "21ae76bd"), ("driver10", "version", "0a44e71b")] {
+        info.driver = driver.into(); info.driver_info = driver_info.into();
+        assert_eq!(cache_path(&directory.0, &info).unwrap(), directory.0.join(format!("pipelines-vulkan-1-2-{hash}.bin")));
+    }
+}
+
+#[test]
+fn different_gpus_keep_their_caches_when_either_adapter_is_read() {
+    for (vendor, device) in [(3, 4), (1, 3), (3, 2)] {
+        let directory = Directory::new();
+        let first = directory.info();
+        let second = wgpu::AdapterInfo { vendor, device, driver: "other driver".into(), ..first.clone() };
+        let first_path = cache_path(&directory.0, &first).unwrap();
+        let second_path = cache_path(&directory.0, &second).unwrap();
+        assert_ne!(first_path, second_path);
+        write_file(&first_path, b"first GPU", &Mutex::new(None)).unwrap();
+        write_file(&second_path, b"second GPU", &Mutex::new(None)).unwrap();
+        for (info, bytes) in [(&first, b"first GPU".as_slice()), (&second, b"second GPU".as_slice())] {
+            assert_eq!(read_file(&directory.0, info).unwrap(), bytes);
+            assert!(first_path.exists() && second_path.exists());
+        }
+    }
+}
+
+#[test]
+fn a_driver_change_removes_only_the_same_gpus_stale_driver_cache() {
+    let directory = Directory::new();
+    let old = directory.info();
+    for (driver, driver_info) in [("new driver", ""), ("", "new version")] {
+        let new = wgpu::AdapterInfo { driver: driver.into(), driver_info: driver_info.into(), ..old.clone() };
+        let old_path = cache_path(&directory.0, &old).unwrap();
+        let new_path = cache_path(&directory.0, &new).unwrap();
+        assert_ne!(old_path, new_path);
+        write_file(&old_path, b"old driver", &Mutex::new(None)).unwrap();
+        write_file(&new_path, b"new driver", &Mutex::new(None)).unwrap();
+        assert_eq!(read_file(&directory.0, &new).unwrap(), b"new driver");
+        assert!(!old_path.exists());
+        assert!(new_path.exists());
+    }
+}
+
+#[test]
+fn legacy_versioned_caches_are_removed_and_other_adapters_survive() {
+    let directory = Directory::new();
+    write_file(&directory.path(), b"current cache", &Mutex::new(None)).unwrap();
+    let legacy = directory.0.join("pipelines-1.0.15-vulkan-13b5-90930010.bin");
+    let same_version = directory.0.join(format!("pipelines-{}-dx12-1-2.bin", env!("CARGO_PKG_VERSION")));
+    let others = ["pipelines-vulkan-3-4-d202ef8d.bin", "pipelines-dx12-1-2-d202ef8d.bin", "pipelines-metal-1-2-d202ef8d.bin"].map(|name| directory.0.join(name));
+    for path in [&legacy, &same_version].into_iter().chain(others.iter()) {
+        std::fs::write(path, b"other cache").unwrap();
+    }
+    assert_eq!(read_file(&directory.0, &directory.info()).unwrap(), b"current cache");
+    assert!(!legacy.exists() && !same_version.exists());
+    assert!(others.iter().all(|path| std::fs::read(path).unwrap() == b"other cache"));
+}
+
+#[test]
 fn written_bytes_roundtrip() {
     let directory = Directory::new();
     let bytes = b"compiled pipeline bytes";
@@ -70,8 +140,8 @@ fn cleanup_keeps_current_files_and_recent_temporaries() {
     let path = directory.path();
     write_file(&path, b"current cache", &Mutex::new(None)).unwrap();
     let obsolete = directory.0.join("pipelines-obsolete-vulkan-1-2.bin");
-    let old_temp = directory.0.join(format!("pipelines-{}-vulkan-1-2.bin.tmp1", env!("CARGO_PKG_VERSION")));
-    let recent_temp = directory.0.join(format!("pipelines-{}-vulkan-1-2.bin.tmp2", env!("CARGO_PKG_VERSION")));
+    let old_temp = path.with_extension("bin.tmp1");
+    let recent_temp = path.with_extension("bin.tmp2");
     let unrelated = directory.0.join("other.bin");
     let subdirectory = directory.0.join("pipelines-obsolete-directory");
     std::fs::create_dir(&subdirectory).unwrap();

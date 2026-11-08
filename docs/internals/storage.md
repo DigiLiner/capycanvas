@@ -118,8 +118,9 @@ its temporary input, output and diagnostics are anonymous files in the existing
 temp folder. Managed paper reloads continue to use their local PNG reader.
 
 The native process GPU loads and saves its pipeline cache in `shaders/`, one
-checked file per app version and adapter, rewritten after idle; unreadable or
-foreign data is discarded.
+checked file per backend, GPU and driver, kept across app updates and rewritten
+after idle. Entries are reused for unchanged shaders and compilers; unreadable
+or foreign data is discarded.
 
 The paper library keeps each imported paper as `<id>.png`, a gray PNG named by
 the SHA-256 of its samples, with its picker preview in `<id>.preview` and names

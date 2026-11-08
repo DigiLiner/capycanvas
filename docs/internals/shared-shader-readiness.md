@@ -178,7 +178,8 @@ accepts explicit `CAPY_FILTERS_DIR` / `CAPY_FILTERS_MODE` overrides; runtime
 package installation and atomic validation remain available. Identical library
 refreshes are no-ops on all three hosts. Prepared pipeline recipes remain in
 process for reuse. The native process GPU loads and saves its pipeline cache in
-`shaders/`, one checked file per app version and adapter, rewritten after idle;
+`shaders/`, one checked file per backend, GPU and driver, kept across app updates
+and rewritten after idle. Entries are reused for unchanged shaders and compilers;
 unreadable or foreign data is discarded. Web relies on the browser's caches.
 Native startup completes after required
 dependencies and host catalog admission, without a disk-cache finalization job.
