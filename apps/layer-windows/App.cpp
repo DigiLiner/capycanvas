@@ -81,7 +81,7 @@ struct App : ApplicationT<App, Markup::IXamlMetadataProvider> {
     Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider metadata{nullptr};
     std::map<uint64_t,std::shared_ptr<CanvasWindow>> windows;
     void TraceWindows()const {
-        if(!GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0))return;
+        if(!CapyUi::WindowDiscoveryEnabled())return;
         CapyUi::RegisteredWindows registered;
         for(auto const& [id,window]:windows)registered.emplace_back(id,window->Handle());
         CapyUi::PublishWindowRegistry(registered);

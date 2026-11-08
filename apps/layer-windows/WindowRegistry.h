@@ -11,6 +11,7 @@
 #include <vector>
 
 namespace CapyUi {
+inline bool WindowDiscoveryEnabled(){return GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)||GetEnvironmentVariableW(L"CAPY_LATENCY_TRACE",nullptr,0);}
 using RegisteredWindows=std::vector<std::pair<uint64_t,HWND>>;
 inline void UpdateWindowRegistry(RegisteredWindows const* windows,HWND hwnd=nullptr,uint64_t id=0,bool applied=false,bool loaded=false){
     struct Entry {uint64_t id;bool applied=false,loaded=false;};

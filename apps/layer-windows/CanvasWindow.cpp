@@ -1898,7 +1898,7 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
             if(auto self=weak.lock();self&&!self->closing&&self->settings->IsOpen())
                 if(auto control=target.get();control&&control.IsLoaded())control.Focus(FocusState::Programmatic);
         });
-    if(workspaceReady&&!discoveryReady){if(GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0))CapyUi::ReadyRegisteredWindow(nativeWindow,true);discoveryReady=true;}
+    if(workspaceReady&&!discoveryReady){if(CapyUi::WindowDiscoveryEnabled())CapyUi::ReadyRegisteredWindow(nativeWindow,true);discoveryReady=true;}
     return true;
 }
 

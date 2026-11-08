@@ -15,11 +15,25 @@ $run = Join-Path $repo ('artifacts/windows/startup-close/' + [Guid]::NewGuid().T
 $results = @()
 $review = $null
 try {
-    Enter-CapyEnvironment @('CAPY_TRACE_SHADER_JOBS', 'CAPY_FILTERS_DIR', 'CAPY_FILTERS_MODE')
-    $env:CAPY_TRACE_UI = '1'
-    $env:CAPY_TRACE_SHADER_JOBS = '1'
+    Enter-CapyEnvironment @('CAPY_LATENCY_TRACE', 'CAPY_TRACE_SHADER_JOBS', 'CAPY_FILTERS_DIR', 'CAPY_FILTERS_MODE')
     $env:CAPY_TEST_DISPLAY = '1'
     $env:CAPY_TEST_PRIMARY = '1'
+    $launch = Join-Path $run 'latency'
+    [IO.Directory]::CreateDirectory($launch) | Out-Null
+    $env:CAPY_STORAGE_DIR = Join-Path $launch 'profile'
+    $env:CAPY_LATENCY_TRACE = '1'
+    $review = Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $launch 'stderr.log')
+    $null = $review.Handle
+    Wait-Until { $script:drawing = Owned-DrawingWindow $review; $null -ne $drawing } 'Latency-only tracing did not publish the owned drawing window.' 60
+    Wait-Until { Trace-File 'presentation-probe' } 'Latency-only renderer did not become ready.' 90
+    if ((Test-Path Env:CAPY_TRACE_UI) -or (Get-ChildItem -LiteralPath $directory -Filter "ui-state-$($review.Id)-*.json")) { throw 'Latency-only tracing enabled per-frame UI tracing.' }
+    if (!(Close-OwnedDrawing $review) -or !$review.WaitForExit(5000) -or $review.ExitCode -ne 0) { throw 'Latency-only drawing did not close with zero exit within five seconds.' }
+    $review.Dispose()
+    $review = $null
+    Write-Output 'Latency-only window discovery and close passed.'
+    Remove-Item Env:CAPY_LATENCY_TRACE
+    $env:CAPY_TRACE_UI = '1'
+    $env:CAPY_TRACE_SHADER_JOBS = '1'
     foreach ($delay in $Delays) {
         $launch = Join-Path $run ([string]$results.Count)
         [IO.Directory]::CreateDirectory($launch) | Out-Null
