@@ -92,13 +92,16 @@ struct ScrollIndicatorsFixture:std::enable_shared_from_this<ScrollIndicatorsFixt
         using namespace winrt::Microsoft::UI::Xaml;
         if(!churning)return;
         if(churnPhase==0){
+            auto vertical=[](Controls::Control const& control,wchar_t const* name){
+                auto frame=templateRoot(control);return frame?frame.FindName(name).try_as<Controls::Primitives::ScrollBar>():nullptr;
+            };
+            auto viewBar=vertical(view,L"PART_VerticalScrollBar"),viewerBar=vertical(viewer,L"VerticalScrollBar");
+            if(!viewBar||!viewerBar||!viewBar.IsLoaded()||!viewerBar.IsLoaded())return;
             view.ScrollTo(0,churnCycle%2?0:300,nullptr);
             viewer.ChangeView(nullptr,double(churnCycle%2?0:300),nullptr,false);
-            for(auto const& control:{view.as<Controls::Control>(),viewer.as<Controls::Control>()})if(auto frame=templateRoot(control)){
-                for(auto name:{L"PART_VerticalScrollBar",L"VerticalScrollBar"})if(auto bar=frame.FindName(name).try_as<Controls::Primitives::ScrollBar>()){
-                    bar.IndicatorMode(Controls::Primitives::ScrollingIndicatorMode::TouchIndicator);
-                    bar.IndicatorMode(Controls::Primitives::ScrollingIndicatorMode::MouseIndicator);++stateTransitions;
-                }
+            for(auto const& bar:{viewBar,viewerBar}){
+                bar.IndicatorMode(Controls::Primitives::ScrollingIndicatorMode::TouchIndicator);
+                bar.IndicatorMode(Controls::Primitives::ScrollingIndicatorMode::MouseIndicator);++stateTransitions;
             }
             churnPhase=1;return;
         }
@@ -107,6 +110,24 @@ struct ScrollIndicatorsFixture:std::enable_shared_from_this<ScrollIndicatorsFixt
         else ++reparents;
         hosts[churnCycle%2].Children().Append(view);hosts[1-churnCycle%2].Children().Append(viewer);
         churnPhase=0;if(++churnCycle==48)churning=false;
+    }
+    void beginChurn(){
+        churnCycle=churnPhase=reparents=replacements=stateTransitions=0;churning=false;churnError=L"";
+        try{
+            auto unready=std::make_shared<ScrollIndicatorsFixture>();
+            auto blocked=[&](auto const& a,auto const& b){
+                unready->view=a;unready->viewer=b;unready->churning=true;unready->churn();
+                return unready->churnPhase==0&&unready->churnCycle==0&&unready->stateTransitions==0&&unready->reparents==0&&unready->replacements==0;
+            };
+            auto a=unready->view;auto b=unready->viewer;
+            if(!blocked(a,b)||!blocked(view,b)||!blocked(a,viewer)){
+                churnError=L"Unready native scroll template consumed a churn phase";return;
+            }
+        }catch(winrt::hresult_error const& error){
+            wchar_t code[16];swprintf_s(code,L"0x%08X",uint32_t(error.code()));
+            churnError=L"Scroll readiness component UNREACHED HRESULT "+winrt::hstring(code)+L": "+error.message();return;
+        }catch(...){churnError=L"Scroll readiness component UNREACHED";return;}
+        churning=true;
     }
     void open(){
         SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -121,7 +142,7 @@ struct ScrollIndicatorsFixture:std::enable_shared_from_this<ScrollIndicatorsFixt
         Controls::StackPanel actions;actions.Orientation(Controls::Orientation::Horizontal);actions.Spacing(8);
         for(auto const& [id,label,action]:{std::tuple{L"indicator-long",L"Long",0},std::tuple{L"indicator-short",L"Short",1},std::tuple{L"indicator-fit",L"Fit",2},std::tuple{L"indicator-focus-view",L"Focus view",4},std::tuple{L"indicator-focus-viewer",L"Focus viewer",5},std::tuple{L"indicator-churn",L"Churn",6},std::tuple{L"indicator-undefined",L"Unknown",7}}){
             Controls::Button button;button.Content(box_value(label));Automation::AutomationProperties::SetAutomationId(button,id);
-            button.Click([weak=weak_from_this(),action](auto&&,auto&&){if(auto self=weak.lock()){if(action==7){self->undefinedView=VisualStateManager::GoToState(self->view,L"CapyUndefinedIndicatorState",false);self->undefinedViewer=VisualStateManager::GoToState(self->viewer,L"CapyUndefinedIndicatorState",false);++self->undefinedRequests;self->status();}else if(action==6){self->churnCycle=0;self->churnPhase=0;self->reparents=0;self->replacements=0;self->stateTransitions=0;self->churnError=L"";self->churning=true;}else if(action==4)self->view.Focus(FocusState::Keyboard);else if(action==5)self->viewer.Focus(FocusState::Keyboard);else self->content(action==0?20:action==1?10:2,action==1?170:260);}});actions.Children().Append(button);
+            button.Click([weak=weak_from_this(),action](auto&&,auto&&){if(auto self=weak.lock()){if(action==7){self->undefinedView=VisualStateManager::GoToState(self->view,L"CapyUndefinedIndicatorState",false);self->undefinedViewer=VisualStateManager::GoToState(self->viewer,L"CapyUndefinedIndicatorState",false);++self->undefinedRequests;self->status();}else if(action==6)self->beginChurn();else if(action==4)self->view.Focus(FocusState::Keyboard);else if(action==5)self->viewer.Focus(FocusState::Keyboard);else self->content(action==0?20:action==1?10:2,action==1?170:260);}});actions.Children().Append(button);
         }
         page.Children().Append(actions);evidence.Text(L"Scroll indicator fixture");Automation::AutomationProperties::SetAutomationId(evidence,L"indicator-status");page.Children().Append(evidence);root.Children().Append(page);
         root.Loaded([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){auto scale=float(self->root.XamlRoot().RasterizationScale());self->window.AppWindow().ResizeClient({int32_t(700*scale),int32_t(450*scale)});self->content(20,260);}});
