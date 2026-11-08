@@ -90,7 +90,10 @@ export async function checkEncloseFill({call,evaluate,settle,fillAreasOnly=false
     if(cancel)for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     await pointer('mouseReleased',await screen(points.at(-1)));await settle();await idle();
   };
-  const click=label=>evaluate(`(()=>{const button=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===${JSON.stringify(label)});if(!button||button.disabled)throw Error('Missing enabled '+${JSON.stringify(label)});button.click()})()`);
+  const click=async label=>{
+    const button=`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===${JSON.stringify(label)})`;
+    await wait(`${button}?.disabled===false`);await evaluate(`${button}.click()`);
+  };
   const output=async()=>{
     await invoke('export_document');await wait(`!!document.querySelector('dialog[open] .dropdown[aria-label="Format"]')`);
     await clickDropdownChoice({call,evaluate,settle},'dialog[open] #export-format','Png');
@@ -339,7 +342,7 @@ export async function checkEncloseFill({call,evaluate,settle,fillAreasOnly=false
   const workspace=await evaluate('layerApp.state().workspace');
   await evaluate(`window.enclosePickers={open:window.showOpenFilePicker,save:window.showSaveFilePicker};window.placementTest={};
     window.showOpenFilePicker=async()=>[{name:'Reference ink.png',async getFile(){return new File([Uint8Array.from(atob('${fixture.toString('base64')}'),c=>c.charCodeAt(0))],'Reference ink.png',{type:'image/png'})}}];
-    window.showSaveFilePicker=async options=>({name:options.suggestedName,async createWritable(){return{async write(value){placementTest.saved=new Uint8Array(value instanceof Blob?await value.arrayBuffer():value)},async close(){},async abort(){}}}});`);
+    window.showSaveFilePicker=async options=>({name:options.suggestedName,async isSameEntry(other){return other===this},async createWritable(){return{async write(value){placementTest.saved=new Uint8Array(value instanceof Blob?await value.arrayBuffer():value)},async close(){},async abort(){}}}});`);
   try {
     await send({type:'preferences',action:{type:'edit',id:'missing_profile',value:0}});
     await send({type:'customize',action:{type:'set_panel_visible',panel:'tool_settings',visible:true}});
