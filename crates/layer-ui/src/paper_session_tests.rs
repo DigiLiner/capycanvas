@@ -22,11 +22,11 @@ fn choosing_and_scaling_paper_are_single_undo_steps_and_new_paper_starts_on_the_
     s.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
     assert_eq!(s.state.layer_properties.title, "Paper");
     let checkpoint = s.engine.checkpoint();
-    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(3) } }).unwrap();
     assert!(s.state.requests.iter().any(|r| matches!(r.kind, HostRequestKind::SaveSettings { .. })), "the choice is remembered for new drawings");
     assert_eq!(s.state.settings.new_document.paper.as_deref(), Some("rough"));
-    assert_eq!(s.engine.document().paper(None).texture, layer_core::paper::built_in_paper("rough").unwrap().texture);
-    assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(2));
+    assert_eq!(s.engine.document().paper(None).texture, layer_core::paper::built_in_paper("rough").unwrap().texture.clone().unwrap());
+    assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(3));
     let gesture = |phase, value| UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Number {
         layer, key: "scale".into(), operation: NumericOperation::Value { value } }) } };
     let chosen = s.engine.checkpoint();
@@ -55,7 +55,7 @@ fn choosing_and_scaling_paper_are_single_undo_steps_and_new_paper_starts_on_the_
     let application = s.engine.document().scene().effect_application(inserted).unwrap();
     assert!(layer_core::paper::is_paper(&application.program));
     assert_eq!(s.engine.document().scene().effect(inserted).unwrap().constant_color(), Some(layer_core::color::RgbColor::WHITE));
-    assert_eq!(s.engine.document().paper(s.engine.document().working.target).texture, layer_core::paper::built_in_paper("rough").unwrap().texture);
+    assert_eq!(s.engine.document().paper(s.engine.document().working.target).texture, layer_core::paper::built_in_paper("rough").unwrap().texture.clone().unwrap());
     assert!((paper_scale(&s) - 1.).abs() < 1e-4);
     assert_eq!(s.state.layer_properties.title, "Paper");
 }
@@ -199,11 +199,11 @@ fn paper_relief_shows_while_scaling_and_briefly_after_a_choice() {
     let opacity = |s: &mut UiSession<Recorder>| s.renderer_mut().paper_overlay.as_ref().map(|overlay| overlay.opacity);
     s.frame(1_000_000_000, 1_000_000_000).unwrap();
     assert_eq!(opacity(&mut s), None);
-    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(3) } }).unwrap();
     assert!(s.wants_continuous_frames());
     s.frame(2_000_000_000, 2_000_000_000).unwrap();
     assert_eq!(opacity(&mut s), Some(1.));
-    assert_eq!(s.renderer_mut().paper_overlay.as_ref().unwrap().paper.surface.texture, layer_core::paper::built_in_paper("rough").unwrap().texture);
+    assert_eq!(s.renderer_mut().paper_overlay.as_ref().unwrap().paper.surface.texture, layer_core::paper::built_in_paper("rough").unwrap().texture.clone().unwrap());
     s.frame(3_050_000_000, 3_050_000_000).unwrap();
     assert!(opacity(&mut s).is_some_and(|o| (o - 0.5).abs() < 1e-3), "fades out");
     s.frame(3_300_000_000, 3_300_000_000).unwrap();
@@ -276,7 +276,7 @@ fn lighting_the_paper_is_one_step_per_drag_turns_on_a_dial_recomposites_only_to_
     s.frame(1_200_000_000, 1_200_000_000).unwrap();
     assert_eq!(s.renderer_mut().composites, separated, "and the drag goes on without recompositing");
     s.dispatch(gesture(ContactPhase::Up, "through_paint", NumericOperation::Value { value: 30. })).unwrap();
-    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(3) } }).unwrap();
     s.frame(2_000_000_000, 2_000_000_000).unwrap();
     assert!(s.renderer_mut().paper_overlay.is_none(), "a lit paper shows its own relief instead of the flash");
 }
@@ -287,7 +287,7 @@ fn paper_relief_waits_for_preparation_and_survives_renderer_replacement() {
     let layer = paper_layer(&s);
     s.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
     s.renderer_mut().paper_overlay_pending = true;
-    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(3) } }).unwrap();
     for now in [1_000_000_000, 4_000_000_000] {
         s.frame(now, now).unwrap();
         assert_eq!(s.renderer_mut().paper_overlay.as_ref().map(|o| o.opacity), Some(1.));
@@ -349,7 +349,7 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
     assert_eq!(applied.id(), crate::paper_library::paper_image_id(&id).unwrap());
     assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(first_imported()));
     assert_eq!(s.state.settings.new_document.paper.as_deref(), Some(id.as_str()));
-    assert_eq!(s.new_drawing_paper(), layer_core::TextureSource::Image(applied.clone()));
+    assert_eq!(s.new_drawing_paper(), Some(layer_core::TextureSource::Image(applied.clone())));
     invoke(&mut s, CommandId::Undo);
     assert_eq!(s.engine.checkpoint(), checkpoint, "one step");
 
@@ -364,9 +364,9 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
     s.paper_imported(Some(layer), entries.clone(), &imported_id, imported).unwrap();
     assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(first_imported() + 1));
     assert_eq!(s.state.settings.new_document.paper.as_deref(), Some(imported_id.as_str()));
-    assert!(matches!(s.new_drawing_paper(), layer_core::TextureSource::Image(_)));
+    assert!(matches!(s.new_drawing_paper(), Some(layer_core::TextureSource::Image(_))));
     s.set_paper_library(entries[..1].to_vec()).unwrap();
-    assert_eq!(s.new_drawing_paper(), layer_core::paper::default_texture(), "a deleted paper is not remembered");
+    assert_eq!(s.new_drawing_paper(), Some(layer_core::paper::default_texture()), "a deleted paper is not remembered");
     assert!(matches!(s.engine.document().paper(None).texture, layer_core::TextureSource::Image(_)), "the drawing keeps its copy");
 
     let mut reopened = UiSession::new(Recorder::default(), s.engine.document().clone(), [1000, 1000], Platform::Gtk).unwrap();
@@ -392,11 +392,11 @@ fn paper_rows_name_their_texture_and_previews_resolve_by_identity() {
     assert_eq!(row(&s), crate::LayerPaper { id: Some("drawing_paper".into()), label: "Fine tooth".into(), editable: true });
     assert!(s.state.layers.iter().filter(|row| row.id != layer).all(|row| row.paper.is_none()));
     assert_eq!(s.paper_preview("drawing_paper"), Some(layer_core::paper::built_in_paper("drawing_paper").unwrap().preview.clone()));
-    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(3) } }).unwrap();
     assert_eq!(row(&s).id.as_deref(), Some("rough"));
     s.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
     let tiles = paper_control(&s, "texture").paper.unwrap().tiles;
-    assert_eq!(tiles[2].id.as_deref(), Some("rough"));
+    assert_eq!(tiles[3].id.as_deref(), Some("rough"));
     assert!(tiles.iter().all(|tile| tile.id.as_deref().and_then(|id| s.paper_preview(id)).is_some()));
     let image = gray_paper(40);
     let id = paper_identity(&image).unwrap();
@@ -428,7 +428,7 @@ fn a_late_library_read_cannot_replace_a_newer_paper_choice() {
                 preview: vec![90;96 * 96].into() }]).unwrap();
             s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(first_imported()) } }).unwrap();
             let request = s.state.requests.iter().find(|request|matches!(&request.kind,HostRequestKind::Paper { .. })).unwrap().id;
-            let value = if different { layer_core::EffectValue::Choice(2) } else { current };
+            let value = if different { layer_core::EffectValue::Choice(3) } else { current };
             s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: value.clone() } }).unwrap();
             let document = s.engine.document().clone();
             let mark = s.engine.checkpoint();
@@ -502,7 +502,7 @@ fn late_remembered_library_loading_preserves_the_existing_startup_stroke() {
         s.paper_loaded(&id,image.clone()).unwrap();s.dispatch(UiAction::CompleteRequest {id:request,error:None}).unwrap();
         assert_live_artwork_eq(s.engine.document(),&before);assert_eq!(s.engine.checkpoint(),mark);
         assert_eq!(s.state.document_file.modified,modified);assert!(!s.state.requests.iter().any(|item|item.id==request));
-        let layer_core::TextureSource::Image(warmed)=s.new_drawing_paper() else {panic!("remembered image is available only to subsequent new drawings")};
+        let Some(layer_core::TextureSource::Image(warmed))=s.new_drawing_paper() else {panic!("remembered image is available only to subsequent new drawings")};
         assert_eq!(*warmed.storage().as_ref(),image);
     }
 }
@@ -521,8 +521,8 @@ fn recovery_keeps_its_authored_paper_when_the_initial_default_was_prepared_from_
     let texture=layer_core::TextureSource::Image(layer_core::authored::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(remembered.clone())));
     let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
     let mut initial=UiSession::blank_with_settings(Recorder::default(),[1000,1000],Platform::Mac,source.localization().clone(),settings,None).unwrap();
-    initial.initialize_paper(Some(id.clone()),texture.clone(),None);initial.frame(0,0).unwrap();
-    assert_eq!(initial.new_drawing_paper(),texture);
+    initial.initialize_paper(Some(id.clone()),Some(texture.clone()),None);initial.frame(0,0).unwrap();
+    assert_eq!(initial.new_drawing_paper(),Some(texture));
     assert!(!initial.engine.can_undo());assert!(!initial.engine.can_redo());assert!(!initial.state.document_file.modified);
     let recovery=saved.load();
     let mut restored=UiSession::from_project_localized(Recorder::default(),recovery.document().clone(),None,[1000,1000],Platform::Mac,source.localization().clone()).unwrap();
@@ -574,7 +574,7 @@ fn deleted_and_readded_paper_reuses_retained_history_source_after_reload() {
         let bad = layer_core::authored::Image::with_id(crate::paper_library::paper_image_id(&id).unwrap(),std::sync::Arc::new(gray_paper(99)));
         let mut edited = document.scene().effect_application(occurrence).unwrap().clone();
         let mut draft=layer_core::EffectInstance {program:edited.program.clone(),values:edited.values};
-        draft.set("texture",layer_core::EffectValue::Texture(layer_core::TextureSource::Image(bad))).unwrap();edited.values=draft.values;
+        draft.set("texture",layer_core::EffectValue::Texture(Some(layer_core::TextureSource::Image(bad)))).unwrap();edited.values=draft.values;
         let edit = layer_core::Edit::Effect(layer_core::authored::RecordChange::replace(&document.artwork.effects,effect,Some(edited)).unwrap());
         let checkpoint = s.engine.checkpoint();
         assert!(s.engine.apply_edit(edit).unwrap_err().to_string().contains("Immutable image identity conflicts with retained history"));
@@ -639,7 +639,7 @@ fn opened_and_recovered_paper_uses_destination_owners_before_inherited_cache() {
             let texture=layer_core::TextureSource::Image(layer_core::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(decoded)));
             let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
             let mut previous=UiSession::blank_with_settings(Recorder::default(),[1000,1000],platform,authored.localization().clone(),settings,None).unwrap();
-            previous.initialize_paper(Some(id.clone()),texture,None);previous.frame(0,0).unwrap();
+            previous.initialize_paper(Some(id.clone()),Some(texture),None);previous.frame(0,0).unwrap();
             if mode==0 {opened.frame(0,0).unwrap();}opened.inherit_window_state(&previous).unwrap();
             opened.set_paper_library(vec![entry]).unwrap();
             let layer=paper_layer(&opened);opened.dispatch(UiAction::SelectLayer {id:layer}).unwrap();
@@ -680,5 +680,5 @@ fn a_library_import_from_new_drawing_becomes_its_paper_without_changing_the_draw
     assert_eq!(s.engine.checkpoint(), checkpoint);
     new_drawing(&mut s, NewDrawingAction::UsePaper);
     new_drawing(&mut s, NewDrawingAction::Create);
-    assert!(matches!(s.new_drawing_order().unwrap().paper, crate::paper_library::PaperMaterial::Ready(layer_core::TextureSource::Image(_))));
+    assert!(matches!(s.new_drawing_order().unwrap().paper, crate::paper_library::PaperMaterial::Ready(Some(layer_core::TextureSource::Image(_)))));
 }

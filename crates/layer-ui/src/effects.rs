@@ -713,7 +713,7 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
         );
         if layer_core::paper::is_paper(program) {
             controls.extend(paper::controls(token, application, doc, papers, l));
-            paper::arrange(&mut controls);
+            paper::arrange(&mut controls, application);
         }
         if effect.program.id.as_ref() == "curves" {
             if let (Some(space), Some(EffectValue::Number(stops))) = (effect.choice("domain"), effect.value("hdr_stops")) {
@@ -1081,7 +1081,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         crate::paper_library::PaperMaterial::capture(&self.state.settings.new_document,
             self.state.settings.new_document.paper.as_deref().and_then(|id| self.papers.image(id)).cloned())
     }
-    pub fn new_drawing_paper(&self) -> layer_core::TextureSource { self.new_drawing_paper_material().fallback() }
+    pub fn new_drawing_paper(&self) -> Option<layer_core::TextureSource> { self.new_drawing_paper_material().fallback() }
     pub fn imported_papers(&self) -> Vec<crate::NamedPaper> {
         self.papers.entries.iter().flatten().map(|entry| crate::NamedPaper { id: entry.id.as_str().into(), label: entry.name.as_str().into() }).collect()
     }
@@ -1089,8 +1089,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         use crate::paper_library::PaperMaterial;
         if let Some(paper) = layer_core::paper::built_in_paper(id) { return PaperMaterial::Ready(paper.texture.clone()); }
         match self.papers.image(id) {
-            Some(image) => PaperMaterial::Ready(layer_core::TextureSource::Image(image.clone())),
-            None => PaperMaterial::Stored { id: id.into(), fallback: layer_core::paper::default_texture() },
+            Some(image) => PaperMaterial::Ready(Some(layer_core::TextureSource::Image(image.clone()))),
+            None => PaperMaterial::Stored { id: id.into(), fallback: Some(layer_core::paper::default_texture()) },
         }
     }
     pub fn canvas_limits(&self) -> crate::CanvasLimits {
@@ -1098,9 +1098,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         crate::CanvasLimits::new(self.engine.geometry_limits().canvas_dimension(), memory)
             .with_working_bytes(self.engine.backend().new_drawing_working_bytes(self.state.camera.viewport))
     }
-    pub fn initialize_paper(&mut self, id: Option<String>, texture: layer_core::TextureSource, warning: Option<String>) -> UiChange {
+    pub fn initialize_paper(&mut self, id: Option<String>, texture: Option<layer_core::TextureSource>, warning: Option<String>) -> UiChange {
         if let Some(id) = id {
-            if let layer_core::TextureSource::Image(image) = texture { self.papers.keep_image(&id, image); }
+            if let Some(layer_core::TextureSource::Image(image)) = texture { self.papers.keep_image(&id, image); }
             self.papers.prepared_default = Some(id);
         }
         if let Some(warning) = warning { self.notify(warning); }
@@ -1115,7 +1115,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if document.is_locked(handle) { return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string()); }
         Ok((handle, application.clone()))
     }
-    pub(super) fn apply_paper_texture(&mut self, layer: u64, texture: layer_core::TextureSource) -> Result<(), String> {
+    pub(super) fn apply_paper_texture(&mut self, layer: u64, texture: Option<layer_core::TextureSource>) -> Result<(), String> {
         let (handle, application) = self.paper_layer(layer)?;
         let edited = paper::with_texture(&application, texture)?;
         if edited == application { return Ok(()); }
@@ -1141,7 +1141,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn paper_image(&self, layer: u64) -> Option<Arc<layer_core::color::source::SourceImage>> {
         let (_, application) = self.paper_layer(layer).ok()?;
         application.values.iter().find_map(|value| match value {
-            EffectValue::Texture(layer_core::TextureSource::Image(image)) => Some(image.storage().clone()),
+            EffectValue::Texture(Some(layer_core::TextureSource::Image(image))) => Some(image.storage().clone()),
             _ => None,
         })
     }

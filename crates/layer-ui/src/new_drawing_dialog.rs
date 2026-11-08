@@ -64,7 +64,7 @@ pub struct NewDrawingOrder {
     pub limits: CanvasLimits,
 }
 impl NewDrawingOrder {
-    pub fn project(&self, paper: layer_core::TextureSource, l: &Localizer) -> Result<Document, String> {
+    pub fn project(&self, paper: Option<layer_core::TextureSource>, l: &Localizer) -> Result<Document, String> {
         self.setup.project(self.artwork, paper, self.limits, l)
     }
 }
@@ -75,11 +75,13 @@ pub struct SheetView {
     pub extent: [u32; 2],
     pub color: RgbColor,
     pub texture: Option<Arc<str>>,
+    pub grain: Option<Arc<str>>,
     pub shown: bool,
 }
 impl SheetView {
     fn new(setup: &DrawingSetup) -> Self {
-        Self { extent: setup.extent(), color: setup.paper.color, texture: setup.paper.texture.clone(), shown: setup.paper.shown() }
+        Self { extent: setup.extent(), color: setup.paper.color, texture: setup.paper.texture.clone(),
+            grain: setup.paper.texture.clone().filter(|id| textured(Some(id))), shown: setup.paper.shown() }
     }
 }
 
@@ -447,7 +449,7 @@ impl NewDrawingDialog {
             }
             Drawer::Paper(draft) => NewDrawingDrawerView::Paper {
                 tiles: paper_tiles(catalog.imported, l).into_iter().map(|(id, label)| PaperChoice { selected: id == draft.picked, id, label }).collect(),
-                relief: PaperReliefView { value: f64::from(draft.relief), numeric: relief_control(), enabled: draft.picked.is_some() },
+                relief: PaperReliefView { value: f64::from(draft.relief), numeric: relief_control(), enabled: textured(draft.picked.as_deref()) },
             },
             Drawer::PaperColor(draft) => {
                 let palette = catalog.settings.paper_palette();
@@ -530,7 +532,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let imported = self.imported_papers();
         let preset = dialog.catalog(&self.state.settings.new_document, &imported, &self.state.localization).matching(&setup, true)
             .map(|view| view.key).filter(|key| *key != PresetKey::Last);
-        let paper = setup.paper.texture.as_deref().map_or_else(|| PaperMaterial::Ready(layer_core::paper::default_texture()), |id| self.paper_material(id));
+        let paper = setup.paper.texture.as_deref().map_or_else(|| PaperMaterial::Ready(Some(layer_core::paper::default_texture())), |id| self.paper_material(id));
         let name = dialog.name.trim().into();
         self.state.settings.new_document.apply(NewDocumentAction::Created { setup: setup.clone(), preset }).map_err(|error| error.message(self.localization()))?;
         self.new_drawing_order = Some(NewDrawingOrder { artwork: layer_core::authored::PortableId::random(), setup, name, paper, limits });
@@ -875,6 +877,35 @@ mod tests {
         assert!(!view(&s).paper_color_enabled);
         assert_eq!(view(&s).page.relief, None);
         assert!(s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::PaperColor }).is_err());
+    }
+
+    #[test]
+    fn texture_none_keeps_the_sheet_color_without_grain_or_relief() {
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            open(&mut s);
+            let color = view(&s).sheet.color;
+            act(&mut s, NewDrawingAction::Paper);
+            act(&mut s, NewDrawingAction::PaperRelief { value: 150. });
+            act(&mut s, NewDrawingAction::PickPaper { id: Some(layer_core::paper::NO_TEXTURE.into()) });
+            let Some(NewDrawingDrawerView::Paper { tiles, relief }) = view(&s).drawer else { panic!() };
+            assert_eq!((tiles[0].id.as_deref(), tiles[1].id.as_deref()), (None, Some(layer_core::paper::NO_TEXTURE)));
+            assert_eq!((relief.enabled, relief.value), (false, 150.));
+            act(&mut s, NewDrawingAction::UsePaper);
+            let view = view(&s);
+            assert!(view.paper_color_enabled && view.sheet.shown);
+            assert_eq!((view.sheet.texture.as_deref(), view.sheet.grain, view.page.relief), (Some(layer_core::paper::NO_TEXTURE), None, None));
+            assert_eq!((view.sheet.color, view.setup.paper.relief), (color, 150));
+            act(&mut s, NewDrawingAction::Create);
+            let order = s.new_drawing_order().unwrap();
+            let doc = order.project(order.paper.fallback(), s.localization()).unwrap();
+            let sheet = doc.bottom_paper().unwrap();
+            assert!(doc.scene().visible(sheet));
+            let effect = doc.scene().effect(sheet).unwrap();
+            assert_eq!(effect.value("texture"), Some(&layer_core::EffectValue::Texture(None)));
+            assert_eq!(effect.constant_color(), Some(color));
+            assert_eq!(effect.value(layer_core::paper::RELIEF), Some(&layer_core::EffectValue::Number(150.)));
+        }
     }
 
     #[test]

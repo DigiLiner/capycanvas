@@ -54,7 +54,7 @@ pub(crate) fn striped_paper(document: &mut Document, paper: authored::Occurrence
         .position(|p| p.key.as_ref() == "texture")
         .unwrap();
     application.values[index] =
-        EffectValue::Texture(TextureSource::Image(Image::new(Arc::new(source))));
+        EffectValue::Texture(Some(TextureSource::Image(Image::new(Arc::new(source)))));
 }
 
 pub(crate) fn dry_contact_contains(end: layer_render::Dab, corner: f32, x: f32, y: f32) -> bool {

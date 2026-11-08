@@ -41,10 +41,12 @@ If display dimensions are unavailable, the sheet is 1,440 × 1,080 px.
   scrolls, comics pages, zines, posters and portrait device/social formats keep
   portrait. Leaf, Reed screen and Toilet paper keep their physical proportions.
   Square presets stay square, and This screen follows the display's orientation.
-- **Paper.** The Choose Texture grid with No paper first, the built-in papers,
+- **Paper.** The Choose Texture grid with No paper first, None, the built-in papers,
   then imported papers, and an Import… tile last. Texture visibility, a 0–300%
   field like W and H, sits at the left of the footer and is disabled for No
-  paper. Use Texture applies the paper and its visibility; Cancel keeps both.
+  paper and None. None keeps the sheet color and shows no grain; No paper
+  removes the Paper layer. Use Texture applies the paper and its visibility;
+  Cancel keeps both.
   Light and Shows through paint start at their defaults.
 - **Paper in presets.** Digital presets start with No paper. Comics pages, print
   sizes and Blueprint keep their paper at 0% Texture visibility: their drawings

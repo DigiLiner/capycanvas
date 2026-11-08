@@ -84,7 +84,7 @@ impl SheetArt {
         let scale = (side / width.max(height)).min(f64::from(fit[0]) / width).min(f64::from(fit[1]) / height);
         self.sheet.set_size_request((width * scale).round().max(4.) as i32, (height * scale).round().max(4.) as i32);
         self.patch.set_display_color(if sheet.shown { sheet.color } else { CLEAR }, workspace.paint_view_color(), 1.);
-        let preview = sheet.texture.as_deref().and_then(|id| workspace.gpu.try_borrow().ok()?.as_ref()?.session.paper_preview(id));
+        let preview = sheet.grain.as_deref().and_then(|id| workspace.gpu.try_borrow().ok()?.as_ref()?.session.paper_preview(id));
         *self.surface.borrow_mut() = preview.as_deref().and_then(grain);
         self.grain.set_opacity(if sheet.shown { 1. } else { 0.35 });
         self.grain.queue_draw();
@@ -1415,7 +1415,7 @@ impl NewDrawing {
     }
 }
 
-pub(crate) async fn paper_texture(w: &Rc<Workspace>, material: &layer_ui::paper_library::PaperMaterial) -> Result<layer_core::TextureSource, String> {
+pub(crate) async fn paper_texture(w: &Rc<Workspace>, material: &layer_ui::paper_library::PaperMaterial) -> Result<Option<layer_core::TextureSource>, String> {
     use layer_ui::paper_library::{PaperMaterial, PaperRequest};
     let PaperMaterial::Stored { id, fallback } = material else { return Ok(material.fallback()) };
     crate::files::paper::run(w, PaperRequest::Load { id: id.clone() }).await?;

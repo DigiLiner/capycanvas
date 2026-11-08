@@ -88,7 +88,7 @@ pub fn import(directory: &Path, source: &SourceImage, name: &str, cancelled: &dy
 
 #[derive(Clone)]
 pub struct PreparedPaper {
-    pub texture: layer_core::TextureSource,
+    pub texture: Option<layer_core::TextureSource>,
     pub identity: Option<String>,
     pub warning: Option<String>,
 }
@@ -106,7 +106,7 @@ pub fn resolve(material: &layer_ui::paper_library::PaperMaterial, directory: Opt
             let texture = loaded.map(|image| layer_core::TextureSource::Image(layer_core::authored::Image::with_id(
                 layer_ui::paper_library::paper_image_id(id).unwrap(), std::sync::Arc::new(image))));
             let warning = texture.is_none().then(|| layer_ui::file_open_failure(localization, &format!("{id}.png")));
-            PreparedPaper { texture: texture.unwrap_or_else(|| fallback.clone()), identity: Some(id.clone()), warning }
+            PreparedPaper { texture: texture.or_else(|| fallback.clone()), identity: Some(id.clone()), warning }
         }
     }
 }
@@ -306,9 +306,9 @@ mod tests {
         for platform in [layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
             let host=crate::NativeHost::launch_prepared(platform,settings.clone(),localization.clone(),prepared.clone(),None).unwrap();
             let document=host.session.engine().document();
-            assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
-            let layer_core::TextureSource::Image(source)=host.session.new_drawing_paper() else {panic!("prepared image paper")};
-            assert_eq!(layer_core::TextureSource::Image(source.clone()),prepared.texture);
+            assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture.clone().unwrap());
+            let Some(layer_core::TextureSource::Image(source))=host.session.new_drawing_paper() else {panic!("prepared image paper")};
+            assert_eq!(Some(layer_core::TextureSource::Image(source.clone())),prepared.texture);
             let actual=source.storage();
             assert_eq!((actual.extent,actual.resolution,actual.interpretation.channels,actual.interpretation.depth,actual.interpretation.profile_assumed),
                 (image.extent,image.resolution,image.interpretation.channels,image.interpretation.depth,image.interpretation.profile_assumed));

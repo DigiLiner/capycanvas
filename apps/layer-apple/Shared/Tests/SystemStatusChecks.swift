@@ -115,7 +115,7 @@ extension XCTestCase {
             XCTAssertTrue(drawer.waitForExistence(timeout: 10))
             #endif
         }
-        let papers = ["Hot press", "Cold press", "Rough", "Extra rough", "Fine tooth", "Bristol", "Newsprint", "Ingres",
+        let papers = ["None", "Hot press", "Cold press", "Rough", "Extra rough", "Fine tooth", "Bristol", "Newsprint", "Ingres",
             "Pastel", "Sanded", "Coarse grit", "Washi", "Unryu", "Handmade", "Canvas", "Linen",
             "Canvas paper", "Rough linen", "Burlap", "Gesso panel", "Gesso across", "Gesso down", "Rough gesso", "Rough across",
             "Rough down", "Matte film", "Chalkboard", "Concrete", "Sand", "Asphalt", "Barn wood", "Dry mud",
@@ -137,14 +137,14 @@ extension XCTestCase {
                 let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "texture-tile-"))
                 XCTAssertEqual(options.count, papers.count)
                 for (option, label) in papers.enumerated() { XCTAssertEqual(app.buttons["texture-tile-\(option)"].label, label) }
-                XCTAssertTrue(app.buttons["texture-tile-1"].isSelected, "Choose Texture starts on the current texture")
+                XCTAssertTrue(app.buttons["texture-tile-2"].isSelected, "Choose Texture starts on the current texture")
                 chooseTexture(papers.count - 1)
                 workspaceActivate(app.buttons["texture-cancel"])
                 XCTAssertTrue(textureDialog.waitForNonExistence(timeout: 10))
                 expectPaperValue(texture, "Cold press")
                 revealEditorControl(texture, in: propertyScroll); workspaceActivate(texture)
                 XCTAssertTrue(textureDialog.waitForExistence(timeout: 10))
-                XCTAssertTrue(app.buttons["texture-tile-1"].isSelected, "Reopening forgets the cancelled choice")
+                XCTAssertTrue(app.buttons["texture-tile-2"].isSelected, "Reopening forgets the cancelled choice")
                 attachEditor(in: app, name: "texture-dialog-" + theme)
             }
             chooseTexture(index)

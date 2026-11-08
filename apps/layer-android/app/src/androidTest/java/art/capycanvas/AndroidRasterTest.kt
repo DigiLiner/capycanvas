@@ -123,7 +123,7 @@ class AndroidRasterTest {
         assertTrue("Selecting Paper keeps ink above it drawable", native { state(it).array("layers").objects().first { row -> row.getLong("id") == ink }.getBoolean("drawing") })
         fun revision() = native { state(it).array("layers").objects().first { row -> row.getLong("id") == ink }.getLong("paint_revision") }
         try {
-            for ((theme, choices) in listOf("light" to (1..6), "dark" to (7..12))) {
+            for ((theme, choices) in listOf("light" to (2..7), "dark" to (8..13))) {
                 send(obj("type" to "set_theme", "theme" to theme))
                 var pendingContacts = 0
                 for (choice in choices) {

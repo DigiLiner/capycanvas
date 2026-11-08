@@ -1060,7 +1060,7 @@ mod tests {
             profile: Default::default(), profile_assumed: false };
         let mut builder = SourceBuilder::new([4, 4], interpretation, 1 << 20).unwrap();
         for _ in 0..4 { builder.push_row(&[128; 4]).unwrap(); }
-        document.set_paper_texture(layer_core::TextureSource::Image(layer_core::Image::new(Arc::new(builder.finish().unwrap()))));
+        document.set_paper_texture(Some(layer_core::TextureSource::Image(layer_core::Image::new(Arc::new(builder.finish().unwrap())))));
         let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
         assert!(renderer.prepare_startup(&document, &brush, false).is_err());
         assert!(renderer.startup.is_some());

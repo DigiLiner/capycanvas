@@ -432,7 +432,7 @@ extension XCTestCase {
         expectTexture("Cold press")
         let white = editorPixels(in: app)
         let dialog = app.descendants(matching: .any)["texture-dialog"].firstMatch
-        let coldPress = app.buttons["texture-tile-1"], rough = app.buttons["texture-tile-2"]
+        let coldPress = app.buttons["texture-tile-2"], rough = app.buttons["texture-tile-3"]
         workspaceActivate(texture)
         XCTAssertTrue(dialog.waitForExistence(timeout: 10), "The texture thumbnail opens Choose Texture")
         XCTAssertEqual(dialog.frame.width, editColorSize.width, accuracy: 1, "Choose Texture keeps the Edit Color width")

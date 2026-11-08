@@ -128,7 +128,7 @@ fn assert_startup_sheet(w: &Workspace) {
     let paper = opened.bottom_paper().unwrap();
     assert_eq!(opened.scene().effect(paper).unwrap().constant_color(), Some(expected.paper.color));
     assert_eq!(layer_core::paper::light(opened.scene().effect(paper).unwrap()).unwrap().relief, 1.);
-    assert_eq!(opened.paper(None).texture, layer_core::paper::built_in_paper("cold_press").unwrap().texture);
+    assert_eq!(Some(opened.paper(None).texture), layer_core::paper::built_in_paper("cold_press").unwrap().texture);
 }
 
 #[test]
@@ -262,6 +262,16 @@ fn native_new_drawing_dialog_review() {
         let marked = match state(&w).new_drawing.and_then(|view| view.drawer) { Some(NewDrawingDrawerView::Paper { tiles, .. }) => tiles.iter().position(|tile| tile.selected), _ => None };
         assert_eq!(papers.selected_children().first().map(|tile| tile.index() as usize), marked, "Import is an action, so the paper stays marked");
         new_drawing_action(&w, NewDrawingAction::PaperRelief { value: 150. });
+        pick(&papers, 1);
+        assert!(!part::<gtk::Widget>(&w, "new-drawing-paper-relief-field").is_sensitive(), "None has no texture to show");
+        press(&w, "new-drawing-paper-use");
+        let view = state(&w).new_drawing.unwrap();
+        assert_eq!((view.sheet.texture.as_deref(), view.sheet.grain, view.page.relief), (Some(layer_core::paper::NO_TEXTURE), None, None));
+        assert!(view.sheet.shown && view.paper_color_enabled);
+        shot("6a-none");
+        press(&w, "new-drawing-texture");
+        let papers = part::<gtk::FlowBox>(&w, "new-drawing-papers");
+        let import = part::<gtk::FlowBoxChild>(&w, "new-drawing-paper-import");
         pick(&papers, 0);
         assert!(!part::<gtk::Widget>(&w, "new-drawing-paper-relief-field").is_sensitive(), "No paper has no texture to show");
         shot("6b-no-paper");
@@ -278,7 +288,7 @@ fn native_new_drawing_dialog_review() {
         chooser().unwrap().close();
         until(|| chooser().is_none(), "the image chooser closes");
         pump(200);
-        pick(&papers, 9);
+        pick(&papers, 10);
         press(&w, "new-drawing-paper-use");
         assert_eq!(state(&w).new_drawing.as_ref().map(|view| view.setup.paper.relief), Some(150));
         press(&w, "new-drawing-paper-color");

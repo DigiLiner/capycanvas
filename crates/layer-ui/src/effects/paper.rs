@@ -26,7 +26,7 @@ pub struct LayerPaper {
 
 #[derive(Clone)]
 pub(crate) enum PaperChoice {
-    Texture(TextureSource),
+    Texture(Option<TextureSource>),
     Library(String),
 }
 pub(crate) struct PaperOption {
@@ -36,23 +36,23 @@ pub(crate) struct PaperOption {
     pub imported: bool,
 }
 
-pub(crate) fn paper_options(current: &TextureSource, papers: &PaperLibrary, l: &Localizer) -> (Vec<PaperOption>, usize) {
+pub(crate) fn paper_options(current: Option<&TextureSource>, papers: &PaperLibrary, l: &Localizer) -> (Vec<PaperOption>, usize) {
     let built_in = paper::built_in_papers().iter().map(|paper| PaperOption {
         label: resource_label(&paper.label, l), choice: PaperChoice::Texture(paper.texture.clone()), id: Some(paper.id.clone()), imported: false,
     });
     let imported = papers.entries.iter().flatten().map(|entry| PaperOption {
         label: entry.name.as_str().into(),
-        choice: papers.image(&entry.id).map_or_else(|| PaperChoice::Library(entry.id.clone()), |image| PaperChoice::Texture(TextureSource::Image(image.clone()))),
+        choice: papers.image(&entry.id).map_or_else(|| PaperChoice::Library(entry.id.clone()), |image| PaperChoice::Texture(Some(TextureSource::Image(image.clone())))),
         id: Some(entry.id.as_str().into()), imported: true,
     });
     let mut options: Vec<_> = built_in.chain(imported).collect();
-    let current_entry = match current { TextureSource::Image(image) => papers.entry_of(image).map(|entry| entry.id.as_str()), _ => None };
+    let current_entry = match current { Some(TextureSource::Image(image)) => papers.entry_of(image).map(|entry| entry.id.as_str()), _ => None };
     let selected = options.iter().position(|option| match &option.choice {
         _ if option.imported => option.id.as_deref() == current_entry,
-        PaperChoice::Texture(texture) => texture == current,
+        PaperChoice::Texture(texture) => texture.as_ref() == current,
         PaperChoice::Library(_) => false,
     }).unwrap_or_else(|| {
-        options.insert(0, PaperOption { label: l.text(MessageId::RESOURCES_PAPER_OWN), choice: PaperChoice::Texture(current.clone()), id: None, imported: false });
+        options.insert(0, PaperOption { label: l.text(MessageId::RESOURCES_PAPER_OWN), choice: PaperChoice::Texture(current.cloned()), id: None, imported: false });
         0
     });
     (options, selected)
@@ -61,14 +61,14 @@ pub(crate) fn paper_options(current: &TextureSource, papers: &PaperLibrary, l: &
 pub(crate) fn layer_paper(effect: layer_core::EffectView, papers: &PaperLibrary, editable: bool, l: &Localizer) -> Option<LayerPaper> {
     if !paper::is_paper(effect.program) { return None; }
     let current = effect.values.iter().find_map(|value| match value { EffectValue::Texture(texture) => Some(texture), _ => None })?;
-    let (mut options, selected) = paper_options(current, papers, l);
+    let (mut options, selected) = paper_options(current.as_ref(), papers, l);
     let option = options.swap_remove(selected);
     Some(LayerPaper { id: option.id, label: option.label, editable })
 }
 
 pub(super) fn choice(application: &EffectApplication, papers: &PaperLibrary) -> Option<String> {
     match texture(application)? {
-        TextureSource::Image(image) => papers.entry_of(image).map(|entry| entry.id.clone()),
+        Some(TextureSource::Image(image)) => papers.entry_of(image).map(|entry| entry.id.clone()),
         texture => paper::built_in_papers().iter().find(|paper| paper.texture == *texture).map(|paper| paper.id.to_string()),
     }
 }
@@ -131,28 +131,30 @@ fn scale_control() -> NumericControl {
     }
 }
 
-fn texture(application: &EffectApplication) -> Option<&TextureSource> {
+fn texture(application: &EffectApplication) -> Option<&Option<TextureSource>> {
     application.values.iter().find_map(|value| match value { EffectValue::Texture(texture) => Some(texture), _ => None })
 }
 
 const ORDER: [&str; 6] = ["color", TEXTURE, SCALE, paper::RELIEF, paper::LIGHT, paper::THROUGH_PAINT];
 
-pub(super) fn arrange(controls: &mut [PropertyControl]) {
+pub(super) fn arrange(controls: &mut [PropertyControl], application: &EffectApplication) {
     controls.sort_by_key(|control| ORDER.iter().position(|key| *key == control.key).unwrap_or(ORDER.len()));
+    let plain = matches!(texture(application), Some(None));
     let flat = controls.iter().any(|control| control.key == paper::RELIEF && control.value == EffectValue::Number(0.));
     for control in controls {
         if control.key == paper::LIGHT && let PropertyKind::Number { numeric } = &mut control.kind {
             numeric.kind = NumericKind::Dial;
         }
-        control.disabled = flat && matches!(control.key.as_str(), paper::LIGHT | paper::THROUGH_PAINT);
+        control.disabled = plain && matches!(control.key.as_str(), SCALE | paper::RELIEF | paper::LIGHT | paper::THROUGH_PAINT)
+            || flat && matches!(control.key.as_str(), paper::LIGHT | paper::THROUGH_PAINT);
     }
 }
 
 pub(super) fn controls(token: u64, application: &EffectApplication, document: &Document, papers: &PaperLibrary, l: &Localizer) -> Vec<PropertyControl> {
     let (Some(current), Some(spatial)) = (texture(application), application.spatial) else { return Vec::new() };
     let parameter = application.program.parameters.iter().find(|p| p.key.as_ref() == TEXTURE).expect("paper texture parameter");
-    let (options, selected) = paper_options(current, papers, l);
-    let default_texture = paper::default_texture();
+    let (options, selected) = paper_options(current.as_ref(), papers, l);
+    let default_texture = Some(paper::default_texture());
     let default = options.iter().position(|option| matches!(&option.choice, PaperChoice::Texture(texture) if *texture == default_texture)).unwrap_or(0) as u32;
     let scale = paper::scale(&spatial, paper::paper_ppi(document.composition().resolution));
     let action = |label: MessageId, icon: Option<&str>, action: EffectAction| PropertyActionView { label: l.text(label).to_string(), icon: icon.map(str::to_string), group: None, action };
@@ -167,7 +169,7 @@ pub(super) fn controls(token: u64, application: &EffectApplication, document: &D
                     action(MessageId::RESOURCES_PAPER_RENAME, None, EffectAction::RenamePaper { id: id.to_string(), name: option.label.to_string() }),
                     action(MessageId::COMMON_DELETE, None, EffectAction::DeletePaper { id: id.to_string() }),
                 ],
-                None if library && index == 0 && matches!(current, TextureSource::Image(_)) =>
+                None if library && index == 0 && matches!(current, Some(TextureSource::Image(_))) =>
                     vec![action(MessageId::RESOURCES_PAPER_ADD, None, EffectAction::AddPaper { layer: token })],
                 _ => Vec::new(),
             },
@@ -190,7 +192,7 @@ pub(super) enum PaperEdit {
     Load(String),
 }
 
-pub(super) fn with_texture(application: &EffectApplication, texture: TextureSource) -> Result<EffectApplication, String> {
+pub(super) fn with_texture(application: &EffectApplication, texture: Option<TextureSource>) -> Result<EffectApplication, String> {
     let mut edited = application.clone();
     let mut draft = EffectInstance { program: edited.program.clone(), values: edited.values };
     draft.set(TEXTURE, EffectValue::Texture(texture)).map_err(str::to_string)?;
@@ -204,12 +206,12 @@ pub(super) fn edited(application: &EffectApplication, document: &Document, retai
     let mut edited = application.clone();
     match (key, value) {
         (TEXTURE, EffectValue::Choice(index)) => {
-            let (mut options, _) = paper_options(texture(application)?, papers, l);
+            let (mut options, _) = paper_options(texture(application)?.as_ref(), papers, l);
             let index = *index as usize;
             if index >= options.len() { return Some(Err(invalid())); }
             return Some(match options.swap_remove(index).choice {
                 PaperChoice::Texture(texture) => {
-                    if let TextureSource::Image(image)=&texture && let Some(entry)=papers.entry_of(image)
+                    if let Some(TextureSource::Image(image))=&texture && let Some(entry)=papers.entry_of(image)
                         && retained.iter().any(|retained|retained.id()==image.id() && !Arc::ptr_eq(retained.storage(),image.storage())) {
                         Ok(PaperEdit::Load(entry.id.clone()))
                     } else {with_texture(application,texture).map(PaperEdit::Applied)}
@@ -239,6 +241,48 @@ mod tests {
     }
 
     #[test]
+    fn texture_none_is_offered_first_and_disables_scale_and_lighting() {
+        use crate::session::test_support::{session, invoke};
+        let mut s = session(crate::Platform::Gtk);
+        let sheet = s.engine().document().bottom_paper().unwrap();
+        let layer = crate::session::occurrence_token(sheet);
+        s.dispatch(crate::UiAction::SelectLayer { id: layer }).unwrap();
+        let set = |key: &str, value| crate::UiAction::Effect { action: EffectAction::Set { layer, key: key.into(), value } };
+        s.dispatch(set(TEXTURE, EffectValue::Choice(3))).unwrap();
+        for (key, value) in [(SCALE, 2.), (paper::RELIEF, 150.), (paper::LIGHT, 90.), (paper::THROUGH_PAINT, 40.)] {
+            s.dispatch(set(key, EffectValue::Number(value))).unwrap();
+        }
+        let before = s.engine().checkpoint();
+        let values: Vec<_> = s.state().layer_properties.controls.iter().map(|control| (control.key.clone(), control.value.clone())).collect();
+        s.dispatch(set(TEXTURE, EffectValue::Choice(0))).unwrap();
+        let chosen = s.engine().checkpoint();
+        assert_ne!(chosen, before);
+        let view = &s.state().layer_properties;
+        let picker = view.controls.iter().find(|control| control.key == TEXTURE).unwrap().paper.as_ref().unwrap();
+        assert_eq!((picker.tiles[0].id.as_deref(), picker.tiles[0].label.as_ref()), (Some(paper::NO_TEXTURE), "None"));
+        assert!(picker.tiles[0].actions.is_empty());
+        for control in &view.controls {
+            assert_eq!(control.disabled, matches!(control.key.as_str(), SCALE | paper::RELIEF | paper::LIGHT | paper::THROUGH_PAINT));
+            if control.key != TEXTURE { assert_eq!(&control.value, &values.iter().find(|(key, _)| key == &control.key).unwrap().1); }
+        }
+        assert_eq!(s.state().settings.new_document.paper.as_deref(), Some(paper::NO_TEXTURE));
+        assert_eq!(s.engine().document().scene().effect(sheet).unwrap().value(TEXTURE), Some(&EffectValue::Texture(None)));
+        s.frame(1_000_000_000, 1_000_000_000).unwrap();
+        assert!(s.renderer_mut().paper_overlay.is_none());
+        invoke(&mut s, crate::CommandId::Undo);
+        assert_eq!(s.engine().checkpoint(), before);
+        invoke(&mut s, crate::CommandId::Redo);
+        assert_eq!(s.engine().checkpoint(), chosen);
+        s.dispatch(crate::UiAction::Layer { action: crate::LayerAction::Delete { id: layer } }).unwrap();
+        let add = s.state().layer_tools.add_paper.as_ref().unwrap().action.clone();
+        s.dispatch(crate::UiAction::Effect { action: add }).unwrap();
+        let doc = s.engine().document();
+        let sheet = doc.bottom_paper().unwrap();
+        assert!(doc.scene().visible(sheet));
+        assert_eq!(doc.scene().effect(sheet).unwrap().value(TEXTURE), Some(&EffectValue::Texture(None)));
+    }
+
+    #[test]
     fn paper_properties_offer_the_built_in_papers_and_scale_at_real_size() {
         let l = Localizer::shared(UiLanguage::English);
         let document = document();
@@ -251,12 +295,12 @@ mod tests {
         assert_eq!((numeric.kind, numeric.min, numeric.max), (NumericKind::Dial, 0., 360.));
         assert_eq!(view.controls[4].value, EffectValue::Number(225.));
         let PropertyKind::Choice { options } = &view.controls[1].kind else { panic!("texture is a choice") };
-        assert_eq!(options.iter().map(|o| o.as_ref()).collect::<Vec<_>>(), ["Hot press", "Cold press", "Rough", "Extra rough", "Fine tooth", "Bristol", "Newsprint", "Ingres",
+        assert_eq!(options.iter().map(|o| o.as_ref()).collect::<Vec<_>>(), ["None", "Hot press", "Cold press", "Rough", "Extra rough", "Fine tooth", "Bristol", "Newsprint", "Ingres",
             "Pastel", "Sanded", "Coarse grit", "Washi", "Unryu", "Handmade", "Canvas", "Linen",
             "Canvas paper", "Rough linen", "Burlap", "Gesso panel", "Gesso across", "Gesso down", "Rough gesso", "Rough across",
             "Rough down", "Matte film", "Chalkboard", "Concrete", "Sand", "Asphalt", "Barn wood", "Dry mud",
             "Crumpled", "Papyrus", "Reeds across", "Reeds down", "Leaf", "Toilet"]);
-        assert_eq!(view.controls[1].value, EffectValue::Choice(4));
+        assert_eq!(view.controls[1].value, EffectValue::Choice(5));
         assert!(!view.controls[1].modified);
         let EffectValue::Number(scale) = view.controls[2].value else { panic!("scale is a number") };
         assert!((scale - 1.).abs() < 1e-6);
@@ -269,7 +313,7 @@ mod tests {
         let (_, application) = effect_application(&document, document.working.occurrence.unwrap()).unwrap();
         let papers = PaperLibrary::default();
         let applied = |edit: Option<Result<PaperEdit, String>>| match edit.unwrap().unwrap() { PaperEdit::Applied(application) => application, PaperEdit::Load(_) => panic!("built-in papers need no loading") };
-        let rough = applied(edited(application, &document, &[], &papers, TEXTURE, &EffectValue::Choice(2), &l));
+        let rough = applied(edited(application, &document, &[], &papers, TEXTURE, &EffectValue::Choice(3), &l));
         assert_eq!(texture(&rough), Some(&paper::built_in_paper("rough").unwrap().texture));
         assert_eq!(rough.spatial, application.spatial);
         let doubled = applied(edited(&rough, &document, &[], &papers, SCALE, &EffectValue::Number(2.), &l));

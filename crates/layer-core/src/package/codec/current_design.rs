@@ -200,11 +200,11 @@ fn saved_papers_keep_their_textures_scale_and_image_samples() {
         let papers: Vec<_> = artwork.effects.iter().filter(|(_, _, e)| crate::paper::is_paper(&e.program)).map(|(_, _, e)| e.clone()).collect();
         assert_eq!(papers.len(), 2);
         let texture = |e: &crate::EffectApplication| e.values.iter().find_map(|v| match v { EffectValue::Texture(t) => Some(t.clone()), _ => None }).unwrap();
-        let rough = papers.iter().find(|e| matches!(texture(e), crate::TextureSource::Program(_))).unwrap();
+        let rough = papers.iter().find(|e| matches!(texture(e), Some(crate::TextureSource::Program(_)))).unwrap();
         assert_eq!(texture(rough), crate::paper::built_in_paper("rough").unwrap().texture);
         assert!((crate::paper::scale(&rough.spatial.unwrap(), [300.; 2]) - 1.5).abs() < 1e-12);
-        let toned = papers.iter().find(|e| matches!(texture(e), crate::TextureSource::Image(_))).unwrap();
-        let crate::TextureSource::Image(image) = texture(toned) else { unreachable!() };
+        let toned = papers.iter().find(|e| matches!(texture(e), Some(crate::TextureSource::Image(_)))).unwrap();
+        let Some(crate::TextureSource::Image(image)) = texture(toned) else { unreachable!() };
         assert_eq!(image.id(), PortableId::from_bytes([9; 16]));
         assert_eq!((image.extent, image.resolution), ([5, 3], Some(crate::ImageResolution::ppi(600))));
         let mut rows = image.rows();

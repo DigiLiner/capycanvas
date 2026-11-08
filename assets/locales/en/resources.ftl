@@ -572,6 +572,7 @@ resources-layer-group-properties = Group properties
 resources-layer-all-layers = All layers
 resources-layer-swipe-lock = Lock
 resources-layer-swipe-unlock = Unlock
+resources-paper-none = None
 resources-paper-add = Add to Library
 resources-paper-asphalt = Asphalt
 resources-paper-bristol = Bristol

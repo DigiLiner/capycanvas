@@ -67,7 +67,7 @@ uses its existing Anti-aliasing switch alone. Fill is available in pen-button
 and finger-tap bindings; four-finger tap remains unbound by default.
 Fill, Lasso fill, Enclose and Fill, Fill Selection and Gradient share Texture
 strength, from 0–200%, starting at 100%. They use the nearest Paper at or below
-the target when the fill starts; 0% or No paper gives a flat fill.
+the target when the fill starts; 0%, No paper or Texture None gives a flat fill.
 
 On paint layers, pen and mouse presses preview Fill as soon as its mask is ready.
 A short radial reveal follows the press; reduced motion skips it. Moving immediately fills

@@ -1319,7 +1319,7 @@ mod tests {
         for platform in [layer_ui::Platform::Android,layer_ui::Platform::Windows,layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
             let host=NativeHost::launch(platform,&saved,&["en"]).unwrap();
             let document=host.session.engine().document();
-            assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
+            assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture.clone().unwrap());
             assert_eq!(document.composition().size,sheet.extent());
             assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(sheet.resolution)));
             assert!(!host.session.state().document_file.modified);

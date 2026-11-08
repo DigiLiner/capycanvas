@@ -351,7 +351,7 @@ fn on_paper(brush: &BrushSnapshot, paper: &str) -> layer_render::DabStyle {
     let mut style = layer_render::DabStyle::for_brush(brush, StrokeTool::Brush);
     style.paper = Some(layer_core::paper::PaperBinding {
         surface: std::sync::Arc::new(layer_core::paper::PaperSurface {
-            texture: layer_core::paper::built_in_paper(paper).unwrap().texture.clone(),
+            texture: layer_core::paper::built_in_paper(paper).unwrap().texture.clone().unwrap(),
             mapping: layer_core::paper::reference([128, 128], layer_core::paper::paper_ppi(None)).mapping,
         }),
         target_offset: [0, 0],

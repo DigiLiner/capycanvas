@@ -60,11 +60,12 @@ fn encode_value(value: &EffectValue, kind: &EffectParameterKind, writer: &mut im
             }).collect::<Result<Vec<_>,String>>()?,"interpolation":values::encode_mix_space(*interpolation)})
         },
         EffectValue::Lut3d(None) => Value::Null, EffectValue::Lut3d(Some(resource)) => writer.lut(resource)?,
-        EffectValue::Texture(TextureSource::Program(texture)) => {
+        EffectValue::Texture(None) => json!({"none":{}}),
+        EffectValue::Texture(Some(TextureSource::Program(texture))) => {
             let id=&texture.program.id;
             json!({"builtin":id,"version":builtin_version(id),"values":encode_values(&texture.program,&texture.values,writer)?})
         },
-        EffectValue::Texture(TextureSource::Image(image)) => json!({"image":writer.image(image)?}),
+        EffectValue::Texture(Some(TextureSource::Image(image))) => json!({"image":writer.image(image)?}),
     };
     Ok(json!({"kind":kind_name(kind),"value":payload}))
 }
@@ -105,16 +106,19 @@ fn decode_value(value: &Value, kind: &EffectParameterKind, reader: &mut impl Res
         },
         EffectParameterKind::Lut3d => EffectValue::Lut3d(if value.is_null() {None} else {Some(reader.lut(value)?)}),
         EffectParameterKind::Texture => {
-            let texture=if value.get("image").is_some() {
-                TextureSource::Image(reader.image(required(object(value,&["image"])?,"image")?)?)
+            let texture=if value.get("none").is_some() {
+                object(required(object(value,&["none"])?,"none")?,&[])?;
+                None
+            } else if value.get("image").is_some() {
+                Some(TextureSource::Image(reader.image(required(object(value,&["image"])?,"image")?)?))
             } else {
                 let fields=object(value,&["builtin","version","values"])?;
                 let id=string(required(fields,"builtin")?)?;
                 let program=crate::bundled_texture_catalog().get(id).ok_or_else(||unsupported("texture program"))?.program();
                 if u32_value(required(fields,"version")?)?!=builtin_version(id) {return Err(unsupported("texture program version"));}
-                TextureSource::Program(EffectInstance {values:decode_values(&program,required(fields,"values")?,reader)?,program})
+                Some(TextureSource::Program(EffectInstance {values:decode_values(&program,required(fields,"values")?,reader)?,program}))
             };
-            texture.validate()?;
+            if let Some(texture)=&texture {texture.validate()?;}
             EffectValue::Texture(texture)
         },
     })
@@ -383,6 +387,33 @@ mod tests {
     }
     fn fixture() -> Arc<EffectProgram> {
         crate::effect_catalog::custom_program("exposure")
+    }
+    #[test]
+    fn texture_none_round_trips_and_older_readers_preserve_it() {
+        fn previous_texture(value: &Value, reader: &mut impl ResourceReader) -> DecodeResult<TextureSource> {
+            let texture = if value.get("image").is_some() {
+                TextureSource::Image(reader.image(required(object(value, &["image"])?, "image")?)?)
+            } else {
+                let fields = object(value, &["builtin", "version", "values"])?;
+                let id = string(required(fields, "builtin")?)?;
+                let program = crate::bundled_texture_catalog().get(id).ok_or_else(|| unsupported("texture program"))?.program();
+                if u32_value(required(fields, "version")?)? != builtin_version(id) { return Err(unsupported("texture program version")); }
+                TextureSource::Program(EffectInstance { values: decode_values(&program, required(fields, "values")?, reader)?, program })
+            };
+            texture.validate()?;
+            Ok(texture)
+        }
+        let mut resources = Resources::default();
+        let kind = EffectParameterKind::Texture;
+        let encoded = encode_value(&EffectValue::Texture(None), &kind, &mut resources).unwrap();
+        assert_eq!(encoded, json!({"kind":"texture","value":{"none":{}}}));
+        assert_eq!(decode_value(&encoded, &kind, &mut resources).unwrap(), EffectValue::Texture(None));
+        assert!(matches!(previous_texture(&encoded["value"], &mut resources), Err(DecodeError::Unsupported(_))));
+        for value in [json!({"none":{"x":1}}), json!({"none":null}), json!({"none":{},"image":{}}), Value::Null] {
+            assert!(decode_value(&json!({"kind":"texture","value":value}), &kind, &mut resources).is_err());
+        }
+        let paper = EffectInstance::new(crate::bundled_effect_catalog().get(crate::paper::PAPER_PROGRAM).unwrap().program());
+        assert!(matches!(paper.view().value("texture"), Some(EffectValue::Texture(Some(_)))));
     }
     #[test]
     fn builtin_data_contracts_are_keyed_and_independent_of_shader_layout() {

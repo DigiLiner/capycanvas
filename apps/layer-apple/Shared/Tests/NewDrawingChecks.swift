@@ -406,11 +406,25 @@ extension XCTestCase {
         XCTAssertTrue(useTexture.waitForNonExistence(timeout: 10))
         expectNewDrawingValue("new-drawing-texture", none, in: app)
 
-        let coldPress = app.buttons["new-drawing-paper-tile-2"]
+        workspaceActivate(textureTile)
+        XCTAssertTrue(useTexture.waitForExistence(timeout: 10))
+        let plain = app.buttons["new-drawing-paper-tile-1"]
+        XCTAssertEqual(plain.label, "None")
+        workspaceActivate(plain)
+        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: plain)
+        expectation(for: NSPredicate(format: "enabled == NO"), evaluatedWith: relief)
+        waitForExpectations(timeout: 10)
+        workspaceActivate(useTexture)
+        XCTAssertTrue(useTexture.waitForNonExistence(timeout: 10))
+        expectNewDrawingValue("new-drawing-texture", "None", in: app)
+        XCTAssertTrue(app.buttons["new-drawing-paper-color"].isEnabled)
+        attachEditor(in: app, name: "new-drawing-none-" + theme)
+
+        let coldPress = app.buttons["new-drawing-paper-tile-3"]
         func pickColdPress() {
             workspaceActivate(textureTile)
             XCTAssertTrue(useTexture.waitForExistence(timeout: 10))
-            XCTAssertFalse(relief.isEnabled, "No paper has no texture to show")
+            XCTAssertFalse(relief.isEnabled, "None has no texture to show")
             workspaceActivate(coldPress)
             expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: coldPress)
             expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: relief)

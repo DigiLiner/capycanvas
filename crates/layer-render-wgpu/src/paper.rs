@@ -870,7 +870,7 @@ mod tests {
     #[test]
     fn newer_scales_replace_unstarted_bakes_and_bakes_advance_one_at_a_time() {
         let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-        let [rough, hot] = ["rough", "hot_press"].map(|id| layer_core::paper::built_in_paper(id).unwrap().texture.clone());
+        let [rough, hot] = ["rough", "hot_press"].map(|id| layer_core::paper::built_in_paper(id).unwrap().texture.clone().unwrap());
         for texture in [&rough, &hot] { bake_binding(&mut renderer, scaled(texture, 1., false)); }
         for scale in [1.5, 2., 2.5] {
             renderer.papers.require(&renderer.device, None, &scaled(&rough, scale, false), startup::OTHER).unwrap();
@@ -893,7 +893,7 @@ mod tests {
     #[test]
     fn a_bake_step_waits_until_the_previous_submission_completes() {
         let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-        let rough = layer_core::paper::built_in_paper("rough").unwrap().texture.clone();
+        let rough = layer_core::paper::built_in_paper("rough").unwrap().texture.clone().unwrap();
         bake_binding(&mut renderer, scaled(&rough, 1., false));
         let id = renderer.papers.require(&renderer.device, None, &scaled(&rough, 3., false), startup::OTHER).unwrap();
         let stage = |papers: &Papers| papers.bakes.iter().find(|b| b.id == id).map(|b| match b.stage { Stage::Waiting => 0, Stage::Probing { .. } => 1, Stage::Baking { next, .. } => 2 + next, Stage::Ready { .. } => u32::MAX }).unwrap();
@@ -912,7 +912,7 @@ mod tests {
     #[test]
     fn a_new_scale_borrows_the_nearest_slope_of_the_same_paper_and_orientation() {
         let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-        let [rough, hot] = ["rough", "hot_press"].map(|id| layer_core::paper::built_in_paper(id).unwrap().texture.clone());
+        let [rough, hot] = ["rough", "hot_press"].map(|id| layer_core::paper::built_in_paper(id).unwrap().texture.clone().unwrap());
         let baked = [1., 3.].map(|scale| {
             let binding = scaled(&rough, scale, false);
             renderer.require_paper_slope(&binding, startup::OTHER).unwrap();
@@ -954,9 +954,16 @@ mod tests {
     fn built_in_paper_previews_match_their_bakes() {
         let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let papers = layer_core::paper::built_in_papers();
-        assert_eq!(papers.len(), layer_core::bundled_texture_catalog().filters().iter().map(|d| d.presets.len()).sum::<usize>());
+        assert_eq!(papers.len(), 1 + layer_core::bundled_texture_catalog().filters().iter().map(|d| d.presets.len()).sum::<usize>());
         for paper in papers {
-            let fresh = preview(&mut renderer, &paper.texture);
+            let Some(texture) = &paper.texture else {
+                assert_eq!(paper.id.as_ref(), layer_core::paper::NO_TEXTURE);
+                assert_eq!(paper.preview.len(), layer_core::paper::PREVIEW_SIZE * layer_core::paper::PREVIEW_SIZE);
+                assert_eq!(&*paper.preview, layer_core::paper::preview(&vec![0.; 4 * layer_core::paper::PREVIEW_SIZE * layer_core::paper::PREVIEW_SIZE]));
+                assert!(paper.preview.iter().all(|value| *value == paper.preview[0]));
+                continue;
+            };
+            let fresh = preview(&mut renderer, texture);
             let difference = fresh.iter().zip(paper.preview.iter()).map(|(a, b)| f64::from(a.abs_diff(*b))).sum::<f64>() / fresh.len() as f64;
             assert!(difference < 1., "{}: preview is {difference:.2} codes from its bake; run write_built_in_paper_previews", paper.id);
         }

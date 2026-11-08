@@ -2348,7 +2348,7 @@ impl<'a> RootInventory<'a> {
         for value in values {
             match value {
                 EffectValue::Lut3d(Some(r)) => self.resources.push(r),
-                EffectValue::Texture(TextureSource::Image(image)) => self.image(image),
+                EffectValue::Texture(Some(TextureSource::Image(image))) => self.image(image),
                 _ => {}
             }
         }

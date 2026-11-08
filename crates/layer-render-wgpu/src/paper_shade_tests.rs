@@ -36,6 +36,32 @@ fn mean(values: &[f32]) -> f32 {
 }
 
 #[test]
+fn paper_without_texture_keeps_its_color_with_raised_lighting_values() {
+    let mut document = rough_gray_paper();
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let texture = crate::create_target(&r.device, [128; 2], wgpu::TextureFormat::Rgba8UnormSrgb, "plain paper").0;
+    let mut presenter = ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, SdrSurfaceColor::Srgb).unwrap();
+    let mut render = |r: &mut WgpuRasterizer, document: &Document| {
+        crate::test_support::submit_settled(r, packet(document.scene(), [128; 2]));
+        presenter.present(r, &texture.create_view(&Default::default()), view(), [0.2, 0.3, 0.4, 1.]).unwrap();
+        let canvas = page_bytes(r, &texture);
+        let mut snapshot = r.snapshot_gpu().capture_scene(document.snapshot(), layer_core::authored::SceneScope::All, Default::default()).unwrap();
+        let mut png = Vec::new();
+        snapshot.write_png(&mut png, &layer_core::color::source::SourceInterpretation { channels: layer_core::color::source::SourceChannels::Rgba, depth: layer_core::color::SampleDepth::U8, profile: Default::default(), profile_assumed: false }, Default::default(), None).unwrap();
+        (canvas, png)
+    };
+    set_paper(&mut document, &[(paper::RELIEF, EffectValue::Number(150.)), (paper::THROUGH_PAINT, EffectValue::Number(40.))]);
+    let rough = render(&mut r, &document);
+    set_paper(&mut document, &[("texture", EffectValue::Texture(None))]);
+    let raised = render(&mut r, &document);
+    assert_ne!(raised, rough);
+    assert!(r.paper_shade().is_none());
+    assert!(raised.0.chunks_exact(4).all(|pixel| pixel[..3].iter().all(|value| value.abs_diff(153) <= 1) && pixel[3] == 255));
+    set_paper(&mut document, &[(paper::RELIEF, EffectValue::Number(0.))]);
+    assert_eq!(render(&mut r, &document), raised);
+}
+
+#[test]
 fn paper_lighting_waiting_for_optional_shaders_does_not_keep_frames_busy() {
     use std::time::{Duration, Instant};
     let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
@@ -198,7 +224,7 @@ fn separated_paper_and_the_paper_preview_light_the_artwork_in_its_own_encoding()
         assert!(r.paper_shade().is_some_and(|(_, state, _)| state[13] != 0.), "the lit sheet is separated from the artwork");
         set_paper(&mut document, &[(paper::RELIEF, EffectValue::Number(0.))]);
         let binding = paper::PaperBinding { surface: Arc::new(paper::PaperSurface {
-            texture: paper::built_in_paper("rough").unwrap().texture.clone(),
+            texture: paper::built_in_paper("rough").unwrap().texture.clone().unwrap(),
             mapping: paper::reference([128; 2], [300.; 2]).mapping }), target_offset: [0; 2] };
         r.set_paper_overlay(Some(layer_render::PaperOverlay { paper: binding.clone(), opacity: 1., moving: false }));
         let previewed = present(&mut r, &document);

@@ -572,6 +572,7 @@ resources-layer-group-properties = Свойства группы
 resources-layer-all-layers = Все слои
 resources-layer-swipe-lock = Заблокировать
 resources-layer-swipe-unlock = Разблокировать
+resources-paper-none = Нет
 resources-paper-add = Добавить в библиотеку
 resources-paper-asphalt = Асфальт
 resources-paper-bristol = Бристоль

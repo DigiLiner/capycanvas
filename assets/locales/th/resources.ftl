@@ -572,6 +572,7 @@ resources-layer-group-properties = คุณสมบัติกลุ่ม
 resources-layer-all-layers = เลเยอร์ทั้งหมด
 resources-layer-swipe-lock = ล็อก
 resources-layer-swipe-unlock = ปลดล็อก
+resources-paper-none = ไม่มี
 resources-paper-add = เพิ่มลงในคลัง
 resources-paper-asphalt = ยางมะตอย
 resources-paper-bristol = กระดาษบริสตอล

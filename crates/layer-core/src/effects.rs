@@ -428,7 +428,7 @@ pub enum EffectValue {
     Curve(Vec<[f32; 2]>),
     Gradient(GradientDefinition),
     Lut3d(Option<Arc<crate::Lut3d>>),
-    Texture(TextureSource),
+    Texture(Option<TextureSource>),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectInstance {
@@ -940,7 +940,7 @@ impl EffectParameter {
             (EffectParameterKind::Gradient, EffectValue::Gradient(s)) => s.validate().is_ok(),
             (EffectParameterKind::Lut3d, EffectValue::Lut3d(resource)) => resource.as_ref().is_none_or(|r|
                 r.validate_descriptor().is_ok() && RgbSpace::ALL.into_iter().any(|space| r.accepts(space))),
-            (EffectParameterKind::Texture, EffectValue::Texture(texture)) => texture.validate().is_ok(),
+            (EffectParameterKind::Texture, EffectValue::Texture(texture)) => texture.as_ref().is_none_or(|t| t.validate().is_ok()),
             _ => false,
         };
         if valid {

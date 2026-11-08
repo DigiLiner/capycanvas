@@ -1013,6 +1013,20 @@ class AndroidFeatureParityTest {
                 awaitDrawing("Cancel keeps the paper and its visibility") { it.isNull("drawer") && it.paper().optString("texture") == "cold_press" && it.paper().getInt("relief") == 120 }
                 assertNull(host.actionError)
 
+                tap("new-drawing-texture", true)
+                tap("new-drawing-paper-tile-1", true)
+                awaitDrawing("None keeps Texture visibility disabled") { it.tiles()[1].getString("id") == "none" && it.tiles()[1].getBoolean("selected") && !it.relief().getBoolean("enabled") }
+                reliefField().assertIsNotEnabled()
+                tap("new-drawing-paper-use")
+                awaitDrawing("None keeps the sheet without grain") { it.isNull("drawer") && it.paper().optString("texture") == "none" && it.paper().getInt("relief") == 120 &&
+                    it.getBoolean("paper_color_enabled") && it.getJSONObject("sheet").getBoolean("shown") && it.getJSONObject("sheet").isNull("grain") }
+                assertTrue(drawing()!!.getJSONObject("page").isNull("relief"))
+                shot(theme, "6c-none")
+                tap("new-drawing-texture", true)
+                tap("new-drawing-paper-tile-$cold", true)
+                tap("new-drawing-paper-use")
+                awaitDrawing("Cold press restores the retained visibility") { it.isNull("drawer") && it.paper().optString("texture") == "cold_press" && it.paper().getInt("relief") == 120 }
+
                 tap("new-drawing-paper-color", true)
                 awaitDrawing("paper color") { it.panel()?.getString("kind") == "paper_color" }
                 shot(theme, "7-paper-color")

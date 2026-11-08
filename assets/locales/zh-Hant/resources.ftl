@@ -688,6 +688,7 @@ resources-layer-group-properties = 群組屬性
 resources-layer-all-layers = 所有圖層
 resources-layer-swipe-lock = 鎖定
 resources-layer-swipe-unlock = 解鎖
+resources-paper-none = 無
 resources-paper-add = 加入資料庫
 resources-paper-asphalt = 瀝青
 resources-paper-bristol = 布里斯托紙

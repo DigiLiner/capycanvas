@@ -11,6 +11,36 @@ const PRESETS: [DefaultBrushPreset; 7] = [DefaultBrushPreset::Pencil,
     DefaultBrushPreset::Charcoal, DefaultBrushPreset::Chalk,
     DefaultBrushPreset::PastelBlock, DefaultBrushPreset::Crayon];
 
+#[test]
+fn a_stroke_on_a_paper_without_texture_matches_no_paper() {
+    let mut plain = Document::new(PortableId::random(), EXTENT[0], EXTENT[1],
+        DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+    plain.set_paper_texture(None);
+    let absent = plain.clone().without_paper().unwrap();
+    let mut rough = plain.clone();
+    rough.set_paper_texture(paper::built_in_paper("rough").unwrap().texture.clone());
+    for preset in [DefaultBrushPreset::Pencil, DefaultBrushPreset::Charcoal] {
+        let stroke = |document: Document| {
+            let (mut engine, mut input) = support::engine(document);
+            engine.set_view(ViewState { width_px: EXTENT[0], height_px: EXTENT[1], document_to_surface: Affine::IDENTITY.0 }, ViewTransform::IDENTITY);
+            engine.set_instant_feedback(InstantFeedbackConfig { enabled: false, ..Default::default() }).unwrap();
+            let mut brush = default_brush(preset);
+            brush.diameter = 36.;
+            brush.stabilization.strength = 0.;
+            engine.set_brush(brush).unwrap();
+            support::draw_with_brush(&mut engine, &mut input, Point { x: 32., y: 128. }, Point { x: 224., y: 128. }, 1_000_000_000);
+            let target = engine.document().drawing_target().unwrap();
+            let mut snapshot = engine.backend().snapshot_gpu().capture_scene(engine.document().snapshot(), authored::SceneScope::Raw(target), Default::default()).unwrap();
+            let pixels = snapshot.preview_linear_document(EXTENT).unwrap().pixels;
+            assert!(pixels.iter().any(|pixel| pixel[3] > 0.));
+            pixels.into_iter().flatten().flat_map(f32::to_le_bytes).collect::<Vec<_>>()
+        };
+        let expected = stroke(absent.clone());
+        assert_eq!(stroke(plain.clone()), expected, "{preset:?}");
+        assert_ne!(stroke(rough.clone()), expected, "{preset:?} catches Rough");
+    }
+}
+
 #[path = "../../layer-engine/tests/support/slow_stroke.rs"]
 mod slow_stroke;
 

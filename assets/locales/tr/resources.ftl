@@ -571,6 +571,7 @@ resources-layer-group-properties = Grup özellikleri
 resources-layer-all-layers = Tüm katmanlar
 resources-layer-swipe-lock = Kilitle
 resources-layer-swipe-unlock = Kilidi aç
+resources-paper-none = Yok
 resources-paper-add = Kitaplığa ekle
 resources-paper-asphalt = Asfalt
 resources-paper-bristol = Bristol

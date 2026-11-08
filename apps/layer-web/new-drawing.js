@@ -47,7 +47,7 @@ function sheetArt(app, element, bounds, mini) {
     Object.assign(node.style, {width:`${width}px`, height:`${height}px`});
     Object.assign(sheet.style, {width:`${Math.max(4, Math.round(w * scale))}px`, height:`${Math.max(4, Math.round(h * scale))}px`, background:view.shown ? paint(app, view.color) : ''});
     sheet.classList.toggle('new-drawing-clear', !view.shown);
-    Object.assign(texture.style, {backgroundImage:grain(app, view.texture) ?? 'none', backgroundSize:`${mini ? 14 : 40}px`, opacity:view.shown ? 1 : .35});
+    Object.assign(texture.style, {backgroundImage:grain(app, view.grain) ?? 'none', backgroundSize:`${mini ? 14 : 40}px`, opacity:view.shown ? 1 : .35});
   };
   return {node, show, resize(next) { size = next; if (shown) show(shown); }};
 }

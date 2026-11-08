@@ -105,7 +105,7 @@ impl DrawingSetup {
         if limits.memory.is_some_and(|memory|memory==0 || limits.working_bytes.is_some_and(|working|working>memory)) { return Err(SetupProblem::Memory); }
         Ok(())
     }
-    pub fn project(&self, id: PortableId, paper: TextureSource, limits: CanvasLimits, l: &Localizer) -> Result<Document, String> {
+    pub fn project(&self, id: PortableId, paper: Option<TextureSource>, limits: CanvasLimits, l: &Localizer) -> Result<Document, String> {
         self.validate(limits).map_err(|problem| problem.error(l))?;
         let mut document = self.options().document_on(id, paper, l);
         document.set_paper_color(self.paper.color);
@@ -628,6 +628,10 @@ pub struct NamedPaper {
     pub label: Arc<str>,
 }
 
+pub fn textured(texture: Option<&str>) -> bool {
+    texture.is_some_and(|id| layer_core::paper::built_in_paper(id).is_none_or(|paper| paper.texture.is_some()))
+}
+
 pub fn texture_name(texture: Option<&str>, imported: &[NamedPaper], l: &Localizer) -> Arc<str> {
     let Some(id) = texture else { return l.text(MessageId::DOCUMENTS_NO_PAPER) };
     layer_core::paper::built_in_paper(id).map(|paper| crate::session::effects::resource_label(&paper.label, l))
@@ -707,7 +711,7 @@ impl NewDrawingView {
             capacity,
             memory,
             texture: texture_name(setup.paper.texture.as_deref(), catalog.imported, l),
-            relief: setup.paper.texture.is_some().then(|| relief_text(setup.paper.relief)),
+            relief: textured(setup.paper.texture.as_deref()).then(|| relief_text(setup.paper.relief)),
             paper_color: if setup.paper.texture.is_none() { l.text(MessageId::DOCUMENTS_PAPER_NONE).to_string() }
                 else if setup.paper.transparent { l.text(MessageId::DOCUMENTS_TRANSPARENT).to_string() }
                 else { paper_color_name(setup.paper.color, l) },
@@ -826,7 +830,8 @@ impl PresetCatalog<'_> {
         let paper = match &setup.paper.texture {
             None => l.text(MessageId::DOCUMENTS_NO_PAPER).to_string(),
             Some(texture) => {
-                args.set("texture", format!("{} {}", texture_name(Some(texture), self.imported, l), relief_text(setup.paper.relief)));
+                let name = texture_name(Some(texture), self.imported, l);
+                args.set("texture", if textured(Some(texture)) { format!("{name} {}", relief_text(setup.paper.relief)) } else { name.to_string() });
                 let color = if setup.paper.transparent { l.text(MessageId::DOCUMENTS_TRANSPARENT).to_string() } else { paper_color_name(setup.paper.color, l) };
                 args.set("color", color);
                 l.format(MessageId::DOCUMENTS_PRESET_PAPER, &args)
@@ -895,7 +900,7 @@ mod tests {
                 assert!(layer_core::paper::built_in_paper(texture).is_some(), "{}", preset.id);
             }
         }
-        for paper in layer_core::paper::built_in_papers() {
+        for paper in layer_core::paper::built_in_papers().iter().filter(|paper| paper.id.as_ref() != layer_core::paper::NO_TEXTURE) {
             assert!(presets.iter().any(|preset| preset.setup.paper.texture.as_deref() == Some(&*paper.id)), "{}", paper.id);
         }
         for (_, color) in PAPER_COLORS {
@@ -1023,7 +1028,7 @@ mod tests {
         heavy.apply(NewDrawingEdit::Depth(SampleDepth::F32));
         let tight = CanvasLimits::new(16384, Some(200 * 1024 * 1024)).with_working_bytes(Some(256*1024*1024));
         assert_eq!(heavy.setup.validate(tight), Err(SetupProblem::Memory));
-        assert_eq!(heavy.setup.project(PortableId::random(), layer_core::paper::default_texture(), tight, &l).unwrap_err(), DRAWING_MEMORY_EXCEEDED);
+        assert_eq!(heavy.setup.project(PortableId::random(), Some(layer_core::paper::default_texture()), tight, &l).unwrap_err(), DRAWING_MEMORY_EXCEEDED);
     }
 
     #[test]
@@ -1035,14 +1040,14 @@ mod tests {
         let paper = project.bottom_paper().unwrap();
         assert_eq!(project.scene().effect(paper).unwrap().constant_color(), Some(KRAFT));
         assert_eq!(layer_core::paper::light(project.scene().effect(paper).unwrap()).map(|light| light.relief), Some(1.));
-        assert_eq!(project.paper(None).texture, bristol);
+        assert_eq!(Some(project.paper(None).texture), bristol);
         assert!(project.scene().occurrence(paper).unwrap().visible);
         assert_eq!(project.composition().resolution, Some(layer_core::ImageResolution::ppi(300)));
         setup.paper.transparent = true;
-        let project = setup.project(PortableId::random(), layer_core::paper::default_texture(), CanvasLimits::default(), &l).unwrap();
+        let project = setup.project(PortableId::random(), Some(layer_core::paper::default_texture()), CanvasLimits::default(), &l).unwrap();
         assert!(!project.scene().occurrence(project.bottom_paper().unwrap()).unwrap().visible);
         setup.paper.texture = None;
-        let project = setup.project(PortableId::random(), layer_core::paper::default_texture(), CanvasLimits::default(), &l).unwrap();
+        let project = setup.project(PortableId::random(), Some(layer_core::paper::default_texture()), CanvasLimits::default(), &l).unwrap();
         assert_eq!(project.bottom_paper(), None);
         assert_eq!(project.scene().order().len(), 1);
         assert_eq!(project.revision, 0);
@@ -1122,7 +1127,7 @@ mod tests {
             assert!(opened.scene().occurrence(paper).unwrap().visible);
             assert_eq!(opened.scene().effect(paper).unwrap().constant_color(), Some(NATURAL));
             let surface = opened.paper(None);
-            assert_eq!(surface.texture, layer_core::paper::built_in_paper("cold_press").unwrap().texture);
+            assert_eq!(surface.texture, layer_core::paper::built_in_paper("cold_press").unwrap().texture.clone().unwrap());
             assert_eq!(layer_core::paper::light(opened.scene().effect(paper).unwrap()).unwrap().relief, 1.);
         }
     }
@@ -1156,5 +1161,10 @@ mod tests {
         assert_eq!((summary.size.as_str(), summary.details.as_str()), ("11 × 8.5 in · 300 ppi", "sRGB 8-bit SDR · Cold press 100 %, Kraft"));
         assert_eq!(catalog.get(&PresetKey::BuiltIn("uhd-hdr".into())).unwrap().details, "144 ppi · No paper · HDR");
         assert_eq!(catalog.tiles(BrowserTab::Group(PresetGroup::Digital), "").len(), 10);
+        let mut plain = built_in("uhd-hdr", None).unwrap();
+        plain.paper.texture = Some(layer_core::paper::NO_TEXTURE.into());
+        plain.paper.relief = 150;
+        assert_eq!(catalog.view(PresetKey::Last, "Plain".into(), PresetGroup::Digital, plain.clone(), true).details, "144 ppi · None · HDR");
+        assert_eq!(catalog.summary("Plain", &plain).details, "sRGB 16-bit float HDR · None, White");
     }
 }

@@ -688,6 +688,7 @@ resources-layer-group-properties = 组属性
 resources-layer-all-layers = 所有图层
 resources-layer-swipe-lock = 锁定
 resources-layer-swipe-unlock = 解锁
+resources-paper-none = 无
 resources-paper-add = 添加到库
 resources-paper-asphalt = 沥青
 resources-paper-bristol = 布里斯托纸

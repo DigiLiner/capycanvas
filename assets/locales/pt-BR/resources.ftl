@@ -572,6 +572,7 @@ resources-layer-group-properties = Propriedades do grupo
 resources-layer-all-layers = Todas as camadas
 resources-layer-swipe-lock = Bloquear
 resources-layer-swipe-unlock = Desbloquear
+resources-paper-none = Nenhuma
 resources-paper-add = Adicionar à biblioteca
 resources-paper-asphalt = Asfalto
 resources-paper-bristol = Bristol

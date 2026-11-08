@@ -4,8 +4,8 @@
 
 Paper gives a drawing a surface. A Paper layer holds the sheet's color and its
 texture; every brush that reacts to tooth reads the height of the paper under
-the layer it paints on. Textures come from built-in
-[texture programs](texture-programs.md) or from imported images, and a small
+the layer it paints on. Texture None keeps only the sheet color. Textures come
+from built-in [texture programs](texture-programs.md) or imported images. A small
 paper library lets artists choose, import and reuse them. Brushes own no grain
 textures.
 
@@ -19,7 +19,7 @@ the library, lighting, rendering, saved data and what each host has.
 | Paper layer with Color, Texture and Scale | Lighting the thickness of paint with the paper |
 | Texture visibility, Light and Shows through paint, lighting the canvas and exports; Texture visibility in New drawing and its presets | Light and Shows through paint in New drawing |
 | One resolution per drawing, 300 ppi by default | Texture parameters in Properties and saved variations |
-| 38 built-in papers from eighteen programs | Portable user texture programs, shared with a portable custom-filter contract |
+| None and 38 built-in papers from eighteen programs | Portable user texture programs, shared with a portable custom-filter contract |
 | Every grain brush follows the paper | Per-brush textures |
 | Importing a paper image and an app-wide paper library | Paper that changes as it is drawn on: burnishing, sizing, absorbency |
 | A brief preview of the paper on the canvas when it changes | Non-repeating full sheets and deckle edges |
@@ -27,9 +27,9 @@ the library, lighting, rendering, saved data and what each host has.
 ## What artists see
 
 1. **New drawing.** The dialog chooses the sheet: size, resolution, color, a
-   paper texture or none with its Texture visibility, and the paper color or
-   transparency ([New drawing](../ui/new-drawing.md)). The drawing starts with a
-   Paper layer under an empty layer, its texture at its real size.
+   paper texture, None for a plain color, or No paper, and the paper color or
+   transparency ([New drawing](../ui/new-drawing.md)). A texture or None creates
+   a Paper layer under an empty layer; No paper creates no Paper layer.
 2. **Choose a paper.** The Paper row in Layers shows its color and, beside it,
    its texture. Tapping the texture, or the Texture tile in Properties, opens
    Choose Texture; Use Texture applies the chosen paper.
@@ -42,7 +42,7 @@ the library, lighting, rendering, saved data and what each host has.
    and Shows through paint sets how much texture shows through the paint: at
    100% the whole picture is lit like paint on rough paper, at 0% paint hides
    the texture it covers. Light and Shows through paint are dimmed while
-   Texture visibility is 0.
+   Texture visibility is 0. None has no relief preview or lighting.
 5. **Draw.** Pencils, charcoal, pastels and textured paint brushes catch the
    tooth. Texture strength in Tool Settings still sets how much a brush reacts.
    Bristol and hot press break a pencil line only lightly; rough breaks it
@@ -56,13 +56,13 @@ the library, lighting, rendering, saved data and what each host has.
 
 | Component | Controls |
 | --- | --- |
-| New drawing | Resolution (ppi) beside Width and Height, kept in presets. Paper chooses the texture or No paper and its Texture visibility; Paper color chooses its color or Transparent. Light and Shows through paint start at their defaults. |
+| New drawing | Resolution (ppi) beside Width and Height, kept in presets. Paper chooses the texture, None or No paper and its Texture visibility; Paper color chooses its color or Transparent. Light and Shows through paint start at their defaults. |
 | Image Size | Unchanged. It shows 300 ppi for a drawing without a resolution. |
 | Layer › New | Paper, beside Solid Color and Gradient Fill. The filter drawer lists Paper with the other fills, from the catalog. |
 | Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. Its texture thumbnail sits left of the name and opens Choose Texture unless the layer is locked. Add mask in the footer and the row menu's Add mask, mask-from-selection and Paste mask items are disabled while Paper is selected. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
-| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%; Texture visibility, a slider from 0 to 300%; Light, a [dial](../ui/numeric-controls.md) with its angle; Shows through paint, a slider from 0 to 100%. Double-clicking a label returns it to its default: Scale 100%, Texture visibility 0%, Light 225° (upper left) and Shows through paint 100%. Light and Shows through paint are disabled while Texture visibility is 0. |
-| Choose Texture | A dialog with Edit Color's width, title and footer, tall enough to show three full rows of papers. One grid of squircle tiles, each preview at its own size with the paper's name below: the built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
-| Canvas | The lit relief while Texture visibility is above 0. On a flat paper, relief shading while Scale changes and for a moment after a paper is chosen. |
+| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%; Texture visibility, a slider from 0 to 300%; Light, a [dial](../ui/numeric-controls.md) with its angle; Shows through paint, a slider from 0 to 100%. Double-clicking a label returns it to its default: Scale 100%, Texture visibility 0%, Light 225° (upper left) and Shows through paint 100%. Light and Shows through paint are disabled while Texture visibility is 0. None disables Scale, Texture visibility, Light and Shows through paint while keeping their values; Color and Texture stay enabled. |
+| Choose Texture | A dialog with Edit Color's width, title and footer, tall enough to show three full rows of papers. One grid of squircle tiles, each preview at its own size with the paper's name below: None, the built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
+| Canvas | None is a plain color with no relief preview. Textured Paper shows lit relief while Texture visibility is above 0. At 0% Texture visibility, a textured paper shows relief shading while Scale changes and for a moment after a paper is chosen. |
 | Tool Settings | Texture strength, unchanged. Brushes have no texture picker or texture scale. |
 
 Choosing a paper is one undo step, and so is each Scale, Texture visibility, Light or
@@ -128,7 +128,7 @@ when none exists inserts it at the bottom, regardless of the selected group.
 | Value | Kind | Rule |
 | --- | --- | --- |
 | `color` | Color | Opaque. Declared as the program's constant color, so Paper keeps the startup background, clear folding and color thumbnails of Solid Color. |
-| `texture` | Texture (new) | A built-in program with its values, or an imported image. Defaults to the paper last chosen in Choose Texture, or Drawing. |
+| `texture` | Texture | None, a built-in program with its values, or an imported image. Defaults to the paper last chosen in Choose Texture, or Drawing. |
 | `relief` | Number, 0–300% | Texture visibility: how far the texture stands out on the canvas and in exports. 100% lights the paper's own relief as the brushes feel it. 0 leaves the paper flat. |
 | `light` | Angle, 0–360° | Where the light comes from, in degrees clockwise from the drawing's +x axis; 225° is the upper left. It turns with the artwork. |
 | `through_paint` | Number, 0–100% | How much texture shows through paint above the paper. |
@@ -157,7 +157,9 @@ hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 - **Appearance does not change tooth.** Visibility, opacity, blending and
   clipping affect only how Paper looks. A Transparent background hides the
   Paper but keeps its tooth.
-- **No Paper below** uses the default paper at 100% of the paper resolution.
+- **No Paper below, or Texture None,** uses Fine tooth
+  (`drawing_paper`) at 100% of the drawing resolution. Fills get no texture in
+  either case.
 - **The stroke keeps its paper.** It is resolved at pen-down and held with the
   stroke's view and brush settings, so queued contacts are unaffected by later
   edits.
@@ -245,14 +247,15 @@ paper is used. New drawing chooses its own paper in the dialog.
 ### Choose Texture
 
 One shared view model, presented by each host in a dialog that shares Edit
-Color's shell: a single grid with the
-built-in papers in catalog order (watercolor, drawing, pastel and Asian papers,
-canvases and panels, then surfaces such as Concrete, Barn wood and Toilet),
+Color's shell: a single grid with None first, then built-in papers in catalog
+order (watercolor, drawing, pastel and Asian papers, canvases and panels, then
+surfaces such as Concrete, Barn wood and Toilet),
 then imported papers, with Import… at the left of the footer. When the selected Paper
 uses an embedded image that is not in the library, that paper comes first with
 Add to Library. Tiles show 16 mm of each paper under raking light with its
-name. Built-in previews are made from their bakes by a test and ship with the
-app ([texture programs](texture-programs.md#validation-and-tests)); an imported
+name. None has a flat 96 × 96 preview computed once without a bake. Built-in
+texture previews are made from their bakes by a test and ship with the app
+([texture programs](texture-programs.md#validation-and-tests)); an imported
 paper's preview is made from its image when it is imported. Hosts request
 previews by paper id and keep them per id, since a paper's preview never
 changes. Choosing a tile marks it; Use Texture applies it, and an imported
@@ -340,7 +343,8 @@ it is measured on desktop only.
 
 Paper lights the finished picture, as a painting on textured paper is lit; the
 height texture is the tooth the brushes feel, so what a pencil catches and what
-the light shows agree.
+the light shows agree. None is never lit, bakes no surface and stays in the
+composite regardless of the retained lighting values.
 
 - **Shade.** Each pixel is multiplied in linear light by
   `S = 1 − visibility · (slope · light direction)`, from the paper's slope at that
@@ -376,12 +380,13 @@ the light shows agree.
 | Record | Change |
 | --- | --- |
 | `paper` built-in effect, version 1 | Values `color`, `texture`, `relief`, `light` and `through_paint`. The spatial reference maps paper millimeters to drawing pixels and holds the scale shown as Scale. |
-| Effect value kind `texture` | `{"kind": "texture", "value": {"builtin": "watercolor", "version": 1, "values": {...}}}` or `{"kind": "texture", "value": {"image": {"ref": "..."}}}`. |
+| Effect value kind `texture` | `{"kind":"texture","value":{"none":{}}}`, `{"kind": "texture", "value": {"builtin": "watercolor", "version": 1, "values": {...}}}` or `{"kind": "texture", "value": {"image": {"ref": "..."}}}`. |
 | `capy.image/1` | An imported paper is a `gray` image with a required resolution, read as data without profile conversion, as the [package contract](../reference/capy-package.md) plans for image inputs. |
 | `capy.composition/2` | New drawings write their resolution. |
 
-Fixed-file tests cover both texture forms, and the frozen built-in contracts
-gain `paper` and each texture program. Brush presets are not stored in
+Fixed-file tests cover program and image textures; None round-trips and older
+readers preserve it as unsupported. Generated fixtures cover all three forms,
+and the frozen built-in contracts gain `paper` and each texture program. Brush presets are not stored in
 drawings, so removing grain fields changes no file. Drawings made before Paper
 keep their Solid Color.
 
@@ -389,7 +394,7 @@ keep their Solid Color.
 
 | Area | State |
 | --- | --- |
-| Shared Rust | Paper layer, texture value, eighteen programs and 38 papers, bake, brushes on Paper, resolution, Scale, relief preview, lighting with Texture visibility, Light and Shows through paint on the canvas and in exports, library policy, import |
+| Shared Rust | Paper layer, optional texture value, None and 38 papers from eighteen programs, bake, brushes on Paper, resolution, Scale, relief preview, lighting with Texture visibility, Light and Shows through paint on the canvas and in exports, library policy, import |
 | GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, paper, Texture visibility and paper color in New drawing, with an Import… tile adding to the library, relief preview, Texture visibility, the Light dial, Shows through paint and the Add paper row. `native_paper_lighting`, `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the lighting controls, the dialog, the row thumbnails, drawing targets, fill masks, Paper's disabled mask controls and sheet creation in both themes. `native_paper_scale_drag` drags Scale with real input on a 12 MP drawing in both themes and records how soon each step reaches the canvas. |
 | Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, paper and paper color in New drawing, with Import… adding to the library, shared relief preview and lighting, the Light dial, and the Add paper row. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows, Choose Texture, the Scale relief and the lighting controls in both themes. |
 | Apple | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, paper, Texture visibility and paper color in New drawing, with an Import… tile adding to the library, shared relief preview and lighting, Texture visibility, the Light dial, Shows through paint and the Add paper row. The `light` case of the property slider fixture covers the dial. Native workers run image decoding and library files through the shared `layer_host::papers::PaperTask`. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |

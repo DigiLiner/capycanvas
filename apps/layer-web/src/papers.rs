@@ -166,10 +166,10 @@ async fn load(id: &str, retained: &[layer_core::Image], localization: &layer_ui:
 }
 
 /// The texture New chose; a stored paper the library cannot read falls back with a warning.
-pub(super) async fn texture(material: &PaperMaterial, retained: &[layer_core::Image], localization: &layer_ui::Localizer) -> (layer_core::TextureSource, Option<String>) {
+pub(super) async fn texture(material: &PaperMaterial, retained: &[layer_core::Image], localization: &layer_ui::Localizer) -> (Option<layer_core::TextureSource>, Option<String>) {
     let PaperMaterial::Stored { id, fallback } = material else { return (material.fallback(), None) };
     match (layer_ui::paper_library::paper_image_id(id), load(id, retained, localization).await) {
-        (Some(parent), Ok(image)) => (layer_core::TextureSource::Image(layer_core::Image::with_id(parent, Arc::new(image))), None),
+        (Some(parent), Ok(image)) => (Some(layer_core::TextureSource::Image(layer_core::Image::with_id(parent, Arc::new(image)))), None),
         _ => (fallback.clone(), Some(layer_ui::file_open_failure(localization, &format!("{id}.png")))),
     }
 }

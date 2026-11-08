@@ -121,7 +121,7 @@ fn apple_paper_library_import_reload_rename_delete_and_add_preserve_authored_his
         assert_eq!(choice(&reopened),index as u32);
         let paper_layer=layer(&reopened);
         assert_source_samples(&reopened.borrow().host.session.paper_image(paper_layer).unwrap(),&original);
-        assert!(matches!(reopened.borrow().host.session.new_drawing_paper(),layer_core::TextureSource::Image(_)));
+        assert!(matches!(reopened.borrow().host.session.new_drawing_paper(),Some(layer_core::TextureSource::Image(_))));
         reopened.invoke("undo");assert_eq!(checkpoint(&reopened),before);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -216,8 +216,8 @@ fn apple_initial_paper_is_prepared_before_publication_and_later_library_reload_d
         let configuration=CString::new(remembered_launch(&directory,&id)).unwrap();
         let app=App::from_handle(unsafe {launch_json(platform,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!(app.0==0));
         let document=document(&app);
-        assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
-        let layer_core::TextureSource::Image(actual)=app.borrow().host.session.new_drawing_paper() else {panic!("initial remembered image must exist before publication")};
+        assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture.clone().unwrap());
+        let Some(layer_core::TextureSource::Image(actual))=app.borrow().host.session.new_drawing_paper() else {panic!("initial remembered image must exist before publication")};
         assert_source_samples(actual.storage(),&paper);
         assert_eq!(document.composition().size,[1440,1080]);assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(144)));
         assert!(!app.state()["document_file"]["modified"].as_bool().unwrap());
@@ -355,7 +355,7 @@ fn apple_failed_initial_material_notifies_once_and_reload_does_not_repeat_the_fa
     let configuration=CString::new(remembered_launch(&directory,&id)).unwrap();
     let app=App::from_handle(unsafe {launch_json(1,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!(app.0==0));
     let before=document(&app);let mark=checkpoint(&app);let notice=app.state()["notice"]["id"].clone();assert!(!notice.is_null());
-    assert_eq!(before.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
+    assert_eq!(before.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture.clone().unwrap());
     for _ in 0..2 {let job=PaperJob::new(&app,0,&directory);job.work(None);job.apply(&app);}
     assert_project_document(&document(&app),&before);assert_eq!(checkpoint(&app),mark);
     assert_eq!(app.state()["notice"]["id"],notice);

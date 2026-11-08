@@ -30,19 +30,19 @@ pub enum PaperRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaperMaterial {
-    Ready(layer_core::TextureSource),
-    Stored { id: String, fallback: layer_core::TextureSource },
+    Ready(Option<layer_core::TextureSource>),
+    Stored { id: String, fallback: Option<layer_core::TextureSource> },
 }
 impl PaperMaterial {
     pub fn capture(settings: &crate::NewDocumentSettings, cached: Option<Image>) -> Self {
-        if let Some(image) = cached { return Self::Ready(layer_core::TextureSource::Image(image)); }
+        if let Some(image) = cached { return Self::Ready(Some(layer_core::TextureSource::Image(image))); }
         let fallback = settings.paper();
         match settings.paper.as_ref().filter(|id| valid_paper_id(id)) {
             Some(id) => Self::Stored { id: id.clone(), fallback },
             None => Self::Ready(fallback),
         }
     }
-    pub fn fallback(&self) -> layer_core::TextureSource {
+    pub fn fallback(&self) -> Option<layer_core::TextureSource> {
         match self { Self::Ready(texture) | Self::Stored { fallback: texture, .. } => texture.clone() }
     }
 }

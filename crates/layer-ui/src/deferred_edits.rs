@@ -114,7 +114,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.rendering_suspended || !self.deferred_edits.is_empty() || !self.canvas_idle() || self.engine.raster_backing_pending() { return 0; }
         let Some(crate::paper_library::PendingPaper { layer, epoch, image: Some(image), .. }) = self.papers.pending.take_if(|pending| pending.image.is_some()) else { return 0 };
         if epoch != self.state.document_file.epoch { return 0; }
-        if let Err(error) = self.apply_paper_texture(layer, layer_core::TextureSource::Image(image)) {
+        if let Err(error) = self.apply_paper_texture(layer, Some(layer_core::TextureSource::Image(image))) {
             self.notify(error);
         }
         regions::DOCUMENT

@@ -94,13 +94,13 @@ impl NewDocumentOptions {
         Ok(())
     }
     pub fn project(self, localization: &Localizer) -> Result<Document, String> {
-        self.project_on(layer_core::paper::default_texture(), localization)
+        self.project_on(Some(layer_core::paper::default_texture()), localization)
     }
-    pub fn project_on(self, paper: layer_core::TextureSource, localization: &Localizer) -> Result<Document, String> {
+    pub fn project_on(self, paper: Option<layer_core::TextureSource>, localization: &Localizer) -> Result<Document, String> {
         self.validate().map_err(|error| error.message(localization))?;
         Ok(self.document_on(layer_core::authored::PortableId::random(), paper, localization))
     }
-    pub(crate) fn document_on(self, id: layer_core::authored::PortableId, paper: layer_core::TextureSource, localization: &Localizer) -> Document {
+    pub(crate) fn document_on(self, id: layer_core::authored::PortableId, paper: Option<layer_core::TextureSource>, localization: &Localizer) -> Document {
         let mut document = Document::new(id, self.extent[0], self.extent[1], layer_core::DocumentNames {
             paint: localization.text(MessageId::DOCUMENTS_CURRENT_INK),
             paper: localization.text(MessageId::DOCUMENTS_PAPER),
@@ -206,9 +206,9 @@ impl NewDocumentSettings {
         }
         Ok(())
     }
-    pub fn paper(&self) -> layer_core::TextureSource {
+    pub fn paper(&self) -> Option<layer_core::TextureSource> {
         self.paper.as_deref().and_then(layer_core::paper::built_in_paper)
-            .map_or_else(layer_core::paper::default_texture, |paper| paper.texture.clone())
+            .map_or_else(|| Some(layer_core::paper::default_texture()), |paper| paper.texture.clone())
     }
 }
 
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(drawing.texture, layer_core::paper::default_texture());
         assert!((drawing.mapping.0[0] - 150. / 25.4).abs() < 1e-12);
         settings.paper = Some("rough".into());
-        assert_eq!(surface(&settings).texture, layer_core::paper::built_in_paper("rough").unwrap().texture);
+        assert_eq!(surface(&settings).texture, layer_core::paper::built_in_paper("rough").unwrap().texture.clone().unwrap());
         settings.paper = Some("deleted".into());
         assert_eq!(surface(&settings).texture, layer_core::paper::default_texture());
         assert_eq!(NewDocumentOptions { resolution: 0, ..options }.validate(), Err(NewDocumentError::Resolution));

@@ -276,7 +276,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
     val height = extent.getDouble(1).coerceAtLeast(1.0)
     val side = minOf(fit.width, fit.height).value.toDouble()
     val scale = minOf(side / maxOf(width, height), fit.width.value / width, fit.height.value / height)
-    val texture = if (sheet.isNull("texture")) null else sheet.getString("texture")
+    val texture = if (sheet.isNull("grain")) null else sheet.getString("grain")
     if (texture != null) LaunchedEffect(host, texture) { host.paperPreviews.load(texture) }
     val image = texture?.let { host.paperPreviews.grain(it) }
     val tile = with(LocalDensity.current) { grain.toPx() }

@@ -1778,7 +1778,7 @@ class AndroidCanvasBarBenchmarkTest {
                 action(obj("type" to "set_layer_visibility", "id" to paper, "visible" to true))
                 action(obj("type" to "select_layer", "id" to paper))
                 fun effect(op: JSONObject) = action(obj("type" to "effect", "action" to op))
-                effect(obj("op" to "set", "layer" to paper, "key" to "texture", "value" to obj("kind" to "choice", "value" to 1)))
+                effect(obj("op" to "set", "layer" to paper, "key" to "texture", "value" to obj("kind" to "choice", "value" to 2)))
                 effect(obj("op" to "set", "layer" to paper, "key" to "relief", "value" to obj("kind" to "number", "value" to 100)))
                 action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "properties", "visible" to true)))
                 val group = host.panelGroup("properties")

@@ -648,7 +648,7 @@ struct NewDrawingSheet: View {
     var body: some View {
         let width = CGFloat(max(1, sheet["extent"][0].number)), height = CGFloat(max(1, sheet["extent"][1].number))
         let scale = min(min(fit.width, fit.height) / max(width, height), fit.width / width, fit.height / height)
-        let shown = sheet["shown"].bool, texture = sheet["texture"].raw as? String
+        let shown = sheet["shown"].bool, texture = sheet["grain"].raw as? String
         ZStack {
             ColorSwatch(rgba: shown ? ColorUI.preview(sheet["color"])["rgba"] : JSON([0, 0, 0, 0]))
             if let texture, let image = previews.grains[texture] {

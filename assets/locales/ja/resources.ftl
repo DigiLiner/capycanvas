@@ -688,6 +688,7 @@ resources-layer-group-properties = グループのプロパティ
 resources-layer-all-layers = すべてのレイヤー
 resources-layer-swipe-lock = ロック
 resources-layer-swipe-unlock = ロック解除
+resources-paper-none = なし
 resources-paper-add = ライブラリに追加
 resources-paper-asphalt = アスファルト
 resources-paper-bristol = ケント紙

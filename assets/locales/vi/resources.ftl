@@ -572,6 +572,7 @@ resources-layer-group-properties = Thuộc tính nhóm
 resources-layer-all-layers = Tất cả lớp
 resources-layer-swipe-lock = Khóa
 resources-layer-swipe-unlock = Mở khóa
+resources-paper-none = Không có
 resources-paper-add = Thêm vào thư viện
 resources-paper-asphalt = Nhựa đường
 resources-paper-bristol = Bristol

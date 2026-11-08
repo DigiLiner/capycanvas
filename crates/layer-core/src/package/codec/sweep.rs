@@ -29,7 +29,7 @@ fn nondefault(mut instance: EffectInstance) -> EffectInstance {
                 vec![EffectValue::Gradient(gradient)]
             },
             (EffectParameterKind::Lut3d, _) => vec![EffectValue::Lut3d(Some(Arc::new(Lut3d::from_samples(2, [[0.;3],[1.;3]], "Exact table".into(), vec![[0.125,0.75,0.5];8].into()).unwrap())))],
-            (EffectParameterKind::Texture, _) => vec![EffectValue::Texture(TextureSource::Program(nondefault(EffectInstance::new(crate::bundled_texture_catalog().filters()[0].program()))))],
+            (EffectParameterKind::Texture, _) => vec![EffectValue::Texture(Some(TextureSource::Program(nondefault(EffectInstance::new(crate::bundled_texture_catalog().filters()[0].program())))))],
             _ => panic!("unsupported parameter {}.{}", instance.program.id, parameter.key),
         };
         assert!(candidates.into_iter().any(|value| instance.set(&parameter.key, value).is_ok() && instance.value(&parameter.key) != Some(&parameter.default)),
@@ -85,12 +85,15 @@ pub(super) fn generate(directory: &Path) {
     }
     for texture in crate::bundled_texture_catalog().filters().iter().skip(1) {
         let mut paper = EffectInstance::new(crate::bundled_effect_catalog().get(crate::paper::PAPER_PROGRAM).unwrap().program());
-        paper.set("texture", EffectValue::Texture(TextureSource::Program(nondefault(EffectInstance::new(texture.program()))))).unwrap();
+        paper.set("texture", EffectValue::Texture(Some(TextureSource::Program(nondefault(EffectInstance::new(texture.program())))))).unwrap();
         effect(&mut filters, paper, texture.id());
     }
     let mut paper = EffectInstance::new(crate::bundled_effect_catalog().get(crate::paper::PAPER_PROGRAM).unwrap().program());
-    paper.set("texture", EffectValue::Texture(TextureSource::Image(image(SourceChannels::Gray, SampleDepth::U8, ColorProfile::Builtin(RgbSpace::Srgb), false)))).unwrap();
+    paper.set("texture", EffectValue::Texture(Some(TextureSource::Image(image(SourceChannels::Gray, SampleDepth::U8, ColorProfile::Builtin(RgbSpace::Srgb), false))))).unwrap();
     effect(&mut filters, paper, "image texture");
+    let mut paper = EffectInstance::new(crate::bundled_effect_catalog().get(crate::paper::PAPER_PROGRAM).unwrap().program());
+    paper.set("texture", EffectValue::Texture(None)).unwrap();
+    effect(&mut filters, paper, "no texture");
     save(directory, "filters.capy", &filters);
 
     let mut layers = Artwork::new([64;2]).unwrap();
@@ -226,11 +229,11 @@ pub(super) fn check(directory: &Path) {
     }
     let mut seen: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     let mut add = |label, value: Value| { seen.entry(label).or_default().insert(value.to_string()); };
-    fn textures(value: &Value) -> bool {
-        if value["kind"] == "texture" && value["value"].get("image").is_some() { return true; }
-        match value { Value::Object(values) => values.values().any(textures), Value::Array(values) => values.iter().any(textures), _ => false }
+    fn textures(value: &Value, form: &str) -> bool {
+        if value["kind"] == "texture" && value["value"].get(form).is_some() { return true; }
+        match value { Value::Object(values) => values.values().any(|v| textures(v, form)), Value::Array(values) => values.iter().any(|v| textures(v, form)), _ => false }
     }
-    assert!(records.iter().any(textures), "missing image texture");
+    for form in ["image", "none"] { assert!(records.iter().any(|v| textures(v, form)), "missing {form} texture"); }
     for record in &records {
         let data = &record["data"];
         match record["type"].as_str().unwrap() {

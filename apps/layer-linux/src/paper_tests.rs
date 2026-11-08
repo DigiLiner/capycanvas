@@ -24,8 +24,11 @@ fn shade(w: &Rc<Workspace>, origin: [f32; 2], pressure: f32) {
     pump(200);
 }
 
-fn texture(w: &Rc<Workspace>) -> layer_core::TextureSource {
-    ui_session(w).engine().document().paper(None).texture
+fn texture(w: &Rc<Workspace>) -> Option<layer_core::TextureSource> {
+    let session = ui_session(w);
+    let doc = session.engine().document();
+    doc.scene().effect(doc.bottom_paper().unwrap()).unwrap().values.iter().find_map(|value|
+        match value { EffectValue::Texture(texture) => Some(texture.clone()), _ => None }).unwrap()
 }
 
 fn texture_dialog(w: &Rc<Workspace>, opener: &gtk::Button) -> (adw::Dialog, gtk::FlowBox) {
@@ -79,7 +82,7 @@ pub(super) fn import_scan(w: &Rc<Workspace>, dialog: &adw::Dialog, path: &std::p
     file.set_file(&gtk::gio::File::for_path(path)).unwrap();
     pump(150);
     file.response(gtk::ResponseType::Accept);
-    until(|| matches!(texture(w), layer_core::TextureSource::Image(_)), "the imported paper is applied");
+    until(|| matches!(texture(w), Some(layer_core::TextureSource::Image(_))), "the imported paper is applied");
 }
 
 pub(super) fn paper_tile_menu(grid: &gtk::FlowBox, index: i32, label: &str) {
@@ -142,16 +145,16 @@ fn native_paper_picker_relief_and_scale() {
     assert_eq!(texture_button(&dialog, "import").label().as_deref(), Some("Import…"));
     assert_eq!(texture_button(&dialog, "apply").label().as_deref(), Some("Use Texture"));
     let before = ui_session(&w).engine().checkpoint();
-    grid.select_child(&grid.child_at_index(2).unwrap());
+    grid.select_child(&grid.child_at_index(index("rough")).unwrap());
     click(&texture_button(&dialog, "cancel"));
     until(|| !dialog.is_mapped(), "Cancel closes Choose Texture");
     assert_eq!(ui_session(&w).engine().checkpoint(), before, "Cancel changes nothing");
     let (dialog, grid) = texture_dialog(&w, &button);
     assert_eq!(content_size(&dialog), size);
     assert_eq!(pending(&grid), drawing(), "a cancelled choice is not kept");
-    grid.select_child(&grid.child_at_index(2).unwrap());
+    grid.select_child(&grid.child_at_index(index("rough")).unwrap());
     save_snapshot(&w, 100, || path("texture-dialog-chosen"));
-    assert_eq!(texture(&w), layer_core::paper::default_texture(), "nothing changes before Use Texture");
+    assert_eq!(texture(&w), Some(layer_core::paper::default_texture()), "nothing changes before Use Texture");
     click(&texture_button(&dialog, "apply"));
     until(|| !dialog.is_mapped(), "Use Texture closes Choose Texture");
     assert_eq!(texture(&w), layer_core::paper::built_in_paper("rough").unwrap().texture);
@@ -167,6 +170,29 @@ fn native_paper_picker_relief_and_scale() {
     assert_eq!(state(&w).layer_properties.controls[2].value, EffectValue::Number(2.));
     save_snapshot(&w, 50, || path("paper-relief-scaled"));
     pump(1800);
+
+    for (key, value) in [("relief", 150.), ("through_paint", 40.)] {
+        w.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Set { layer: paper, key: key.into(), value: EffectValue::Number(value) } });
+    }
+    let kept = state(&w).layer_properties.controls;
+    let (dialog, grid) = texture_dialog(&w, &button);
+    grid.select_child(&grid.child_at_index(index(layer_core::paper::NO_TEXTURE)).unwrap());
+    click(&texture_button(&dialog, "apply"));
+    until(|| !dialog.is_mapped(), "None closes Choose Texture");
+    ready(&w);
+    assert_eq!(texture(&w), None);
+    assert!(!ui_session(&w).engine().backend().has_paper_overlay());
+    let controls = state(&w).layer_properties.controls;
+    assert_eq!(controls.iter().map(|control| control.disabled).collect::<Vec<_>>(), [false, false, true, true, true, true]);
+    for control in &controls[2..] {
+        assert_eq!(control.value, kept.iter().find(|previous| previous.key == control.key).unwrap().value);
+        assert!(!named::<gtk::Widget>(w.window.upcast_ref(), &format!("property-{}", control.key)).is_sensitive());
+    }
+    save_snapshot(&w, 200, || path("paper-none"));
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    ready(&w);
+    assert_eq!(texture(&w), layer_core::paper::built_in_paper("rough").unwrap().texture);
+    for _ in 0..2 { w.dispatch(UiAction::Invoke { command: CommandId::Undo }); }
 
     let scan = directory.join("cotton-rag.png");
     save_scan(&scan);
@@ -198,7 +224,7 @@ fn native_paper_picker_relief_and_scale() {
     paper_tile_menu(&grid, built_in(), "Delete");
     until(|| tiles().len() == built_in() as usize + 1 && tiles()[0].label.as_ref() == "This drawing’s paper" && caption(0) == "This drawing’s paper", "the drawing keeps its deleted paper");
     assert_eq!(pending(&grid), Some(0), "the choice follows the drawing's paper");
-    assert!(matches!(texture(&w), layer_core::TextureSource::Image(_)));
+    assert!(matches!(texture(&w), Some(layer_core::TextureSource::Image(_))));
     save_snapshot(&w, 200, || path("texture-dialog-own"));
     paper_tile_menu(&grid, 0, "Add to Library");
     until(|| tiles().len() == built_in() as usize + 1 && tiles()[built_in() as usize].label.as_ref() == state(&w).document_file.title(), "the drawing's paper returns to the library");
@@ -222,7 +248,7 @@ fn native_paper_picker_relief_and_scale() {
     for _ in 0..3 { w.dispatch(UiAction::Invoke { command: CommandId::Undo }); }
     ready(&w);
     assert_eq!(ui_session(&w).engine().checkpoint(), before, "the import, Scale and the choice are one step each");
-    assert_eq!(texture(&w), layer_core::paper::default_texture());
+    assert_eq!(texture(&w), Some(layer_core::paper::default_texture()));
 
     let row = || state(&w).layers.into_iter().find(|row| row.id == paper).unwrap();
     assert_eq!(row().paper.unwrap().label.as_ref(), "Fine tooth");
@@ -566,7 +592,7 @@ fn native_paper_lighting() {
     shade(&w, [180., 200.], 0.45);
     let paper = layer_ui::occurrence_token(layer_core::paper::paper_occurrence(ui_session(&w).engine().document().scene(), None).unwrap());
     w.dispatch(UiAction::SelectLayer { id: paper });
-    w.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Set { layer: paper, key: "texture".into(), value: EffectValue::Choice(1) } });
+    w.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Set { layer: paper, key: "texture".into(), value: EffectValue::Choice(index("cold_press") as u32) } });
     ready(&w);
     pump(2000);
     let control = |key: &str| named::<crate::number_control::NumberControl>(w.window.upcast_ref(), &format!("property-{key}"));

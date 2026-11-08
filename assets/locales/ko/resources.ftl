@@ -688,6 +688,7 @@ resources-layer-group-properties = 그룹 속성
 resources-layer-all-layers = 모든 레이어
 resources-layer-swipe-lock = 잠금
 resources-layer-swipe-unlock = 잠금 해제
+resources-paper-none = 없음
 resources-paper-add = 라이브러리에 추가
 resources-paper-asphalt = 아스팔트
 resources-paper-bristol = 켄트지

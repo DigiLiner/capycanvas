@@ -84,7 +84,7 @@ fn paper_relief_shades_only_the_canvas_and_leaves_no_trace() {
     };
     let baseline = present(&r);
     let paper = layer_core::paper::PaperBinding { surface: std::sync::Arc::new(layer_core::paper::PaperSurface {
-        texture: layer_core::paper::built_in_paper("rough").unwrap().texture.clone(),
+        texture: layer_core::paper::built_in_paper("rough").unwrap().texture.clone().unwrap(),
         mapping: layer_core::paper::reference([128; 2], [300.; 2]).mapping,
     }), target_offset: [0; 2] };
     r.set_paper_overlay(Some(layer_render::PaperOverlay { paper: paper.clone(), opacity: 1., moving: false }));
@@ -130,7 +130,7 @@ fn staged_paper_relief_follows_a_new_scale_at_once_and_reports_only_its_own_bake
     };
     let baseline = present(&r).0;
     let paper = |scale: f64| layer_core::paper::PaperBinding { surface: std::sync::Arc::new(layer_core::paper::PaperSurface {
-        texture: layer_core::paper::built_in_paper("rough").unwrap().texture.clone(),
+        texture: layer_core::paper::built_in_paper("rough").unwrap().texture.clone().unwrap(),
         mapping: layer_core::paper::with_scale(&layer_core::paper::reference([128; 2], [300.; 2]), scale, [300.; 2]).mapping,
     }), target_offset: [0; 2] };
     let shading = |pixels: &[u8]| (34..94).flat_map(|y| (34..94).map(move |x| (y * 128 + x) * 4))

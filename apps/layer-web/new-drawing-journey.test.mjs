@@ -203,6 +203,7 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
     let paper=await drawer();
     assert.equal(paper.tiles[0].id??null,null,'No paper comes first');
+    assert.equal(paper.tiles[1].id,'none','None follows No paper');
     assert.equal(await evaluate(`!!document.querySelector('#new-drawing-papers [data-new-drawing-paper="0"] svg')`),true,'No paper shows its icon');
     const reliefField='#new-drawing-paper-relief-field input';
     const paperDrawer=await evaluate(`(()=>{const grid=document.querySelector('#new-drawing-papers'),tile=grid.lastElementChild,field=document.querySelector('#new-drawing-paper-relief-field'),box=n=>Math.round(n.getBoundingClientRect().height);
@@ -235,6 +236,14 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     await capture(`${theme}-6b-no-paper`);
     await evaluate(`(()=>{const body=document.querySelector('#new-drawing-paper-drawer .new-drawing-drawer-body');body.scrollTop=body.scrollHeight;})()`);
     await capture(`${theme}-6c-import`);
+    await click('#new-drawing-papers [data-new-drawing-paper="1"]');
+    assert.equal((await drawer()).relief.enabled,false,'None disables Texture visibility');
+    await click('#new-drawing-paper-use');await shut('new-drawing-paper-drawer');
+    const plain=await view();
+    assert.deepEqual([plain.sheet.texture,plain.sheet.grain,plain.sheet.shown,plain.paper_color_enabled,plain.page.relief],['none',null,true,true,null]);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.new-drawing-main .new-drawing-grain')).backgroundImage`),'none','None draws no sheet grain');
+    await capture(`${theme}-6d-none`);
+    await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
     const cold=paper.tiles.findIndex(t=>t.id==='cold_press');
     await click(`#new-drawing-papers [data-new-drawing-paper="${cold}"]`);
     assert.equal(await evaluate(`${node(`#new-drawing-papers [data-new-drawing-paper="${cold}"]`)}.getAttribute('aria-checked')`),'true','Clicking a paper picks it');

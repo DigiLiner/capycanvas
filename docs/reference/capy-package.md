@@ -362,7 +362,7 @@ Effect `values` maps stable parameter keys to `{kind,value}` values: `number`
 (F32), `toggle` (boolean), `choice` (stable option string), `color` (portable
 color), `curve` (ordered `[x,y]` pairs), `gradient` (`stops`, an ordered array of
 `{position,color}`, and `interpolation`: `classic`, `linear_rgb` or `oklab`), `lut3d` (`{"resource":{"ref":"…"},"title":"…"}` or explicit
-null), or `texture`. A texture is a built-in
+null), or `texture`. A texture is `{"none":{}}` for no texture, a built-in
 [texture program](../development/texture-programs.md) with all its values,
 `{"builtin":"watercolor","version":1,"values":{…}}`, or an image,
 `{"image":{"ref":"…"}}`, naming a `capy.image/1` record with gray U8 samples, a

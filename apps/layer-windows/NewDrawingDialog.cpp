@@ -70,7 +70,7 @@ struct SheetArt {
         auto bounds=winrt::Windows::Foundation::Rect{float((root.Width()-w)/2),float((root.Height()-h)/2),float(w),float(h)};
         nearShadow.Rounded(float(w),float(h),{0,0,0,0},2,1,.18f);farShadow.Rounded(float(w),float(h),{0,0,0,0},mini?3.f:14.f,mini?1.f:4.f,mini?.16f:.14f);nearShadow.Layout(bounds,1,!mini);farShadow.Layout(bounds,0,true);
         ring.Visibility(mini?Visibility::Visible:Visibility::Collapsed);ring.Width(w+2);ring.Height(h+2);Canvas::SetLeft(ring,bounds.X-1);Canvas::SetTop(ring,bounds.Y-1);
-        auto texture=view.GetNamedValue(L"texture",JsonValue::CreateNullValue());
+        auto texture=view.GetNamedValue(L"grain",JsonValue::CreateNullValue());
         ImageSource source{nullptr};
         if(texture.ValueType()==JsonValueType::String)source=paperPreview(data,texture.GetString()).source;
         auto key=texture.Stringify()+L"/"+to_hstring(w)+L"x"+to_hstring(h)+(source?L"/ready":L"");

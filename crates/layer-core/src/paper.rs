@@ -8,6 +8,7 @@ pub const LIGHT: &str = "light";
 pub const THROUGH_PAINT: &str = "through_paint";
 const LIGHTING: [&str; 3] = [RELIEF, LIGHT, THROUGH_PAINT];
 pub const DEFAULT_PAPER: &str = "drawing_paper";
+pub const NO_TEXTURE: &str = "none";
 pub const DEFAULT_PAPER_PPI: f64 = 300.;
 const MINIMUM_IMAGE_PPI: f64 = 150.;
 const MM_PER_INCH: f64 = 25.4;
@@ -42,21 +43,24 @@ const BUILT_IN_PREVIEWS: &[u8] = include_bytes!("../../../assets/filters/paper_p
 pub struct BuiltInPaper {
     pub id: Arc<str>,
     pub label: ResourceLabel,
-    pub texture: TextureSource,
+    pub texture: Option<TextureSource>,
     pub preview: Arc<[u8]>,
 }
 
 pub fn built_in_papers() -> &'static [BuiltInPaper] {
     static PAPERS: std::sync::OnceLock<Vec<BuiltInPaper>> = std::sync::OnceLock::new();
-    PAPERS.get_or_init(|| crate::bundled_texture_catalog().filters().iter()
+    PAPERS.get_or_init(|| std::iter::once(BuiltInPaper {
+        id: NO_TEXTURE.into(), label: ResourceLabel::Message { message: "resources-paper-none".into() },
+        texture: None, preview: preview(&vec![0.; 4 * PREVIEW_SIZE * PREVIEW_SIZE]).into(),
+    }).chain(crate::bundled_texture_catalog().filters().iter()
         .flat_map(|definition| definition.presets.iter().map(move |preset| (definition, preset)))
         .zip(BUILT_IN_PREVIEWS.as_chunks::<{ PREVIEW_SIZE * PREVIEW_SIZE }>().0)
         .map(|((definition, preset), preview)| BuiltInPaper {
             id: preset.id.clone(),
             label: preset.label.clone(),
-            texture: TextureSource::Program(definition.preset(preset).expect("bundled paper")),
+            texture: Some(TextureSource::Program(definition.preset(preset).expect("bundled paper"))),
             preview: Arc::from(&preview[..]),
-        })
+        }))
         .collect())
 }
 
@@ -85,7 +89,7 @@ pub fn built_in_paper(id: &str) -> Option<&'static BuiltInPaper> {
 }
 
 pub fn default_texture() -> TextureSource {
-    built_in_paper(DEFAULT_PAPER).expect("bundled default paper").texture.clone()
+    built_in_paper(DEFAULT_PAPER).expect("bundled default paper").texture.clone().expect("default paper texture")
 }
 
 pub fn reference(size: [u32; 2], ppi: [f64; 2]) -> EffectSpatialReference {
@@ -143,7 +147,7 @@ impl PaperLight {
 }
 
 pub fn light(effect: EffectView<'_>) -> Option<PaperLight> {
-    if !is_paper(effect.program) { return None; }
+    if !is_paper(effect.program) || matches!(effect.value("texture"), Some(EffectValue::Texture(None))) { return None; }
     let number = |key| match effect.value(key)? { EffectValue::Number(v) => Some(*v), _ => None };
     Some(PaperLight { relief: number(RELIEF)? / 100., angle: number(LIGHT)?, through_paint: number(THROUGH_PAINT)? / 100. })
 }
@@ -191,7 +195,7 @@ pub fn surface(scene: SceneView<'_>, occurrence: OccurrenceHandle) -> Option<Pap
 
 fn texture(application: &EffectApplication) -> Option<&TextureSource> {
     if !is_paper(&application.program) { return None; }
-    application.values.iter().find_map(|value| match value { EffectValue::Texture(texture) => Some(texture), _ => None })
+    application.values.iter().find_map(|value| match value { EffectValue::Texture(texture) => texture.as_ref(), _ => None })
 }
 
 pub fn paper_occurrence(scene: SceneView<'_>, from: Option<OccurrenceHandle>) -> Option<OccurrenceHandle> {
@@ -243,7 +247,7 @@ impl crate::Document {
     pub fn paper_binding(&self, target: SourceTarget) -> PaperBinding {
         PaperBinding { surface: Arc::new(self.paper(Some(target))), target_offset: self.target_offset(target) }
     }
-    pub fn set_paper_texture(&mut self, texture: TextureSource) {
+    pub fn set_paper_texture(&mut self, texture: Option<TextureSource>) {
         let Some(handle) = paper_occurrence(self.scene(), None).and_then(|h| self.scene().effect_handle(h)) else { return };
         for value in &mut self.artwork.effects.get_mut(handle).expect("listed paper").values {
             if let EffectValue::Texture(current) = value { *current = texture.clone(); }
@@ -300,6 +304,26 @@ mod tests {
     use crate::{Document, DocumentNames, ResolutionUnit, authored::PortableId};
     fn document() -> Document {
         Document::new(PortableId::random(), 300, 200, DocumentNames { paint: "Ink".into(), paper: "Paper".into() })
+    }
+    #[test]
+    fn paper_without_texture_is_a_plain_fill() {
+        let mut doc = document();
+        doc.set_paper_texture(None);
+        doc.set_paper_relief(150.);
+        let paper = doc.bottom_paper().unwrap();
+        let handle = doc.scene().effect_handle(paper).unwrap();
+        let application = doc.artwork.effects.get_mut(handle).unwrap();
+        let index = application.program.parameters.iter().position(|p| p.key.as_ref() == THROUGH_PAINT).unwrap();
+        application.values[index] = EffectValue::Number(40.);
+        let target = doc.drawing_target().unwrap();
+        assert!(doc.scene().visible(paper));
+        assert_eq!(doc.scene().effect(paper).unwrap().constant_color(), Some(crate::color::RgbColor::WHITE));
+        assert_eq!(surface(doc.scene(), paper), None);
+        assert_eq!(light(doc.scene().effect(paper).unwrap()), None);
+        assert_eq!(lit_paper(doc.scene()), None);
+        assert_eq!(separate_paper(doc.scene()), None);
+        assert_eq!(doc.nearest_paper_binding(Some(target)), None);
+        assert_eq!(doc.paper_binding(target), doc.clone().without_paper().unwrap().paper_binding(target));
     }
     #[test]
     fn drawings_map_paper_at_their_resolution_and_image_files_below_print_count_as_print() {

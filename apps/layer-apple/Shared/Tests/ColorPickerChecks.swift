@@ -60,7 +60,7 @@ extension XCTestCase {
         workspaceActivate(app.buttons["new-drawing-color-use"])
         expectNewDrawingValue("new-drawing-paper-color", "White", in: app)
         workspaceActivate(app.buttons["new-drawing-texture"])
-        workspaceActivate(app.buttons["new-drawing-paper-tile-2"])
+        workspaceActivate(app.buttons["new-drawing-paper-tile-3"])
         enterNewDrawingNumber("paper-relief", "0", in: app)
         workspaceActivate(app.buttons["new-drawing-paper-use"])
         createNewDrawing(width: "2400", height: "1800", depth: 0, in: app)

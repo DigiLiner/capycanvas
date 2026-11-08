@@ -1000,6 +1000,7 @@ resources-layer-group-properties = Properti grup
 resources-layer-all-layers = Semua lapisan
 resources-layer-swipe-lock = Kunci
 resources-layer-swipe-unlock = Buka kunci
+resources-paper-none = Tidak ada
 resources-paper-add = Tambahkan ke Pustaka
 resources-paper-asphalt = Aspal
 resources-paper-bristol = Bristol
