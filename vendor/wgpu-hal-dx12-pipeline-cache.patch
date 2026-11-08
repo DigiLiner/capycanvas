@@ -1,0 +1,214 @@
+diff --git a/wgpu-hal/src/dx12/adapter.rs b/wgpu-hal/src/dx12/adapter.rs
+index 621eea4ca..108f276c1 100644
+--- a/wgpu-hal/src/dx12/adapter.rs
++++ b/wgpu-hal/src/dx12/adapter.rs
+@@ -460,0 +461 @@ impl super::Adapter {
++            | wgt::Features::PIPELINE_CACHE
+diff --git a/wgpu-hal/src/dx12/device.rs b/wgpu-hal/src/dx12/device.rs
+index bbc4eabdb..75fdfdd21 100644
+--- a/wgpu-hal/src/dx12/device.rs
++++ b/wgpu-hal/src/dx12/device.rs
+@@ -10 +10,4 @@ use core::{ffi, num::NonZeroU32, ptr, time::Duration};
+-use std::time::Instant;
++use std::{
++    hash::{DefaultHasher, Hash, Hasher},
++    time::Instant,
++};
+@@ -39,0 +43,45 @@ const NAGA_LOCATION_SEMANTIC: &[u8] = c"LOC".to_bytes();
++fn pipeline_cache_key(value: &impl Hash) -> [u8; 16] {
++    let mut key = [0; 16];
++    for (chunk, prefix) in key.chunks_exact_mut(8).zip([0u64, 1]) {
++        let mut hash = DefaultHasher::new();
++        prefix.hash(&mut hash);
++        value.hash(&mut hash);
++        chunk.copy_from_slice(&hash.finish().to_le_bytes());
++    }
++    key
++}
++
++impl super::PipelineCache {
++    fn from_data(mut data: &[u8]) -> Self {
++        let mut shaders = super::HashMap::new();
++        while !data.is_empty() {
++            let Some((header, rest)) = data.split_at_checked(20) else {
++                return Self::default();
++            };
++            let key = header[..16].try_into().unwrap();
++            let length = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
++            let Some((bytecode, rest)) = rest.split_at_checked(length) else {
++                return Self::default();
++            };
++            shaders.insert(key, bytecode.to_vec());
++            data = rest;
++        }
++        Self {
++            shaders: Mutex::new(shaders),
++        }
++    }
++
++    fn data(&self) -> Option<Vec<u8>> {
++        let shaders = self.shaders.lock();
++        let mut entries: Vec<_> = shaders.iter().collect();
++        entries.sort_unstable_by_key(|(key, _)| **key);
++        let mut data = Vec::new();
++        for (key, bytecode) in entries {
++            data.extend_from_slice(key);
++            data.extend_from_slice(&u32::try_from(bytecode.len()).ok()?.to_le_bytes());
++            data.extend_from_slice(bytecode);
++        }
++        Some(data)
++    }
++}
++
+@@ -288,0 +337 @@ impl super::Device {
++        cache: Option<&super::PipelineCache>,
+@@ -420,16 +469,28 @@ impl super::Device {
+-        let source_name = stage.module.raw_name.as_deref();
+-
+-        let full_stage = format!(
+-            "{}_{}",
+-            naga::back::hlsl::shader_stage_to_hlsl_str(naga_stage),
+-            key.shader_model.to_str()
+-        );
+-
+-        let compiled_shader = self.compiler_container.compile(
+-            self,
+-            &key.source,
+-            source_name,
+-            &key.entry_point,
+-            stage_bit,
+-            &full_stage,
+-        )?;
++        let saved_key = pipeline_cache_key(&key);
++        let saved = cache.and_then(|cache| cache.shaders.lock().get(&saved_key).cloned());
++        let compiled_shader = if let Some(bytecode) = saved {
++            super::CompiledShader::Precompiled(bytecode)
++        } else {
++            let source_name = stage.module.raw_name.as_deref();
++            let full_stage = format!(
++                "{}_{}",
++                naga::back::hlsl::shader_stage_to_hlsl_str(naga_stage),
++                key.shader_model.to_str()
++            );
++            let shader = self.compiler_container.compile(
++                self,
++                &key.source,
++                source_name,
++                &key.entry_point,
++                stage_bit,
++                &full_stage,
++            )?;
++            if let Some(cache) = cache {
++                let native = shader.create_native_shader();
++                let bytecode = unsafe {
++                    core::slice::from_raw_parts(native.pShaderBytecode.cast::<u8>(), native.BytecodeLength)
++                };
++                cache.shaders.lock().insert(saved_key, bytecode.to_vec());
++            }
++            shader
++        };
+@@ -1962 +2023 @@ impl crate::Device for super::Device {
+-                Some(self.load_shader(stage, desc.layout, naga::ShaderStage::Fragment, None)?)
++                Some(self.load_shader(stage, desc.layout, naga::ShaderStage::Fragment, None, desc.cache)?)
+@@ -2074,0 +2136 @@ impl crate::Device for super::Device {
++                    desc.cache,
+@@ -2139,0 +2202 @@ impl crate::Device for super::Device {
++                        desc.cache,
+@@ -2154,0 +2218 @@ impl crate::Device for super::Device {
++                    desc.cache,
+@@ -2207,2 +2271,7 @@ impl crate::Device for super::Device {
+-        let blob_cs =
+-            self.load_shader(&desc.stage, desc.layout, naga::ShaderStage::Compute, None)?;
++        let blob_cs = self.load_shader(
++            &desc.stage,
++            desc.layout,
++            naga::ShaderStage::Compute,
++            None,
++            desc.cache,
++        )?;
+@@ -2272 +2341 @@ impl crate::Device for super::Device {
+-        _desc: &crate::PipelineCacheDescriptor<'_>,
++        desc: &crate::PipelineCacheDescriptor<'_>,
+@@ -2274 +2343,16 @@ impl crate::Device for super::Device {
+-        Ok(super::PipelineCache)
++        Ok(super::PipelineCache::from_data(desc.data.unwrap_or_default()))
++    }
++    fn pipeline_cache_validation_key(&self) -> Option<[u8; 16]> {
++        let compiler = match &*self.compiler_container {
++            shader_compilation::CompilerContainer::Fxc(_) => "fxc",
++            shader_compilation::CompilerContainer::DynamicDxc(_) => "dynamic dxc",
++            shader_compilation::CompilerContainer::StaticDxc(_) => "static dxc",
++        };
++        Some(pipeline_cache_key(&(
++            "wgpu-hal dx12 dxil v1",
++            compiler,
++            self.shared.private_caps.shader_model,
++        )))
++    }
++    unsafe fn pipeline_cache_get_data(&self, cache: &super::PipelineCache) -> Option<Vec<u8>> {
++        cache.data()
+@@ -2692,0 +2777,53 @@ impl crate::Device for super::Device {
++
++#[cfg(test)]
++mod pipeline_cache_tests {
++    use super::*;
++    use super::super::PipelineCache;
++
++    #[test]
++    fn pipeline_cache_records_roundtrip_in_key_order() {
++        let cache = PipelineCache::default();
++        cache.shaders.lock().insert([2; 16], vec![3]);
++        cache.shaders.lock().insert([1; 16], vec![4, 5]);
++        let expected = [
++            &[1u8; 16][..], &2u32.to_le_bytes(), &[4, 5],
++            &[2u8; 16], &1u32.to_le_bytes(), &[3],
++        ].concat();
++        assert_eq!(cache.data().unwrap(), expected);
++        let loaded = PipelineCache::from_data(&expected);
++        assert_eq!(*loaded.shaders.lock(), *cache.shaders.lock());
++        assert_eq!(loaded.data().unwrap(), expected);
++        assert!(PipelineCache::from_data(&[]).shaders.lock().is_empty());
++    }
++
++    #[test]
++    fn malformed_pipeline_cache_records_discard_the_whole_cache() {
++        let valid = [&[1u8; 16][..], &3u32.to_le_bytes(), b"abc"].concat();
++        for length in 1..valid.len() {
++            assert!(PipelineCache::from_data(&valid[..length]).shaders.lock().is_empty());
++        }
++        for suffix in [vec![0], vec![0; 19], [&[2u8; 16][..], &u32::MAX.to_le_bytes()].concat()] {
++            let bytes = [valid.clone(), suffix].concat();
++            assert!(PipelineCache::from_data(&bytes).shaders.lock().is_empty());
++        }
++    }
++
++    #[test]
++    fn shader_keys_are_deterministic_and_include_every_field() {
++        let shader = || ShaderCacheKey {
++            source: "source".into(), entry_point: "main".into(),
++            stage: naga::ShaderStage::Compute, shader_model: naga::back::hlsl::ShaderModel::V6_0,
++        };
++        let key = pipeline_cache_key(&shader());
++        assert_eq!(key, pipeline_cache_key(&shader()));
++        assert_ne!(key[..8], key[8..]);
++        for changed in [
++            ShaderCacheKey { source: "other source".into(), ..shader() },
++            ShaderCacheKey { entry_point: "other_entry".into(), ..shader() },
++            ShaderCacheKey { stage: naga::ShaderStage::Vertex, ..shader() },
++            ShaderCacheKey { shader_model: naga::back::hlsl::ShaderModel::V6_1, ..shader() },
++        ] {
++            assert_ne!(key, pipeline_cache_key(&changed));
++        }
++    }
++}
+diff --git a/wgpu-hal/src/dx12/mod.rs b/wgpu-hal/src/dx12/mod.rs
+index 5aca0c78e..c91c4d92c 100644
+--- a/wgpu-hal/src/dx12/mod.rs
++++ b/wgpu-hal/src/dx12/mod.rs
+@@ -1396,2 +1396,4 @@ impl crate::DynRayTracingPipeline for RayTracingPipeline {}
+-#[derive(Debug)]
+-pub struct PipelineCache;
++#[derive(Debug, Default)]
++pub struct PipelineCache {
++    shaders: Mutex<HashMap<[u8; 16], Vec<u8>>>,
++}

@@ -223,7 +223,7 @@ impl PipelineCacheHeader {
 
 fn adapter_key(adapter: &AdapterInfo) -> Result<[u8; 15], PipelineCacheValidationError> {
     match adapter.backend {
-        wgt::Backend::Vulkan => {
+        wgt::Backend::Vulkan | wgt::Backend::Dx12 => {
             // If these change size, the header format needs to change
             // We set the type explicitly so this won't compile in that case
             let v: [u8; 4] = adapter.vendor.to_be_bytes();
@@ -331,6 +331,17 @@ mod tests {
 
     // IMPORTANT: If these tests fail, then you MUST increment HEADER_VERSION
     const VALIDATION_KEY: [u8; 16] = u128::to_be_bytes(0xFFFFFFFF_FFFFFFFF_88888888_88888888);
+    #[test]
+    fn dx12_data_round_trips_and_rejects_a_matching_vulkan_adapter() {
+        let dx12 = AdapterInfo { backend: wgt::Backend::Dx12, ..ADAPTER };
+        let data = b"compiled DXIL";
+        let mut cache = Vec::from([0; HEADER_LENGTH]);
+        super::add_cache_header(&mut cache, data, &dx12, VALIDATION_KEY);
+        cache.extend_from_slice(data);
+        assert_eq!(super::validate_pipeline_cache(&cache, &dx12, VALIDATION_KEY), Ok(data.as_slice()));
+        assert_eq!(super::validate_pipeline_cache(&cache, &ADAPTER, VALIDATION_KEY), Err(E::DeviceMismatch));
+    }
+
     #[test]
     fn written_header() {
         let mut result = [0; HEADER_LENGTH];

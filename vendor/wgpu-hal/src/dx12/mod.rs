@@ -1393,8 +1393,10 @@ pub struct RayTracingPipeline {}
 
 impl crate::DynRayTracingPipeline for RayTracingPipeline {}
 
-#[derive(Debug)]
-pub struct PipelineCache;
+#[derive(Debug, Default)]
+pub struct PipelineCache {
+    shaders: Mutex<HashMap<[u8; 16], Vec<u8>>>,
+}
 
 impl crate::DynPipelineCache for PipelineCache {}
 
