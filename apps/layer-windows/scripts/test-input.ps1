@@ -314,3 +314,19 @@ public static class CapyParkProbePointer {
 & (Join-Path $PSScriptRoot '../tests/ink-color.ps1')
 & (Join-Path $PSScriptRoot '../tests/document-invoke.ps1')
 & (Join-Path $PSScriptRoot '../tests/recovery-fixture.ps1') -Output (Join-Path $OutputDirectory ('recovery-paths-'+[guid]::NewGuid().ToString('N')))
+
+& {
+    if(!('CapyItemStatusHistory' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'ItemStatusHistory.cs') -ReferencedAssemblies @([System.Windows.Automation.AutomationElement].Assembly.Location;[System.Windows.Automation.AutomationEvent].Assembly.Location;[Collections.Generic.List[object]].Assembly.Location;[Diagnostics.Stopwatch].Assembly.Location;if($PSVersionTable.PSEdition -eq 'Core'){'System.Collections.dll';'System.Threading.dll'})}
+    $history=[CapyItemStatusHistory]::new()
+    try{
+        foreach($width in @(100,130,169,200)){
+            $change=[System.Windows.Automation.AutomationPropertyChangedEventArgs]::new([System.Windows.Automation.AutomationElement]::ItemStatusProperty,$null,('{"bounds":{"width":'+$width+'}}'))
+            $history.Record($null,$change)
+        }
+        $changes=$history.Snapshot()
+        if((($changes|ForEach-Object {($_.Status|ConvertFrom-Json).bounds.width}) -join ',') -cne '100,130,169,200'){throw 'ItemStatus history lost intermediate changes between composed grabs'}
+        $retained=$history.Snapshot()
+        $history.Record($null,[System.Windows.Automation.AutomationPropertyChangedEventArgs]::new([System.Windows.Automation.AutomationElement]::ItemStatusProperty,$null,''))
+        if($retained.Count -ne 4 -or $history.Snapshot().Count -ne 5){throw 'ItemStatus history mutated an earlier snapshot'}
+    }finally{$history.Dispose()}
+}

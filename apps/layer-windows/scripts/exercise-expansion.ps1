@@ -5,6 +5,7 @@ $script:ResizeVerticalScrollStatus='not-run'
 $script:ResizeMixedInputStatus='not-run'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 . (Join-Path $PSScriptRoot 'ComposedFrames.ps1')
+if(!('CapyItemStatusHistory' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'ItemStatusHistory.cs') -ReferencedAssemblies @([System.Windows.Automation.AutomationElement].Assembly.Location;[System.Windows.Automation.AutomationEvent].Assembly.Location;[Collections.Generic.List[object]].Assembly.Location;[Diagnostics.Stopwatch].Assembly.Location;if($PSVersionTable.PSEdition -eq 'Core'){'System.Collections.dll';'System.Threading.dll'})}
 $CapyCacheModel=$true
 Add-Type -AssemblyName System.Drawing
 if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
@@ -440,17 +441,21 @@ function Check-NarrowExpansion([string]$Panel){
     $cache.Add([System.Windows.Automation.AutomationElement]::ItemStatusProperty)
     $cache.Add([System.Windows.Automation.AutomationElement]::BoundingRectangleProperty)
     $receipts=[Collections.Generic.List[object]]::new()
-    $sample=Sample-Frames $area {
-        param($i)
-        if($i -eq 3){$menu.Invoke()}
-        $native=$group.GetUpdatedCache($cache).Cached
-        $receipts.Add([ordered]@{frame=$i;expansion=$(if($native.ItemStatus){$native.ItemStatus|ConvertFrom-Json}else{$null});native_bounds=$native.BoundingRectangle})
-    }
+    $history=[CapyItemStatusHistory]::new();$sample=$null
     try{
+        $history.Watch($group)
+        $sample=Sample-Frames $area {
+            param($i)
+            if($i -eq 3){$menu.Invoke()}
+            $native=$group.GetUpdatedCache($cache).Cached
+            $receipts.Add([ordered]@{frame=$i;expansion=$(if($native.ItemStatus){$native.ItemStatus|ConvertFrom-Json}else{$null});native_bounds=$native.BoundingRectangle})
+        }
+        $history.Dispose()
+        $changes=@($history.Snapshot())
         for($i=0;$i -lt $sample.frames.Count;$i++){$sample.frames[$i].Save((Join-Path $folder ('frame-{0:D3}.png' -f $i)))}
-        @{panel=$Panel;theme=$Theme;scale=$scale;viewport=$model.layout.viewport;docked=$docked;area=$area;action_frame=3;sample_count=$sample.frames.Count;receipts=$receipts;times=$sample.times;frequency=[Diagnostics.Stopwatch]::Frequency}|ConvertTo-Json -Depth 18|Set-Content (Join-Path $folder 'frames.json')
+        @{panel=$Panel;theme=$Theme;scale=$scale;viewport=$model.layout.viewport;docked=$docked;area=$area;action_frame=3;sample_count=$sample.frames.Count;receipts=$receipts;history=$changes;times=$sample.times;frequency=[Diagnostics.Stopwatch]::Frequency}|ConvertTo-Json -Depth 18|Set-Content (Join-Path $folder 'frames.json')
         Capture ('narrow-expansion-'+$Panel+'-final') -WithModel -Composed
-        $expanded=@($receipts|Where-Object {$_.expansion})
+        $expanded=@(foreach($change in $changes){if($change.Status){@{timestamp=$change.Timestamp;expansion=($change.Status|ConvertFrom-Json)}}})
         if(!$expanded.Count){throw 'Narrow expansion produced no native geometry samples'}
         $final=$expanded[-1].expansion
         if(@($receipts|Select-Object -Last 3|Where-Object { !$_.expansion -or ($_.expansion|ConvertTo-Json -Depth 12 -Compress) -cne ($final|ConvertTo-Json -Depth 12 -Compress)}).Count){throw 'Narrow expansion did not finish within the composed sample window'}
@@ -466,7 +471,7 @@ function Check-NarrowExpansion([string]$Panel){
             $range=$possible|Measure-Object -Minimum -Maximum
             $minimum=$docked.Height+$range.Minimum*($final.bounds.height*$scale-$docked.Height)-2
             $maximum=$docked.Height+$range.Maximum*($final.bounds.height*$scale-$docked.Height)+2
-            [ordered]@{frame=$receipt.frame;progress=$progress;height=$bounds.height*$scale;expected_height=$expected;minimum_height=$minimum;maximum_height=$maximum;error=[Math]::Abs($bounds.height*$scale-$expected);configuration_width=$receipt.expansion.configuration.width*$scale}
+            [ordered]@{timestamp=$receipt.timestamp;progress=$progress;height=$bounds.height*$scale;expected_height=$expected;minimum_height=$minimum;maximum_height=$maximum;error=[Math]::Abs($bounds.height*$scale-$expected);configuration_width=$receipt.expansion.configuration.width*$scale}
         })
         $intermediate=@($trajectory|Where-Object {$_.progress -gt 0 -and $_.progress -lt 1}|ForEach-Object {$_.progress}|Select-Object -Unique)
         $proof=@{final=$final;intermediate_samples=$intermediate.Count;trajectory=$trajectory};$proof|ConvertTo-Json -Depth 14|Set-Content (Join-Path $folder 'trajectory.json')
@@ -480,7 +485,7 @@ function Check-NarrowExpansion([string]$Panel){
         $proof.overflow_px=if($proof.scroll_view_size -gt 0){$configuration.Current.BoundingRectangle.Height*(100/$proof.scroll_view_size-1)}else{[double]::PositiveInfinity}
         $proof|ConvertTo-Json -Depth 14|Set-Content (Join-Path $folder 'trajectory.json')
         if($proof.overflow_px -gt 2){throw 'Narrow expansion clips configuration content and cannot prove its natural height trajectory'}
-    }finally{foreach($image in $sample.frames){$image.Dispose()}}
+    }finally{$history.Dispose();if($sample){foreach($image in $sample.frames){$image.Dispose()}}}
     Dismiss $Panel
     Maximize-DrawingWindow;Resize-Settled
 }
