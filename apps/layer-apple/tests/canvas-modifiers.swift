@@ -1,4 +1,5 @@
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 import ImageIO
 
 private final class FixtureKey: UIKey {
@@ -23,8 +24,12 @@ private final class Contact: UITouch {
     var device: UITouch.TouchType = .indirectPointer
     var pressure: CGFloat = 1
     var altitude: CGFloat = .pi / 2
+    var target: UIView?
     override var type: UITouch.TouchType { device }
     override var timestamp: TimeInterval { time }
+    override var view: UIView? { target }
+    override var window: UIWindow? { target?.window }
+    override func location(in view: UIView?) -> CGPoint { point }
     override func preciseLocation(in view: UIView?) -> CGPoint { point }
     override var estimationUpdateIndex: NSNumber? { nil }
     override var estimatedPropertiesExpectingUpdates: UITouch.Properties { [] }
@@ -130,6 +135,7 @@ private final class NativeRotation: UIRotationGestureRecognizer {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("capy-modifiers-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
+        if !vectorsOnly { try await phoneContacts(root: root) }
         let url = root.appendingPathComponent("ruler.capy")
         let store = EditorStore(platform: 0,
             persistence: EditorPersistence(root: root.appendingPathComponent("state")), managedWorkspaces: false)
@@ -274,13 +280,14 @@ private final class NativeRotation: UIRotationGestureRecognizer {
                 canvas.touchesBegan([pen], with: event)
                 canvas.touchesBegan([finger], with: event)
             }
-            try require(canvas.contacts.count == 1 && canvas.contacts[ObjectIdentifier(pen)] != nil
-                && canvas.ignoredContacts.contains(ObjectIdentifier(finger)), "Pencil must exclude fingers in either arrival order")
+            try require(canvas.contacts.count == 2 && canvas.contacts[ObjectIdentifier(pen)] != nil
+                && canvas.contacts[ObjectIdentifier(finger)] != nil && canvas.ignoredContacts.isEmpty,
+                "UIKit must forward both arrival orders to shared Pencil-over-finger arbitration")
             finger.time += 0.01; canvas.touchesCancelled([finger], with: event)
             try require(!canvas.ignoredContacts.contains(ObjectIdentifier(finger)), "Terminal ignored contact must retire")
             finger.time += 0.01; canvas.touchesBegan([finger], with: event)
-            try require(canvas.contacts.count == 1 && canvas.ignoredContacts.contains(ObjectIdentifier(finger)),
-                "A reused finger identity must still obey active-Pencil palm rejection")
+            try require(canvas.contacts.count == 2 && canvas.ignoredContacts.isEmpty,
+                "Reused finger identities must still reach shared Pencil-over-finger arbitration")
             pen.time += 0.01; canvas.touchesCancelled([pen], with: event)
             finger.time += 0.01; canvas.touchesEnded([finger], with: event)
             try require(canvas.contacts.isEmpty && canvas.ignoredContacts.isEmpty, "All cancelled/ignored contacts must retire")
@@ -289,6 +296,42 @@ private final class NativeRotation: UIRotationGestureRecognizer {
         }
         }
         try await artwork(store: store, canvas: canvas, root: root)
+    }
+
+    private func phoneContacts(root: URL) async throws {
+        let store = EditorStore(platform: 0, persistence: EditorPersistence(root: root.appendingPathComponent("phone-contact")))
+        defer { store.native?.detach() }
+        try await wait("Private phone contact owner", failure: { store.failure }) { !store.state.isNull }
+        store.native?.resize(width: 412, height: 891, scale: 1)
+        try await wait("Shared phone bar geometry", failure: { store.failure }) { !store.snapshot["layout"]["phone"].isNull }
+        let controller = UIViewController()
+        let input = ReorderInputView(frame: CGRect(x: 0, y: 0, width: 412, height: 891))
+        input.model = store.workspace.input
+        let window = UIWindow(frame: input.frame)
+        window.rootViewController = controller
+        window.addSubview(controller.view)
+        controller.view.addSubview(input); input.validate()
+        defer { input.detach(); window.rootViewController = nil }
+        let types = [UITouch.TouchType.direct, .pencil, .indirectPointer].map { NSNumber(value: $0.rawValue) }
+        let observers = window.gestureRecognizers?.filter { !$0.cancelsTouchesInView && $0.allowedTouchTypes == types } ?? []
+        try require(observers.count == 1, "The window has one passive raw phone-contact observer")
+        let observer = observers[0], contact = Contact(), event = ContactEvent()
+        contact.device = .direct
+        let tile = store.snapshot["layout"]["phone"]["tool_hits"][0].rect
+        contact.point = CGPoint(x: tile.midX, y: tile.midY)
+        let covered = UIView(frame: window.bounds)
+        window.addSubview(covered); contact.target = covered
+        observer.touchesBegan([contact], with: event)
+        try require(store.workspace.input.enabled && !store.workspace.input.phone.pointerDown,
+            "A native cover outside the editor must not begin a hidden phone-bar contact")
+        observer.touchesEnded([contact], with: event)
+        covered.removeFromSuperview(); contact.target = controller.view
+        observer.touchesBegan([contact], with: event)
+        try require(store.workspace.input.phone.pointerDown, "The exposed editor retains ordinary phone-bar taps")
+        observer.touchesEnded([contact], with: event)
+        try require(!store.workspace.input.phone.pointerDown && !store.workspace.input.phone.active,
+            "Raw physical release completes an ordinary tap even though pan and hold never recognize")
+        passed("PASS: UIKit raw phone contact rejects a native cover and retains ordinary physical tap completion")
     }
 
     private func artwork(store: EditorStore, canvas: CanvasView, root: URL) async throws {
@@ -349,6 +392,17 @@ private final class NativeRotation: UIRotationGestureRecognizer {
             try await invoke("fit_canvas")
             try await wait("Prepare replacement drawing") { store.snapshot["brush_ready"].bool }
         }
+        func position(_ p: CGPoint, camera: JSON) throws -> CGPoint {
+            let angle = CGFloat(camera["rotation"].number), zoom = CGFloat(camera["zoom"].number)
+            let x = p.x * (camera["flipped"][0].bool ? -zoom : zoom)
+            let y = p.y * (camera["flipped"][1].bool ? -zoom : zoom)
+            let surface = CGPoint(x: CGFloat(camera["translation"][0].number) + cos(angle) * x - sin(angle) * y,
+                y: CGFloat(camera["translation"][1].number) + sin(angle) * x + cos(angle) * y)
+            try require(surface.x >= 0 && surface.y >= 0
+                && surface.x < CGFloat(camera["viewport"][0].number)
+                && surface.y < CGFloat(camera["viewport"][1].number), "Supplied artwork contact must lie within the published viewport")
+            return CGPoint(x: surface.x / canvas.contentScaleFactor, y: surface.y / canvas.contentScaleFactor)
+        }
         func path(_ points: [CGPoint], device: UITouch.TouchType, modifiers: UIKeyModifierFlags = [], cancel: Bool = false,
             pressures: [CGFloat] = [], altitude: CGFloat = .pi / 2) async throws {
             try require(pressures.isEmpty || pressures.count == points.count, "Match supplied pressure samples to contact positions")
@@ -356,21 +410,10 @@ private final class NativeRotation: UIRotationGestureRecognizer {
             touch.pressure = pressures.first ?? 1; touch.altitude = altitude
             event.flags = modifiers
             let camera = store.state["camera"]
-            func position(_ p: CGPoint) throws -> CGPoint {
-                let angle = CGFloat(camera["rotation"].number), zoom = CGFloat(camera["zoom"].number)
-                let x = p.x * (camera["flipped"][0].bool ? -zoom : zoom)
-                let y = p.y * (camera["flipped"][1].bool ? -zoom : zoom)
-                let surface = CGPoint(x: CGFloat(camera["translation"][0].number) + cos(angle) * x - sin(angle) * y,
-                    y: CGFloat(camera["translation"][1].number) + sin(angle) * x + cos(angle) * y)
-                try require(surface.x >= 0 && surface.y >= 0
-                    && surface.x < CGFloat(camera["viewport"][0].number)
-                    && surface.y < CGFloat(camera["viewport"][1].number), "Supplied artwork contact must lie within the published viewport")
-                return CGPoint(x: surface.x / canvas.contentScaleFactor, y: surface.y / canvas.contentScaleFactor)
-            }
-            touch.point = try position(points[0]); canvas.touchesBegan([touch], with: event)
+            touch.point = try position(points[0], camera: camera); canvas.touchesBegan([touch], with: event)
             for (index, point) in points.enumerated().dropFirst() {
                 touch.pressure = pressures.isEmpty ? 1 : pressures[index]
-                touch.point = try position(point); touch.time = max(touch.time.nextUp, ProcessInfo.processInfo.systemUptime)
+                touch.point = try position(point, camera: camera); touch.time = max(touch.time.nextUp, ProcessInfo.processInfo.systemUptime)
                 canvas.touchesMoved([touch], with: event)
             }
             touch.time = max(touch.time.nextUp, ProcessInfo.processInfo.systemUptime)
@@ -419,6 +462,45 @@ private final class NativeRotation: UIRotationGestureRecognizer {
         try await action(["type":"set_brush_size", "value":4])
         let paper = try await pixels()
         if !vectorsOnly {
+        let fingerMode = store.state["settings"]["finger_drawing"].string
+        try await action(["type": "preferences", "action": ["type": "edit", "id": "finger_drawing", "value": 1]])
+        for theme in ["light", "dark"] {
+            try await newDocument()
+            try await action(["type": "set_theme", "theme": theme])
+            try await action(["type": "select_brush", "id": 1])
+            try await action(["type": "set_brush_size", "value": 4])
+            try await wait("Prepare finger-arbitration brush") { store.snapshot["brush_ready"].bool }
+            let blank = try await pixels()
+            let undo = store.command("undo")["enabled"].bool
+            let finger = Contact(), pen = Contact(), event = ContactEvent()
+            finger.device = .direct; pen.device = .pencil
+            let camera = store.state["camera"]
+            finger.point = try position(CGPoint(x: 24, y: 32), camera: camera)
+            canvas.touchesBegan([finger], with: event)
+            finger.point = try position(CGPoint(x: 64, y: 32), camera: camera); finger.time += 0.01
+            canvas.touchesMoved([finger], with: event)
+            try await flush()
+            pen.point = try position(CGPoint(x: 64, y: 64), camera: camera)
+            pen.time = max(pen.time.nextUp, ProcessInfo.processInfo.systemUptime)
+            canvas.touchesBegan([pen], with: event)
+            try require(canvas.contacts.count == 2 && canvas.ignoredContacts.isEmpty,
+                "The UIKit stream must retain a resting finger for shared pen arbitration in \(theme)")
+            pen.time += 0.01; canvas.touchesEnded([pen], with: event)
+            finger.point = try position(CGPoint(x: 104, y: 32), camera: camera); finger.time += 0.02
+            canvas.touchesMoved([finger], with: event)
+            finger.time += 0.01; canvas.touchesEnded([finger], with: event)
+            try await flush()
+            try await history(blank, try await pixels())
+            try require(store.command("undo")["enabled"].bool == undo,
+                "Pencil withdraws the finger draft, which stays rejected until lift without another artwork history step in \(theme)")
+            try await path([CGPoint(x: 24, y: 96), CGPoint(x: 64, y: 96), CGPoint(x: 104, y: 96)], device: .direct)
+            let painted = try await pixels()
+            try await history(blank, painted)
+            passed("PASS: UIKit \(theme) shared finger withdrawal, rejection until lift, fresh finger and one-step pixel history")
+        }
+        try await action(["type": "preferences", "action": ["type": "edit", "id": "finger_drawing",
+            "value": ["auto", "on", "off"].firstIndex(of: fingerMode)!]])
+        try await newDocument()
         let scroll = Scroll(), scrollEvent = ContactEvent(); scrollEvent.nativeType = .scroll
         func sameCamera(_ before: JSON) -> Bool {
             ["translation", "zoom", "rotation"].allSatisfy {

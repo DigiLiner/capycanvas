@@ -132,21 +132,6 @@ extension CanvasView {
             }
             if phase == 1 {
                 let tool: UInt32 = touch.type == .pencil ? 0 : touch.type == .direct ? 3 : 1
-                if tool == 3 && contacts.values.contains(where: { $0.tool == 0 }) {
-                    ignoredContacts.insert(key)
-                    continue
-                }
-                if tool == 0 {
-                    // Reject fingers already resting on the screen as Pencil begins.
-                    for (other, contact) in contacts where contact.tool == 3 {
-                        var terminal = contact.last
-                        if terminal.count == 9 {
-                            terminal[7] = touch.timestamp * 1_000_000_000; terminal[8] = 4
-                            send(contact, records: terminal, predicted: false)
-                        }
-                        contacts.removeValue(forKey: other); ignoredContacts.insert(other)
-                    }
-                }
                 nextContact &+= 1
                 // Keep the press button through release, when UIKit's mask is
                 // empty. Rust owns primary paint, right/middle pan and other buttons.
@@ -276,7 +261,7 @@ extension CanvasView {
             guard let self, pickerHold?.key == key, let contact = contacts[key], contact.last.count == 9 else { return }
             pickerHold = nil
             store.input(["type": "color_picker_hold", "id": id, "position": [contact.last[0], contact.last[1]],
-                "offset": 44 * Double(contentScaleFactor)])
+                "offset": DialogUI.resolve(["kind": "finger_loupe_offset", "scale": Double(contentScaleFactor)]).number])
             wake()
         }
         pickerHold = PickerHold(key: key, start: start, work: work)
