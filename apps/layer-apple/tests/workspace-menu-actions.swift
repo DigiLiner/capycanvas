@@ -43,11 +43,18 @@ import Foundation
     }
     @MainActor static func contextualRows(_ store: EditorStore) async throws {
         func rows() -> [JSON] { editorApplicationMenu(store)["sections"].array.flatMap(\.array) }
+        func stableRows(_ rows: [JSON]) -> [JSON] {
+            rows.filter { $0["action"]["command"].string != "zoom_out" }.map { row in
+                guard let sections = row.object["sections"] as? [[Any]] else { return row }
+                return row.replacing("sections", with: JSON(sections.map { stableRows($0.map { JSON($0) }).map(\.raw) }))
+            }
+        }
         func drawing(_ row: JSON) -> Bool { row["action"]["command"].string == "drawings" }
         func switcher(_ row: JSON) -> Bool { row["label"].string == store.workspaces!.view["switcher_menu"]["title"].string }
         func header(_ action: [String: Any]) async throws {
             try await store.apply(["type": "customize", "action": ["type": "header", "action": action]])
         }
+        let original = stableRows(rows()).map(\.stableKey)
         let originalHeader = store.snapshot["header"]["model"]["zones"].stableKey
         let originalExtras = store.snapshot["main_menu"]["extras"].stableKey
         let file = editorApplicationMenu(store, id: "file").stableKey
@@ -71,6 +78,9 @@ import Foundation
         try await header(["type": "cancel"])
         precondition(store.snapshot["header"]["model"]["zones"].stableKey == originalHeader,
             "Cancelling header editing must restore its exact entries")
+        let restored = stableRows(rows()).map(\.stableKey)
+        precondition(restored == original,
+            "Restoring the header preserves every menu row except the viewport-dependent Zoom out state\nBefore: \(original)\nAfter: \(restored)")
         precondition(store.snapshot["main_menu"]["extras"].stableKey == originalExtras
             && !rows().contains(where: drawing) && !rows().contains(where: switcher),
             "Restoring the header must remove its contextual rows")

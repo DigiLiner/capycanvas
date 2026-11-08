@@ -74,9 +74,13 @@ import SQLite3
             let recoveredWorkspaces = recovered.workspaces!
             try await recoveredWorkspaces.started("corrupt database recovery")
             precondition(recovered.failure == nil && !recovered.state["notice"].isNull)
-            try require(await recoveredWorkspaces.workspaceRows().count == 3, "In-memory recovery must initialize the shared defaults")
+            try require(await recoveredWorkspaces.workspaceRows().count == 3, "Recovered storage must initialize the shared defaults")
             try await recoveredWorkspaces.closed()
-            try require(Data(contentsOf: badFile) == badData, "In-memory recovery must preserve the corrupt library")
+            let damaged = try FileManager.default.contentsOfDirectory(at: badFile.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.hasPrefix("workspaces.damaged.") && $0.pathExtension == "sqlite3" }
+            try require(damaged.count == 1, "Recovery must set aside exactly one damaged library")
+            try require(Data(contentsOf: damaged[0]) == badData, "Recovery must preserve the damaged library bytes")
+            try TestWorkspaceDatabase(directory: badStorage.locations!.workspaces).execute("SELECT id FROM items")
             print("PASS: platform \(platform), SQLite startup, scene restoration, latest-edit switching, failure unlock, suspension, ownership recovery, restart and unreadable-store preservation")
         }
     }
@@ -142,6 +146,7 @@ import SQLite3
         precondition(recovered != original && !workspaces.readOnly && workspaces.error == nil
             && editor.state["brush"]["diameter"].number == 95)
         try await successor.workspaces!.closed()
+        precondition(editor.state["brush"]["diameter"].number == 96, "The peer's durable brush preference must be adopted before switching")
         let currentBrush = editor.state["brush"].stableKey
         try await workspaces.perform(["type": "switch", "id": original])
         precondition(editor.state["workspace"]["layout"].stableKey == successorLayout, "The other window's durable workspace must be adopted")
