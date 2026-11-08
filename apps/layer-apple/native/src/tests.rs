@@ -53,7 +53,11 @@ unsafe fn launch_json(platform: u32, json: *const c_char, bootstrap: *mut u64, e
     app
 }
 
-struct App(u64, Option<(std::path::PathBuf, layer_host::session_stores::SessionStores)>, std::cell::Cell<u64>);
+struct PrivateRoot { path: std::path::PathBuf, completion: std::sync::mpsc::Sender<std::io::Result<()>> }
+impl Drop for PrivateRoot {
+    fn drop(&mut self) { let _ = self.completion.send(std::fs::remove_dir_all(&self.path)); }
+}
+struct App(u64, Option<(layer_host::session_stores::SessionStores, std::sync::mpsc::Receiver<std::io::Result<()>>)>, std::cell::Cell<u64>);
 impl App {
     fn from_handle(handle: u64) -> Self { Self(handle, None, std::cell::Cell::new(2_000_000_000)) }
     fn frame_time(&self, now: u64) -> u64 {
@@ -1311,9 +1315,11 @@ impl App {
     fn new(platform: u32) -> Self {
         let mut app = Self::unbound(platform);
         let root = std::env::temp_dir().join(format!("capy-apple-storage-{}", layer_core::PortableId::random()));
-        let stores = layer_host::session_stores::SessionStores::native(root.clone(), std::sync::Arc::new(|| {}));
+        let (completion, retired) = std::sync::mpsc::channel();
+        let guard = PrivateRoot { path: root.clone(), completion };
+        let stores = layer_host::session_stores::SessionStores::native(root, std::sync::Arc::new(move || { let _ = &guard; }));
         app.with(|native| stores.attach_window(&native.window, &native.host).unwrap());
-        app.1 = Some((root, stores));
+        app.1 = Some((stores, retired));
         app
     }
     fn unbound(platform: u32) -> Self {
@@ -1505,9 +1511,9 @@ impl App {
 impl Drop for App {
     fn drop(&mut self) {
         unsafe { capy_apple_destroy(self.0) }
-        if let Some((root, stores)) = self.1.take() {
+        if let Some((stores, retired)) = self.1.take() {
             drop(stores);
-            if let Err(error) = std::fs::remove_dir_all(root) { assert_eq!(error.kind(), std::io::ErrorKind::NotFound); }
+            if let Err(error) = retired.recv_timeout(std::time::Duration::from_secs(60)).expect("Private test storage workers did not release their root within 60 seconds") { assert_eq!(error.kind(), std::io::ErrorKind::NotFound); }
         }
     }
 }
