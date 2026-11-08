@@ -9,6 +9,7 @@ import Foundation
             guard Date() < deadline else { throw HostFailure(message: "Column-stack workspace startup timed out") }
             try await Task.sleep(for: .milliseconds(10))
         }
+        try await desktopViewport(store)
     }
     @MainActor static func main() async throws {
         for platform: UInt32 in [0, 1] {
@@ -16,7 +17,6 @@ import Foundation
             defer { try? FileManager.default.removeItem(at: root) }
             var store = EditorStore(platform: platform, persistence: EditorPersistence(root: root))
             try await ready(store)
-            store.native?.resize(width: 1200, height: 900, scale: 1)
             let paint = "builtin:workspace:illustrator"
             try await store.workspaces!.perform(["type":"switch", "id":paint])
             func layout() -> String { store.state["workspace"]["layout"].stableKey }

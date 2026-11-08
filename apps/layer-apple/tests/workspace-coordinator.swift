@@ -15,6 +15,7 @@ import SQLite3
             workspaces.suspend()
             workspaces.resume()
             try await workspaces.started()
+            try await desktopViewport(first)
             try await workspaces.perform(["type": "form", "action": ["type": "new"]])
             try languageReadiness(platform: platform, root: root, projection: workspaces.view)
             workspaces.cancelPrompt(); try await workspaces.settle()
@@ -126,6 +127,7 @@ import SQLite3
         let successor = EditorStore(platform: platform, scene: scene,
             persistence: EditorPersistence(root: root), managedWorkspaces: true)
         try await successor.workspaces!.started("successor ownership")
+        try await desktopViewport(successor)
         precondition(successor.workspaces!.view["id"].string == original)
         precondition(successor.state["brush"]["diameter"].number == 95, "Suspension must save before releasing the claim")
         try await successor.apply(["type": "set_brush_size", "value": 96])
@@ -140,9 +142,10 @@ import SQLite3
         precondition(recovered != original && !workspaces.readOnly && workspaces.error == nil
             && editor.state["brush"]["diameter"].number == 95)
         try await successor.workspaces!.closed()
+        let currentBrush = editor.state["brush"].stableKey
         try await workspaces.perform(["type": "switch", "id": original])
         precondition(editor.state["workspace"]["layout"].stableKey == successorLayout, "The other window's durable workspace must be adopted")
-        precondition(editor.state["brush"]["diameter"].number == 95, "Switching workspaces preserves the current brush")
+        precondition(editor.state["brush"].stableKey == currentBrush, "Switching workspaces preserves the current brush")
         try await workspaces.answer(["type": "delete", "value": recovered])
         try await editor.apply(["type": "set_brush_size", "value": 91])
         let flushed: Bool = await withCheckedContinuation { continuation in

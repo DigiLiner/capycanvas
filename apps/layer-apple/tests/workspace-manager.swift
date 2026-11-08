@@ -11,6 +11,7 @@ import SwiftUI
             let editor = EditorStore(platform: platform, persistence: storage)
             let workspaces = editor.workspaces!
             try await workspaces.started()
+            try await desktopViewport(editor)
             let defaults = try await workspaces.workspaceRows()
             precondition(defaults.map { $0["title"].string } == ["Sketch", "Paint", "Photo"])
             precondition(workspaces.view["id"].string == defaults[platform == 0 ? 0 : 1]["id"].string,
@@ -92,6 +93,7 @@ import SwiftUI
             try await workspaces.flushed()
             let other = EditorStore(platform: platform, persistence: storage, managedWorkspaces: true)
             try await other.workspaces!.started("other window")
+            try await desktopViewport(other)
             try await other.workspaces!.perform(["type": "switch", "id": defaults[0]["id"].string])
             let otherID = other.workspaces!.view["id"].string
             var focused = false
@@ -130,6 +132,7 @@ import SwiftUI
             try await wait("discarded scene release") { other.workspaces!.view["closed"].bool }
             let successor = EditorStore(platform: platform, persistence: storage, managedWorkspaces: true)
             try await successor.workspaces!.started("successor window")
+            try await desktopViewport(successor)
             try await successor.workspaces!.perform(["type": "switch", "id": otherID])
             precondition(successor.workspaces!.view["id"].string == otherID, "A discarded scene must release its claim")
             try await successor.workspaces!.closed()

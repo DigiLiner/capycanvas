@@ -9,6 +9,7 @@ import Foundation
             guard Date() < deadline else { throw HostFailure(message: "Title-bar workspace startup timed out") }
             try await Task.sleep(for: .milliseconds(10))
         }
+        try await desktopViewport(store)
     }
     @MainActor static func edit(_ store: EditorStore, _ value: [String: Any]) async throws {
         try await store.apply(["type":"customize", "action":["type":"header", "action":value]])

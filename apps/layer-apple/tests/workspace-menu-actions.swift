@@ -48,7 +48,8 @@ import Foundation
         func header(_ action: [String: Any]) async throws {
             try await store.apply(["type": "customize", "action": ["type": "header", "action": action]])
         }
-        let original = rows().map(\.stableKey)
+        let originalHeader = store.snapshot["header"]["model"]["zones"].stableKey
+        let originalExtras = store.snapshot["main_menu"]["extras"].stableKey
         let file = editorApplicationMenu(store, id: "file").stableKey
         let entries = store.snapshot["header"]["model"]["zones"].array.flatMap(\.array)
         let title = entries.first { $0["item"]["kind"].string == "document_title" }!
@@ -68,7 +69,11 @@ import Foundation
         precondition(editorApplicationMenu(store, id: "file").stableKey == file,
             "Contextual Main Menu rows must not change the File menu")
         try await header(["type": "cancel"])
-        precondition(rows().map(\.stableKey) == original, "Restoring the header must remove its contextual rows")
+        precondition(store.snapshot["header"]["model"]["zones"].stableKey == originalHeader,
+            "Cancelling header editing must restore its exact entries")
+        precondition(store.snapshot["main_menu"]["extras"].stableKey == originalExtras
+            && !rows().contains(where: drawing) && !rows().contains(where: switcher),
+            "Restoring the header must remove its contextual rows")
     }
     @MainActor static func main() async throws {
         let promptTitles = ["new": "New Workspace", "reset_brushes": "Reset All Brushes?",
@@ -81,6 +86,7 @@ import Foundation
             let editor = EditorStore(platform: platform, persistence: EditorPersistence(root: root))
             let workspaces = editor.workspaces!
             try await workspaces.started()
+            try await desktopViewport(editor)
             try await workspaces.perform(["type": "switch", "id": "builtin:workspace:illustrator"])
             try await contextualRows(editor)
             // Give reset/history something to operate on and retain across
