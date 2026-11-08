@@ -121,10 +121,43 @@ import SwiftUI
         try await phone.workspaces!.started()
         try await phone.workspaces!.perform(["type": "switch", "id": "builtin:workspace:painter"])
         phone.native?.resize(width: 375, height: 667, scale: 1)
-        try await wait("Shared phone layout") { !phone.snapshot["layout"]["phone"].isNull }
+        try await wait("Shared phone layout") {
+            !phone.snapshot["layout"]["phone"].isNull && phone.snapshot["layout"]["viewport"][0].number == 375
+                && phone.snapshot["layout"]["viewport"][1].number == 667
+        }
+        var phonePlane = CGSize.zero
+        window.setContentSize(NSSize(width: 375, height: 667))
+        window.contentView = NSHostingView(rootView: PhoneFrame(store: phone, input: phone.workspace.input.phone)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { phonePlane = $0 }
+            .frame(width: 375, height: 667, alignment: .topLeading).coordinateSpace(name: "editor-workspace"))
+        try await wait("Phone frame native plane") { phonePlane.width > 0 && phonePlane.height > 0 }
+        precondition(phonePlane == CGSize(width: 375, height: 667),
+            "The phone frame plane must fill its viewport before placing controls: \(phonePlane)")
+        phone.dispatch(["type": "phone", "action": ["kind": "panel", "panel": "color"]])
+        try await wait("Phone Color measurement plan") { phone.contentDrawers.items["tool"].map { !$0.measurement["measure"].isNull } ?? false }
+        let color = phone.contentDrawers.items["tool"]!
+        color.reduceMotion = true
+        precondition(color.measurement["scrolls_together"].bool && color.measurement["measure"]["placement"]["columns"].array.count == 2)
+        color.measure(400, column: 0); color.measure(280, column: 1); color.measureColor(300)
+        try await wait("Shared Color fit and placement") { !color.colorFit.isNull && !color.geometry["placement"].isNull }
+        precondition(color.colorFit["size"].number >= 128 && color.colorFit["height"].number <= color.colorFit["natural_height"].number)
+        phone.dispatch(["type": "phone", "action": ["kind": "panel", "panel": "proof"]])
+        try await wait("Content-sized phone Proof") { color.model["columns"][0][0].string == "proof" && color.measurement["content_sized"][0][0].bool }
+        color.measure(80, column: 0)
+        try await wait("Proof uses its measured body height") { abs(color.geometry["placement"]["bounds"]["height"].number - 80) < 0.5 }
+        precondition(!color.measurement["scrolls_together"].bool)
+        phone.dispatch(["type": "phone", "action": ["kind": "panel", "panel": "layers"]])
+        try await wait("Phone Layers measurement plan") { color.model["columns"][0][0].string == "layers" && !color.measurement["measure"].isNull }
+        let layerSizing: JSON = await withCheckedContinuation { continuation in
+            phone.query(["type": "layer_drawer_sizing", "measurement": ["fixed_height": 20, "unit_height": 40], "properties_height": 120]) {
+                continuation.resume(returning: $0)
+            }
+        }
+        color.measureLayerPages(layerSizing)
+        try await wait("Phone Layers uses shared page placement") { color.geometry["placement"].stableKey == layerSizing["placements"][0].stableKey }
+        color.stop()
         phone.customize(["type": "close_expanded"])
         phone.dispatch(["type": "phone", "action": ["kind": "capy"]])
-        window.setContentSize(NSSize(width: 375, height: 667))
         let presenter = PhoneMenuPresentation(store: phone)
         window.contentView = NSHostingView(rootView: PhoneMenu(store: phone, input: presenter)
             .frame(width: 375, height: 667).coordinateSpace(name: "editor-workspace"))
@@ -201,6 +234,7 @@ import SwiftUI
                     "A completed swipe retains the parent preview until the shared route changes")
             }
             return phone.state["phone"]["menu"].bool && phone.state["phone"]["menu_route"].stableKey == rootRoute
+                && presenter.route.stableKey == rootRoute && presenter.enabled && !presenter.swiping
         }
         for next in [filePhone, rootPhone] {
             let layout = phone.snapshot["layout"]["phone"]

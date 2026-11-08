@@ -5,12 +5,13 @@ struct ProofPanel: View {
     @ObservedObject var store: EditorStore
     @ObservedObject var controller: ProofController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var bodyFitsContent = false
     @State private var forward = true
     @State private var displayedMode: String
     private var model: JSON { store.snapshot["proof_panel"] }
     private var copy: JSON { store.catalog["proof_copy"] }
-    init(store: EditorStore, controller: ProofController) {
-        self.store = store; self.controller = controller
+    init(store: EditorStore, controller: ProofController, bodyFitsContent: Bool = false) {
+        self.store = store; self.controller = controller; self.bodyFitsContent = bodyFitsContent
         _displayedMode = State(initialValue: store.snapshot["proof_panel"]["mode"].string)
     }
     var body: some View {
@@ -31,10 +32,11 @@ struct ProofPanel: View {
             ZStack {
                 Group {
                     if displayedMode == "sdr" {
-                        ProofDial(store: store, controller: controller)
+                        ProofDial(store: store, controller: controller).fixedSize(horizontal: bodyFitsContent, vertical: bodyFitsContent)
                     } else if displayedMode == "print" {
-                        EditorScrollView { PrintProofControls(controller: controller, model: model, store: store) }
-                    } else { Spacer(minLength: 0) }
+                        if bodyFitsContent { PrintProofControls(controller: controller, model: model, store: store) }
+                        else { EditorScrollView { PrintProofControls(controller: controller, model: model, store: store) } }
+                    } else if !bodyFitsContent { Spacer(minLength: 0) }
                 }.id(displayedMode)
                     .transition(.asymmetric(insertion: .move(edge: forward ? .trailing : .leading),
                         removal: .move(edge: forward ? .leading : .trailing)))

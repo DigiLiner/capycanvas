@@ -11,9 +11,9 @@ struct NavigatorPanel: View {
         return (try? JSON.decode(pointer))?["overview_aspect"].number ?? 1
     }
     var body: some View {
-        VStack(spacing: store.panelMetrics.spacing) {
+        let aspect = aspect
+        NavigatorPanelLayout(aspect: aspect, spacing: store.panelMetrics.spacing) {
             NavigatorDrawing(store: store)
-                .frame(minHeight: 0, idealHeight: 164, maxHeight: .infinity)
                 .modifier(PanelBodyMeasurement(panel: "navigator", part: "overview", kind: .scroll,
                     naturalHeight: { [aspect] width in max(0, width) * aspect }))
             NavigationButtons(store: store, prefix: "navigator")
@@ -21,6 +21,26 @@ struct NavigatorPanel: View {
         }.padding(8)
             .modifier(PanelBodyMeasurement(panel: "navigator", part: "insets",
                 intrinsicHeight: 16 + store.panelMetrics.spacing))
+    }
+}
+
+
+private struct NavigatorPanelLayout: Layout {
+    let aspect: CGFloat
+    let spacing: CGFloat
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? subviews[1].sizeThatFits(.unspecified).width
+        let commands = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        return CGSize(width: width, height: proposal.height.flatMap { $0.isFinite ? $0 : nil }
+            ?? max(0, width) * aspect + commands + spacing)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let commands = subviews[1].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
+        let overview = max(0, bounds.height - commands - spacing)
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: overview))
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + overview + spacing), anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: commands))
     }
 }
 

@@ -139,65 +139,100 @@ private struct WorkspaceContentDrawer: View {
     @ObservedObject var store: EditorStore
     @ObservedObject var drawer: ContentDrawerPresentation
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
+    private var phone: Bool { !store.snapshot["layout"]["phone"].isNull }
     var body: some View {
-        let placement = drawer.geometry["placement"], connection = drawer.geometry["connection"], tabs = drawer.model["tabs"]
-        let shadowCuts = DrawerShadow.cuts(placement: placement, connection: connection)
-        let panels = tabs["panels"].array.map { drawer.panel($0) }
+        let placement = drawer.geometry["placement"].isNull && phone ? drawer.measurement["measure"]["placement"] : drawer.geometry["placement"]
+        let connection = drawer.geometry["connection"]
+        let visible = !drawer.geometry["placement"].isNull
         if !placement.isNull {
             ZStack(alignment: .topLeading) {
-                if !connection.isNull {
+                if visible && !connection.isNull {
                     DrawerBridge(connection: connection).fill(palette.glassPanel).placed(connection["bounds"])
                         .modifier(GlassConnection(key: "drawer:" + drawer.id, connection: connection))
                 }
-                ZStack(alignment: .topLeading) {
-                    ForEach(placement["columns"].array.indices, id: \.self) { index in
-                        let bounds = placement["columns"][index]
-                        VStack(spacing: 0) {
-                            if !tabs.isNull {
-                                WorkspacePanelHeader(store: store, group: tabs.replacing("id", with: tabs["group"]).replacing("tab_presentations", with: placement["tab_presentations"]), panels: panels, drawer: true)
-                            }
-                            GeometryReader { clip in
-                                if !drawer.model["layer_properties"].isNull {
-                                    LayerInspector(store: store, drawer: drawer, width: bounds.rect.width, height: bounds.rect.height)
-                                } else { EditorScrollView(.vertical, showsIndicators: false) {
-                                    VStack(spacing: 0) {
-                                        ForEach(drawer.model["columns"][index].array.indices, id: \.self) { row in
-                                            let panel = drawer.panel(drawer.model["columns"][index][row])
-                                            DrawerPanelBody(store: store, panel: panel, width: bounds.rect.width,
-                                                splitFilters: drawer.model["columns"].array.contains { $0.array.contains { $0.string == "filter_types" } },
-                                                anchor: drawer.model["anchor"])
-                                        }
-                                    }.frame(maxWidth: .infinity, alignment: .topLeading)
-                                        .background(GeometryReader { body in
-                                            Color.clear.preference(key: DrawerHeights.self, value: [index: body.size.height + (tabs.isNull ? 0 : 36)])
-                                        })
-                                }.environment(\.drawerColumn, UInt64(drawer.id))
-                                    .environment(\.workspaceClip, clip.frame(in: .named("editor-workspace")))
-                                }
-                            }
-                        }.placed(bounds)
-                    }
+                GeometryReader { viewport in
+                    if phone && drawer.measurement["scrolls_together"].bool {
+                        EditorScrollView(.vertical, showsIndicators: false) {
+                            columns(placement, together: true)
+                                .frame(height: placement["columns"].array.map { $0.rect.maxY }.max() ?? 0, alignment: .topLeading)
+                        }.environment(\.workspaceClip, viewport.frame(in: .named("editor-workspace")))
+                    } else { columns(placement, together: false) }
                 }.frame(width: placement["bounds"].rect.width, height: placement["bounds"].rect.height, alignment: .topLeading)
                     .environment(\.editorPalette, palette.glassy)
                     .modifier(DrawerContainerSurface(drawers: store.contentDrawers, bounds: placement["bounds"].rect,
-                        cuts: shadowCuts,
+                        cuts: DrawerShadow.cuts(placement: placement, connection: connection),
                         fill: palette.glassPanel, shadow: 12, joined: connection["square_corners"], excluding: drawer.id,
-                        identifier: drawer.id == "tool" ? "tool-drawer" : "column-drawer-" + drawer.id))
+                        active: visible, identifier: drawer.id == "tool" ? "tool-drawer" : "column-drawer-" + drawer.id))
                     .modifier(NavigatorReveal())
                     .background(GeometryReader { body in
                         Color.clear.preference(key: ColumnDrawerMeasurements.self,
-                            value: drawer.interactive && !drawer.model["tabs"].isNull
+                            value: visible && drawer.interactive && !drawer.model["tabs"].isNull
                                 ? [drawer.model["tabs"]["group"].uint: body.frame(in: .named("editor-workspace"))] : [:])
                     })
                     .placed(placement["bounds"])
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                // This view observes the drawer itself. Reading interactive in
-                // the parent list left a reopened drawer with stale disabled
-                // gesture preferences when its identity survived the close.
-                .environment(\.workspaceGesturesEnabled, drawer.interactive)
-                .allowsHitTesting(drawer.interactive)
-                .onPreferenceChange(DrawerHeights.self) { heights in for (column, height) in heights { drawer.measure(height, column: column) } }
+                .opacity(visible ? 1 : 0)
+                .environment(\.workspaceGesturesEnabled, visible && drawer.interactive)
+                .allowsHitTesting(visible && drawer.interactive)
         }
+    }
+    private func columns(_ placement: JSON, together: Bool) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(0..<min(placement["columns"].array.count, drawer.model["columns"].array.count), id: \.self) { index in
+                let bounds = placement["columns"][index]
+                Group {
+                    if together {
+                        column(index, bounds: bounds, placement: placement, together: true)
+                            .frame(width: bounds.rect.width).offset(x: bounds.rect.minX, y: bounds.rect.minY)
+                    } else { column(index, bounds: bounds, placement: placement, together: false).placed(bounds) }
+                }
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+    private func column(_ index: Int, bounds: JSON, placement: JSON, together: Bool) -> some View {
+        VStack(spacing: 0) {
+            if !drawer.model["tabs"].isNull {
+                WorkspacePanelHeader(store: store,
+                    group: drawer.model["tabs"].replacing("id", with: drawer.model["tabs"]["group"]).replacing("tab_presentations", with: placement["tab_presentations"]),
+                    panels: drawer.model["tabs"]["panels"].array.map { drawer.panel($0) }, drawer: true)
+            }
+            if together { contents(index, width: bounds.rect.width) }
+            else {
+                GeometryReader { clip in
+                    Group {
+                        if !drawer.model["layer_properties"].isNull {
+                            LayerInspector(store: store, drawer: drawer, width: bounds.rect.width, height: bounds.rect.height)
+                        } else { EditorScrollView(.vertical, showsIndicators: false) { contents(index, width: bounds.rect.width) } }
+                    }.environment(\.workspaceClip, clip.frame(in: .named("editor-workspace")))
+                }
+            }
+        }.environment(\.drawerColumn, UInt64(drawer.id))
+    }
+    private func contents(_ index: Int, width: CGFloat) -> some View {
+        VStack(spacing: phone ? store.panelMetrics.group : 0) {
+            ForEach(drawer.model["columns"][index].array.indices, id: \.self) { row in
+                panelBody(index, row: row, width: width)
+            }
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(GeometryReader { geometry in
+                Color.clear.preference(key: DrawerHeights.self,
+                    value: [index: geometry.size.height + (drawer.model["tabs"].isNull ? 0 : 36)])
+            })
+            .onPreferenceChange(DrawerHeights.self) { values in
+                for (column, height) in values { drawer.measure(height, column: column) }
+            }
+    }
+    private func panelBody(_ column: Int, row: Int, width: CGFloat) -> DrawerPanelBody {
+        let panel = drawer.panel(drawer.model["columns"][column][row])
+        let split = drawer.model["columns"].array.contains { $0.array.contains { $0.string == "filter_types" } }
+        let toolbar = drawer.measurement["toolbars"].array.first { $0["panel"].string == panel["id"].string }?["layout"] ?? JSON()
+        let colorHeight: ((CGFloat) -> Void)? = phone ? { height in drawer.measureColor(height) } : nil
+        return DrawerPanelBody(store: store, panel: panel, width: width, splitFilters: split,
+            anchor: drawer.model["anchor"], phone: phone,
+            minimum: drawer.measurement["minimums"][column][row].number,
+            contentSized: phone && drawer.measurement["content_sized"][column][row].bool,
+            availableHeight: drawer.measurement["measure"]["available"]["height"].number,
+            toolbar: toolbar, colorFit: phone && panel["id"].string == "color" ? drawer.colorFit : JSON(), colorHeight: colorHeight)
     }
 
 }
@@ -213,7 +248,7 @@ struct LayerInspector<Owner: LayerInspectorOwner>: View {
     @State private var footerHover = false
     private var open: Bool { drawer.propertiesOpen }
     private var footerHeight: CGFloat { drawer.footerHeight }
-    private var sizingKey: String { JSON([measurement.raw, propertiesHeight, width, store.state["layers"].array.count, store.state["camera"]["viewport"].raw, drawer.sizingContext]).stableKey }
+    private var sizingKey: String { JSON([measurement.raw, propertiesHeight, width, store.snapshot["presented_layer_rows"].raw, store.state["camera"]["viewport"].raw, drawer.sizingContext]).stableKey }
     var body: some View {
         let view = store.state["layer_properties"], disclosure = view["disclosure"]
         let label = drawer.disclosure ?? disclosure[open ? "return_label" : "label"].string
@@ -280,14 +315,22 @@ private struct DrawerPanelBody: View {
     let width: CGFloat
     let splitFilters: Bool
     var anchor = JSON()
+    var phone = false
+    var minimum: CGFloat = 0
+    var contentSized = false
+    var availableHeight: CGFloat = 0
+    var toolbar = JSON()
+    var colorFit = JSON()
+    var colorHeight: ((CGFloat) -> Void)?
     @State private var tiles = JSON()
     private var tileKey: String { JSON([panel["id"].raw, panel["tiles"].array.map { [$0["id"].raw, $0["control"].raw, $0["slider_style"].raw] }, panel["tile_style"].raw, width]).stableKey }
     var body: some View {
         Group {
             if !panel["tiles"].array.isEmpty {
-                WorkspaceToolbar(store: store, panel: panel, geometry: tiles, vertical: true)
-                    .frame(height: tiles["content_height"].number)
+                WorkspaceToolbar(store: store, panel: panel, geometry: phone ? toolbar : tiles, vertical: true)
+                    .frame(height: (phone ? toolbar : tiles)["content_height"].number)
                     .task(id: tileKey) {
+                        guard !phone else { return }
                         let result: JSON = await withCheckedContinuation { c in
                             store.query(["type": "drawer_toolbar", "panel": panel["id"].raw, "width": max(1, width), "height": 800]) { c.resume(returning: $0) }
                         }
@@ -295,10 +338,11 @@ private struct DrawerPanelBody: View {
                     }
             } else {
                 PanelControls(store: store, panel: panel, scrollable: false, measureForWorkspace: false, splitFilters: splitFilters,
-                    drawerAnchor: anchor)
-                    .frame(height: ["layers", "adjustments", "filter_types"].contains(panel["id"].string) ? 480 : panel["id"].string == "navigator" ? 240 : nil)
+                    drawerAnchor: anchor, colorFit: colorFit, colorHeight: colorHeight, bodyFitsContent: contentSized)
+                    .frame(height: phone ? (minimum > 0 ? minimum : nil) : ["layers", "adjustments", "filter_types"].contains(panel["id"].string) ? 480 : panel["id"].string == "navigator" ? 240 : nil)
+                    .frame(maxHeight: contentSized ? availableHeight : nil)
             }
-        }
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("drawer-panel-" + panel["id"].string)
     }
 }
 
@@ -318,6 +362,7 @@ struct DrawerContainerSurface: ViewModifier {
     var extra: [DrawerSource] = []
     var sharedRadii: [CGFloat]? = nil
     var gpuSurface = false
+    var active = true
     let identifier: String
     func body(content: Content) -> some View {
         let sources = drawers.sources.filter { $0.key != excluding }.map(\.value) + extra
@@ -331,7 +376,7 @@ struct DrawerContainerSurface: ViewModifier {
             }
             content.clipShape(shape.fittedClip)
                 .background { if !gpuSurface { shape.fill(fill) } }
-                .modifier(GlassRegistration(shape: shape, active: !gpuSurface))
+                .modifier(GlassRegistration(shape: shape, active: active && !gpuSurface))
                 .accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
         }
     }

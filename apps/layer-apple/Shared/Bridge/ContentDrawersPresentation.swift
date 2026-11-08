@@ -9,6 +9,10 @@ import SwiftUI
     @Published private(set) var interactive = false
     @Published private(set) var pagePosition: CGFloat = 0
     @Published private(set) var layerSizes = JSON()
+    @Published private(set) var measurement = JSON()
+    @Published private(set) var colorFit = JSON()
+    private var measurementKey = ""
+    private var wheelHeight: CGFloat = 0
     private weak var store: EditorStore?
     private var current = JSON()
     private var key = ""
@@ -50,7 +54,7 @@ import SwiftUI
         }
         let measured = model["columns"].array.indices.map { heights[$0] ?? 0 }
         let nextKey = JSON([next.raw, store.snapshot["layout"].raw,
-            measured, layerSizes.raw, id == "tool" ? store.contentDrawers.tileRevision : 0]).stableKey
+            measured, layerSizes.raw, wheelHeight, store.snapshot["color_panel"]["hdr"].raw, id == "tool" ? store.contentDrawers.tileRevision : 0]).stableKey
         guard key != nextKey else { return }; key = nextKey
         let pageTo: CGFloat = model["layer_properties"].bool ? 1 : 0
         let pageChange = !model["layer_properties"].isNull && !next.isNull && pagePosition != pageTo
@@ -77,6 +81,7 @@ import SwiftUI
             let duration = max(0.001, store.catalog["panel_expansion_ms"].number / 1000)
             while !Task.isCancelled {
                 guard let self, let request = self.latest else { return }
+                let phone = !store.snapshot["layout"]["phone"].isNull
                 let target: JSON
                 if request.closing { target = request.from }
                 else if let placement = request.placement { target = placement }
@@ -84,10 +89,39 @@ import SwiftUI
                     let page = request.pageTo == 1 ? 1 : 0
                     let heights = !self.model["layer_properties"].isNull && self.layerSizes["heights"].array.count == 2
                         ? [self.layerSizes["heights"][page].number] : request.heights
-                    target = await withCheckedContinuation { continuation in
-                        store.query(["type": "drawer", "column": UInt64(self.id) as Any? ?? NSNull(),
-                            "heights": heights, "progress": 1, "from": NSNull(), "closing": false]) {
-                            continuation.resume(returning: $0["placement"])
+                    if phone {
+                        let context = self.sizingContext + self.model["columns"].stableKey + self.model["tool_set"].stableKey
+                        if self.measurementKey != context {
+                            let next: JSON = await withCheckedContinuation { continuation in
+                                store.query(["type": "drawer_measure", "column": UInt64(self.id) as Any? ?? NSNull()]) {
+                                    continuation.resume(returning: $0)
+                                }
+                            }
+                            guard !Task.isCancelled else { return }
+                            guard self.latest?.token == request.token else { continue }
+                            self.measurement = next; self.measurementKey = context
+                        }
+                        if !self.model["layer_properties"].isNull {
+                            guard self.layerSizes["placements"].array.count == 2 else { self.task = nil; return }
+                            target = self.layerSizes["placements"][page]
+                        } else {
+                            guard heights.count == self.measurement["measure"]["placement"]["columns"].array.count,
+                                heights.allSatisfy({ $0 > 0 }) else { self.task = nil; return }
+                            var query: [String: Any] = ["measure": self.measurement["measure"].raw, "heights": heights, "progress": 1]
+                            if self.wheelHeight > 0, let column = self.model["columns"].array.firstIndex(where: { $0.array.contains { $0.string == "color" } }) {
+                                query["color"] = ["column": column, "fixed_height": max(0, heights[column] - self.wheelHeight),
+                                    "hdr": store.snapshot["color_panel"]["hdr"].bool]
+                            }
+                            let frame = Self.frame(query)
+                            self.colorFit = frame["color_fit"]
+                            target = frame["placement"]
+                        }
+                    } else {
+                        target = await withCheckedContinuation { continuation in
+                            store.query(["type": "drawer", "column": UInt64(self.id) as Any? ?? NSNull(),
+                                "heights": heights, "progress": 1, "from": NSNull(), "closing": false]) {
+                                continuation.resume(returning: $0["placement"])
+                            }
                         }
                     }
                 }
@@ -99,7 +133,7 @@ import SwiftUI
                     let progress = request.animate && !self.reduceMotion ? min(1, (ProcessInfo.processInfo.systemUptime - start) / duration) : 1
                     let eased = CGFloat(1 - pow(1 - progress, 3))
                     let position = request.pageFrom.map { $0 + (request.pageTo - $0) * eased } ?? request.pageTo
-                    let result = Self.frame(["from": request.from.raw, "to": target.raw, "progress": eased, "closing": request.closing])
+                    let result = Self.frame(["from": request.from.raw, "to": target.raw, "progress": eased, "closing": request.closing, "clip_contents": phone])
                     self.geometry = result; self.pagePosition = position; store.workspace.refreshChrome()
                     store.contentDrawers.source(self.id, geometry: result, anchor: self.model["anchor"])
                     if progress == 1 {
@@ -123,6 +157,10 @@ import SwiftUI
     func measure(_ height: CGFloat, column: Int) {
         guard height.isFinite, abs((heights[column] ?? 0) - height) > 0.5 else { return }
         heights[column] = height; refresh(current)
+    }
+    func measureColor(_ height: CGFloat) {
+        guard height.isFinite, abs(wheelHeight - height) > 0.5 else { return }
+        wheelHeight = height; refresh(current)
     }
     func measureLayerPages(_ next: JSON) {
         guard next.stableKey != layerSizes.stableKey else { return }

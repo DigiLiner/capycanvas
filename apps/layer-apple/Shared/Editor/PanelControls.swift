@@ -25,6 +25,9 @@ struct PanelControls: View {
     var measureForWorkspace = true
     var splitFilters = false
     var drawerAnchor = JSON()
+    var colorFit = JSON()
+    var colorHeight: ((CGFloat) -> Void)?
+    var bodyFitsContent = false
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var fitsColorWheel: Bool {
         panel["id"].string == "color" && panel["controls"].array.filter { $0["visible_in_panel"].bool }.map { $0["control"].string } == ["color_wheel"]
@@ -38,7 +41,7 @@ struct PanelControls: View {
             .modifier(PanelMeasurementScope(panel: panel["id"].string, enabled: measureForWorkspace, splitFilters: splitFilters))
     }
     @ViewBuilder private var contents: some View {
-        if panel["id"].string == "proof" { ProofPanel(store: store, controller: store.proof).modifier(WorkspaceControlSurface(workspace: store.workspace, container: true)) }
+        if panel["id"].string == "proof" { ProofPanel(store: store, controller: store.proof, bodyFitsContent: bodyFitsContent).modifier(WorkspaceControlSurface(workspace: store.workspace, container: true)) }
         else if panel["id"].string == "layers" { LayerPanel(store: store, panel: panel).modifier(WorkspaceControlSurface(workspace: store.workspace, container: true)) }
         else if panel["id"].string == "palettes" { PalettePanel(store: store, controller: store.palettes, docked: scrollable).modifier(WorkspaceControlSurface(workspace: store.workspace, container: true)) }
         else if panel["id"].string == "filter_types" { FilterTypesPanel(store: store).modifier(WorkspaceControlSurface(workspace: store.workspace, container: true)) }
@@ -100,6 +103,10 @@ struct PanelControls: View {
         case "color_wheel":
             VStack(alignment: .leading, spacing: 8) {
                 ColorPanel(store: store)
+                    .frame(width: colorFit.isNull ? nil : colorFit["size"].number,
+                        height: colorFit.isNull ? nil : colorFit["height"].number)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { colorHeight?($0) }
+                    .frame(maxWidth: .infinity)
             }.frame(maxHeight: maximumHeight)
         case "properties": LayerPropertiesPanel(store: store)
         case "histogram", "waveform": ScopeControl(store: store, kind: item["control"].string, maximumHeight: maximumHeight)
