@@ -2349,3 +2349,58 @@ Write-Output 'Actual clipboard Copy routing rejects stale native context and rev
     }}}
 }
 'Sketch blank baseline requires canvas, brush and paper shader readiness'
+
+& {
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-navigation-controls.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $messages=@('Preferences did not close','Preferences did not close after Wheel Pan','Fit Reset preferences did not close','Restore Reset preferences did not close','Pinch preferences did not close and reenable the owned native canvas')
+ $review=[pscustomobject]@{Id=7}
+ function Invoke-Id($Id){if($Id-cne'CloseButton'){throw 'Unexpected navigation close input'};$script:navigationClose.closes++}
+ function Model{
+  $state=$script:navigationClose
+  [pscustomobject]@{preferences=$(if($state.coreAt-lt0-or$state.poll-lt$state.coreAt){[pscustomobject]@{page='canvas'}}else{$null})}
+ }
+ function Find($Id,[switch]$Visible){
+  $state=$script:navigationClose
+  if($Id-eq'CloseButton'){if($state.closeAt-lt0-or$state.poll-lt$state.closeAt){[pscustomobject]@{Current=[pscustomobject]@{ProcessId=7}}};return}
+  if($Id-cne'drawing-canvas'){throw 'Unexpected native navigation acknowledgement'}
+  if(!$state.missing){[pscustomobject]@{Current=[pscustomobject]@{ProcessId=$state.pid;IsEnabled=($state.nativeAt-ge0-and$state.poll-ge$state.nativeAt)}}}
+ }
+ function Wait-Until([scriptblock]$Condition,[string]$Message){
+  if($Message-cne$script:navigationClose.message-or$args.Count){throw 'Navigation changed its original close failure or bound'}
+  for($poll=1;$poll-le8;$poll++){$script:navigationClose.poll=$poll;if(& $Condition){return}}
+  throw $Message
+ }
+ function Reset-Zoom{
+  $state=$script:navigationClose
+  if($state.coreAt-lt0-or$state.poll-lt$state.coreAt-or$state.nativeAt-lt0-or$state.poll-lt$state.nativeAt-or$state.closeAt-lt0-or$state.poll-lt$state.closeAt-or$state.missing-or$state.pid-ne$review.Id){throw 'Navigation requested Zoom before native Preferences released canvas'}
+  $state.zoom++
+ }
+ $helpers=@($source.FindAll({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-ceq'Close-Preferences'},$true))
+ if($helpers.Count-ne1){throw 'Missing single actual navigation Close-Preferences helper'}
+ . ([scriptblock]::Create($helpers[0].Extent.Text))
+ $calls=@($source.FindAll({param($node)$node-is[Management.Automation.Language.CommandAst]-and$node.GetCommandName()-ceq'Close-Preferences'},$true))
+ if($calls.Count-ne5){throw 'Navigation must use Close-Preferences for all five closes'}
+ foreach($message in $messages){
+  $callsForMessage=@($calls|Where-Object {$_.CommandElements.Count-eq2-and$_.CommandElements[1]-is[Management.Automation.Language.StringConstantExpressionAst]-and$_.CommandElements[1].Value-ceq$message})
+  if($callsForMessage.Count-ne1){throw 'Missing actual navigation close caller or changed original failure'}
+  $statement=$callsForMessage[0].Parent;$statements=@($statement.Parent.Statements);$index=[array]::IndexOf($statements,$statement)
+  $nodes=@($statement);$requestsZoom=$message-ceq'Preferences did not close'
+  if($requestsZoom){if($statements[$index+1].Extent.Text-cne'Reset-Zoom'){throw 'Native close no longer directly precedes actual Zoom'};$nodes+=,$statements[$index+1]}
+  $sequence=($nodes|ForEach-Object {$_.Extent.Text})-join"`n"
+  foreach($case in @(@{name='core-first';core=2;native=4;closed=4;pid=7},@{name='native-first';core=4;native=1;closed=1;pid=7},@{name='visible-close';core=1;native=1;closed=4;pid=7},@{name='ready';core=1;native=1;closed=1;pid=7},@{name='missing';core=1;native=1;closed=1;pid=7},@{name='wrong-owner';core=1;native=1;closed=1;pid=8},@{name='native-stalled';core=1;native=-1;closed=1;pid=7},@{name='core-stalled';core=-1;native=1;closed=1;pid=7},@{name='modal-stalled';core=1;native=1;closed=-1;pid=7})){
+   $script:navigationClose=@{coreAt=$case.core;nativeAt=$case.native;closeAt=$case.closed;pid=$case.pid;missing=($case.name-eq'missing');poll=0;closes=0;zoom=0;message=$message}
+   $failure=$null;try{. ([scriptblock]::Create($sequence))}catch{$failure=$_}
+   $negative=$case.name-in@('missing','wrong-owner','native-stalled','core-stalled','modal-stalled')
+   if($negative){
+    if(!$failure-or$failure.Exception.Message-cne$message-or$script:navigationClose.poll-ne8-or$script:navigationClose.zoom-ne0){throw "Navigation $message/$($case.name) weakened its original failure: $failure"}
+   }else{
+    if($failure){throw $failure}
+    if($script:navigationClose.poll-ne[Math]::Max($case.core,[Math]::Max($case.native,$case.closed))-or$script:navigationClose.zoom-ne[int]$requestsZoom){throw 'Actual navigation close returned before all native/shared acknowledgements'}
+   }
+   if($script:navigationClose.closes-ne1){throw 'Navigation changed its original CloseButton invocation'}
+  }
+ }
+ 'Actual navigation close paths: shared Preferences absent and visible owned native canvas released before continuation; all original failure messages and bounds retained.'
+}

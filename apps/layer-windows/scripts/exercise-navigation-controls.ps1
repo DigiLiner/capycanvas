@@ -79,6 +79,9 @@ function Preference-Switch([string]$Id){
  } "Native preference switch did not scroll into view: $Id"
  [pscustomobject]$hit
 }
+function Close-Preferences([string]$Message){
+ Invoke-Id 'CloseButton';Wait-Until {$canvas=Find 'drawing-canvas' -Visible;!(Model).preferences -and !(Find 'CloseButton' -Visible) -and $canvas -and $canvas.Current.ProcessId -eq $review.Id -and $canvas.Current.IsEnabled} $Message
+}
 function Set-PinchPreferences([bool]$Fit,[bool]$Restore){
  Open-CanvasPreferences
  foreach($pair in @(@('quick_pinch_fit',$Fit),@('quick_pinch_restore',$Restore))){
@@ -87,7 +90,7 @@ function Set-PinchPreferences([bool]$Fit,[bool]$Restore){
   $expected=if($value){[System.Windows.Automation.ToggleState]::On}else{[System.Windows.Automation.ToggleState]::Off}
   Wait-Until {(Model).state.settings.$id -eq $value -and (Preference $id).kind.active -eq $value -and $switch.pattern.Current.ToggleState -eq $expected} "Native pinch preference did not acknowledge its value: $id"
  }
- Invoke-Id 'CloseButton';Wait-Until {$canvas=Find 'drawing-canvas' -Visible;!(Model).preferences -and !(Find 'CloseButton' -Visible) -and $canvas -and $canvas.Current.ProcessId -eq $review.Id -and $canvas.Current.IsEnabled} 'Pinch preferences did not close and reenable the owned native canvas'
+ Close-Preferences 'Pinch preferences did not close and reenable the owned native canvas'
 }
 function Reset-PinchPreference([ValidateSet('quick_pinch_fit','quick_pinch_restore')][string]$Id){
  $other=if($Id -eq 'quick_pinch_fit'){'quick_pinch_restore'}else{'quick_pinch_fit'};$before=(Model).state.settings.$other
@@ -220,7 +223,7 @@ try{
  $switch.pattern.Toggle()
  Wait-Until {!(Model).state.settings.rotate_with_two_fingers} 'Two-finger rotation preference did not reach shared settings'
  Capture "canvas-preferences-$Theme" -WithModel -Composed
- Invoke-Id 'CloseButton';Wait-Until {!(Model).preferences} 'Preferences did not close'
+ Close-Preferences 'Preferences did not close'
  Reset-Zoom
  $before=(Model).state.camera.zoom;Wheel
  Wait-Until {(Model).state.camera.zoom -gt $before} 'Plain wheel did not zoom after selecting Zoom'
@@ -240,7 +243,7 @@ try{
  (Control 'preference-choice-wheel_behavior').GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
  (Control $wheel.kind.options[0] -Name -Type ([System.Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
  Wait-Until {!(Model).state.settings.wheel_zoom} 'Wheel Pan preference did not reach shared settings'
- Invoke-Id 'CloseButton';Wait-Until {!(Model).preferences} 'Preferences did not close after Wheel Pan'
+ Close-Preferences 'Preferences did not close after Wheel Pan'
  $before=(Model).state.camera;Wheel
  Wait-Until {[Math]::Abs((Model).state.camera.translation[1]-$before.translation[1]) -gt .001} 'Plain wheel did not pan after selecting Pan'
  if([Math]::Abs((Model).state.camera.zoom-$before.zoom) -gt .001){throw 'Wheel Pan changed zoom'}
@@ -253,12 +256,12 @@ try{
  Open-CanvasPreferences;Reset-PinchPreference 'quick_pinch_fit'
  if((Model).state.settings.quick_pinch_restore -ne $false){throw 'Fit Reset changed the disabled Restore preference'}
  Capture "pinch-fit-reset-$Theme" -WithModel -Composed
- Invoke-Id 'CloseButton';Wait-Until {!(Model).preferences} 'Fit Reset preferences did not close'
+ Close-Preferences 'Fit Reset preferences did not close'
  Set-PinchPreferences $false $false
  Open-CanvasPreferences;Reset-PinchPreference 'quick_pinch_restore'
  if((Model).state.settings.quick_pinch_fit -ne $false){throw 'Restore Reset changed the disabled Fit preference'}
  Capture "pinch-restore-reset-$Theme" -WithModel -Composed
- Invoke-Id 'CloseButton';Wait-Until {!(Model).preferences} 'Restore Reset preferences did not close'
+ Close-Preferences 'Restore Reset preferences did not close'
  $checks.quick_pinch_native_defaults_edit_independent_reset='passed'
  [CapyRowPointer]::Dispose()
  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved -StateDirectory $run
