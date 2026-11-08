@@ -21,16 +21,16 @@ fn apple_enclose_fill_flat_choices_and_source_use_native_transport() {
             let selected = |command: &str| app.state()["commands"].as_array().unwrap().iter()
                 .find(|item| item["id"] == command).unwrap()["selected"] == true;
             app.invoke("fill");
-            choose("groups", &lasso);
-            choose("groups", &enclose);
-            choose("groups", &fill);
+            choose("subtools", &lasso);
+            choose("subtools", &enclose);
+            choose("subtools", &fill);
             assert!(selected("fill"));
-            choose("groups", &lasso);
+            choose("subtools", &lasso);
             assert!(selected("lasso_fill"));
-            choose("groups", &enclose);
+            choose("subtools", &enclose);
             let state = app.full_snapshot()["state"].clone();
-            assert_eq!(state["tool_set"]["groups"].as_array().unwrap().iter().map(|item| item["label"].clone()).collect::<Vec<_>>(), [fill, lasso.clone(), enclose.clone(), unfilled]);
-            assert!(state["tool_set"]["subtools"].as_array().unwrap().is_empty());
+            assert_eq!(state["tool_set"]["subtools"].as_array().unwrap().iter().map(|item| item["label"].clone()).collect::<Vec<_>>(), [fill, lasso.clone(), enclose.clone(), unfilled]);
+            assert!(state["tool_set"]["groups"].as_array().unwrap().is_empty());
             assert!(selected("enclose_fill"));
             for source in ["selection_visible", "selection_editing", "selection_reference"] {
                 let state = app.state();
@@ -46,7 +46,7 @@ fn apple_enclose_fill_flat_choices_and_source_use_native_transport() {
                 assert_eq!(app.state()["tool_extra"].as_array().unwrap().iter()
                     .any(|item| item["Checklist"]["id"] == "reference-layers"), source == "selection_reference");
             }
-            choose("groups", &lasso);
+            choose("subtools", &lasso);
             assert!(selected("lasso_fill"));
             assert!(!app.state()["tool_extra"].as_array().unwrap().iter()
                 .any(|item| item["Choice"]["id"] == "selection-source" || item["Checklist"]["id"] == "reference-layers"));
