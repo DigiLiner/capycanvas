@@ -99,6 +99,10 @@ pub async fn process_gpu(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>,
     let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
         compatible_surface: Some(surface), power_preference, force_fallback_adapter: false, apply_limit_buckets: false,
     }).await.map_err(|e| layer_ui::gpu_unsupported(localization, &e.to_string()))?;
+    let saved = std::thread::spawn({
+        let info = adapter.get_info();
+        move || layer_render_wgpu::SavedPipelines::read_file(&info)
+    });
     let limits = layer_render_wgpu::rendering_limits(adapter.limits());
     admit_adapter(localization, &adapter, &limits)?;
     let (device, queue, watch) = request_device(&adapter, &wgpu::DeviceDescriptor {
@@ -107,7 +111,9 @@ pub async fn process_gpu(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>,
             & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
         required_limits: limits, memory_hints: layer_render_wgpu::memory_hints(), ..Default::default()
     }).await.map_err(|e| e.to_string())?;
-    let gpu = ProcessGpu { factory: RendererFactory::new(adapter, device, queue), watch };
+    let data = saved.join().unwrap_or(None);
+    let saved = layer_render_wgpu::SavedPipelines::open(&device, &adapter.get_info(), data);
+    let gpu = ProcessGpu { factory: RendererFactory::new_saved(adapter, device, queue, saved), watch };
     *PROCESS_GPU.lock().map_err(|e| e.to_string())? = Some(gpu.clone());
     Ok(gpu)
 }

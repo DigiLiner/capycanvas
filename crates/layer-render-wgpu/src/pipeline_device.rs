@@ -23,6 +23,8 @@ impl Drop for CompileTrace<'_> {
 }
 #[derive(Clone)]
 pub(crate) struct DeviceRecipes {
+    #[cfg(not(target_arch = "wasm32"))]
+    saved_pipelines: Option<std::sync::Arc<crate::SavedPipelines>>,
     pub transient_display: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub transient_memory: Option<layer_core::MemoryOwner>,
     pub bounds_pipeline: std::sync::Arc<std::sync::OnceLock<std::sync::Arc<super::thumbnails::BoundsPipeline>>>,
@@ -35,6 +37,8 @@ pub(crate) struct DeviceRecipes {
 impl From<&PipelineDevice> for DeviceRecipes {
     fn from(device: &PipelineDevice) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            saved_pipelines: device.saved_pipelines.clone(),
             transient_display: device.transient_display.clone(),
             transient_memory: device.transient_memory.clone(),
             bounds_pipeline: device.bounds_pipeline.clone(),
@@ -48,6 +52,8 @@ impl From<&PipelineDevice> for DeviceRecipes {
 }
 #[derive(Clone)]
 pub(crate) struct PipelineDevice {
+    #[cfg(not(target_arch = "wasm32"))]
+    saved_pipelines: Option<std::sync::Arc<crate::SavedPipelines>>,
     pub transient_display: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub transient_memory: Option<layer_core::MemoryOwner>,
     device: wgpu::Device,
@@ -72,6 +78,8 @@ pub(crate) struct PipelineDevice {
 impl From<wgpu::Device> for PipelineDevice {
     fn from(device: wgpu::Device) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            saved_pipelines: None,
             device,
             transient_display: Default::default(),
             transient_memory: None,
@@ -105,6 +113,8 @@ impl std::ops::Deref for PipelineDevice {
 }
 impl PipelineDevice {
     pub fn with_device_recipes(mut self, recipes: &DeviceRecipes) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        { self.saved_pipelines = recipes.saved_pipelines.clone(); }
         self.transient_display = recipes.transient_display.clone();
         self.transient_memory = recipes.transient_memory.clone();
         self.bounds_pipeline = recipes.bounds_pipeline.clone();
@@ -117,6 +127,8 @@ impl PipelineDevice {
     }
     pub fn with_recipes(&self, recipes: &Self) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            saved_pipelines: recipes.saved_pipelines.clone(),
             blend_pipelines: recipes.blend_pipelines.clone(),
             tone_pipelines: recipes.tone_pipelines.clone(),
             dehaze_pipelines: recipes.dehaze_pipelines.clone(),
@@ -124,8 +136,18 @@ impl PipelineDevice {
         }
     }
     pub fn for_recipe(&self) -> Self {
-        Self { working_space: self.working_space, depth: self.depth, transient_display: self.transient_display.clone(), transient_memory: self.transient_memory.clone(), ..Self::from(self.device.clone()) }
+        Self { working_space: self.working_space, depth: self.depth, transient_display: self.transient_display.clone(), transient_memory: self.transient_memory.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            saved_pipelines: self.saved_pipelines.clone(),
+            ..Self::from(self.device.clone()) }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn with_saved_pipelines(mut self, saved: Option<std::sync::Arc<crate::SavedPipelines>>) -> Self {
+        self.saved_pipelines = saved;
+        self
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn saved_pipelines(&self) -> Option<&std::sync::Arc<crate::SavedPipelines>> { self.saved_pipelines.as_ref() }
     /// A working attachment choice, independent of native integer backing and
     /// document primaries. All deferred recipes retain this same choice.
     pub fn working_format(&self) -> wgpu::TextureFormat {
@@ -176,6 +198,13 @@ impl PipelineDevice {
     ) -> wgpu::RenderPipeline {
         #[cfg(target_os = "windows")]
         let _trace = CompileTrace::new(descriptor.label);
+        if descriptor.cache.is_none() && let Some(store) = self.saved_pipelines() {
+            let mut descriptor = descriptor.clone();
+            descriptor.cache = Some(store.cache());
+            let pipeline = self.device.create_render_pipeline(&descriptor);
+            store.compiled();
+            return pipeline;
+        }
         self.device.create_render_pipeline(descriptor)
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -185,6 +214,13 @@ impl PipelineDevice {
     ) -> wgpu::ComputePipeline {
         #[cfg(target_os = "windows")]
         let _trace = CompileTrace::new(descriptor.label);
+        if descriptor.cache.is_none() && let Some(store) = self.saved_pipelines() {
+            let mut descriptor = descriptor.clone();
+            descriptor.cache = Some(store.cache());
+            let pipeline = self.device.create_compute_pipeline(&descriptor);
+            store.compiled();
+            return pipeline;
+        }
         self.device.create_compute_pipeline(descriptor)
     }
 }

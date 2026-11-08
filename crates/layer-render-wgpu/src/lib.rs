@@ -88,6 +88,10 @@ pub type BrowserNearestCoordinateDecoder = std::rc::Rc<dyn Fn([f64;6],[u32;2],u3
 use builtin_masks::builtin_masks;
 use deferred::{Compilation, CompileMode, Deferred};
 mod pipeline_device;
+#[cfg(not(target_arch = "wasm32"))]
+mod saved_pipelines;
+#[cfg(not(target_arch = "wasm32"))]
+pub use saved_pipelines::SavedPipelines;
 mod renderer_factory;
 mod memory;
 pub use memory::new_drawing_working_bytes as new_drawing_memory_requirement;
@@ -414,7 +418,7 @@ pub struct GpuRasterMetrics {
 }
 
 pub fn rendering_features(adapter: &wgpu::Adapter) -> wgpu::Features {
-    adapter.features() & (wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE)
+    adapter.features() & (wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE | wgpu::Features::PIPELINE_CACHE)
         | native_tiles::native_in_place_features(adapter)
 }
 

@@ -10,7 +10,7 @@ pub(super) const DOCUMENT: u8 = 2;
 pub(super) const BRUSH: u8 = 3;
 pub(super) const VALIDATION: u8 = 4;
 pub(super) const OTHER: u8 = 5;
-const BACKGROUND: u8 = OTHER + 1;
+pub(super) const BACKGROUND: u8 = OTHER + 1;
 #[path = "shader_admission.rs"]
 mod admission;
 #[cfg(not(target_arch = "wasm32"))]
@@ -677,6 +677,10 @@ impl WgpuRasterizer {
         startup.finished = brush_ready
             && !startup.host_catalog_pending
             && startup.compiler.pending() == 0;
+        #[cfg(not(target_arch = "wasm32"))]
+        if startup.finished && let Some(store) = self.device.saved_pipelines() {
+            store.schedule(&startup.compiler);
+        }
         if brush_ready {
             let generation = startup.preparation.load(std::sync::atomic::Ordering::Relaxed);
             for pipeline in std::mem::take(&mut startup.warming).into_iter().filter(|p| !p.ready()) {

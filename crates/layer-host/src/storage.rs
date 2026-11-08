@@ -31,6 +31,8 @@ impl StorageRoots {
     pub fn resolve(platform: impl FnOnce() -> Result<Self, String>) -> Result<Self, String> {
         let roots = Self::chosen(std::env::var_os(STORAGE_OVERRIDE).map(PathBuf::from), platform)?;
         layer_core::temp_files::set_directory(roots.temp.clone())?;
+        #[cfg(not(target_arch = "wasm32"))]
+        layer_render_wgpu::SavedPipelines::register(roots.shaders());
         Ok(roots)
     }
 
@@ -83,6 +85,9 @@ impl StorageRoots {
     pub fn clipboard(&self) -> PathBuf {
         self.cache.join("clipboard")
     }
+    pub fn shaders(&self) -> PathBuf {
+        self.cache.join("shaders")
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +107,7 @@ mod tests {
             roots.sessions(),
             roots.file_dialogs(),
             roots.clipboard(),
+            roots.shaders(),
             roots.temp.clone(),
         ];
         assert!(stores.iter().all(|path| path.starts_with(root)));

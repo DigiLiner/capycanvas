@@ -45,7 +45,14 @@ struct Choice { key: Key, device: PipelineDevice, recipes: OnceLock<Arc<Recipes>
 
 impl RendererFactory {
     pub fn new(adapter: wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        Self::with_device(adapter, &PipelineDevice::from(device), queue)
+        #[cfg(not(target_arch = "wasm32"))]
+        { Self::new_saved(adapter, device, queue, None) }
+        #[cfg(target_arch = "wasm32")]
+        { Self::with_device(adapter, &PipelineDevice::from(device), queue) }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_saved(adapter: wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue, saved: Option<Arc<SavedPipelines>>) -> Self {
+        Self::with_device(adapter, &PipelineDevice::from(device).with_saved_pipelines(saved), queue)
     }
     pub(super) fn with_device(adapter: wgpu::Adapter, device: &PipelineDevice, queue: wgpu::Queue) -> Self {
         let budget = layer_core::MemoryBudget::process();

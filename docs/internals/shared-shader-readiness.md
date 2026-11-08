@@ -176,6 +176,8 @@ startup. Android also stops packaging that redundant asset copy. GTK still
 accepts explicit `CAPY_FILTERS_DIR` / `CAPY_FILTERS_MODE` overrides; runtime
 package installation and atomic validation remain available. Identical library
 refreshes are no-ops on all three hosts. Prepared pipeline recipes remain in
-process for reuse. The app does not persist opaque driver pipeline-cache data
-or submit stored bytes to the driver. Native startup completes after required
+process for reuse. The native process GPU loads and saves its pipeline cache in
+`shaders/`, one checked file per app version and adapter, rewritten after idle;
+unreadable or foreign data is discarded. Web relies on the browser's caches.
+Native startup completes after required
 dependencies and host catalog admission, without a disk-cache finalization job.

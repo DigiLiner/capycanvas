@@ -14,7 +14,7 @@ saves goes wherever they choose, never into these folders.
 | Config | Preferences (`settings.json`), export presets | Kept; backed up. Reading never fails; unreadable fields keep their defaults. |
 | Data | Workspaces, toolbars, palettes and tool memory (`workspaces/`), imported color profiles (`color-profiles/`), imported papers (`papers/`) | Kept; backed up. Never deleted automatically. |
 | State | Restartable editing sessions, including drawings never saved to a file (`sessions/`); GTK's last folder per file dialog (`file-dialogs/`) | Kept on this device; not backed up. |
-| Cache | The latest copied image other apps paste from (`clipboard/`) | Regenerated or replaced; the platform may clear it. |
+| Cache | The latest copied image other apps paste from (`clipboard/`), compiled shader pipelines (`shaders/`) | Regenerated or replaced; the platform may clear it. |
 | Temp | Copies of opened `.capy` files, parked drawing tabs, pasted images being read | Gone when the app stops. |
 
 Temporary files are anonymous: a file is created in the temp folder and loses
@@ -117,8 +117,9 @@ confined decoder described in the [architecture](../architecture.md#files-and-ot
 its temporary input, output and diagnostics are anonymous files in the existing
 temp folder. Managed paper reloads continue to use their local PNG reader.
 
-Shader pipelines remain in process and in the driver's own caches. The app does
-not load or save opaque driver pipeline-cache blobs from its storage folders.
+The native process GPU loads and saves its pipeline cache in `shaders/`, one
+checked file per app version and adapter, rewritten after idle; unreadable or
+foreign data is discarded.
 
 The paper library keeps each imported paper as `<id>.png`, a gray PNG named by
 the SHA-256 of its samples, with its picker preview in `<id>.preview` and names
