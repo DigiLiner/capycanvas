@@ -44,33 +44,35 @@ pub unsafe extern "C" fn capy_palette_file(request: *const c_char, bytes: *const
 }
 
 /// # Safety
-/// Worker only. Borrows NUL-terminated recipe/action JSON; returns owned draft/error JSON.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_export_draft(recipe: *const c_char, action: *const c_char) -> u64 {
-    let result = (|| -> Result<serde_json::Value, String> {
-        let (localization, action) = control_request(&unsafe { read_title(action) }?)?;
-        let recipe: layer_ui::ExportRecipe = serde_json::from_str(&unsafe { read_title(recipe) }?).map_err(|e| e.to_string())?;
-        let draft=recipe.draft_localized(action, &localization);
-        serde_json::to_value(draft).map_err(|e| e.to_string())
-    })();
-    CString::new(result.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string()).map_or(0,handles::text)
-}
-
-/// # Safety
 /// Worker only. Borrows descriptors at offset zero and NUL-terminated JSON.
 /// input may be -1 for defaults; changed preferences require a temporary output.
 /// Returns owned view/error JSON. The host publishes output only after success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_export_presets(input: i32, output: i32, request: *const c_char, color: *const c_char) -> u64 {
     let result = (|| -> Result<serde_json::Value, String> {
-        let (localization, request) = control_request(&unsafe { read_title(request) }?)?;
-        let mut library = if input < 0 { layer_ui::ExportPresets::default() } else {
+        let (localization, request): (_, serde_json::Value) = control_request(&unsafe { read_title(request) }?)?;
+        let bytes = if input < 0 { Vec::new() } else {
             let file = ManuallyDrop::new(unsafe { File::from_raw_fd(input) });
             let mut bytes = Vec::new();
             (&*file).take(layer_ui::ExportPresets::MAX_FILE_BYTES as u64 + 1)
                 .read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-            layer_ui::ExportPresets::restore(&bytes)
+            bytes
         };
+        if request["type"] == "replace" && !bytes.is_empty() {
+            layer_ui::ExportPresets::decode(&bytes).map_err(|reason| reason.preset_message(&localization))?;
+        }
+        if request["type"] == "read" { return Ok(serde_json::json!({"bytes": bytes})); }
+        if request["type"] == "replace" {
+            let expected: Vec<u8> = serde_json::from_value(request["expected"].clone()).map_err(|e| e.to_string())?;
+            let next: Vec<u8> = serde_json::from_value(request["next"].clone()).map_err(|e| e.to_string())?;
+            let encoded = layer_ui::ExportPresets::replace_encoded(&bytes, &expected, &next).map_err(|reason| reason.preset_message(&localization))?;
+            if output < 0 { return Err("No export preferences output is open".into()); }
+            let mut file = ManuallyDrop::new(unsafe { File::from_raw_fd(output) });
+            file.write_all(&encoded).map_err(|e| e.to_string())?;
+            return Ok(serde_json::json!({"changed": true}));
+        }
+        let mut library = layer_ui::ExportPresets::restore(&bytes);
+        let request = serde_json::from_value(request).map_err(|e| e.to_string())?;
         let color = serde_json::from_str(&unsafe { read_title(color) }?).map_err(|e| e.to_string())?;
         let mut view = library.operate(request, color).map_err(|reason| reason.preset_message(&localization))?;
         view.localize_names(color, &localization);

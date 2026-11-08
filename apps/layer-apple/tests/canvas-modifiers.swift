@@ -144,7 +144,7 @@ private final class NativeRotation: UIRotationGestureRecognizer {
             create: { _, done in done(nil) }, export: { staging, done in
                 do { try FileManager.default.copyItem(at: staging, to: url); done(url) }
                 catch { store.failure = error.localizedDescription; done(nil) }
-            }, exportOptions: { $0.choose($0.recipe) }))
+            }, exportOptions: { $0.choose() }))
         let canvas = CanvasView(store: store)
         let renderLayer = canvas.layer.sublayers?.compactMap { $0 as? ObservedMetalLayer }.first
         try require(!(canvas.layer is CAMetalLayer) && renderLayer != nil && renderLayer?.delegate == nil,
@@ -346,7 +346,7 @@ private final class NativeRotation: UIRotationGestureRecognizer {
                 let destination = staging.pathExtension == "capy" ? vectorPackage : png
                 do { try FileManager.default.copyItem(at: staging, to: destination); done(destination) }
                 catch { store.failure = error.localizedDescription; done(nil) }
-            }, exportOptions: { $0.choose($0.recipe) }))
+            }, exportOptions: { $0.choose() }))
         func flush() async throws {
             // Live transform previews are intentionally not recoverable yet.
             // Drive the ordinary renderer frame rather than requesting a save.

@@ -1,116 +1,85 @@
 import SwiftUI
 
-/// One immutable delivery copy. Shared validation, CMM work and previews run on I/O.
 @MainActor final class ExportController: ObservableObject {
+    @Published private(set) var view = JSON()
     @Published private(set) var copy: JSON
-    private let currentCopy: () -> JSON
-    @Published private(set) var profileNames: [String] = []
-    @Published private(set) var metadataCopy = JSON()
-    @Published private(set) var outputSize = ""
-    private var projectedError: JSON?
-    private var profileCaptions: [JSON] = []
-    private var copyRevision: UInt64 = 0
-    func refreshCopy() {
-        copy = currentCopy()
-        copyRevision &+= 1
-        guard loaded, !closing, !finished, let native else { return }
-        let revision = copyRevision
-        native.submit(2, JSON(["type": "native_caption", "caption": ["type": "export_size",
-            "width": details["output_extent"][0].uint, "height": details["output_extent"][1].uint]])) { [weak self] value in
-            DispatchQueue.main.async {
-                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
-                self.outputSize = value.string
-            }
-        }
-        if let projectedError {
-            native.submit(2, projectedError) { [weak self] value in
-                DispatchQueue.main.async {
-                    guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
-                    if self.projectedError != nil { self.error = value.string }
-                }
-            }
-        }
-        native.submit(2, JSON(["type": "export_preset_copy", "names": names])) { [weak self] value in
-            DispatchQueue.main.async {
-                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
-                self.names = value.array.map(\.string)
-            }
-        }
-        native.submit(2, JSON(["type": "export_profile_captions_copy", "captions": profileCaptions.map(\.raw)])) { [weak self] value in
-            DispatchQueue.main.async {
-                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
-                self.profileNames = value.array.map(\.string)
-            }
-        }
-        native.submit(2, JSON(["type": "export_metadata_copy", "format": recipe["format"].raw,
-            "keep": recipe["metadata"]["keep"].raw])) { [weak self] value in
-            DispatchQueue.main.async {
-                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
-                self.metadataCopy = value
-            }
-        }
-    }
-    private func blockedRange() {
-        busy = false
-        if closing { finish(nil); return }
-        error = currentCopy()["outside_range"].string
-        projectedError = JSON(["type": "color_feature_error_copy", "reason": "HdrRangeBlocked"])
-        refreshCopy()
-    }
-    private func acceptProfileCaptions() {
-        if profileCaptions.isEmpty { profileCaptions = details["form"]["profile_captions"].array }
-        while profileCaptions.count < profiles.count {
-            profileCaptions.append(JSON(["type": "literal", "name": profiles[profileCaptions.count]["name"].string]))
-        }
-        profileNames = profiles.map { $0["name"].string }
-    }
+    @Published private(set) var details = JSON()
     @Published private(set) var busy = false
     @Published private(set) var loaded = false
-    @Published private(set) var choiceRevision = 0
-    @Published private(set) var details = JSON()
-    @Published private(set) var draft = JSON()
-    var recipe: JSON { draft["recipe"] }
     @Published private(set) var profiles: [JSON] = []
-    @Published private(set) var profileIndex = 0
-    @Published private(set) var names: [String] = []
-    @Published private(set) var destination = 0
     @Published private(set) var previews: [CGImage] = []
     @Published private(set) var clipped: UInt64 = 0
+    @Published private(set) var outputSize = ""
     @Published var error: String?
     let preferences: ColorPreferencesStore
+    private let currentCopy: () -> JSON
     private weak var native: NativeOwner?
     private let request: UInt64
     private var task: NativeProjectTask?
+    private var operations = 0
+    private var previewRunning = false
+    private var pendingPreview: UInt64?
+    private var pendingChoice = false
+    private var working = false { didSet { refreshBusy() } }
+    private func refreshBusy() { busy = working || operations > 0 }
     private var closing = false
     private var finished = false
-    private let completion: (NativeProjectTask?, JSON, Int, JSON) -> Void
+    private let completion: (NativeProjectTask?, JSON, JSON?) -> Void
     init(native: NativeOwner, request: UInt64, preferences: ColorPreferencesStore, copy: @escaping () -> JSON,
-        completion: @escaping (NativeProjectTask?, JSON, Int, JSON) -> Void) {
+        completion: @escaping (NativeProjectTask?, JSON, JSON?) -> Void) {
         self.currentCopy = copy; self.copy = copy()
         self.native = native; self.request = request; self.preferences = preferences; self.completion = completion
     }
+    var fields: JSON { view["fields"] }
+    func refreshCopy() {
+        copy = currentCopy()
+        if loaded { query("export_dialog_view") { [weak self] in self?.accept($0) } }
+        if !outputSize.isEmpty {
+            native?.submit(2, JSON(["type": "native_caption", "caption": ["type": "export_size",
+                "width": details["output_extent"][0].uint, "height": details["output_extent"][1].uint]])) { [weak self] value in
+                DispatchQueue.main.async { self?.outputSize = value?.string ?? "" }
+            }
+        }
+    }
+    private func query(_ type: String, _ values: [String: Any] = [:], failure: (() -> Void)? = nil, completion: @escaping @MainActor (JSON) -> Void) {
+        guard !finished, let native else { return }
+        var request = values
+        request["type"] = type; request["id"] = self.request
+        let observation = (values["action"] as? [String: Any])?["type"] as? String == "preview"
+        let mutation = !observation && !["export_dialog_view", "export_dialog_profiles", "export_dialog_recipe"].contains(type)
+        if mutation { operations += 1; refreshBusy() }
+        native.submit(2, JSON(request)) { [weak self] value in
+            DispatchQueue.main.async {
+                guard let self, !self.finished else { return }
+                if mutation { self.operations -= 1; self.refreshBusy() }
+                guard let value, value["error"].isNull || !value["dialog"].isNull else { failure?(); self.failed(value?["error"].string ?? "Export is unavailable"); return }
+                completion(value)
+                if self.closing && !self.busy && !self.previewRunning { self.finish(nil) }
+            }
+        }
+    }
     func load(ready: (() -> Void)? = nil) {
         guard !busy, !closing, !finished, let native else { return }
-        busy = true; error = nil
+        working = true; error = nil
         native.exportTask(id: request) { [weak self] task, error in
             DispatchQueue.main.async {
                 guard let self else { task?.cancel(); return }
-                if self.closing { task?.cancel(); self.busy = false; self.finish(nil); return }
+                guard !self.closing else { task?.cancel(); self.working = false; self.finish(nil); return }
                 guard let task else { self.failed(error ?? "The drawing is unavailable"); return }
                 self.task = task
                 let preferences = self.preferences
                 NativeProjectTask.io.async { [weak self] in
                     do {
                         let details = try task.details()
-                        let view = try preferences.presets(color: details["color"], request: JSON(["type": "get", "index": 0]))
-                        let profile = ExportController.matchProfile(view["recipe"]["profile"], in: details["form"]["profiles"].array)
-                        let draft = try preferences.exportDraft(recipe: view["recipe"])
+                        let presets = try preferences.retainedPresets(JSON(["type": "read"]))["bytes"]
                         DispatchQueue.main.async { [weak self] in
                             guard let self else { return }
-                            self.busy = false
-                            if self.closing { self.finish(nil); return }
-                            self.details = details; self.accept(view, draft: draft, profiles: profile.0, selected: profile.1)
-                            self.loaded = true; self.refreshCopy(); ready?()
+                            self.details = details
+                            self.query("begin_export_dialog", ["presets": presets.raw, "capabilities": [
+                                "formats": ["Png", "Tiff", "Jpeg", "Webp", "PngHdr", "JpegHdr", "AvifHdr", "Exr"], "profile_import": true]]) { [weak self] value in
+                                guard let self else { return }
+                                self.loaded = true; self.working = false; self.accept(value); ready?()
+                            }
                         }
                     } catch { let message = error.localizedDescription
                         DispatchQueue.main.async { [weak self] in self?.failed(message) }
@@ -119,113 +88,116 @@ import SwiftUI
             }
         }
     }
-    private nonisolated static func matchProfile(_ profile: JSON, in values: [JSON]) -> ([JSON], Int) {
-        // ICC byte equality belongs to the worker, never a SwiftUI body update.
-        if let index = values.firstIndex(where: { ($0["profile"].raw as? NSDictionary)?.isEqual(profile["profile"].raw) == true }) {
-            return (values, index)
-        }
-        return (values + [profile], values.count)
+    private func accept(_ value: JSON) {
+        let revision = view["preview_revision"].uint, profilesChanged = view["profile_revision"].uint != value["profile_revision"].uint || !loaded || profiles.isEmpty
+        view = value; copy = value["copy"]
+        if revision != value["preview_revision"].uint { previews = []; clipped = 0; outputSize = "" }
+        if profilesChanged { query("export_dialog_profiles") { [weak self] in self?.profiles = $0.array } }
+        if revision != value["preview_revision"].uint { pendingPreview = value["preview_revision"].uint }
+        schedulePreview()
     }
-    private func accept(_ view: JSON, draft: JSON?, profiles: [JSON], selected: Int) {
-        names = view["names"].array.map(\.string)
-        if !view["index"].isNull { destination = Int(view["index"].uint) }
-        if let draft {
-            self.draft = draft; self.profiles = profiles; profileIndex = selected
-        }
-        acceptProfileCaptions(); metadataCopy = self.draft["metadata"]
-        choiceRevision += 1; invalidate(); refreshCopy()
+    func act(_ action: [String: Any], completion: (@MainActor () -> Void)? = nil) {
+        guard loaded, !closing, !finished else { return }
+        if action["type"] as? String != "preview" { error = nil }
+        query("export_dialog_action", ["action": action]) { [weak self] value in self?.accept(value); completion?() }
     }
-    func invalidate() { previews = []; clipped = 0; projectedError = nil; error = nil }
-    func change(_ key: String, _ value: JSON) {
-        guard loaded, !busy, !closing, !finished else { return }
-        busy = true; invalidate()
-        let recipe = recipe, preferences = preferences, profiles = profiles
-        NativeProjectTask.io.async { [weak self] in
-            do {
-                let draft = try preferences.exportDraft(recipe: recipe, action: JSON(["type": key, "value": value.raw]))
-                let selected = key == "profile" ? ExportController.matchProfile(value, in: profiles) : nil
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.busy = false
-                    if self.closing { self.finish(nil); return }
-                    self.draft = draft
-                    if let selected { self.profiles = selected.0; self.profileIndex = selected.1 }
-                    self.acceptProfileCaptions(); self.metadataCopy = draft["metadata"]; self.refreshCopy()
-                }
-            } catch { let message = error.localizedDescription
-                DispatchQueue.main.async { [weak self] in self?.failed(message) }
+    func change(_ type: String, _ value: JSON) { act(["type": "edit", "action": ["type": type, "value": value.raw]]) }
+    func imported(_ profile: JSON) { act(["type": "profile", "result": ["Ok": profile.raw]]) }
+    func selectProfile(_ index: Int) { guard profiles.indices.contains(index) else { return }; imported(profiles[index]) }
+    func usePrintProfile() {
+        query("export_dialog_print_profile") { [weak self] profile in
+            guard let self, !profile.isNull else { return }
+            self.query("profile_channels", ["profile": profile[0].raw]) { [weak self] channels in
+                self?.act(["type": "intent", "value": profile[2].raw])
+                self?.imported(JSON(["profile": profile[0].raw, "name": profile[1].raw, "channels": channels.raw]))
             }
         }
     }
-    func selectProfile(_ index: Int) {
-        guard profiles.indices.contains(index) else { return }
-        change("profile", profiles[index])
+    func preset(_ operation: String) {
+        act(["type": "begin_preset", "operation": operation]) { [weak self] in
+            guard let self, self.view["preset_busy"].bool, operation != "save" else { return }
+            self.storePreset(operation)
+        }
     }
-    func imported(_ profile: JSON) { change("profile", profile) }
-    func preference(_ request: JSON) {
-        guard loaded, !busy, !closing, !finished else { return }
-        busy = true; error = nil
-        let color = details["color"], previous = profiles, preferences = preferences
-        NativeProjectTask.io.async { [weak self] in
-            do {
-                let view = try preferences.presets(color: color, request: request)
-                let profile = ExportController.matchProfile(view["recipe"]["profile"], in: previous)
-                let draft = view["recipe"].isNull ? nil : try preferences.exportDraft(recipe: view["recipe"])
+    func storePreset(_ operation: String = "save") {
+        guard !working else { return }
+        working = true
+        query("export_dialog_preset_write", ["operation": operation]) { [weak self] write in
+            guard let self else { return }
+            let preferences = self.preferences
+            NativeProjectTask.io.async { [weak self] in
+                let result = Result { try preferences.retainedPresets(JSON(["type": "replace", "expected": write["expected"].raw, "next": write["next"].raw])) }
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    self.busy = false
-                    if self.closing { self.finish(nil); return }
-                    self.accept(view, draft: draft, profiles: profile.0, selected: profile.1)
+                    self.working = false
+                    let response: [String: Any]
+                    switch result {
+                    case .success: response = ["Ok": write["result"].raw]
+                    case .failure(let error): response = ["Err": ["Diagnostic": error.localizedDescription]]
+                    }
+                    self.act(["type": "preset_result", "result": response])
                 }
-            } catch { let message = error.localizedDescription
-                DispatchQueue.main.async { [weak self] in self?.failed(message) }
             }
         }
     }
-    func preview(_ recipe: JSON) { prepare(recipe, preview: true) }
-    func choose(_ recipe: JSON) { prepare(recipe, preview: false) }
-    private func prepare(_ recipe: JSON, preview: Bool) {
-        guard loaded, !busy, !closing, !finished, let task else { return }
-        busy = true; invalidate()
-        let preferences = preferences
-        NativeProjectTask.io.async { [weak self] in
-            do {
-                try task.configureExport(recipe)
-                // HDR preflight scans output codes on the worker before the
-                // save picker; a range failure stays in the editable form.
-                if preview || recipe["format"].string.contains("Hdr") { try task.compare() }
-                let details = try task.details()
-                if !preview && details["range_blocked"].bool {
-                    DispatchQueue.main.async { [weak self] in self?.blockedRange() }
-                    return
+    private func schedulePreview() {
+        guard view["error"].isNull else { pendingPreview = nil; return }
+        guard pendingPreview != nil, operations == 0, !previewRunning, !working, !closing, !finished else { return }
+        prepare(preview: true)
+    }
+    func preview() { error = nil; pendingPreview = view["preview_revision"].uint; schedulePreview() }
+    func choose() {
+        if previewRunning { pendingChoice = true } else { prepare(preview: false) }
+    }
+    private func prepare(preview: Bool) {
+        guard loaded, !working, !previewRunning, !closing, !finished, let task else { return }
+        let revision = view["preview_revision"].uint
+        if preview { previewRunning = true; pendingPreview = nil } else { working = true }
+        if !preview { error = nil }
+        query("export_dialog_recipe", failure: { [weak self] in self?.previewRunning = false }) { [weak self] recipe in
+            guard let self else { return }
+            NativeProjectTask.io.async { [weak self] in
+                do {
+                    try task.configureExport(recipe)
+                    if preview || recipe["format"].string.contains("Hdr") { try task.compare() }
+                    let details = try task.details()
+                    let images = preview ? try (0..<(details["has_sdr_preview"].bool ? 3 : 2)).map { try task.comparison(index: UInt32($0)) } : []
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        if preview { self.previewRunning = false } else { self.working = false }
+                        if self.closing { self.finish(nil); return }
+                        if preview && (revision != self.view["preview_revision"].uint || self.operations > 0) {
+                            self.pendingPreview = self.view["preview_revision"].uint; self.schedulePreview(); return
+                        }
+                        self.details = details; self.previews = images; self.clipped = details["clipped_channels"].uint
+                        self.act(["type": "preview", "value": ["ready": preview, "transparent": details["transparent"].raw, "range_exceeded": details["range_blocked"].bool]]) { [weak self] in
+                            guard let self else { return }
+                            if self.pendingChoice { self.pendingChoice = false; self.choose() }
+                        }
+                        if !preview && !details["range_blocked"].bool {
+                            self.query("export_dialog_remember_write") { [weak self] write in self?.finish(task, recipe: recipe, write: write) }
+                        } else if preview {
+                            self.native?.submit(2, JSON(["type": "native_caption", "caption": ["type": "export_size",
+                                "width": details["output_extent"][0].uint, "height": details["output_extent"][1].uint]])) { [weak self] caption in
+                                DispatchQueue.main.async { self?.outputSize = caption?.string ?? "" }
+                            }
+                        }
+                    }
+                } catch { let message = error.localizedDescription
+                    DispatchQueue.main.async { [weak self] in self?.previewRunning = false; self?.failed(message); self?.schedulePreview() }
                 }
-                let images = preview ? try (0..<(details["has_sdr_preview"].bool ? 3 : 2)).map { try task.comparison(index: UInt32($0)) } : []
-                let draft = try preferences.exportDraft(recipe: recipe)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.busy = false
-                    if self.closing { self.finish(nil); return }
-                    self.draft = draft; self.details = details
-                    self.previews = images; self.clipped = details["clipped_channels"].uint
-                    self.metadataCopy = draft["metadata"]; self.refreshCopy()
-                    if !preview { self.finish(task) }
-                }
-            } catch { let message = error.localizedDescription
-                DispatchQueue.main.async { [weak self] in self?.failed(message) }
             }
         }
     }
     func cancel() {
         guard !finished else { return }
         closing = true; task?.cancel()
-        if !busy { finish(nil) }
+        if !busy && !previewRunning { finish(nil) }
     }
-    private func failed(_ message: String) {
-        projectedError = nil; busy = false
-        if closing { finish(nil) } else { error = message }
-    }
-    private func finish(_ result: NativeProjectTask?) {
+    private func failed(_ message: String) { working = false; if closing { finish(nil) } else { error = message } }
+    private func finish(_ result: NativeProjectTask?, recipe: JSON = JSON(), write: JSON? = nil) {
         guard !finished else { return }
-        finished = true; task = nil; completion(result, recipe, destination, details["color"])
+        finished = true; task = nil
+        completion(result, recipe, write)
     }
 }

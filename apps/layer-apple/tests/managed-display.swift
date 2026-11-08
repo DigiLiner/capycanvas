@@ -168,7 +168,7 @@ private final class DisplayCaptureLayer: CAMetalLayer, @unchecked Sendable {
                 try await invoke("export_document")
                 try await wait("Export loaded", store: store) { store.projectFiles.exportEditor?.loaded == true }
                 let export = store.projectFiles.exportEditor!
-                export.preview(export.recipe)
+                export.preview()
                 try await wait("Snapshot readback", store: store) { !export.busy }
                 try require(export.error == nil && export.previews.count == 2, export.error ?? "Snapshot previews")
                 try require(export.previews.allSatisfy { $0.colorSpace?.name == CGColorSpace.displayP3 }, "Comparison images retain P3 tags")

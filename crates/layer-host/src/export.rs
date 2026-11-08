@@ -107,6 +107,7 @@ pub struct ExportTask {
     previews: Vec<Preview>,
     clipped: u64,
     range_blocked: bool,
+    transparent: Option<bool>,
     space: RgbSpace,
     name: String,
 }
@@ -127,6 +128,7 @@ impl ExportTask {
             previews: Vec::new(),
             clipped: 0,
             range_blocked: false,
+            transparent: None,
             space,
             name: name.to_owned(),
         })
@@ -150,6 +152,7 @@ impl ExportTask {
         self.previews.clear();
         self.clipped = 0;
         self.range_blocked = false;
+        self.transparent = None;
         Ok(())
     }
 
@@ -185,6 +188,7 @@ impl ExportTask {
             .collect::<Result<_, String>>()?;
         self.clipped = output.clipped;
         self.range_blocked = output.range_blocked;
+        self.transparent = output.transparent;
         Ok(())
     }
 
@@ -222,6 +226,7 @@ impl ExportTask {
             "clipped_channels": self.clipped,
             "has_sdr_preview": self.previews.len() == 3,
             "range_blocked": self.range_blocked,
+            "transparent": self.transparent,
             "sampled_time": document.has_animated_effects().then_some(self.original.time),
         }))
     }
@@ -315,6 +320,9 @@ mod tests {
                 .draft_canonical(ExportDraftAction::Format(format))
                 .recipe
         };
+        task.configure(format(ExportFormat::Exr)).unwrap();
+        task.compare(Default::default()).unwrap();
+        assert_eq!(task.details().unwrap()["transparent"], false);
         task.configure(format(ExportFormat::PngHdr)).unwrap();
         assert!(written(&mut task).is_err());
         task.compare(Default::default()).unwrap();

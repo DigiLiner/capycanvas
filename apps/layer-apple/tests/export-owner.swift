@@ -147,8 +147,8 @@ import UniformTypeIdentifiers
             }
             defer { withExtendedLifetime(dismissal) {} }
             func invoke(_ command: String) async throws { try await store.apply(["type": "invoke", "command": command]) }
-            func idle(allowError: Bool = false) async throws {
-                try await wait("Document completion", store: store) { !store.projectFiles.busy && store.state["requests"].array.isEmpty }
+            func idle(_ label: String = "Document completion", allowError: Bool = false) async throws {
+                try await wait(label, store: store) { !store.projectFiles.busy && store.state["requests"].array.isEmpty }
                 if !allowError { try require(store.projectFiles.error == nil, store.projectFiles.error ?? "") }
             }
             func dialog() async throws -> ExportController {
@@ -158,86 +158,122 @@ import UniformTypeIdentifiers
                 try require(editor.error == nil, editor.error ?? "")
                 return editor
             }
+            func pauseIO() async -> DispatchSemaphore {
+                let release = DispatchSemaphore(value: 0)
+                await withCheckedContinuation { entered in
+                    NativeProjectTask.io.async {
+                        entered.resume()
+                        _ = release.wait(timeout: .now() + .seconds(30))
+                    }
+                }
+                return release
+            }
+            func delayedDialog() async throws -> ExportController {
+                let release = await pauseIO()
+                defer { release.signal() }
+                try await invoke("export_document")
+                try await wait("Assigned unloaded Export", store: store) { store.projectFiles.exportEditor != nil }
+                let editor = store.projectFiles.exportEditor!
+                try require(!editor.loaded && editor.view["dialog"].isNull, "Export is assigned before its file worker loads the dialog")
+                var ownerReady = false
+                let changes = store.projectFiles.objectWillChange.sink {
+                    DispatchQueue.main.async { if editor.loaded && !editor.view["dialog"].isNull { ownerReady = true } }
+                }
+                defer { changes.cancel() }
+                release.signal()
+                try await wait("Export owner dialog publication", store: store) { ownerReady }
+                try require(editor.error == nil, editor.error ?? "")
+                return editor
+            }
+            func acceptedRecipe() async -> JSON {
+                let id = store.state["requests"].array.first { $0["kind"]["request"]["type"].string == "export" }!["id"].uint
+                return await withCheckedContinuation { done in
+                    store.query(["type": "export_dialog_recipe", "id": id]) { done.resume(returning: $0) }
+                }
+            }
             func finished(_ editor: ExportController) async throws {
-                try await wait("Export worker", store: store) { !editor.busy }
+                try await wait("Export worker", store: store) { !editor.busy && (!editor.previews.isEmpty || editor.error != nil) }
                 try require(editor.error == nil, editor.error ?? "")
             }
-            try await invoke("new_document"); try await idle()
+            try await invoke("new_document"); try await idle("New document completion")
             try await store.apply(["type":"color", "action":["op":"definition", "color":["space":"DisplayP3", "rgba":[0.7,0.3,0.15,0.8]]]])
             try await invoke("select_all"); try await store.apply(["type":"layer", "action":["op":"fill_selection"]]); try await invoke("deselect")
             _ = await withCheckedContinuation { done in native.flushPersistence { done.resume(returning: $0) } }
-            try await invoke("save_document"); try await idle()
+            try await invoke("save_document"); try await idle("Master save completion")
             try await invoke("add_layer") // Export must preserve unsaved state too.
             let state = store.state["document_file"].stableKey
             let original = try Data(contentsOf: master)
             func localized(_ editor: ExportController) async throws {
-                let localizedRecipe = editor.recipe.stableKey
-                let localizedDraft = editor.draft.stableKey
-                let literalNames = Array(editor.names.dropFirst(4))
-                let localizedProfiles = editor.profiles.map(\.stableKey)
-                let localizedSelection = (editor.destination, editor.profileIndex)
-                editor.invalidNumber("color-features-export-quality")
+                let fields = editor.fields.stableKey
+                let literalNames = Array(editor.view["preset_names"].array.dropFirst(4)).map(\.string)
+                let profiles = editor.profiles.map(\.stableKey)
+                let destination = editor.view["destination"].uint
                 for (language, index, title) in [("ja", 2, "画像を書き出す"), ("en", 1, "Export image")] {
                     try await store.apply(["type": "preferences", "action": ["type": "edit", "id": "language", "value": index]])
                     try await wait("Export language", store: store) { store.interfaceLanguage == language }
                     editor.refreshCopy()
-                    try await wait("Export copy projections", store: store) {
-                        editor.names.first == store.catalog["export_copy"]["web_share"].string
-                            && editor.metadataCopy["label"].string == store.catalog["export_copy"]["metadata"].string
-                        && editor.outputSize.contains(language == "ja" ? "出力" : "Output")
-                    }
-                    try require(editor.copy["title"].string == title
-                        && editor.copy.stableKey == store.catalog["export_copy"].stableKey,
-                        "Open export controller consumes the current shared catalog")
-                    try require(!editor.copy["outside_range"].string.isEmpty
-                        && !editor.copy["preview_gainmap"].string.isEmpty
-                        && !editor.copy["jpeg_gainmap"].string.isEmpty
-                        && !editor.copy["avif_gainmap"].string.isEmpty,
-                        "Shared preview, HDR option and warning copy is available")
-                    try require(editor.profiles.map(\.stableKey) == localizedProfiles
-                        && editor.destination == localizedSelection.0 && editor.profileIndex == localizedSelection.1,
-                        "Locale projection preserves exact profile backing and selection")
-                    try require(editor.draft.stableKey == localizedDraft && Array(editor.names.dropFirst(4)) == literalNames,
-                        "Locale projection preserves the exact draft and literal preset names")
+                    try await wait("Export copy projections", store: store) { !editor.busy && editor.copy["title"].string == title }
+                    try require(editor.profiles.map(\.stableKey) == profiles && editor.fields.stableKey == fields
+                        && editor.view["destination"].uint == destination,
+                        "Retained Export relocalization preserves exact profiles, fields and selection")
+                    try require(Array(editor.view["preset_names"].array.dropFirst(4)).map(\.string) == literalNames,
+                        "Retained Export preserves authored preset names")
                     let size = NativeTextContext.caption(["type": "export_size", "width": 64, "height": 48], language: language)
                     try require(size.contains("64") && size.contains("48") && size.contains(language == "ja" ? "出力" : "Output"),
-                        "Output size caption follows the active language")
+                        "Shared output-size copy follows the active language")
                     let number = NativeTextContext.caption(["type": "numeric_error", "reason": ["reason": "whole_number",
                         "label": ["message": "color-features-export-quality"]]], language: language)
-                    try await wait("Export number error", store: store) { editor.error == number }
-                    try require(number.contains(editor.copy["quality"].string), "Whole-number error resolves its shared field label")
-                    try require(editor.recipe.stableKey == localizedRecipe,
-                        "Changing export language preserves every recipe value")
+                    try require(number.contains(editor.copy["quality"].string), "Numeric errors use the localized shared field label")
                 }
-                editor.invalidNumber("color-features-export-quality")
-                editor.invalidate()
-                await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-                    native.submit(2, JSON(["type": "catalog"])) { _ in
-                        DispatchQueue.main.async { done.resume() }
-                    }
-                }
-                try require(editor.error == nil, "Cleared numeric errors cannot return from an older copy reply")
             }
-            var editor = try await dialog()
+            var editor = try await delayedDialog()
+            try await finished(editor)
+            try require(editor.previews.count == 2, "Export automatically prepares its initial comparison")
             try await localized(editor)
-            editor.cancel(); try await idle()
+            let accepted = editor.fields.stableKey
+            editor.act(["type": "navigate", "page": "size"]); try await finished(editor)
+            try require(editor.view["page"].string == "size", "Export navigation uses the retained shared page")
+            editor.act(["type": "back"]); try await finished(editor)
+            try require(editor.view["page"].string == "root" && editor.fields.stableKey == accepted,
+                "Export Back preserves all accepted draft fields")
+            editor.cancel(); try await idle("Initial Export cancellation")
             try require(store.state["document_file"].stableKey == state, "Cancel leaves unsaved master unchanged")
+            let presetPath = StorageLocations.within(directory)!.exportPresets
+            let unreadablePresets = Data("Preserved export preset bytes".utf8)
+            try await io {
+                try FileManager.default.createDirectory(at: presetPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try unreadablePresets.write(to: presetPath)
+                try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: presetPath.path)
+            }
+            try await invoke("export_document")
+            try await idle("Initial preset I/O failure completion", allowError: true)
+            try require(store.projectFiles.error != nil && store.projectFiles.exportEditor == nil,
+                "Initial preset I/O failure reports through Files and retires Export")
+            try await io {
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: presetPath.path)
+                try require(Data(contentsOf: presetPath) == unreadablePresets, "Initial preset I/O failure preserves unreadable preset bytes")
+                try FileManager.default.removeItem(at: presetPath)
+            }
+            store.projectFiles.dismissAlert()
+
             editor = try await dialog()
-            editor.preference(JSON(["type": "get", "index": 2])); try await finished(editor)
+            editor.act(["type": "preset", "index": 2]); try await finished(editor)
             editor.change("format", JSON("Jpeg")); try await finished(editor)
-            try require(editor.recipe["depth"].string == "U8" && editor.recipe["background"].string == "White"
-                && editor.draft["depths"].array.map(\.string) == ["U8"]
-                && !editor.draft["backgrounds"].array.map(\.string).contains("Preserve"), "JPEG draft supplies valid dependent values and choices")
-            editor.change("encoding", editor.recipe["encoding"].replacing("dither", with: JSON("Stochastic8")))
+            let jpegRecipe = await acceptedRecipe()
+            try require(jpegRecipe["depth"].string == "U8" && jpegRecipe["background"].string == "White"
+                && editor.view["depths"].array.map { $0["value"].string } == ["U8"]
+                && !editor.view["backgrounds"].array.map { $0["value"].string }.contains("Preserve"), "JPEG draft supplies valid dependent values and choices")
+            editor.change("encoding", (await acceptedRecipe())["encoding"].replacing("dither", with: JSON("Stochastic8")))
             try await finished(editor)
             editor.change("format", JSON("Png")); try await finished(editor)
             editor.change("depth", JSON("U16")); try await finished(editor)
-            try require(editor.recipe["encoding"]["dither"].string == "None"
-                && editor.draft["dithers"].array.map(\.string) == ["None"], "16-bit draft removes inapplicable dither")
+            try require((await acceptedRecipe())["encoding"]["dither"].string == "None"
+                && !editor.view["show_dither"].bool, "16-bit draft removes inapplicable dither")
             editor.imported(cmyk); try await finished(editor)
-            try require(editor.recipe["format"].string == "Tiff" && editor.recipe["background"].string == "White"
-                && editor.draft["formats"].array.map(\.string) == ["Tiff", "Jpeg"]
-                && !editor.draft["backgrounds"].array.map(\.string).contains("Preserve"), "CMYK import supplies supported output choices")
+            let cmykRecipe = await acceptedRecipe()
+            try require(cmykRecipe["format"].string == "Tiff" && cmykRecipe["background"].string == "White"
+                && editor.view["formats"].array.map { $0["value"].string } == ["Tiff", "Jpeg"]
+                && !editor.view["backgrounds"].array.map { $0["value"].string }.contains("Preserve"), "CMYK import supplies supported output choices")
             let cmykOutput = root.appendingPathComponent("CMYK-\(platform).tiff")
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 180),
                 styleMask: [.titled], backing: .buffered, defer: false)
@@ -253,12 +289,12 @@ import UniformTypeIdentifiers
             try require(window.attachedSheet === sheet, "Owned export sheet is attached")
             let beforeDelivery = deliveries
             destination = cmykOutput
-            editor.choose(editor.recipe)
+            editor.choose()
             try await wait("Export dismissal while attached", store: store) { store.projectFiles.exportEditor == nil }
             try require(deliveries == beforeDelivery && store.projectFiles.busy,
                 "Export delivery waits for native sheet detachment")
             window.endSheet(sheet)
-            try await idle()
+            try await idle("CMYK sheet-detached delivery")
             try require(window.attachedSheet == nil && !deliveredWhileAttached && deliveries == beforeDelivery + 1,
                 "Native sheet detachment delivers exactly once")
             store.projectFiles.exportDismissed()
@@ -271,28 +307,57 @@ import UniformTypeIdentifiers
             try require(CGImageSourceCreateImageAtIndex(cmykSource, 0, nil)?.colorSpace?.model == .cmyk,
                 "The shared draft must produce an actual CMYK delivery copy")
             editor = try await dialog()
-            editor.preview(editor.recipe.replacing("jpeg_quality", with: JSON(0)))
-            try await wait("Invalid output", store: store) { editor.error != nil }
-            editor.preference(JSON(["type": "get", "index": 2])); try await finished(editor)
+            editor.change("quality", JSON(0)); editor.preview()
+            try await wait("Invalid output", store: store) { !editor.view["error"].isNull }
+            try require(editor.error == nil && store.failure == nil, "Invalid export drafts stay in the shared form without a failed recipe query")
+            editor.act(["type": "preset", "index": 2]); try await finished(editor)
             editor.imported(profile); try await finished(editor)
-            let recipe = editor.recipe.replacing("size", with: JSON(["Fit": ["bounds": [32,32], "enlarge": false]]))
+            let recipe = (await acceptedRecipe()).replacing("size", with: JSON(["Fit": ["bounds": [32,32], "enlarge": false]]))
                 .replacing("resolution", with: JSON(["Ppi": 240]))
-            editor.preview(recipe); try await finished(editor)
+            var publishedExtents: [[UInt64]] = []
+            let publication = editor.$previews.dropFirst().sink { images in
+                if !images.isEmpty { publishedExtents.append(editor.details["output_extent"].array.map(\.uint)) }
+            }
+            let release = await pauseIO()
+            defer { release.signal() }
+            editor.preview()
+            editor.act(["type": "fit", "enabled": true]) {
+                editor.act(["type": "bound", "axis": 0, "value": 32])
+                editor.act(["type": "bound", "axis": 1, "value": 32]); editor.change("resolution", recipe["resolution"])
+            }
+            try await wait("Queued latest preview", store: store) {
+                !editor.busy && editor.view["bounds"][0].uint == 32 && editor.view["bounds"][1].uint == 32
+                    && editor.fields["resolution"].stableKey == recipe["resolution"].stableKey
+            }
+            var draftError: String?
+            do {
+                _ = try NativeTextContext.number(editor.view["numeric"]["dimension"], value: 0,
+                    operation: ["type": "expression", "text": "1 +"], language: store.interfaceLanguage)
+            } catch { draftError = error.localizedDescription }
+            guard let draftError else { throw HostFailure(message: "The incomplete native expression must fail validation") }
+            editor.error = draftError
+            release.signal()
+            try await wait("Latest automatic preview", store: store) { !editor.busy && !publishedExtents.isEmpty }
+            try require(editor.error == draftError, "Automatic successor preview preserves native draft validation errors")
+            publication.cancel()
+            try require(publishedExtents.allSatisfy { $0 == [32,24] }, "Edits queued during preview publish only the latest output extent")
             try require(editor.previews.count == 2 && editor.details["output_extent"][0].uint == 32
                 && editor.details["output_extent"][1].uint == 24, "Complete before/output comparison and fit")
-            editor.preference(JSON(["type": "save", "name": "Delivery", "recipe": recipe.raw])); try await finished(editor)
+            editor.preset("save"); try await finished(editor)
+            editor.act(["type": "name", "value": "Delivery"]); try await finished(editor)
+            editor.storePreset(); try await finished(editor)
             let preferences = store.colorPreferences
             let color = JSON(["space": "DisplayP3", "depth": "U16"])
             let previousCustom = try await io { try preferences.presets(color: color, request: JSON(["type":"get", "index":3])) }
-            destination = nil; editor.choose(editor.recipe); try await idle()
+            destination = nil; editor.choose(); try await idle("Named output destination cancellation")
             let remembered = try await io { try preferences.presets(color: color, request: JSON(["type":"get", "index":3])) }
             try require(remembered["recipe"].stableKey == previousCustom["recipe"].stableKey, "Cancelled destination preserves the previous Custom output choices")
             editor = try await dialog()
-            editor.preference(JSON(["type":"get", "index":4])); try await finished(editor)
-            try require(editor.recipe.stableKey == recipe.stableKey, "Reuse named output after cancel")
+            editor.act(["type": "preset", "index": 4]); try await finished(editor)
+            try require((await acceptedRecipe()).stableKey == recipe.stableKey, "Reuse named output after cancel")
             try await localized(editor)
             let tiff = root.appendingPathComponent("Output-\(platform).tiff")
-            destination = tiff; editor.choose(editor.recipe); try await idle()
+            destination = tiff; editor.choose(); try await idle("Named TIFF delivery")
             try image(tiff, type: .tiff, depth: 16, extent: [32,24])
             if platform == 1 { try require(chosenType == .tiff, "NSSavePanel receives TIFF type") }
             else {
@@ -305,18 +370,19 @@ import UniformTypeIdentifiers
                 editor = try await dialog()
                 let output = root.appendingPathComponent("Output-\(platform)." + type.preferredFilenameExtension!)
                 destination = output
-                let value = editor.recipe.replacing("format", with: JSON(format)).replacing("background", with: JSON("White"))
-                editor.choose(value); try await idle()
+                let value = (await acceptedRecipe()).replacing("format", with: JSON(format)).replacing("background", with: JSON("White"))
+                editor.change("format", value["format"]); editor.change("background", value["background"])
+                editor.choose(); try await idle("\(format) delivery")
                 try image(output, type:type, depth:8, extent:[64,48])
             }
-            editor = try await dialog(); editor.preview(editor.recipe); editor.cancel(); try await idle()
+            editor = try await dialog(); editor.preview(); editor.cancel(); try await idle("Active preview cancellation")
             if platform == 1 {
                 editor = try await dialog(); destination = root.appendingPathComponent("Missing/output.png")
-                editor.choose(editor.recipe); try await idle(allowError:true)
+                editor.choose(); try await idle("Missing-directory delivery failure", allowError:true)
                 try require(store.projectFiles.error != nil, "Write failure is visible")
                 store.projectFiles.error = nil
                 editor = try await dialog(); destination = root.appendingPathComponent("Retry.png")
-                editor.choose(editor.recipe.replacing("format", with: JSON("Png"))); try await idle()
+                editor.change("format", JSON("Png")); editor.choose(); try await idle("PNG retry delivery")
                 try image(destination!, type:.png, depth:8, extent:[64,48])
             }
             let expectedState = try JSON.decode(state).replacing("export_uri", with: JSON(destination!.absoluteString))

@@ -32,13 +32,14 @@ final class ColorPreferencesStore: @unchecked Sendable {
                 }
             }
         }
-        if ["list", "get"].contains(request["type"].string) { return try operate(-1) }
+        if ["list", "get", "read"].contains(request["type"].string) { return try operate(-1) }
         guard let url else { throw HostFailure(message: "Saving color preferences is disabled") }
         try prepare(url.deletingLastPathComponent())
         var view = JSON()
         try ProjectFileIO.atomicWrite(to: url) { view = try operate($0) }
         return view
     }
+    func retainedPresets(_ request: JSON) throws -> JSON { try presets(color: JSON(), request: request) }
     private func prepare(_ directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
@@ -78,11 +79,6 @@ final class ColorPreferencesStore: @unchecked Sendable {
         catch { try? file.close(); throw error }
         try file.close()
         return (metadata, try Data(contentsOf: url))
-    }
-    func exportDraft(recipe: JSON, action: JSON = JSON(["type": "refresh"])) throws -> JSON {
-        try recipe.encoded().withCString { recipe in
-            try localized(action).encoded().withCString { try result(takeNativeText(capy_export_draft(recipe, $0))) }
-        }
     }
     private func library(_ action: JSON, bytes: Data = Data()) throws -> JSON {
         try localized(action).encoded().withCString { action in

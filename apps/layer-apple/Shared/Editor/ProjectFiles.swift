@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Combine
 #if os(macOS)
 import AppKit
-import Combine
 #else
 import UIKit
 #endif
@@ -19,7 +19,22 @@ import UIKit
     @Published var cancelling = false
     @Published private(set) var creating = false
     @Published var colorEditor: DocumentColorController?
-    @Published var exportEditor: ExportController?
+    @Published var exportEditor: ExportController? {
+        didSet {
+            exportSubscriptions.removeAll()
+            if let editor = exportEditor {
+                editor.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+                    .store(in: &exportSubscriptions)
+                editor.$error.sink { [weak self, weak editor] message in
+                    guard let message else { return }
+                    DispatchQueue.main.async {
+                        guard let self, let editor, self.exportEditor === editor, !editor.loaded else { return }
+                        self.report(message); editor.cancel()
+                    }
+                }.store(in: &exportSubscriptions)
+            }
+        }
+    }
     @Published var packageSummary: JSON?
     @Published var packageImage: CGImage?
     @Published var packageCopying = false
@@ -27,6 +42,7 @@ import UIKit
     @Published var profileError: String?
     @Published var interpreting = false
     @Published var copyProgress: String?
+    private var exportSubscriptions = Set<AnyCancellable>()
     private var copying = false
     private var profileCompletion: ((JSON?) -> Void)?
     private var exportDelivery: (() -> Void)?
@@ -423,7 +439,7 @@ import UIKit
     private func beginExport(name: String, owner: JSON) {
         guard let id = requestID, let native = store?.native else { fail("The canvas is unavailable"); return }
         let editor = ExportController(native: native, request: id, preferences: preferences,
-            copy: { [weak store = self.store] in store?.catalog["export_copy"] ?? JSON() }) { [weak self] task, recipe, destination, color in
+            copy: { [weak store = self.store] in store?.catalog["export_copy"] ?? JSON() }) { [weak self] task, recipe, write in
             guard let self, self.requestID == id else { task?.cancel(); return }
             guard let task else { self.finish(); return }
             self.activeTask = task
@@ -441,8 +457,10 @@ import UIKit
                     guard self.preferences.canSave else { self.finish(true); return }
                     let preferences = self.preferences
                     NativeProjectTask.io.async { [weak self] in
-                        let result = Result { try preferences.presets(color: color, request:
-                            JSON(["type": "remember", "index": destination < 4 ? destination : 3, "recipe": recipe.raw])) }
+                        let result = Result {
+                            guard let write else { throw HostFailure(message: "Export preferences are unavailable") }
+                            return try preferences.retainedPresets(JSON(["type": "replace", "expected": write["expected"].raw, "next": write["next"].raw]))
+                        }
                         DispatchQueue.main.async {
                             if case .failure(let error) = result {
                                 let detail = error.localizedDescription

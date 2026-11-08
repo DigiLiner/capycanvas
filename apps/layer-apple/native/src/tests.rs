@@ -2189,3 +2189,49 @@ fn apple_launch_uses_each_scene_settings_instead_of_first_process_language() {
         assert_eq!(app.request(2, json!({"type":"bootstrap"})).unwrap()["active_tag"], language);
     }
 }
+
+#[test]
+fn retained_export_presets_compare_and_replace_without_overwriting_unreadable_data() {
+    use std::io::{Read as _, Seek as _, Write as _};
+    use std::os::fd::AsRawFd;
+    fixture_localization();
+    let request = |input: i32, output: i32, action: Value| {
+        let action = CString::new(json!({"language":"en","request":action}).to_string()).unwrap();
+        let color = CString::new("null").unwrap();
+        let text = unsafe { capy_export_presets(input, output, action.as_ptr(), color.as_ptr()) };
+        serde_json::from_slice::<Value>(handles::take_text(text).to_bytes()).unwrap()
+    };
+    assert_eq!(request(-1,-1,json!({"type":"read"})),json!({"bytes":[]}));
+    let expected = layer_ui::ExportPresets::default().encode().unwrap();
+    let mut library = layer_ui::ExportPresets::default();
+    library.save("Retained",layer_ui::ExportRecipe::wide_color()).unwrap();
+    let next = library.encode().unwrap();
+    let mut output = fixtures::tempfile();
+    assert_eq!(request(-1,output.as_raw_fd(),json!({"type":"replace","expected":expected,"next":next})),json!({"changed":true}));
+    output.rewind().unwrap();
+    let mut saved = Vec::new();
+    output.read_to_end(&mut saved).unwrap();
+    assert_eq!(saved,next);
+    output.rewind().unwrap();
+    let rejected = fixtures::tempfile();
+    assert!(request(output.as_raw_fd(),rejected.as_raw_fd(),json!({"type":"replace","expected":expected,"next":next}))["error"].is_string());
+    assert_eq!(rejected.metadata().unwrap().len(),0);
+    let mut unreadable = fixtures::tempfile();
+    unreadable.write_all(b"future preset bytes").unwrap();
+    unreadable.rewind().unwrap();
+    let bytes = request(unreadable.as_raw_fd(),-1,json!({"type":"read"}))["bytes"].clone();
+    assert_eq!(bytes,json!(b"future preset bytes"));
+    let app = App::new(0);
+    app.invoke("export_document");
+    let id = app.state()["requests"].as_array().unwrap().last().unwrap()["id"].as_u64().unwrap();
+    let view = app.request(2,json!({"type":"begin_export_dialog","id":id,"presets":bytes,
+        "capabilities":{"formats":["Png"],"profile_import":false}})).unwrap();
+    assert_eq!(view["page"],"root");
+    unreadable.rewind().unwrap();
+    assert!(request(unreadable.as_raw_fd(),rejected.as_raw_fd(),json!({"type":"replace","expected":expected,"next":next}))["error"].is_string());
+    assert_eq!(rejected.metadata().unwrap().len(),0);
+    unreadable.rewind().unwrap();
+    let mut preserved = Vec::new();
+    unreadable.read_to_end(&mut preserved).unwrap();
+    assert_eq!(preserved,b"future preset bytes");
+}

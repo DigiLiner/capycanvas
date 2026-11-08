@@ -83,7 +83,7 @@ import ImageIO
                         do { try FileManager.default.copyItem(at: staging, to: url); callback(url) }
                         catch { preconditionFailure("Provider copy failed: \(error)") }
                     } else { callback(nil) }
-                } : nil, exportOptions: { $0.choose($0.recipe) }))
+                } : nil, exportOptions: { $0.choose() }))
             let layer = attachSurface(store, CGSize(width: 128, height: 128))
             let startupDeadline = Date().addingTimeInterval(45)
             while !store.snapshot["shaders_ready"].bool && store.failure == nil {
@@ -423,7 +423,7 @@ import ImageIO
             }
         }, exportOptions: {
             exportStage = "options"; print("Grant export: \(exportStage)")
-            $0.choose($0.recipe.replacing("format", with: JSON("Png")))
+            $0.change("format", JSON("Png")); $0.choose()
         }))
         func wait(_ label: String, _ ready: () -> Bool) async throws {
             try await CapyTest.wait(label, seconds: 60, failure: { store.failure ?? store.recovery.error },

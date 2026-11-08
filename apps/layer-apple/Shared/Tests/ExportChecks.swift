@@ -74,7 +74,8 @@ extension XCTestCase {
             expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: choose); waitForExpectations(timeout: 30)
         }
         func reveal(_ element: XCUIElement) {
-            let scroll = app.scrollViews.containing(.button, identifier: "export-preview").firstMatch
+            let scroll = app.descendants(matching: .any)["export-dialog"].firstMatch.scrollViews.firstMatch
+            XCTAssertTrue(scroll.waitForExistence(timeout: 10))
             XCTAssertTrue(element.waitForExistence(timeout: 10))
             // Edge-aligned controls need no decorative inset to be clickable.
             for _ in 0..<15 {
@@ -84,6 +85,11 @@ extension XCTestCase {
             }
             XCTFail("Export control is outside the viewport: \(element.identifier)")
         }
+        func page(_ id: String) {
+            let button = app.buttons[id == "root" ? "export-back" : "export-page-" + id]
+            if id != "root" { reveal(button) }
+            workspaceActivate(button)
+        }
         func choice(_ id: String, _ label: String) {
             let picker = app.descendants(matching: .any).matching(identifier: id).firstMatch
             reveal(picker); workspaceActivate(picker); workspaceActivate(app.menuItems[label].firstMatch)
@@ -92,21 +98,25 @@ extension XCTestCase {
             let field = app.textFields[id]; reveal(field); workspaceActivate(field)
             field.typeKey("a", modifierFlags: .command); field.typeText(value)
         }
-        openExport(); choice("export-destination", "Further editing")
-        choice("export-format", "JPEG image")
+        openExport(); page("presets"); choice("export-destination", "Further editing"); page("root")
+        choice("export-format", "JPEG")
+        page("color")
         let depth = app.descendants(matching: .any).matching(identifier: "export-depth").firstMatch
-        expectation(for: NSPredicate(format: "enabled == NO"), evaluatedWith: depth)
-        waitForExpectations(timeout: 15)
-        choice("export-format", "TIFF image")
+        XCTAssertTrue(depth.waitForNonExistence(timeout: 15), "JPEG must not offer unsupported depth choices")
+        page("root")
+        choice("export-format", "TIFF")
+        page("color")
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: depth)
         waitForExpectations(timeout: 15)
-        choice("export-destination", "Further editing")
+        page("root"); page("presets"); choice("export-destination", "Further editing"); page("root")
+        page("color")
         let importProfile = app.buttons["source-profile-import"]
         reveal(importProfile); workspaceActivate(importProfile)
         chooseFile(URL(fileURLWithPath: "/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc"))
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: app.buttons["export-choose-file"])
         waitForExpectations(timeout: 20)
-        for (id, excluded) in [("export-format", "PNG image"), ("export-background", "Preserve")] {
+        for (destination, id, excluded) in [("root", "export-format", "PNG"), ("color", "export-background", "Keep transparency")] {
+            page(destination)
             let picker = app.descendants(matching: .any).matching(identifier: id).firstMatch
             reveal(picker); workspaceActivate(picker)
             XCTAssertFalse(app.menuItems[excluded].exists, "CMYK must omit unsupported \(excluded)")
@@ -115,24 +125,23 @@ extension XCTestCase {
         reveal(importProfile); workspaceActivate(importProfile); chooseFile(profile)
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: app.buttons["export-choose-file"])
         waitForExpectations(timeout: 20)
+        page("root"); page("size")
         let fit = app.checkBoxes["export-fit"]; reveal(fit); workspaceActivate(fit)
         field("export-width", "６４"); field("export-height", "64")
+        page("root")
         let preview = app.buttons["export-preview"]
         reveal(preview); workspaceActivate(preview)
         XCTAssertTrue(app.staticTexts["export-output-size"].waitForExistence(timeout: 60))
         let size = app.staticTexts["export-output-size"]
         XCTAssertEqual(size.value as? String ?? size.label, "Output: 64 × 48 px")
         reveal(size); attachEditor(in: app, name: "profiled-export-comparison-" + theme)
-        let presets = app.disclosureTriangles["Presets"].firstMatch
-        reveal(presets)
-        // AppKit reports the disclosure hit point left of the clipped scroll
-        // content. Click its visible chevron using the measured content edge.
-        let scroll = app.scrollViews.containing(.button, identifier: "export-preview").firstMatch
-        scroll.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 6, dy: presets.frame.midY - scroll.frame.minY)).click()
-        field("export-preset-name", "Studio TIFF")
+        page("presets")
         let savePreset = app.buttons["export-preset-save"]; reveal(savePreset); workspaceActivate(savePreset)
+        field("export-preset-name", "Studio TIFF")
+        let confirmPreset = app.buttons["export-preset-confirm"]; reveal(confirmPreset); workspaceActivate(confirmPreset)
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: app.buttons["export-choose-file"])
         waitForExpectations(timeout: 20)
+        page("root")
         chooseExportDestination(in: app)
         let save = app.windows.buttons["OKButton"].firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 15))
@@ -140,11 +149,12 @@ extension XCTestCase {
         XCTAssertTrue(save.waitForNonExistence(timeout: 10))
         XCTAssertEqual(editorPixels(in: app), before)
         attachEditor(in: app, name: "profiled-export-after-save-cancel-" + theme)
-        openExport(); choice("export-destination", "Studio TIFF")
+        openExport(); page("presets"); choice("export-destination", "Studio TIFF"); page("root"); page("color")
         let library = app.buttons["color-profile-library"]; reveal(library); workspaceActivate(library)
         let use = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "profile-use-")).firstMatch
         XCTAssertTrue(use.waitForExistence(timeout: 15)); attachEditor(in: app, name: "saved-icc-profile-library-" + theme)
         workspaceActivate(use); XCTAssertTrue(use.waitForNonExistence(timeout: 10))
+        page("root")
         chooseExportDestination(in: app)
         XCTAssertTrue(save.waitForExistence(timeout: 15))
         app.typeKey("g", modifierFlags: [.command, .shift]); app.typeText(root.path + "\n")
