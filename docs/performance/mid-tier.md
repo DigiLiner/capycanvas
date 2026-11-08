@@ -92,6 +92,7 @@ Shipped changes, reference-device comparisons:
 - `d3bc1303b`, retained panel body: baseline → final unmeasured on this device; matched TCL results do not qualify 90 Hz.
 - `bce7a641b`, retained thumbnail projection: layer reorder mean 70.537 → 70.631 presents/s, worst p99 22.412 → 33.497 ms; attached filter 54.088 → 54.742, p99 55.823 → 66.985 ms. Neither establishes a gain.
 - `ae37124aa`, layout-only measurement identities/per-panel reads: no matched middle-tier comparison; final absolute observations include the change.
+- Properties sliders that apply at press, ABBA against `d6771611e` (2026-11-07): Size slider 71.38 → 84.31 presents/s, worst p99 156.28 → 44.66 ms; Opacity 70.85 → 79.11, 234.35 → 44.66 ms; Flow 72.98 → 86.79, 189.69 → 22.34 ms; layer opacity slider 81.73 → 82.06, 33.48 → 22.36 ms. Value scrubs are unchanged; one candidate leg's layer opacity value p99 rose 22.42 → 33.49 ms while the other stayed at 22.34 ms. Every row still misses 90 Hz.
 
 Rejected clipping and publication trials were not shipped; their TCL results do
 not establish a middle-tier effect. Per-contact demand, refresh proof, recovered

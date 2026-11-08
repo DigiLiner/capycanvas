@@ -18,6 +18,9 @@ entry without changing the effect application.
   input character counts must not choose compact field widths.
 - Wider integers and continuous values: label left and a plain, tappable value
   right; a native slider underneath. Tapping the value enters text editing.
+  Pressing a slider moves it to the pointer at once. On Android, iPadOS and
+  Web, a touch or pen swipe that turns vertical before it moves sideways
+  scrolls the panel instead and restores the value from before the press.
   Panel values also accept vertical mouse, touch and pen drags: up increases,
   down decreases, four logical pixels equal one field step, and the value snaps
   as the slider does. Holding Shift during the drag, as in Blender and Krita,

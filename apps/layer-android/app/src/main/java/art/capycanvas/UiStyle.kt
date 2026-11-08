@@ -1,6 +1,5 @@
 package art.capycanvas
 
-import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,9 +40,24 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.inset
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -296,36 +310,72 @@ private tailrec fun inputActivity(context: android.content.Context): android.app
         .rotate(if (vertical) 90f else 0f))
 }
 
-/** Native slider gestures/semantics with a 4dp track and an optional 16dp thumb. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Slider gestures/semantics with a 4dp track and an optional 16dp thumb. */
 @Composable internal fun EditorSlider(value: Float, onChange: (Float) -> Unit,
-    modifier: Modifier = Modifier, range: ClosedFloatingPointRange<Float> = 0f..1f,
-    enabled: Boolean = true, label: String = "", height: Dp = 28.dp,
+    modifier: Modifier = Modifier, enabled: Boolean = true, label: String = "", height: Dp = 28.dp,
     inactiveTrackColor: Color = LocalPalette.current.input, showThumb: Boolean = true,
-    activeTrackColor: Color = LocalPalette.current.accent,
-    onValueChangeFinished: (() -> Unit)? = null) {
+    activeTrackColor: Color = LocalPalette.current.accent, onPress: () -> Unit = {}, onCancel: () -> Unit = {}) {
     val colors = LocalPalette.current
     val focus = LocalFocusManager.current
-    var keyInput by remember { mutableStateOf(false) }
-    val input = modifier.onPreviewKeyEvent { keyInput = it.type == KeyEventType.KeyDown; false }
-        .onFocusChanged { if (!it.isFocused) keyInput = false }
-        .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); keyInput = false } }
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-        Slider(value.coerceIn(range), { if (!keyInput) focus.clearFocus(); onChange(it) }, input.height(height).semantics { contentDescription = label },
-            enabled = enabled, valueRange = range, onValueChangeFinished = onValueChangeFinished,
-            thumb = {
-                // Material measures the slider from its thumb/track, so reserve
-                // the hit height here without enlarging the visible knob.
-                Box(Modifier.width(if (showThumb) 16.dp else 0.dp).height(height), contentAlignment = Alignment.Center) {
-                    if (showThumb) Box(Modifier.size(16.dp).shadow(2.dp, CircleShape).background(colors.thumb, CircleShape))
+    val fill = value.coerceIn(0f, 1f)
+    val current by rememberUpdatedState(fill)
+    val change by rememberUpdatedState(onChange)
+    val press by rememberUpdatedState(onPress)
+    val cancel by rememberUpdatedState(onCancel)
+    val thumb = if (showThumb) 16.dp else 0.dp
+    Layout({ if (showThumb) Box(Modifier.size(thumb).shadow(2.dp, CircleShape).background(colors.thumb, CircleShape)) },
+        modifier.height(height).semantics {
+            contentDescription = label
+            progressBarRangeInfo = ProgressBarRangeInfo(fill, 0f..1f)
+            if (enabled) setProgress { change(it.coerceIn(0f, 1f)); true } else disabled()
+        }.onKeyEvent { event ->
+            val next = when (event.key) {
+                Key.DirectionRight, Key.DirectionUp -> current + .01f
+                Key.DirectionLeft, Key.DirectionDown -> current - .01f
+                Key.PageUp -> current + .1f
+                Key.PageDown -> current - .1f
+                Key.MoveHome -> 0f
+                Key.MoveEnd -> 1f
+                else -> null
+            }
+            if (!enabled || next == null) false
+            else { if (event.type == KeyEventType.KeyDown) change(next.coerceIn(0f, 1f)); true }
+        }.focusable(enabled).pointerInput(enabled, thumb) {
+            if (!enabled) return@pointerInput
+            awaitEachGesture {
+                val down = awaitFirstDown()
+                if (currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
+                down.consume(); focus.clearFocus(); press()
+                val inset = thumb.toPx() / 2
+                var picked = Float.NaN
+                fun pick(x: Float) = ((x - inset) / maxOf(1f, size.width - 2 * inset)).coerceIn(0f, 1f)
+                    .let { if (it != picked) { picked = it; change(it) } }
+                pick(down.position.x)
+                var owned = false
+                while (true) {
+                    val contact = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                    if (contact == null || contact.isConsumed) { cancel(); break }
+                    if (!contact.pressed) { contact.consume(); break }
+                    val moved = contact.position - down.position
+                    owned = owned || abs(moved.x) > viewConfiguration.touchSlop && abs(moved.x) >= abs(moved.y)
+                    if (owned) contact.consume()
+                    pick(contact.position.x)
+                    if (!owned && awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id }?.isConsumed != false) {
+                        cancel(); break
+                    }
                 }
-            },
-            track = { state ->
-                ComposeCanvas(Modifier.fillMaxWidth().height(4.dp)) {
-                    val fraction = (state.value - range.start) / (range.endInclusive - range.start)
-                    editorSliderTrack(inactiveTrackColor, activeTrackColor.copy(alpha = if (enabled) 1f else .4f), size.width * fraction)
-                }
-            })
+            }
+        }.drawBehind {
+            val track = 4.dp.roundToPx(); val knob = thumb.roundToPx(); val top = ((size.height.roundToInt() - track) / 2).toFloat()
+            inset((knob / 2).toFloat(), top, (knob - knob / 2).toFloat(), size.height - top - track) {
+                editorSliderTrack(inactiveTrackColor, activeTrackColor.copy(alpha = if (enabled) 1f else .4f), size.width * fill)
+            }
+        }) { measurables, constraints ->
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else constraints.minWidth
+        val knobs = measurables.map { it.measure(Constraints()) }
+        layout(width, constraints.maxHeight) {
+            knobs.forEach { it.place(((width - it.width) * fill).roundToInt(), (constraints.maxHeight - it.height) / 2) }
+        }
     }
 }
 

@@ -228,6 +228,156 @@ class AndroidInteractionTest {
             action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
     }
 
+    private fun sliderPanel(fraction: Double = .3) {
+        fixture.getJSONObject("layout").apply {
+            array("bands").getJSONObject(0).put("root", obj("kind" to "split", "id" to 46,
+                "axis" to "vertical", "fraction" to fraction, "first" to tabs(41, "tool_settings"),
+                "second" to tabs(47, "brushes")))
+            put("next_id", maxOf(48, getInt("next_id")))
+        }
+        restore()
+    }
+
+    private fun sliderTag(id: String) = "number-slider-" + state().array("tool_settings").objects()
+        .first { it.getString("id") == id }.getString("label")
+
+    private fun sliderScroll(tag: String): Float {
+        var value = 0f
+        onMain {
+            value = generateSequence(find(tag)?.parent) { it.parent }.firstNotNullOf {
+                it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+            }.value()
+        }
+        return value
+    }
+
+    private fun revealSlider(tag: String) {
+        onMain {
+            val item = find(tag)!!
+            val scroll = generateSequence(item.parent) { it.parent }.first { it.config.getOrNull(SemanticsActions.ScrollBy) != null }
+            val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+            scroll.config[SemanticsActions.ScrollBy].action!!.invoke(0f, -range.value())
+        }
+        settle()
+        onMain { scrollMenuTo(hasTag(tag), "panel-body-tool_settings") }
+        settle()
+        assertTrue("The slider is visible before injecting input", bounds(tag).width > 0 && bounds(tag).height > 0)
+    }
+
+    @Test fun toolSettingSlidersApplyAtDownAndKeepSidewaysContacts() {
+        sliderPanel()
+        command("brush")
+        action(obj("type" to "select_brush", "id" to 25))
+        for (theme in listOf("light", "dark")) for (pointer in pointerTools) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "set_tool_setting", "id" to "size", "value" to 9))
+            val tag = sliderTag("size")
+            revealSlider(tag)
+            val track = settledBounds(tag)
+            val numeric = state().array("tool_settings").objects().first { it.getString("id") == "size" }.getJSONObject("numeric")
+            fun expected(position: Double) = JSONObject(Native.number(obj("control" to numeric, "value" to 9,
+                "operation" to obj("type" to "position", "position" to position)).toString(), host.languageTag)).getDouble("value")
+            tool = pointer
+            val scroll = sliderScroll(tag)
+            event(MotionEvent.ACTION_DOWN, Offset(track.left + track.width * .8f, track.center.y))
+            waitFor("$theme/$pointer Size changes during held DOWN") { kotlin.math.abs(setting("size") - expected(.8)) < .01 }
+            event(MotionEvent.ACTION_UP); settle()
+            assertEquals("UP keeps the pressed Size", expected(.8), setting("size"), .01)
+            event(MotionEvent.ACTION_DOWN, Offset(track.left + track.width * .35f, track.center.y))
+            event(MotionEvent.ACTION_MOVE, Offset(track.left + track.width * .6f, track.center.y))
+            waitFor("Size follows a sideways drag") { kotlin.math.abs(setting("size") - expected(.6)) < .01 }
+            event(MotionEvent.ACTION_MOVE, Offset(track.left + track.width * .6f, track.center.y - 32 * density))
+            event(MotionEvent.ACTION_UP); settle()
+            assertEquals("Sideways ownership keeps the panel still", scroll, sliderScroll(tag), .5f)
+            assertEquals("Sideways UP keeps Size", expected(.6), setting("size"), .01)
+        }
+    }
+
+    @Test fun verticalSliderContactsScrollAndRestoreThePressedValue() {
+        sliderPanel()
+        command("brush")
+        action(obj("type" to "select_brush", "id" to 25))
+        for (theme in listOf("light", "dark")) for (pointer in listOf(MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "set_tool_setting", "id" to "size", "value" to 9))
+            val tag = sliderTag("size")
+            revealSlider(tag)
+            val track = settledBounds(tag)
+            val scroll = sliderScroll(tag)
+            tool = pointer
+            val start = Offset(track.left + track.width * .8f, track.center.y)
+            event(MotionEvent.ACTION_DOWN, start)
+            waitFor("$theme/$pointer Size changes before vertical handoff") { setting("size") != 9.0 }
+            for (step in 1..8) {
+                event(MotionEvent.ACTION_MOVE, start - Offset(0f, step * 10 * density))
+                SystemClock.sleep(16)
+            }
+            waitFor("Vertical contact scrolls and restores Size") { sliderScroll(tag) > scroll + 8 * density && setting("size") == 9.0 }
+            event(MotionEvent.ACTION_UP); settle()
+            assertEquals("Vertical UP keeps the pre-press Size", 9.0, setting("size"), .001)
+        }
+    }
+
+    @Test fun liquifyAmountAppliesAtDownAndVerticalHandoffLeavesNoUndo() {
+        sliderPanel(.2)
+        val paint = editingLayer()
+        command("brush")
+        action(obj("type" to "select_brush", "id" to 1))
+        action(obj("type" to "set_brush_size", "value" to 64))
+        action(obj("type" to "set_color", "rgba" to JSONArray(listOf(.1, .2, .8, 1.0))))
+        waitFor("paint brush ready", 120_000) { snapshot().optBoolean("brush_ready") }
+        tool = MotionEvent.TOOL_TYPE_STYLUS
+        val extent = state().array("tabs").objects().first { it.getBoolean("active") }
+        val width = extent.getDouble("width"); val height = extent.getDouble("height")
+        val blank = paintRevision(paint)
+        drag(documentPoint(width * .4, height * .45), documentPoint(width * .6, height * .45))
+        waitFor("the Amount fixture is painted", 120_000) { paintRevision(paint) != blank }
+        val painted = paintRevision(paint)
+        command("liquify")
+        action(obj("type" to "select_brush", "id" to 12))
+        action(obj("type" to "set_brush_size", "value" to height * .3))
+        waitFor("Liquify ready", 120_000) { snapshot().optBoolean("brush_ready") }
+        for (theme in listOf("light", "dark")) for (pointer in listOf(MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            tool = MotionEvent.TOOL_TYPE_STYLUS
+            drag(documentPoint(width * .5, height * .4), documentPoint(width * .5, height * .6))
+            waitFor("Liquify authors the fixture", 120_000) { paintRevision(paint) != painted }
+            command("liquify_adjust")
+            val tag = sliderTag("liquify_amount")
+            revealSlider(tag)
+            val track = settledBounds(tag)
+            val scroll = sliderScroll(tag)
+            val revision = state().getJSONObject("document_file").getLong("revision")
+            val raster = paintRevision(paint)
+            tool = pointer
+            val start = Offset(track.left + track.width * .4f, track.center.y)
+            event(MotionEvent.ACTION_DOWN, start)
+            waitFor("$theme/$pointer Amount previews held DOWN") { kotlin.math.abs(setting("liquify_amount") - .4) < .01 }
+            assertEquals("Held Amount authors no revision", revision, state().getJSONObject("document_file").getLong("revision"))
+            assertEquals("Held Amount preserves the raster", raster, paintRevision(paint))
+            for (step in 1..8) {
+                event(MotionEvent.ACTION_MOVE, start + Offset(0f, step * 10 * density))
+                SystemClock.sleep(16)
+            }
+            waitFor("Vertical Amount contact scrolls and cancels preview") { sliderScroll(tag) < scroll - 8 * density && setting("liquify_amount") == 1.0 }
+            event(MotionEvent.ACTION_UP); settle()
+            assertEquals("Cancelled Amount authors no revision", revision, state().getJSONObject("document_file").getLong("revision"))
+            assertEquals("Cancelled Amount preserves the raster", raster, paintRevision(paint))
+            revealSlider(tag)
+            val committedTrack = settledBounds(tag)
+            event(MotionEvent.ACTION_DOWN, Offset(committedTrack.left + committedTrack.width * .8f, committedTrack.center.y))
+            waitFor("Amount previews the next DOWN") { kotlin.math.abs(setting("liquify_amount") - .8) < .01 }
+            event(MotionEvent.ACTION_MOVE, Offset(committedTrack.left + committedTrack.width * .6f, committedTrack.center.y))
+            waitFor("Amount follows the sideways contact") { kotlin.math.abs(setting("liquify_amount") - .6) < .01 }
+            event(MotionEvent.ACTION_UP)
+            waitFor("Amount UP commits one adjustment", 120_000) { paintRevision(paint) != raster }
+            command("undo")
+            waitFor("One Undo restores the pre-contact deformation", 120_000) { paintRevision(paint) == raster }
+            command("undo")
+            waitFor("Undo skips cancelled Amount and restores the painted fixture", 120_000) { paintRevision(paint) == painted }
+        }
+    }
+
     @Test fun missingPaperRowSharesLayerScrollingAndNativeActivation() {
         val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
         customize(obj("type" to "close_expanded"))

@@ -286,7 +286,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
 // mapping positions to the thumb's centre as the native control does.
 export function captureSliderContacts(number) {
   const { slider } = number;
-  let contact = null;
+  let contact = null, start;
   const pick = e => {
     const b = slider.getBoundingClientRect(), thumb = parseFloat(getComputedStyle(slider).getPropertyValue("--thumb-size")) || 0;
     if (!number.commit()) return false;
@@ -296,10 +296,12 @@ export function captureSliderContacts(number) {
   slider.addEventListener("pointerdown", e => {
     if (e.button || slider.disabled) return;
     e.preventDefault(); e.stopPropagation();
-    if (!pick(e)) return;
+    if (!number.commit()) return;
+    start = number.getValue(); pick(e);
     slider.focus({preventScroll:true});
     contact = e.pointerId; slider.setPointerCapture(e.pointerId);
   });
   slider.addEventListener("pointermove", e => { if (contact === e.pointerId) { e.preventDefault(); pick(e); } });
+  slider.addEventListener("pointercancel", e => { if (contact === e.pointerId && !number.onEditPhase) number.apply({ type: "value", value: start }); });
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) slider.addEventListener(type, () => { contact = null; });
 }

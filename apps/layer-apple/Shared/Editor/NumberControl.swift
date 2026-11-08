@@ -24,7 +24,7 @@ struct NumberControl: View {
     @State private var formatted = JSON()
     @State private var numericLabels = JSON()
     @State private var showsEntry = false
-    @State private var horizontalDrag: Bool?
+    @State private var sliderDrag: SliderDrag?
     @State private var readoutContact: (y: CGFloat, fill: Double, source: String)?
     @State private var dialOrigin: Double?
     @State private var dialContact = false
@@ -218,21 +218,27 @@ struct NumberControl: View {
                     .frame(width: max(0, geometry.size.width * formatted["fill"].number))
             }.frame(height: 4).clipShape(Capsule()).frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
-                // Preserve vertical scrolling through long tool-settings lists.
                 .simultaneousGesture(DragGesture(minimumDistance: 0).updating($contact) { _, active, _ in active = true }.onChanged { event in
                     guard enabled else { cancelDrag(); return }
-                    if horizontalDrag == nil && max(abs(event.translation.width), abs(event.translation.height)) >= 6 {
-                        horizontalDrag = abs(event.translation.width) > abs(event.translation.height)
-                        if horizontalDrag == true { gestureChange?("down", field.value) { field.error = $0 } }
-                    }
-                    if horizontalDrag == true {
+                    guard let drag = sliderDrag else {
+                        sliderDrag = SliderDrag(start: field.value)
+                        gestureChange?("down", field.value) { field.error = $0 }
                         position(event.location.x / max(1, geometry.size.width), phase: "move")
+                        return
                     }
+                    guard drag.scrolls != true else { return }
+                    #if os(iOS)
+                    if drag.scrolls == nil && max(abs(event.translation.width), abs(event.translation.height)) >= 6 {
+                        let scrolls = abs(event.translation.height) >= abs(event.translation.width)
+                        sliderDrag?.scrolls = scrolls
+                        if scrolls { restore(drag.start); return }
+                    }
+                    #endif
+                    position(event.location.x / max(1, geometry.size.width), phase: "move")
                 }.onEnded { event in
                     guard enabled else { cancelDrag(); return }
-                    if horizontalDrag == true { position(event.location.x / max(1, geometry.size.width), phase: "up") }
-                    else if horizontalDrag == nil { position(event.location.x / max(1, geometry.size.width)) }
-                    horizontalDrag = nil
+                    if sliderDrag?.scrolls != true { position(event.location.x / max(1, geometry.size.width), phase: "up") }
+                    sliderDrag = nil
                 })
         }.frame(height: compactPanel ? 16 : store.panelMetrics.height).modifier(NumberControlMeasurement(id: key + ":track"))
             .accessibilityElement().accessibilityLabel(label)
@@ -361,8 +367,8 @@ struct NumberControl: View {
     private func cancelDrag() {
         readoutContact = nil; cancelDial()
         if valueScrub != nil { settleValueDrag(cancel: true) }
-        if horizontalDrag == true { gestureChange?("cancel", field.value) { field.error = $0 } }
-        horizontalDrag = nil
+        if let drag = sliderDrag, drag.scrolls != true { restore(drag.start) }
+        sliderDrag = nil
     }
     private func cancelDial() {
         if dialContact || dialKey {
@@ -394,14 +400,15 @@ struct NumberControl: View {
     private func settleValueDrag(cancel: Bool) {
         guard let start = valueScrub?.start else { return }
         valueScrub = nil
-        if cancel {
-            if let gestureChange { gestureChange("cancel", start) { field.error = $0 } }
-            else if Float(start) != Float(field.value) {
-                let token = field.submit(start)
-                change(start) { error in field.complete(token, error: error); format() }
-            }
-        }
+        if cancel { restore(start) }
         format()
+    }
+    private func restore(_ start: Double) {
+        if let gestureChange { gestureChange("cancel", start) { field.error = $0 } }
+        else if Float(start) != Float(field.value) {
+            let token = field.submit(start)
+            change(start) { error in field.complete(token, error: error); format() }
+        }
     }
     private func resetValue() {
         guard enabled else { return }
@@ -444,6 +451,10 @@ struct NumberControl: View {
             field.error = error.localizedDescription
             return nil
         }
+    }
+    private struct SliderDrag {
+        let start: Double
+        var scrolls: Bool?
     }
     private struct ValueScrub {
         let start: Double

@@ -76,6 +76,7 @@ Shipped changes, matched comparisons:
 - `d3bc1303b`, retained panel body: unchanged `PanelControls` compositions 290 → 0; diagnostic mean measure/layout cost 8.206 → 6.312 ms (−23.1%). Column-gap cadence 42.127 → 44.680 presents/s is within run spread (light, short-primer diagnostic); target remains missed.
 - `bce7a641b`, retained thumbnail projection: layer reorder 44.779 → 50.431 presents/s; attached filter reorder 38.049 → 45.246. Worst p99 49.983 → 49.983 ms and 83.322 → 83.311 ms; both miss target.
 - `ae37124aa`, layout-only measurement identities/per-panel reads: rebased wheel mean mouse 37.642 → 44.846 presents/s, touch 43.088 → 45.406; size slider 36.522 → 36.765, delivered values 27.491 → 27.101/s, within the accepted pooled gate's control spread. No reorder gain is claimed.
+- Properties sliders that apply at press, ABBA against `d6771611e` (2026-11-07): Size slider 36.94 → 47.99 presents/s, worst p99 183.27 → 50.03 ms; Opacity 52.41 → 59.62, 183.08 → 33.33 ms; Flow 56.81 → 58.84, 83.30 → 33.32 ms; layer opacity slider 58.66 → 58.26 within spread, p99 33.34 → 49.96 ms from one candidate contact (the other leg 33.2–33.4 ms). Value scrubs are unchanged. Size still misses 60 Hz.
 
 Rejected: full-pane intermediate removal and content-only clipping were not
 accepted as wheel/reorder improvements; publication/coalescing trials were not

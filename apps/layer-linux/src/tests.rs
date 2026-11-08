@@ -8747,18 +8747,21 @@ fn native_slider_feedback() {
 }
 
 #[test]
-#[ignore = "private Wayland display, native panel slider input"]
+#[ignore = "private Wayland display: --native-test=native_panel_slider_input --tablet"]
 fn native_panel_slider_input() {
     let app = native_test_app("art.capycanvas.PanelSliders");
-    let w = fixture_workspace(&app);
+    let w = Workspace::new(&app);
     w.window.maximize();
     w.window.present();
     let mut input = RemoteInput::new();
     input.ready();
-    until(|| w.window.is_maximized() && w.surface.width() > 0, "slider workspace allocated");
+    until(|| w.window.is_maximized() && w.surface.width() > 0 && w.gpu.borrow().is_some()
+        && w.workspaces.ready(), "slider workspace ready");
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(WorkspaceState::default()) });
     let workspace = tool_settings_workspace(&w, &[], true, true);
     w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
-    let output = artifact_dir("../../artifacts/ui/panel-sliders");
+    let output_root = std::env::var("LAYER_TEST_ARTIFACTS").unwrap_or_else(|_| "../../artifacts/ui/panel-sliders".into());
+    let output = artifact_dir(&output_root);
     for theme in [Theme::Light, Theme::Dark] {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
         w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::GPen as u32 });
@@ -8782,8 +8785,21 @@ fn native_panel_slider_input() {
         let value = find_css(size.upcast_ref(), "number-value").unwrap().compute_bounds(&size).unwrap();
         assert_eq!(size.width() as f32 - value.x() - value.width(), 0.);
         assert_eq!(value.y() + value.height(), bar.y() + bar.height(), "the readout aligns with the slider's bottom");
-        assert_eq!(opacity.compute_bounds(&panel).unwrap().y() - size.compute_bounds(&panel).unwrap().y() - size.height() as f32, 4.);
+        let flow = named::<crate::number_control::NumberControl>(&panel, "tool-setting-flow");
+        assert_eq!(flow.compute_bounds(&panel).unwrap().y() - size.compute_bounds(&panel).unwrap().y() - size.height() as f32, 4.);
         assert!(find_css(size.upcast_ref(), "number-step").is_none());
+        for device in ["mouse", "touch", "pen"] {
+            w.dispatch(UiAction::SetToolSetting { id: "size".into(), value: 32. });
+            let point = screen_point(scale.upcast_ref(), &w.window, [0.8, 0.5]);
+            input.perform(serde_json::json!([contact(device, "move", point), contact(device, "down", point)]));
+            let pressed = size.value();
+            assert!(pressed > 100., "{device} {theme:?} slider changes before motion or release: {pressed}");
+            assert_eq!(state(&w).brush.diameter as f64, pressed, "{device} press publishes the brush size");
+            let mut release = vec![contact(device, "up", point)];
+            if device == "pen" { release.push(serde_json::json!({ "pen": "leave" })); }
+            input.perform(serde_json::Value::Array(release));
+            assert_eq!(size.value(), pressed, "{device} release preserves the pressed slider value");
+        }
         for value in [999., 1000.] {
             w.dispatch(UiAction::SetToolSetting { id: "size".into(), value });
             pump(30);

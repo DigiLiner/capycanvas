@@ -98,7 +98,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     var positionKeys by remember { mutableStateOf(false) }
     val positionInput = if (onPositionChange == null) Modifier else Modifier.onPreviewKeyEvent { positionKeys = it.type == KeyEventType.KeyDown; false }
         .onFocusChanged { if (!it.isFocused) positionKeys = false }
-        .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); positionKeys = false } }
+        .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial); positionKeys = false } }
     val displayKey = if (ranged) "edit" else "text"
     fun resolve(value: Double, op: JSONObject): JSONObject {
         val request = obj("control" to control, "value" to value, "operation" to op)
@@ -178,6 +178,8 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         } else endEdit()
     })
     val cancelScrub by rememberUpdatedState({ scrubCancelled = true; settleScrub(scrubOrigin, true) })
+    val pressSlider = { scrubOrigin = currentValue }
+    val cancelSlider = { settleScrub(scrubOrigin, true) }
     DisposableEffect(scrubbing) {
         val handler: ((android.view.KeyEvent) -> Boolean)? = if (!scrubbing) null else { event ->
             if (event.keyCode != android.view.KeyEvent.KEYCODE_ESCAPE) false
@@ -362,7 +364,8 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                     onDoubleTap = reset) { position, radius -> if (finish()) apply(obj("type" to "dial", "x" to position.x.toDouble(), "y" to position.y.toDouble(), "radius" to radius.toDouble())) }
                 else EditorSlider(shown.number("fill"), { if (finish()) apply(obj("type" to "position", "position" to it)) },
                     Modifier.fillMaxWidth().padding(start = 36.dp, end = 76.dp).align(Alignment.BottomStart).then(contact).testTag("number-slider-$label"),
-                    enabled = enabled, label = label, height = 16.dp, inactiveTrackColor = fieldFill, showThumb = false, activeTrackColor = colors.sliderFill)
+                    enabled = enabled, label = label, height = 16.dp, inactiveTrackColor = fieldFill, showThumb = false, activeTrackColor = colors.sliderFill,
+                    onPress = pressSlider, onCancel = cancelSlider)
             }
             errorCaption?.let { Text(it, Modifier.testTag("number-error-$id"), color = colors.accent, fontSize = 12.sp) }
         }
@@ -372,7 +375,8 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         Column(modifier) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (showSlider) EditorSlider(shown.number("fill"), { if (finish()) apply(obj("type" to "position", "position" to it)) }, Modifier.weight(1f).then(contact).then(positionInput).testTag(if (settings) "setting-slider-$id" else "number-slider-$label"),
-                    enabled = enabled, label = label, height = height, inactiveTrackColor = fieldFill, showThumb = false, activeTrackColor = colors.sliderFill)
+                    enabled = enabled, label = label, height = height, inactiveTrackColor = fieldFill, showThumb = false, activeTrackColor = colors.sliderFill,
+                    onPress = pressSlider, onCancel = cancelSlider)
                 valueControl()
             }
             errorCaption?.let { Text(it, Modifier.testTag("number-error-$id"), color = colors.accent, fontSize = 12.sp) }
@@ -394,7 +398,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                 Modifier.weight(1f).then(contact).testTag(if (settings) "setting-slider-$id" else "number-slider-$label"),
                 enabled = enabled, label = label, height = height,
                 inactiveTrackColor = if (settings) colors.divider else fieldFill, showThumb = settings,
-                activeTrackColor = if (settings) colors.accent else colors.sliderFill)
+                activeTrackColor = if (settings) colors.accent else colors.sliderFill, onPress = pressSlider, onCancel = cancelSlider)
             step(1, "plus")
         }
         errorCaption?.let { Text(it, Modifier.testTag("number-error-$id"), color = colors.accent, fontSize = 12.sp) }

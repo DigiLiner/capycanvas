@@ -20,7 +20,7 @@ class Element extends FakeElement {
   setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}
 }
 function harness(t){
-  const previous={document:globalThis.document,window:globalThis.window};
+  const previous={document:globalThis.document,window:globalThis.window,getComputedStyle:globalThis.getComputedStyle};
   const doc={createElement:tag=>new Element(tag,doc)};globalThis.document=doc;globalThis.window={addEventListener(){},removeEventListener(){}};
   t.after(()=>{for(const[key,value]of Object.entries(previous))if(value===undefined)delete globalThis[key];else globalThis[key]=value;});
   const control={kind:'slider',min:0,max:10,soft_min:0,soft_max:10,scale:1,step:1,digits:1},operations=[],captions=[],changes=[];
@@ -93,6 +93,35 @@ function contactElements(number){
   }
   return find(number,'number-dial-face');
 }
+
+test('slider down applies immediately, cancel restores only plain fields, and release keeps the value',async t=>{
+  const h=harness(t),listeners={};
+  globalThis.window={addEventListener:(type,listener)=>(listeners[type]??=new Set()).add(listener),removeEventListener:(type,listener)=>listeners[type]?.delete(listener)};
+  globalThis.getComputedStyle=()=>({getPropertyValue:()=> '20px'});
+  for(const phased of [false,true])for(const pointerType of ['mouse','touch','pen']){
+    const resolve=request=>h.options.resolve({...request,value:request.operation.type==='position'?request.operation.position*10:request.operation.type==='value'?request.operation.value:request.value});
+    const number=createNumberField({...h.options,resolve}),slider=number.slider,phases=[];
+    slider.getBoundingClientRect=()=>({x:100,width:120});slider.setPointerCapture=()=>{};
+    if(phased)number.onEditPhase=phase=>phases.push(phase);
+    const contact=(type,pointerId=1,clientX=190)=>{
+      const event={type,button:0,pointerType,pointerId,clientX,target:slider};
+      if(type==='pointerdown')number.dispatch(type,event);
+      for(const listener of [...listeners[type]??[]])listener(event);
+      slider.dispatch(type,event);
+    };
+    number.update(2);h.operations.length=0;h.changes.length=0;
+    contact('pointerdown');assert.equal(number.getValue(),8,`${pointerType}: value changes before release`);assert.deepEqual(h.changes,[8]);
+    contact('pointermove',2,130);assert.equal(number.getValue(),8,'another contact cannot change the value');
+    contact('pointercancel');assert.equal(number.getValue(),phased?8:2);assert.deepEqual(h.changes,phased?[8]:[8,2]);
+    assert.deepEqual(h.operations.map(r=>r.operation),phased?[{type:'position',position:.8}]:[{type:'position',position:.8},{type:'value',value:2}]);
+    assert.deepEqual(phases,phased?['down','cancel']:[]);
+    number.update(2);h.changes.length=0;phases.length=0;
+    contact('pointerdown');contact('pointermove',1,170);assert.equal(number.getValue(),6);
+    contact('pointerup');await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(number.getValue(),6,'release retains the position');assert.deepEqual(h.changes,[8,6]);assert.deepEqual(phases,phased?['down','up']:[]);
+    contact('pointercancel');assert.equal(number.getValue(),6,'an ended contact cannot restore an earlier value');number.dispose();
+  }
+});
 
 test('a panel dial sits in a slider row and one press or drag relative to its centre is one gesture',async t=>{
   const h=harness(t),control={...h.options.control,kind:'dial',min:0,max:360,step:1,default_value:225},phases=[],listeners={};

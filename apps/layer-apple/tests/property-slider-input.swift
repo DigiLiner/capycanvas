@@ -220,10 +220,15 @@ import QuartzCore
                             let track = geometry.frames[identifier + ":track"] else {
                             throw HostFailure(message: "Missing pen-scroll number controls")
                         }
-                        let beforePen = value()
-                        let trackPoint = CGPoint(x: track.midX, y: track.midY)
-                        try event(.leftMouseDown, at: trackPoint, marker: host, number: 1020, tablet: true); try await drain(0.02)
+                        let trackPoint = CGPoint(x: track.minX + track.width * 0.8, y: track.midY)
                         let trackLift = CGPoint(x: trackPoint.x + 4, y: trackPoint.y + 4)
+                        let beforeMouse = value()
+                        try event(.leftMouseDown, at: trackPoint, marker: host, number: 1018, tablet: false); try await drain(0.02)
+                        try require(abs(value() - beforeMouse) > 0.0001, "Platform \(platform) brush-size slider must change on mouse down")
+                        try event(.leftMouseUp, at: trackPoint, marker: host, number: 1019, tablet: false); try await drain()
+                        try await action(["type": "set_brush_size", "value": 32])
+                        let beforePen = value()
+                        try event(.leftMouseDown, at: trackPoint, marker: host, number: 1020, tablet: true); try await drain(0.02)
                         try event(.leftMouseDragged, at: trackLift, marker: host, number: 1021, tablet: true); try await drain(0.02)
                         try event(.leftMouseUp, at: trackLift, marker: host, number: 1022, tablet: true); try await drain()
                         let sliderChanged = abs(value() - beforePen) > 0.0001

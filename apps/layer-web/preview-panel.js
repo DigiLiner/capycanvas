@@ -1,6 +1,5 @@
 import {liveCopy} from './localization.js';
 import {createDialogHost} from './dialog-host.js';
-import {captureSliderContacts} from './numeric.js';
 
 export function createPreviewPanel({app,name,view,kind,value,apply,cancel,element,button,icon,numberField,workspace}) {
   const common=liveCopy(app,'bootstrap_view').common;
@@ -26,10 +25,7 @@ export function createPreviewPanel({app,name,view,kind,value,apply,cancel,elemen
     if(rebuilt) {
       const field=numberField(v.numeric,v.label,value);
       field.id=`${name}-value`;field.dataset.kind=kind(v);shown=JSON.stringify([v.numeric,v.kind]);
-      if(v.numeric.kind==='slider'){
-        captureSliderContacts(field);
-        field.slider.addEventListener('touchstart',e=>{if(e.cancelable)e.preventDefault();},{passive:false});
-      }
+      if(v.numeric.kind==='slider')field.slider.addEventListener('touchstart',e=>{if(e.cancelable)e.preventDefault();},{passive:false});
       if(number)number.replaceWith(field);else body.prepend(field);
       number=field;
     }

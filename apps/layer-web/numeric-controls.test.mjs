@@ -21,6 +21,7 @@ export async function checkNumericControls({call,evaluate,settle}) {
   const tabs=(id,panels)=>({kind:'tabs',id,panels,active:panels[0],tab_style:'icon'});
   Object.assign(fixture.layout,{bands:[{id:40,edge:'left',extent:310,root:tabs(41,['sizes'])},{id:42,edge:'right',extent:310,root:tabs(43,['tool_settings'])},{id:44,edge:'top',extent:36,root:tabs(45,['toolbar'])}],floating:[],collapsed:[],column_scroll:[],fit_tab_groups:[],fit_height_groups:[],column_stacks:[],next_id:Math.max(46,fixture.layout.next_id)});
   fixture.zen_mode=false;
+  const sliderFixture=structuredClone(fixture);sliderFixture.layout.bands[1].root={kind:'split',id:46,axis:'vertical',fraction:.25,first:tabs(43,['tool_settings']),second:tabs(47,['layers'])};sliderFixture.layout.next_id=Math.max(48,sliderFixture.layout.next_id);
   const size='.dock-group[data-group="43"] [data-tool-setting="size"]';
   const point=selector=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
   const input=async(device,type,p,fine=false)=>{
@@ -57,6 +58,27 @@ export async function checkNumericControls({call,evaluate,settle}) {
   }
   try {
     if(native)await performNative([{key:0xffe1,down:true},{key:0xffe1,down:false},{wait_ms:100}]);
+    await send({type:'restore_workspace',workspace:sliderFixture});
+    for(const theme of ['light','dark']) {
+      await send({type:'set_theme',theme});
+      await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1});
+      try {
+        await send({type:'set_brush_size',value:40});
+        const {expected,...press}=await evaluate(`(()=>{const n=document.querySelector('${size} .number-slider');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect(),thumb=parseFloat(getComputedStyle(n).getPropertyValue('--thumb-size')),field=layerApp.state().tool_settings.find(f=>f.id==='size');return{x:r.x+thumb/2+.8*(r.width-thumb),y:r.y+r.height/2,expected:layerApp.app.number_input({control:field.numeric,value:field.value,operation:{type:'position',position:.8}})}})()`);
+        await input('touch','down',press);await wait();
+        close(await evaluate('layerApp.state().brush.diameter'),expected.value,'touch press changes the Properties slider before release');assert.equal(await text(size),expected.text,'held slider readout');
+        await input('touch','up',press);await wait();close(await evaluate('layerApp.state().brush.diameter'),expected.value,'touch release keeps the pressed value');
+        const scrollOwner=`(()=>{for(let n=document.querySelector('${size}').parentElement;n;n=n.parentElement)if(/auto|scroll/.test(getComputedStyle(n).overflowY)&&n.scrollHeight>n.clientHeight)return n;throw Error('Properties settings must overflow')})()`;
+        await evaluate(`${scrollOwner}.scrollTop=0`);await send({type:'set_brush_size',value:40});
+        const start=await point(size+' .number-slider');start.x=press.x;
+        await input('touch','down',start);await wait();assert.notEqual(await evaluate('layerApp.state().brush.diameter'),40,'vertical handoff starts with a changed value');
+        for(const distance of [20,40,60,80]){await input('touch','move',{x:start.x,y:start.y-distance});await settle();}
+        await input('touch','up',{x:start.x,y:start.y-80});await wait();
+        assert.ok(await evaluate(`${scrollOwner}.scrollTop>0`),'a vertical swipe starting on the slider scrolls Properties');
+        close(await evaluate('layerApp.state().brush.diameter'),40,'vertical handoff restores the value before the press');assert.equal(await text(size),'40 px','vertical handoff restores the readout');
+      } finally {await call('Emulation.setTouchEmulationEnabled',{enabled:false});}
+      console.log(`PASS: Properties slider touch down-hold, release, vertical scroll and restoration in ${theme}`);
+    }
     await send({type:'restore_workspace',workspace:fixture});
     for(const theme of ['light','dark']) {
       await send({type:'set_theme',theme});
@@ -67,7 +89,7 @@ export async function checkNumericControls({call,evaluate,settle}) {
         close(g.glyph.right,g.value.right-g.paddingRight,'complete suffix right anchor');assert.ok(g.glyph.left>=g.value.left+g.paddingLeft-.5,'whole readout fits');assert.notEqual(g.textOverflow,'ellipsis');assert.ok(g.font.includes('Adwaita Sans'));
         if(Number.isInteger(value))assert.ok(g.glyph.left>=g.track.right+6,'integer readout clears slider');
         const p=await point(size+' .number-value');await input('mouse','down',p);await input('mouse','up',p);await wait();
-        const entry=await evaluate(`document.querySelector('${size} .number-entry').getBoundingClientRect().toJSON()`);close(entry.width,68,'entry width');close(entry.height,24,'entry height');close(entry.bottom,g.box.bottom,'entry bottom');close(entry.right,g.box.right,'entry right');fonts.push({theme,value,role:'entry',...await platformFonts(size+' .number-entry',String(value))});
+        const entry=await evaluate(`document.querySelector('${size} .number-entry').getBoundingClientRect().toJSON()`);close(entry.width,68,'entry width');close(entry.height,26,'entry height');close(entry.bottom,g.box.bottom,'entry bottom');close(entry.right,g.box.right,'entry right');fonts.push({theme,value,role:'entry',...await platformFonts(size+' .number-entry',String(value))});
         close(entry.left-g.track.right,8,'entry slider gap');const editingTrack=await evaluate(`document.querySelector('${size} .number-slider').getBoundingClientRect().toJSON()`);close(editingTrack.left,g.track.left,'stable slider left');close(editingTrack.right,g.track.right,'stable slider right');await key('Escape');await wait();
       }
       close(measured[0].glyph.right,measured[1].glyph.right,'999 and 1000 suffix anchor');geometryReports.push({theme,measured});
