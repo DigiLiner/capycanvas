@@ -108,13 +108,13 @@ impl WgpuRasterizer {
         data: &Arc<RasterData>,
     ) -> Result<(), GpuRasterError> {
         if !self.snapshot_worker { return self.publish_prepared_restore(target,data); }
-        let (before,selected)=self.select_restore_data(target,previous,data,&BTreeSet::new());
+        let (before,selected)=self.select_restore_data(target,previous,data,&BTreeSet::new(),0);
         self.restore_raster(target,&before,&selected)?;
         if let Some(native)=&mut self.native_edit {native.backing.insert(target,data.clone());}
         Ok(())
     }
 
-    pub(super) fn select_restore_data(&mut self,target:SourceTarget,previous:&RasterData,data:&RasterData,required:&BTreeSet<[u32;2]>)->(RasterData,RasterData) {
+    pub(super) fn select_restore_data(&mut self,target:SourceTarget,previous:&RasterData,data:&RasterData,required:&BTreeSet<[u32;2]>,reserved_color_bytes:u64)->(RasterData,RasterData) {
         if self.native_edit.is_some() {
             let paint = self.paint_layers.iter().find(|l| l.id == target);
             let resident: BTreeSet<_> = paint
@@ -136,7 +136,7 @@ impl WgpuRasterizer {
                 .count() as u64;
             // Reserve both mutable color surfaces, including a future blend
             // companion, before deciding whether an eager restore fits.
-            let candidate = other_bytes.saturating_add(
+            let candidate = other_bytes.saturating_add(reserved_color_bytes).saturating_add(
                 colors.saturating_mul(2 * PAGE_SIZE as u64 * PAGE_SIZE as u64 * 16),
             );
             if colors != 0 && !self.snapshot_worker && candidate > self.native_edit.as_ref().unwrap().color_cache_bytes {

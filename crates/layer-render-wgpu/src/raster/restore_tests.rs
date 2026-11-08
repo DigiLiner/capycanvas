@@ -39,6 +39,37 @@ fn live_pixels(r: &WgpuRasterizer) -> Vec<(RasterPlane, [u32; 2], Vec<u8>)> {
 }
 
 #[test]
+fn cold_multilayer_restore_reserves_eager_color_across_the_whole_batch() {
+    use layer_core::{authored::*,MemoryBudget,MemoryFacts,DeviceMemoryFacts};
+    let extent=[4216,3016];let color=DocumentColor::default();
+    let mut artwork=Artwork::new(extent).unwrap();
+    artwork.compositions.get_mut(artwork.root).unwrap().color=color;
+    let mut ink=None;
+    for layer in 0..28 {
+        let (_,target)=crate::test_support::add_paint(&mut artwork,"Cold raster",extent);
+        let SourceTarget::Paint(paint)=target else {unreachable!()};
+        let tile=Arc::new(blob(color,RasterPlane::Color,0x139a+layer));
+        let tiles=(0..extent[1].div_ceil(PAGE_SIZE)).flat_map(|y|(0..extent[0].div_ceil(PAGE_SIZE)).map(move|x|[x,y]))
+            .map(|coordinate|(TileKey {plane:RasterPlane::Color,coordinate},RasterTile::backed_shared(tile.clone()))).collect();
+        artwork.paint.get_mut(paint).unwrap().raster=RasterRevision::backed(RasterData {tiles,watercolor:None});
+        ink=Some(target);
+    }
+    let mut document=layer_core::Document::from_artwork(artwork).unwrap();document.working.target=ink;
+    let mut r=crate::memory::memory_tests::renderer_in_budget(color,
+        DeviceMemoryFacts {budget_bytes:Some(8<<30),unified:false,..Default::default()},
+        MemoryBudget::with_facts(MemoryFacts {host_default_bytes:Some(8<<30),override_bytes:Some(8<<30),..Default::default()})).unwrap();
+    r.ensure_document_metadata(extent,document.scene()).unwrap();
+    let mut frame=crate::test_support::packet(document.scene(),extent);
+    frame.view=crate::test_support::view([3840,2160]);
+    frame.view.document_to_surface=[0.,0.01,-0.01,0.,1920.,1080.];
+    r.prepare_raster_restores(frame);
+    assert!(r.take_restore_failure().is_none(),"optional restoration must not refuse a valid cold document");
+    let projected=r.projected_restore_bytes();let allowed=r.native_edit.as_ref().unwrap().color_cache_bytes;
+    assert!(projected<=allowed,"all selected eager pages share one existing color grant: projected={projected}, allowed={allowed}");
+    assert_eq!(r.source_cache_work(),[0,0],"selection must not decode the cold layers");
+}
+
+#[test]
 fn ready_restore_requires_consumed_preparation_progress_between_iterations() {
     use std::sync::mpsc;
     use std::time::Duration;

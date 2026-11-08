@@ -36,10 +36,10 @@ struct TargetRestore {
 enum SourcePage {Raster(TileKey,RasterTile),Base([u32;2],layer_core::authored::PaintBase)}
 struct Request {target:SourceTarget,extent:[u32;2],before:RasterData,data:Arc<RasterData>,required:BTreeSet<[u32;2]>,base:Option<layer_core::authored::PaintBase>,replace:bool}
 impl TargetRestore {
-    fn new(r:&mut WgpuRasterizer,request:Request)->Result<Self,GpuRasterError> {
+    fn new(r:&mut WgpuRasterizer,request:Request,reserved_color_bytes:u64)->Result<Self,GpuRasterError> {
         let Request {target,extent,before,data,required,base,replace}=request;
         data.validate_storage_index(extent,target.is_coverage(),r.document_color()).map_err(GpuRasterError::Effect)?;
-        let (before,selected)=r.select_restore_data(target,&before,&data,&required);
+        let (before,selected)=r.select_restore_data(target,&before,&data,&required,reserved_color_bytes);
         let resident=|coordinate|r.paint_layers.iter().find(|layer|layer.id==target).is_some_and(|layer|layer.pages.iter().any(|page|page.coordinate==coordinate));
         let mut pending:Vec<_>=selected.tiles.iter().filter(|(key,tile)|if replace {
             !before.tiles.get(key).is_some_and(|old|old.same_capture(tile)) || key.plane==RasterPlane::Color && required.contains(&key.coordinate) && !resident(key.coordinate)
@@ -169,10 +169,17 @@ impl RestorePreflight {
         }
     }
     fn new(r:&mut WgpuRasterizer,key:Key,requests:Vec<Request>)->Self {
-        let mut targets=Vec::new();let mut failure=None;
+        let mut targets=Vec::new();let mut failure=None;let mut reserved_color_bytes=0u64;
+        let color_page_bytes=2*u64::from(PAGE_SIZE).pow(2)*u64::from(r.device.working_format().block_copy_size(None).unwrap());
         for request in requests {
-            match TargetRestore::new(r,request) {
-                Ok(target)=>targets.push(Some(target)),Err(error)=>{failure=Some(error);break;},
+            match TargetRestore::new(r,request,reserved_color_bytes) {
+                Ok(target)=> {
+                    let colors=target.pending.iter().filter(|source|matches!(source,
+                        SourcePage::Base(..)|SourcePage::Raster(TileKey {plane:RasterPlane::Color,..},_))).count() as u64;
+                    reserved_color_bytes=reserved_color_bytes.saturating_add(colors.saturating_mul(color_page_bytes));
+                    targets.push(Some(target));
+                },
+                Err(error)=>{failure=Some(error);break;},
             }
         }
         Self {key,targets,failure,consumed:false}
