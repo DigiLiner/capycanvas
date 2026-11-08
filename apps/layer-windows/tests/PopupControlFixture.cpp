@@ -855,12 +855,27 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
             dialogs.Hide();co_await wait([&dialogs]{return !dialogs.IsOpen();},L"Customization name fixture did not close");
         }catch(...){if(heldKey)try{nativeKey(VK_RETURN,true);}catch(...){}dialogs.Hide();throw;}
     }
+    winrt::Windows::Foundation::IAsyncOperation<hstring> workspaceFixtureCatalog(){
+        std::string catalog;
+        co_await resume_background();
+        {
+            struct Apartment{Apartment(){init_apartment(apartment_type::multi_threaded);}~Apartment(){uninit_apartment();}} apartment;
+            NativeLaunch launch(capy_launch("[\"en\"]",nullptr));require(bool(launch),L"Workspace fixture launch failed");
+            NativeHandle<capy_destroy> host(capy_create(1000,700,1,launch.get()));require(bool(host),L"Workspace fixture host failed");
+            NativeString copy(capy_query(host.get(),R"({"type":"catalog"})"));require(bool(copy),L"Workspace fixture production catalog missing");catalog=std::move(copy.bytes);
+        }
+        co_await apartment;
+        auto value=J::Parse(to_hstring(catalog));value.Insert(L"bootstrap",object(data->catalog,L"bootstrap"));co_return value.Stringify();
+    }
     winrt::Windows::Foundation::IAsyncAction workspaceIme(){
         auto dark=root.RequestedTheme()!=ElementTheme::Light;
         auto header=O({{L"this_workspace",S(L"This workspace")},{L"saved_toolbars",S(L"Saved toolbars")},{L"toolbar_actions",S(L"Actions")},
             {L"new_workspace",S(L"New Workspace")},{L"new_toolbar",S(L"New Toolbar")},{L"search",S(L"Search")},{L"description",S(L"Description")},
             {L"retry",S(L"Retry")},{L"move_up",S(L"Move Up")},{L"move_down",S(L"Move Down")},{L"current_workspace",S(L"Current workspace")},{L"drag_to_reorder",S(L"Drag to reorder")}});
-        auto catalog=J::Parse(data->catalog.Stringify());catalog.Insert(L"native_copy",O({{L"header",header}}));
+        auto catalog=J::Parse(co_await workspaceFixtureCatalog());catalog.Insert(L"native_copy",O({{L"header",header}}));
+        require(catalog.HasKey(L"panel_metrics"),L"Workspace fixture production panel metrics missing");
+        require(num(object(catalog,L"panel_metrics"),L"layer_swipe_action_width")>0,L"Workspace fixture production swipe width must be non-zero");
+        auto threshold=num(object(catalog,L"panel_metrics"),L"layer_swipe_threshold");require(threshold>0&&threshold<1,L"Workspace fixture production swipe threshold is invalid");
         auto palette=O({{L"text",S(dark?L"#eeeeee":L"#111111")},{L"card",S(dark?L"#343434":L"#eeeeee")},{L"accent",S(L"#4488cc")},{L"accent_foreground",S(L"#ffffff")}});
         auto state=O({{L"theme",S(dark?L"dark":L"light")},{L"palette",palette}});
         A options;for(auto type:{L"rename",L"delete"})options.Append(O({{L"label",S(type)},{L"enabled",B(true)},{L"action",O({{L"type",S(type)},{L"value",S(L"fixture-custom")}})}}));
@@ -1098,7 +1113,7 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
             phase=L"settings-resize";co_await settingsResize();
             phase=L"window-close";auto closed=owner.Begin(data,anchor,menu());window.Close();co_await settle();
             require(!closed.Current()&&!closed.Show(anchor,{}),L"Reply reopened canceled owner");empty();++checks;
-        } catch(hresult_error const& e){resultCode=1;error=e.message();}catch(...){resultCode=1;error=L"Unhandled popup fixture failure";}
+        } catch(hresult_error const& e){resultCode=1;wchar_t hex[11]{};swprintf_s(hex,L"0x%08X",static_cast<unsigned>(e.code().value));error=hstring(hex)+L": "+e.message();}catch(...){resultCode=1;error=L"Unhandled popup fixture failure";}
         owner.Cancel();auto count=checks;auto imeCount=imeChecks;auto step=to_string(phase);auto message=to_string(error);auto path=output;
         A imeEvents;for(auto const& event:*imeTrace)imeEvents.Append(event);auto imeJson=to_string(imeEvents.Stringify());
         co_await resume_background();
