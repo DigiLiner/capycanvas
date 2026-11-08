@@ -1,4 +1,6 @@
 use super::*;
+#[path="transform_cancel_tests.rs"]
+mod transform_cancel;
 use layer_core::{Document, authored::PortableId};
 use crate::layer_tests::placement::{paint_document, target, paint, paint_mut, occurrence_id, set_mask, reveal_all};
 

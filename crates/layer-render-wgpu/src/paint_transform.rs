@@ -916,10 +916,10 @@ impl ImageTransformState {
                 })
                 .collect()
         });
-        let base = self.sources[0].as_ref().unwrap().base.as_ref();
+        let source = self.sources[0].as_ref().unwrap();
         let initialize: std::collections::BTreeSet<_> = match index.filter(|_| self.background.is_none()) {
             Some(index) => coordinates.iter().copied().filter(|c| r.paint_layers[index].pages.iter().all(|p| p.coordinate != *c)
-                && base.is_some_and(|base| source_access::paint_base_contains(base, *c))).collect(),
+                && source.contains(*c)).collect(),
             None => Default::default(),
         };
         let reach = (transform.placement.interpolation.support().max(1) + 1) as f32;
