@@ -242,6 +242,7 @@ public static class CapyParkProbePointer {
   $expectedPart=if($case.part){$case.part}else{1}
   if($Theme -cne $case.theme -or [bool]$LargeText -ne $case.large -or $JourneyPart -ne $expectedPart -or ![bool](Get-Variable -Name $case.mode -ValueOnly)){throw "Localization alias lost its theme, text scale or part: $($case.name)"}
  }
+ . (Join-Path $PSScriptRoot 'CapyEnvironment.ps1')
  $start=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-Shortcuts'},$true)
  Invoke-Expression $start.Extent.Text
  $traces=Join-Path $OutputDirectory ('shortcut-traces-'+[Guid]::NewGuid().ToString('N'))
