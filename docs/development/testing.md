@@ -70,7 +70,7 @@ and two CPU slots; no free card stops all fixture input. Follow the
 the windowless checks above. Fixture routing changes also run
 `tools/windows-vm/test-fixture-routing.ps1` on PowerShell 7 and Windows PowerShell
 5.1 and the Python suite in `tools/windows-vm`.
-Changes to scripts that fixtures or tests dot-source or mock (for example,
+Changes to scripts that fixtures or tests dot-source, AST-import or mock (for example,
 `CapyUia.ps1`, `CapyEnvironment.ps1` or `run-fixtures.ps1`) run the full normal
 suite with `tools/windows-vm/windows-vm.py check`, not only the edited scripts.
 

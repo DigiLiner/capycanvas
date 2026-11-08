@@ -18,7 +18,7 @@ function Import-FeatureHelpers([string]$File,[string[]]$Names){
 }
 if($Journey -in @('preview','size-controls')){
  $CapyPopups=$true
- Import-FeatureHelpers 'exercise-toolbar-components.ps1' @('Control','Box','Tile','Brush','Along','Press','Drag','Release','Switch-Workspace')
+ Import-FeatureHelpers 'exercise-toolbar-components.ps1' @('Box','Tile','Brush','Along','Press','Drag','Release','Switch-Workspace')
 }else{
  Import-FeatureHelpers 'exercise-tools.ps1' @('Model','Wait-Until','Find','Control','Arranged','Reveal-Control','Reveal-Number','Invoke-Control','Invoke-Id','Field','Value','Focus','Draft','Select-Tool','Check-Projection')
 }
