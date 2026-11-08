@@ -423,13 +423,6 @@ function Rejected-InlineNameAdmission([string]$Id){
     if(((Storage).order -join '|') -cne ($order -join '|') -or ((Storage).switcher.id -join '|') -cne ($pins -join '|')){throw 'Fixture cleanup changed order or pins'}
 }
 
-function Read-AckFailureNode($Peer,$Cache){
-    if(!$Peer){return $null}
-    $node=$Peer.GetUpdatedCache($Cache);$info=$node.Cached
-    $value=$node.GetCachedPropertyValue([System.Windows.Automation.ValuePattern]::ValueProperty,$true)
-    $selected=$node.GetCachedPropertyValue([System.Windows.Automation.SelectionItemPattern]::IsSelectedProperty,$true)
-    [ordered]@{runtime_id=@($node.GetCachedPropertyValue([System.Windows.Automation.AutomationElement]::RuntimeIdProperty));id=$info.AutomationId;process=$info.ProcessId;focused=$info.HasKeyboardFocus;enabled=$info.IsEnabled;offscreen=$info.IsOffscreen;bounds=$info.BoundingRectangle.ToString();value=$(if($value-is[string]){$value});selected=$(if($selected-is[bool]){$selected});item_status=$info.ItemStatus}
-}
 function Held-Acknowledgement([string]$Id,[ValidateSet('pin','apply','row')][string]$Target,[bool]$AckBeforeRelease){
     if($Device-ne'mouse'){throw 'Forced acknowledgement ordering requires the existing mouse journey'}
     $original=(Storage).id;$selected=$preview;$layout=$previewLayout
@@ -448,26 +441,6 @@ function Held-Acknowledgement([string]$Id,[ValidateSet('pin','apply','row')][str
     $claims=[PrivateWorkspaceLease]::ReadClaims($run,$env:CAPY_STORAGE_DIR)
     Assert-AckClaim $claims $claims $original
     $owner=@($claims|Where-Object Id -eq $original)[0]
-    $failureCache=$null;$failureAccepted=$null;$failureItems=$null;$failureStatePath=$null
-    if($Target-eq'row'){
-        $failureCache=[System.Windows.Automation.CacheRequest]::new()
-        $failureCache.TreeScope=[System.Windows.Automation.TreeScope]::Element
-        $failureCache.TreeFilter=[System.Windows.Automation.Automation]::RawViewCondition
-        foreach($property in @(
-            [System.Windows.Automation.AutomationElement]::RuntimeIdProperty,
-            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-            [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
-            [System.Windows.Automation.AutomationElement]::HasKeyboardFocusProperty,
-            [System.Windows.Automation.AutomationElement]::IsEnabledProperty,
-            [System.Windows.Automation.AutomationElement]::IsOffscreenProperty,
-            [System.Windows.Automation.AutomationElement]::BoundingRectangleProperty,
-            [System.Windows.Automation.AutomationElement]::ItemStatusProperty,
-            [System.Windows.Automation.ValuePattern]::ValueProperty,
-            [System.Windows.Automation.SelectionItemPattern]::IsSelectedProperty)){$failureCache.Add($property)}
-        $failureAccepted=Control ('workspace-manager-row-'+$selected) -Arranged
-        $failureItems=Control 'workspace-manager-items' -Arranged
-        $failureStatePath=State-File
-    }
     $name='Accepted '+$Target+' '+$AckBeforeRelease+' '+[Guid]::NewGuid().ToString('N').Substring(0,8)
     $entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($name)
     $trace=[ordered]@{target=$Target;ack_before_release=$AckBeforeRelease;before=$before;claims_before=$claims;name=$name;order_before=$order;passed=$false}
@@ -476,22 +449,32 @@ function Held-Acknowledgement([string]$Id,[ValidateSet('pin','apply','row')][str
         $lease=[PrivateWorkspaceLease]::new($run,$env:CAPY_STORAGE_DIR)
         [CapyRowPointer]::Down('mouse',[int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2))
         $pending=@{model=$null}
+        if($Target-eq'row'){
+            if($AckBeforeRelease){throw 'A row Rename acknowledgement requires its native release'}
+            $trace.held_native=Read-AckNative $peer $rootRuntime -Held
+            Assert-AckNative $before $trace.held_native
+            $held=Model;$w=$held.windows_workspace;$trace.held_model=$w
+            if($w.busy -or $w.prompt_action.type-ne'rename' -or @($w.rows|Where-Object id -eq $Id)[0].title-ne$title -or $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value-cne$name){throw 'A held row submitted or changed its inline Rename'}
+            Assert-AckPreview $held $original $selected $layout
+            [CapyRowPointer]::Up()
+            if([CapyRowPointer]::Active){throw 'Released row retained its native Down'}
+        }
         Wait-Until {
             if($lease.Expired){throw 'Acknowledgement gate expired before pending Rename was observed'}
-            if(![CapyRowPointer]::Active){throw 'Pending Rename lost its native Down contact'}
+            if($Target-ne'row' -and ![CapyRowPointer]::Active){throw 'Pending Rename lost its native Down contact'}
             $pending.model=Model
             $w=$pending.model.windows_workspace
             $w.busy -and $w.prompt_action.type-eq'rename' -and @($w.rows|Where-Object id -eq $Id)[0].title-eq$title
         } 'Real Rename did not become pending behind the owned database gate' 3
         Assert-AckPreview $pending.model $original $selected $layout
-        $trace.pending_native=Read-AckNative $peer $rootRuntime -Held
+        $trace.pending_native=Read-AckNative $peer $rootRuntime -Held:($Target-ne'row')
         Assert-AckNative $before $trace.pending_native
         $trace.pending_model=$pending.model.windows_workspace
         $trace.claims_pending=[PrivateWorkspaceLease]::ReadClaims($run,$env:CAPY_STORAGE_DIR)
         Assert-AckClaim $claims $trace.claims_pending $original
         if($lease.Expired -or $lease.ElapsedMilliseconds-ge3500){throw 'Pending native observations exhausted the bounded acknowledgement gate'}
         $trace.gate_release_ms=$lease.ElapsedMilliseconds
-        if(!$AckBeforeRelease){
+        if(!$AckBeforeRelease -and $Target-ne'row'){
             [CapyRowPointer]::Up()
             if([CapyRowPointer]::Active){throw 'Release-before-acknowledgement retained native Down'}
             $model=Model;Assert-AckPreview $model $original $selected $layout
@@ -560,25 +543,6 @@ function Held-Acknowledgement([string]$Id,[ValidateSet('pin','apply','row')][str
         $trace.passed=$true
     }catch{
         $trace.error=($_|Out-String)+$_.ScriptStackTrace
-        if($Target-eq'row' -and $_.Exception.Message-ceq'Real Rename did not become pending behind the owned database gate'){
-            $cost=[Diagnostics.Stopwatch]::StartNew()
-            $observed=[ordered]@{utc=[DateTime]::UtcNow.ToString('o');phase='before finally DriverCancel and lease Dispose';dispatch_scope='Published shared controller status only; no normal-app outbound callback trace exists';driver_active_before=[CapyRowPointer]::Active;foreground=[CapyRowPointer]::GetForegroundWindow().ToInt64();expected_window=$drawingWindow.ToInt64();gate_elapsed_before=$lease.ElapsedMilliseconds;gate_expired_before=$lease.Expired;last_polled_workspace=$pending.model.windows_workspace;native=@()}
-            $trace.failure_before_cleanup=$observed
-            try{
-                $observed.raw_snapshot_path=$failureStatePath
-                try{$observed.raw_snapshot=[IO.File]::ReadAllText($failureStatePath)}catch{$observed.raw_snapshot_error=$_.Exception.Message}
-                $focused=$null;try{$focused=[System.Windows.Automation.AutomationElement]::FocusedElement}catch{$observed.focus_error=$_.Exception.Message}
-                foreach($item in @(@{kind='focus';peer=$focused},@{kind='entry';peer=$entry},@{kind='target';peer=$peer},@{kind='accepted';peer=$failureAccepted},@{kind='list';peer=$failureItems})){
-                    if($cost.ElapsedMilliseconds-ge500 -or $lease.Expired -or ![CapyRowPointer]::Active){$observed.native_stop='500ms cooperative budget, expired gate or released contact';break}
-                    $part=[ordered]@{kind=$item.kind;started_ms=$cost.ElapsedMilliseconds;gate_elapsed_before=$lease.ElapsedMilliseconds;driver_active_before=[CapyRowPointer]::Active;gate_expired_before=$lease.Expired}
-                    try{$part.node=Read-AckFailureNode $item.peer $failureCache}catch{$part.error=$_.Exception.Message}
-                    $part.finished_ms=$cost.ElapsedMilliseconds;$part.gate_elapsed_after=$lease.ElapsedMilliseconds;$part.driver_active_after=[CapyRowPointer]::Active;$part.gate_expired_after=$lease.Expired
-                    $observed.native+=@($part)
-                }
-            }catch{$observed.capture_error=$_.Exception.Message}finally{
-                $observed.elapsed_ms=$cost.ElapsedMilliseconds;$observed.driver_active_after=[CapyRowPointer]::Active;$observed.gate_elapsed_after=$lease.ElapsedMilliseconds;$observed.gate_expired_after=$lease.Expired
-            }
-        }
         throw
     }finally{
         if([CapyRowPointer]::Active){[CapyRowPointer]::Cancel()}
@@ -635,7 +599,7 @@ function Held-Rename([string]$Id){
     Open-Manager;Preview-Select
     if($Device-eq'mouse'){
         foreach($target in @('pin','apply','row')){
-            foreach($ackBeforeRelease in @($false,$true)){Held-Acknowledgement $Id $target $ackBeforeRelease}
+            foreach($ackBeforeRelease in $(if($target-eq'row'){@($false)}else{@($false,$true)})){Held-Acknowledgement $Id $target $ackBeforeRelease}
         }
     }
     Write-Output "$Device held pin and Apply across inline rename passed"

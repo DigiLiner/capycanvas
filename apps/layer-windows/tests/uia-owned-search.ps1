@@ -2404,3 +2404,54 @@ Write-Output 'Actual clipboard Copy routing rejects stale native context and rev
  }
  'Actual navigation close paths: shared Preferences absent and visible owned native canvas released before continuation; all original failure messages and bounds retained.'
 }
+
+& {
+ Add-Type -TypeDefinition @'
+namespace CapyRowRenameTest {
+ public static class Driver {
+  public static bool Active;public static int Ups;
+  public static void Down(string device,int x,int y){Active=true;Ups=0;}
+  public static void Up(){if(!Active)throw new System.InvalidOperationException("Released twice");Active=false;Ups++;}
+ }
+ public static class Lease {public static string ReadClaims(object run,object storage){return "owned";}}
+ public static class ValuePattern {public static object Pattern="value";}
+}
+'@
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-switcher-drag.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $definition=@($source.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Held-Acknowledgement'},$true))
+ if($definition.Count-ne1){throw 'Missing actual Rename acknowledgement journey'}
+ $attempt=@($definition[0].Body.FindAll({param($n)$n-is[Management.Automation.Language.TryStatementAst]},$true))[0]
+ $statements=@($attempt.Body.Statements)
+ $start=@(0..($statements.Count-1)|Where-Object {$statements[$_].Extent.Text.StartsWith('[CapyRowPointer]::Down(')})
+ $end=@(0..($statements.Count-1)|Where-Object {$statements[$_].Extent.Text-eq'$lease.Dispose()'})
+ if($start.Count-ne1-or$end.Count-ne1-or$end[0]-le$start[0]){throw 'Missing actual native press through gated pending Rename sequence'}
+ $sequence=[scriptblock]::Create(($statements[$start[0]..($end[0]-1)].Extent.Text-join"`n").Replace('[CapyRowPointer]','[CapyRowRenameTest.Driver]').Replace('[PrivateWorkspaceLease]','[CapyRowRenameTest.Lease]').Replace('System.Windows.Automation.ValuePattern','CapyRowRenameTest.ValuePattern'))
+ function Wait-Until([scriptblock]$Condition,[string]$Message,[double]$Timeout){foreach($sample in 1..3){if(& $Condition){return}};throw $Message}
+ function Model {
+  $held=[CapyRowRenameTest.Driver]::Active
+  [pscustomobject]@{windows_workspace=[pscustomobject]@{id='original';selected=$(if($case-eq'selection'-and$held){'next'}else{'selected'});busy=(!$held-and$case-ne'no-pending')-or($held-and$case-eq'early-submit');prompt_action=[pscustomobject]@{type='rename'};rows=@([pscustomobject]@{id='renamed';title='Old title'})}}
+ }
+ function Assert-AckPreview($Model,$Original,$Selected,$Layout){if($Model.windows_workspace.id-cne$Original-or$Model.windows_workspace.selected-cne$Selected){throw 'Preview changed'}}
+ function Read-AckNative($Peer,$RootRuntime,[switch]$Held){if([CapyRowRenameTest.Driver]::Active-ne[bool]$Held){throw 'Native contact phase mismatch'};if($case-eq'identity'-and$Held){return 'replaced'};'retained'}
+ function Assert-AckNative($Before,$After){if($Before-cne$After){throw 'Native identity changed'}}
+ function Assert-AckClaim($Before,$After,$Original){if($Before-cne$After){throw 'Claim changed'}}
+ foreach($case in 'ready','early-submit','selection','draft','identity','no-pending'){
+  $Target='row';$AckBeforeRelease=$false;$Id='renamed';$next='next';$original='original';$selected='selected';$layout='layout';$title='Old title';$name='Exact saved name'
+  $bounds=[pscustomobject]@{X=0;Y=0;Width=100;Height=30};$lease=[pscustomobject]@{Expired=$false;ElapsedMilliseconds=200};$trace=@{};$before='retained';$claims='owned';$peer='row';$rootRuntime='root';$run='unused'
+  $entry=[pscustomobject]@{};$entry|Add-Member ScriptMethod GetCurrentPattern {param($Pattern)[pscustomobject]@{Current=[pscustomobject]@{Value=$(if($case-eq'draft'){'Changed'}else{$name})}}}
+  $failure=$null;try{. $sequence}catch{$failure=$_}
+  if($case-eq'ready'){
+   if($failure-or[CapyRowRenameTest.Driver]::Active-or[CapyRowRenameTest.Driver]::Ups-ne1-or!$trace.pending_model.busy){throw "Actual row release did not establish gated Rename: $failure"}
+  }elseif(!$failure){throw "Actual row Rename accepted invalid $case state"}
+ }
+ $heldRename=@($source.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Held-Rename'},$true))
+ $mouse=@($heldRename[0].Body.FindAll({param($n)$n-is[Management.Automation.Language.IfStatementAst]-and$n.Clauses[0].Item1.Extent.Text-eq"`$Device-eq'mouse'"},$true))
+ if($mouse.Count-ne1){throw 'Missing actual acknowledgement order matrix'}
+ $orders=[Collections.Generic.List[string]]::new()
+ function Held-Acknowledgement($Id,$Target,$AckBeforeRelease){$orders.Add("$Target/$AckBeforeRelease")}
+ $Device='mouse';. ([scriptblock]::Create($mouse[0].Extent.Text))
+ if(($orders-join'|')-cne'pin/False|pin/True|apply/False|apply/True|row/False'){throw 'Native acknowledgement matrix changed its valid order coverage'}
+ 'Actual row Rename preserves held draft, preview, claims and native identity; only release admits gated Rename, while pin and Apply retain both acknowledgement orders.'
+}
