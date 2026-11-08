@@ -7,10 +7,10 @@ fn scene_space(c:vec4<f32>)->vec4<f32> {
 }
 fn scene_convert(c:vec4<f32>,convert:f32)->vec4<f32> {
     if convert==1. {return working_encode(c);}
-    if convert==2. {return working_decode(c);}
-    if convert==3. {return working_clamp(c);}
-    if convert==4. {return working_clamp(working_decode(c));}
-    return c;
+    var r=c;
+    if convert==2. || convert==4. {r=working_decode(c);}
+    if convert==3. || convert==4. {r=working_clamp(r);}
+    return r;
 }
 fn scene_sample(image:texture_2d<f32>,uv:vec2<f32>)->vec4<f32> {
     return working_sample_float(image,uv*vec2<f32>(textureDimensions(image)));
@@ -129,10 +129,11 @@ fn scene_clip(v:Vertex) {
         return vec4(select(pixel.a,0.,all(pixel==seed)));
     }
     let raw=scene_read(front,v);
-    if op==1u || op==7u || op==13u || op==14u || op==17u || op==19u {return scene_pointwise(raw,v);}
+    var dst=vec4(0.);
+    if scene_needs_back(op) {dst=scene_read(back,v);}
+    if op==1u || op==7u || op==13u || op==14u || op==17u || op==19u {return scene_pointwise(raw,dst,v);}
     if op==2u {let m=mix(raw.r,1.-raw.r,settings.options.z);return vec4<f32>(m);}
     if op==20u {return working_decode(vec4<f32>(vec3<f32>(raw.r),1.));}
-    let dst=scene_read(back,v);
     if op==16u {return raw*settings.options.y+dst*settings.options.z;}
     if op==3u {let coverage=select(dst.a,dst.r,settings.options.y==2.);return raw*mix(coverage,1.-coverage,settings.options.z);}
     let a=(1.-raw.a)*.42;
@@ -211,8 +212,7 @@ fn scene_fill_over(input:FillInput)->vec4<f32> {
     scene_clip(v);
     let src=blend_opacity(scene_read(front,v),settings.options.y);
     let dst=scene_read(back,v);
-    if settings.options.w>.5 {return blend_clip(src,dst,u32(settings.options.z));}
-    return blend_composite(src,dst,u32(settings.options.z));
+    return blend_layer(src,dst,u32(settings.options.z),settings.options.w>.5);
 }
 @fragment fn fragment_image(v:Vertex)->@location(0) vec4<f32> {
     return scene_space(scene_image(v))*settings.options.y;
@@ -230,37 +230,37 @@ fn scene_fill_over(input:FillInput)->vec4<f32> {
     return hdr_map_sdr(ink/9.,settings.operation_linear,settings.operation_offset);
 }
 
-fn scene_pointwise(raw: vec4<f32>, v: Vertex) -> vec4<f32> {
+fn scene_needs_back(op:u32)->bool {
+    return !(op==1u || op==2u || op==20u || ((op==7u || op==13u) && settings.options.w<2.));
+}
+fn scene_pointwise(raw: vec4<f32>, dst: vec4<f32>, v: Vertex) -> vec4<f32> {
     let op = u32(settings.options.x);
-    if op == 1u { return scene_space(raw)*settings.options.y; }
-    if op == 14u { return scene_space(raw + scene_read(back,v) * (1. - raw.a)) * settings.options.y; }
-    if op == 19u {
+    if op == 17u {
+        let original=working_unassociate(raw);
+        let low=working_unassociate(working_encode(dst));
+        return vec4<f32>((.5+(original-low)*.5)*raw.a,raw.a);
+    }
+    var color = raw;
+    var m = 1.;
+    if op == 14u { color = raw + dst * (1. - raw.a); }
+    else if op == 19u {
         let size=vec2<f32>(textureDimensions(front));
         let p=(v.position.xy-settings.rect.xy)*size/settings.rect.zw;
         let preview=textureLoad(front,clamp(vec2<i32>(floor(p)),vec2(0),vec2<i32>(size)-1),0);
-        let base=scene_read(back,v);
+        let base=dst;
         if settings.options.z>.5 {
             let result=working_encode(preview)+working_encode(base)*(1.-preview.a);
             if settings.operation_offset.w==1. {return result*settings.options.y;}
-            return scene_space(working_decode(result))*settings.options.y;
+            color = working_decode(result);
+        } else { color = preview+base*(1.-preview.a); }
+    } else if op != 1u {
+        m = settings.options.z;
+        if settings.options.w>=2. {
+            let mask=dst.r;
+            m=mix(mask,1.-mask,settings.options.w-2.);
         }
-        return scene_space(preview+base*(1.-preview.a))*settings.options.y;
     }
-    if op == 17u {
-        let original=working_unassociate(raw);
-        let low=working_unassociate(working_encode(scene_read(back,v)));
-        return vec4<f32>((.5+(original-low)*.5)*raw.a,raw.a);
-    }
-    return scene_normal(raw,v);
-}
-
-fn scene_normal(raw: vec4<f32>, v: Vertex) -> vec4<f32> {
-    var m = settings.options.z;
-    if settings.options.w>=2. {
-        let mask=scene_read(back,v).r;
-        m=mix(mask,1.-mask,settings.options.w-2.);
-    }
-    let src = scene_space(raw) * m * settings.options.y;
+    let src = scene_space(color) * m * settings.options.y;
     if settings.options.x == 13. { return scene_convert(src + settings.source_over * (1. - src.a),settings.extent.w); }
     return src;
 }

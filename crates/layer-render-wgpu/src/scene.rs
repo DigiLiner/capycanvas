@@ -2725,15 +2725,21 @@ impl Pipelines {
             bind_group_layouts: &[Some(&uniforms), Some(&layout),Some(&edges)],
             immediate_size: 0,
         });
-        let pipeline = FRAGMENTS.into_iter().enumerate().map(|(i, (entry,label))| {
+        let mut pipeline: Vec<Deferred<wgpu::RenderPipeline>> = Vec::with_capacity(FRAGMENTS.len());
+        for (i, (entry,label)) in FRAGMENTS.into_iter().enumerate() {
+            if i == 1 && device.attachment_blend(device.working_format(), Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)).is_none() {
+                pipeline.push(pipeline[0].clone());
+                continue;
+            }
             let (device, pipeline_layout, shader) =
                 (device.clone(), pipeline_layout.clone(), shader.clone());
-            Deferred::pipeline(move |mode| {
+            pipeline.push(Deferred::pipeline(move |mode| {
                 fullscreen_pipeline_recipe(mode, &device, &pipeline_layout, &shader, entry,
                     (i == 1 || i == SCALAR_PIPELINE).then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     if i == 2 || i==SCALAR_PIPELINE { device.scalar_format() } else { device.working_format() }, label)
-            })
-        }).collect::<Vec<_>>().try_into().ok().unwrap();
+            }));
+        }
+        let pipeline = pipeline.try_into().ok().unwrap();
         let constant = {
             let inputs = crate::bindings::layout(device, "scene normal stack inputs", &[
                 texture_entry(0, device), texture_entry(1, device),
@@ -2957,6 +2963,60 @@ mod shader_tests {
     use super::*;
 
     #[test]
+    fn fallback_composition_reuses_the_unblended_recipe() {
+        let adapter = pollster::block_on(WgpuRasterizer::headless_instance().request_adapter(&Default::default())).unwrap();
+        let (device, _) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let device = PipelineDevice::from(device);
+        assert!(device.attachment_blend(device.working_format(), Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)).is_none());
+        let pipelines = Pipelines::new(&device);
+        assert!(std::ptr::eq(pipelines.pipeline[0].compile(), pipelines.pipeline[1].compile()));
+    }
+
+    #[test]
+    fn scene_conversion_preserves_every_code_and_foreign_values() {
+        let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let output = crate::test_support::page_texture(&r, wgpu::TextureFormat::Rgba32Float);
+        let scene = include_str!("scene.wgsl");
+        let conversion = scene.split_once("fn scene_convert").unwrap().1.split_once("fn scene_sample").unwrap().0;
+        for space in layer_core::color::RgbSpace::ALL {
+            let source = format!("{}\nfn scene_convert{}\n{}", working_color::source(space), conversion, "
+                @group(0) @binding(0) var output:texture_storage_2d<rgba32float,write>;
+                fn expected(c:vec4<f32>,code:f32)->vec4<f32> {
+                    if code==1. {return working_encode(c);}
+                    if code==2. {return working_decode(c);}
+                    if code==3. {return working_clamp(c);}
+                    if code==4. {return working_clamp(working_decode(c));}
+                    return c;
+                }
+                @compute @workgroup_size(1) fn check(@builtin(global_invocation_id) id:vec3<u32>) {
+                    let codes=array<f32,9>(0.,1.,2.,3.,4.,5.,-1.,bitcast<f32>(0x7fc00000u),6.);
+                    let color=vec4<f32>(1.4,-.2,.7,f32(id.x)/4.);
+                    textureStore(output,vec2<i32>(id.xy),scene_convert(color,codes[id.y]));
+                    textureStore(output,vec2<i32>(i32(id.x),i32(id.y)+16),expected(color,codes[id.y]));
+                }
+            ");
+            let shader = r.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(source.into()) });
+            let pipeline = r.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: None, layout: None, module: &shader, entry_point: Some("check"), compilation_options: Default::default(), cache: None,
+            });
+            let binding = r.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None, layout: &pipeline.get_bind_group_layout(0),
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&output.create_view(&Default::default())) }],
+            });
+            let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
+                pass.set_pipeline(&pipeline); pass.set_bind_group(0, &binding, &[]); pass.dispatch_workgroups(8, 9, 1);
+            }
+            encoder.submit(&r.queue);
+            let pixels = crate::test_support::float_pixels(&r, &output);
+            for y in 0..9 { for x in 0..8 {
+                assert_eq!(pixels[y*256+x].map(f32::to_bits), pixels[(y+16)*256+x].map(f32::to_bits), "{space:?}/{x}/{y}");
+            }}
+        }
+    }
+
+    #[test]
     fn fragment_operations_select_only_their_assigned_pipeline() {
         assert_eq!(FRAGMENTS.map(|(entry,_)| entry).as_slice(), ["fragment_main","fragment_main","fragment_coverage",
             "fragment_fill","fragment_gradient","fragment_figure","fragment_blend","fragment_image","fragment_tone","fragment_main","fragment_fill_opaque"]);
@@ -3019,7 +3079,7 @@ mod shader_tests {
 
     #[test]
     fn fragment_families_omit_unrelated_operations() {
-        let families = ["gradient_shape", "ellipse_distance", "scene_image", "hdr_map_sdr", "blend_composite", "paper_sample",
+        let families = ["gradient_shape", "ellipse_distance", "scene_image", "hdr_map_sdr", "blend_layer", "blend_composite", "blend_clip", "paper_sample",
             "fill_plateau", "fill_anchor", "fill_feasible_neighbour", "fill_reconstruct"];
         for space in layer_core::color::RgbSpace::ALL {
             let source = shader_source(space);
@@ -3031,7 +3091,7 @@ mod shader_tests {
                 ("fragment_fill_opaque", &["paper_sample", "fill_plateau", "fill_anchor", "fill_feasible_neighbour", "fill_reconstruct"][..]),
                 ("fragment_gradient", &["gradient_shape", "paper_sample"][..]),
                 ("fragment_figure", &["ellipse_distance"][..]),
-                ("fragment_blend", &["blend_composite"][..]),
+                ("fragment_blend", &["blend_layer"][..]),
                 ("fragment_image", &["scene_image"][..]),
                 ("fragment_tone", &["hdr_map_sdr"][..]),
                 ("compose_constant", &[][..]),

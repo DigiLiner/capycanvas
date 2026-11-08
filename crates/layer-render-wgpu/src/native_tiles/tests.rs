@@ -13,6 +13,10 @@ fn encoder_bindings_follow_tile_count_and_optional_tracking() {
                 let (entries,source)=NativeTileEncoder::pipeline_source(in_place,tracked,count,format,name);
                 let module=naga::front::wgsl::parse_str(&source).unwrap();
                 naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all()).validate(&module).unwrap();
+                let mut reachable = module.clone();
+                naga::compact::compact(&mut reachable, naga::compact::KeepUnused::No);
+                assert_eq!(reachable.functions.iter().any(|(_, function)| function.name.as_deref() == Some("half_bits")),
+                    format != Some(wgpu::TextureFormat::Rgba8Uint), "{name}/{in_place}/{tracked}/{count}");
                 let flags=module.global_variables.iter().filter(|(_,v)|v.name.as_deref().is_some_and(|n|n.starts_with("changes"))).count();
                 assert_eq!(flags,if tracked {count} else {0});
                 let mut bindings:Vec<_>=entries.iter().map(|entry|entry.binding).collect();bindings.sort();

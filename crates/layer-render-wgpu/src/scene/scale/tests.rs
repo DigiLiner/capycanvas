@@ -1967,8 +1967,17 @@ fn resident_bytes_with_pool(cache: &crate::scene::scale::Cache, scene: &crate::s
 }
 
 #[test]
-fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition() {
-    use layer_core::{ImageTransform,LayerPlacement,Projective};
+fn projective_display_matches_analytic_bilinear_pigment_and_composition() {
+    analytic_display_resample(layer_core::Projective([0.9,0.07,-16.,-0.05,1.1,-12.,0.001,-0.0002,1.]));
+}
+
+#[test]
+fn affine_display_matches_analytic_bilinear_pigment_and_composition() {
+    analytic_display_resample(layer_core::Projective([0.9,0.07,-16.,-0.05,1.1,-12.,0.,0.,1.]));
+}
+
+fn analytic_display_resample(transform: layer_core::Projective) {
+    use layer_core::{ImageTransform,LayerPlacement};
     let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let source=crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float);
     let colors:Vec<_>=(0..256*256).map(|i| {let a=if (i/256/5+i%256/7)%2==0 {0.25}else{0.75};
@@ -1977,19 +1986,18 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
     let extent=[256;2];let plan=display_mips::Plan::at(extent,0);let texels=[3,5,113,83];
     let resample=r.scene_pipelines.resample.clone();
     for encode in [false,true] {
-        let moved=ImageTransform {placement:LayerPlacement::from_projective(
-            Projective([0.9,0.07,-16.,-0.05,1.1,-12.,0.001,-0.0002,1.])),..Default::default()};
+        let moved=ImageTransform {placement:LayerPlacement::from_projective(transform),..Default::default()};
         let values=crate::scene::resample::Resample::values(crate::scene::resample::Request {moved:&moved,kept:&ImageTransform::default(),
             clip:layer_core::Affine::IDENTITY,extent,texels,
             display:pixel_transform::DisplayLevel {side:1,extent,opacity:0.65,backdrop:[0.1,0.05,0.15,0.5],encode},
             target:plan,source:plan,max_lod:0,outside:0.,keep_source:false,identity:false}).unwrap();
         let uniforms=r.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:None,contents:&values,usage:wgpu::BufferUsages::UNIFORM});
-        let compute=crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float);
+        let compute=(transform.0[6..]==[0.,0.,1.]).then(||crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float));
         let fragment=crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float);
         let tiled=crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float);
         let source=source.create_view(&Default::default());
-        let compute_view=compute.create_view(&Default::default());let fragment_view=fragment.create_view(&Default::default());
-        let binding=resample.binding(&r.device,&uniforms,0,[&source,&compute_view,&r.empty_view]);
+        let fragment_view=fragment.create_view(&Default::default());
+        let binding=compute.as_ref().map(|output|resample.binding(&r.device,&uniforms,0,[&source,&output.create_view(&Default::default()),&r.empty_view]));
         let reference=resample.mesh_binding(&r.device,&uniforms,&[source.clone(),r.empty_view.clone()]);
         let mut fine=crate::paint_transform::fine::FineInputs::new(&r,1,false,0,Default::default()).unwrap();
         fine.require([[0;2]].into_iter().collect()).unwrap();
@@ -2001,17 +2009,18 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
         let fine_pass=r.scene_pipelines.fine_resample.clone();
         let tiled_binding=fine_pass.fine_binding(&r.device,&uniforms,&[source.clone(),r.empty_view.clone()],&fine.view,&fine.directory);
         fine_pass.encode_mesh(&mut encoder,&tiled_binding,&tiled.create_view(&Default::default()),texels,None,false);
-        resample.encode(&mut encoder,&binding,texels);
+        if let Some(binding)=&binding {resample.encode(&mut encoder,binding,texels);}
         resample.encode_mesh(&mut encoder,&reference,&fragment_view,texels,None,false);
         r.uploads.finish(&encoder);encoder.submit(&r.queue);
-        let actual=pixels(&r,&compute);let expected=pixels(&r,&fragment);let bounded=pixels(&r,&tiled);
-        assert!(actual.iter().any(|p|p[3]>0.5),"projective display samples actual semitransparent pigment");
+        let mut sampled=vec![pixels(&r,&fragment),pixels(&r,&tiled)];
+        if let Some(compute)=&compute {sampled.push(pixels(&r,compute));}
+        for image in &sampled {assert!(image.iter().any(|p|p[3]>0.5),"display samples actual semitransparent pigment");}
         let rows=pixel_transform::inverse_rows(&moved).unwrap().map(|row|row.map(f64::from));
-        let mut maximum=[0f64;3];
+        let mut maximum=vec![0f64;sampled.len()];
         for y in 0..256 {for x in 0..256 {
             let index=y*256+x;
             if x<texels[0] as usize || y<texels[1] as usize || x>=(texels[0]+texels[2]) as usize || y>=(texels[1]+texels[3]) as usize {
-                assert_eq!(actual[index],[0.;4]);assert_eq!(expected[index],[0.;4]);assert_eq!(bounded[index],[0.;4]);continue;
+                for image in &sampled {assert_eq!(image[index],[0.;4]);}continue;
             }
             let [u,v]=crate::test_support::preimage(moved.placement.outer.0.map(f64::from),[x as f64+0.5,y as f64+0.5]).unwrap();
             let h=[x as f64+0.5,y as f64+0.5,1.];
@@ -2031,7 +2040,8 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
                 reference[channel]=value*opacity+[0.1,0.05,0.15][channel]*(1.-opacity);
             }
             reference[3]=opacity+0.5*(1.-opacity);
-            for (path,pixel) in [actual[index],expected[index],bounded[index]].into_iter().enumerate() {
+            for (path,image) in sampled.iter().enumerate() {
+                let pixel=image[index];
                 for channel in 0..4 {
                     let error=(f64::from(pixel[channel])-reference[channel]).abs();maximum[path]=maximum[path].max(error);
                     let color=if channel==3 {1.}else {let value=[0.8,0.2,0.6][channel];if encode {r.device.working_space().encode(value)}else{value}};
@@ -2041,8 +2051,8 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
                 }
             }
         }}
-        eprintln!("analytic projective compute/fragment max error {maximum:?}, encode {encode}");
-        assert!(maximum.into_iter().all(|error|error<1./255.),"reduced U8 display is within one channel code of analytic bilinear pigment: {maximum:?}");
+        eprintln!("analytic display resample max error {maximum:?}, encode {encode}");
+        assert!(maximum.iter().all(|&error|error<1./255.),"reduced U8 display is within one channel code of analytic bilinear pigment: {maximum:?}");
     }
 }
 

@@ -671,9 +671,10 @@ contrast, inversion and component modes) for the menus described in
 [shared UI](../ui/shared-ui.md#layer-blend-menu).
 
 [`blend_modes.wgsl`](../../crates/layer-render-wgpu/src/blend_modes.wgsl) holds every
-formula, on straight colors, and two premultiplied helpers: `blend_composite` puts
-a source over its backdrop and `blend_clip` blends a clipped source inside its
-base's coverage. They serve every place a layer's blend applies:
+formula, on straight colors. `blend_composite` puts a source over its backdrop,
+and `blend_clip` blends a clipped source inside its base's coverage.
+`blend_layer` selects either behavior with a shared blend evaluation for scene
+and display composition. These helpers serve every place a layer's blend applies:
 - layers, groups and common-base clipping runs (`scene.wgsl`, op 4);
 - effect interpolation, preserving or filtering alpha as declared
   (`fx_adjustment` and `fx_filter` in `effects_color.wgsl`);

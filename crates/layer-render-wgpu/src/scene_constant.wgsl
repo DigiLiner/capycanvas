@@ -20,10 +20,12 @@ fn compose_constant(@builtin(global_invocation_id) id: vec3<u32>) {
     var result: vec4<f32>;
     if u32(settings.options.x) == 0u {
         result = settings.color;
-    } else if u32(settings.options.x) == 15u {
-        result = scene_normal_stack(scene_read(front,v), scene_read(back,v), v);
     } else {
-        result = scene_pointwise(scene_read(front,v),v);
+        let op=u32(settings.options.x);
+        let raw=scene_read(front,v);
+        var dst=vec4(0.);
+        if scene_needs_back(op) {dst=scene_read(back,v);}
+        if op == 15u {result = scene_normal_stack(raw, dst, v);} else {result = scene_pointwise(raw,dst,v);}
     }
     textureStore(scene_output,vec2<i32>(p),result);
 }

@@ -308,6 +308,8 @@ impl NativeTileEncoder {
             buffer_entry(shared + 1, wgpu::BufferBindingType::Uniform, true, 48),
         ]);
         let mut body = include_str!("native_tiles/encode.wgsl")
+            .replace("FLOAT_PUBLICATION", if output_format == Some(wgpu::TextureFormat::Rgba8Uint) { "" }
+                else { include_str!("native_tiles/encode_float.wgsl") })
             .replace("MODE_PROJECTION", if output_format.is_none() { "
                 value=publishable(layer_color(value,settings.weights.rgb,settings.weights.a,select(sdr_decode_component(0.5,settings.curve),0.5,settings.maximum==0u)));
             " } else { "" })

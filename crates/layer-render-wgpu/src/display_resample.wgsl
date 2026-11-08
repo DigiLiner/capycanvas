@@ -59,10 +59,6 @@ fn mesh_source(owner:vec2<f32>)->vec2<f32> {
 fn resample_affine_area(@builtin(global_invocation_id) id:vec3<u32>) {
     if any(id.xy>=resample.texels.zw) {return;}
     let t=resample.texels.xy+id.xy;
-    if resample.w.x!=0. || resample.w.y!=0. || resample.w.z!=1. {
-        textureStore(level,vec2<i32>(t),resample_color(t,false,false,vec2(0.),vec2(0.),vec2(0.)));
-        return;
-    }
     let h=vec3(vec2<f32>(t)+min(vec2(1.),resample.target_extent.xy-vec2<f32>(t))*.5,1.);
     if !inside(h) {textureStore(level,vec2<i32>(t),composite_color(vec4(resample.options.w)));return;}
     let footprint=min(vec2(1.),resample.target_extent.xy-vec2<f32>(t));

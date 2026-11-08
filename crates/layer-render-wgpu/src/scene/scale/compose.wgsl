@@ -46,9 +46,5 @@ fn compose(@builtin(global_invocation_id) id: vec3<u32>) {
         textureStore(output, p, color + below * (1. - color.a));
         return;
     }
-    if clipped {
-        textureStore(output, p, blend_clip(color, below, mode));
-    } else {
-        textureStore(output, p, blend_composite(color, below, mode));
-    }
+    textureStore(output, p, blend_layer(color, below, mode, clipped));
 }
