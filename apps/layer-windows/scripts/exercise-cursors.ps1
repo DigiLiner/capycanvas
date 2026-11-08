@@ -60,7 +60,7 @@ function Tool([string]$Id) {
     (Control 'command-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($command.label)
     Wait-Until {$row=Find 'command-result-0' -Visible;$row -and $row.Current.Name.StartsWith($command.label)} "Tool search did not find $Id"
     [CapyRowPointer]::Key([uint32]$review.Id,0x0D)
-    Wait-Until {!(Find 'command-search' -Visible) -and @((Model).state.commands|Where-Object {$_.id -eq $Id -and $_.selected}).Count -eq 1 -and (Model).brush_ready} "Tool did not activate: $Id"
+    Wait-Until {!(Find 'command-search' -Visible) -and @((Model).state.commands|Where-Object {$_.id -eq $Id -and $_.selected}).Count -eq 1 -and (Model).brush_ready -and (Model).canvas_ready -and (Model).shaders_ready} "Tool did not activate: $Id"
 }
 function Pixels([string]$Name='') {
     $path=if($Name){Join-Path $run ($Name+'.png')}else{''}

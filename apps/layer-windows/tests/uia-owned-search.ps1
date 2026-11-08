@@ -2246,3 +2246,41 @@ Write-Output 'Actual clipboard Copy routing rejects stale native context and rev
  }
  'Actual Sketch Fill drawer assertion checks four ordered shared/native choices and rejects invalid rows'
 }
+
+& {
+ $tokens=$null;$errors=$null
+ $cursorAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-cursors.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $tool=$cursorAst.Find({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-eq'Tool'},$true)
+ if(!$tool){throw 'Missing actual cursor Tool helper'}
+ $toolWait=@($tool.FindAll({param($node)$node-is[Management.Automation.Language.CommandAst]-and$node.GetCommandName()-eq'Wait-Until'},$true))[-1]
+ $baseline=@($cursorAst.FindAll({param($node)$node-is[Management.Automation.Language.AssignmentStatementAst]-and$node.Left.Extent.Text-eq'$empty'},$true))
+ $leave=@($cursorAst.FindAll({param($node)$node-is[Management.Automation.Language.CommandAst]-and$node.GetCommandName()-eq'Wait-Until'-and$node.CommandElements[-1].Extent.Text-eq"'Leaving the pointer did not clear the retained cursor'"},$true))
+ if(!$toolWait-or$baseline.Count-ne1-or$leave.Count-ne1){throw 'Missing actual cursor readiness, pixel reference or leave assertion'}
+ $actualReady=[scriptblock]::Create($toolWait.Extent.Text)
+ $actualBaseline=[scriptblock]::Create($baseline[0].Extent.Text)
+ $actualLeave=[scriptblock]::Create($leave[0].Extent.Text)
+ function Find{param($Id,[switch]$Visible)$null}
+ function Model{
+  [pscustomobject]@{brush_ready=($script:cursorBlocked-ne'brush');canvas_ready=($script:cursorBlocked-ne'canvas');shaders_ready=($script:cursorPrepared-and$script:cursorBlocked-ne'shaders');state=[pscustomobject]@{commands=@([pscustomobject]@{id='pen';selected=$true})}}
+ }
+ function Pixels{if($script:cursorPrepared){'textured paper'}else{'uniform paper'}}
+ function Wait-StablePixels([scriptblock]$Sample){& $Sample}
+ function Wait-Until([scriptblock]$Predicate,[string]$Message){
+  for($poll=0;$poll-lt2;$poll++){if(& $Predicate){return};$script:cursorPrepared=$true}
+  throw $Message
+ }
+ $Id='pen'
+ $script:cursorBlocked='';$script:cursorPrepared=$false
+ . $actualReady
+ . $actualBaseline
+ $script:cursorPrepared=$true
+ . $actualLeave
+ if($empty-cne'textured paper'){throw 'Actual cursor baseline preceded complete presentation preparation'}
+ foreach($blocked in 'brush','canvas','shaders'){
+  $script:cursorBlocked=$blocked;$script:cursorPrepared=$false;$failure=$null
+  try{. $actualReady}catch{$failure=$_}
+  if(!$failure-or$failure.Exception.Message-cne'Tool did not activate: pen'){throw "Actual cursor readiness admitted missing $blocked preparation"}
+ }
+ 'Actual cursor readiness waits for optional presentation preparation before its unchanged pixel reference and exact leave assertion.'
+}
