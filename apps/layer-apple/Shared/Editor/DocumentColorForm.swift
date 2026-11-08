@@ -3,6 +3,7 @@ import SwiftUI
 struct DocumentColorForm: View {
     @ObservedObject var editor: DocumentColorController
     @Environment(\.capyInterfaceLanguage) private var language
+    @Environment(\.editorDialogPage) private var page
     let spaces: [JSON]
     @State private var space = "Srgb"
     @State private var depth = "U16"
@@ -41,7 +42,11 @@ struct DocumentColorForm: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(editor.title).font(.headline)
+            if page {
+                EditorPageHeader(intent: editor.dialog, title: editor.title, identifier: "document-color",
+                    primaryLabel: applyLabel, primaryEnabled: editor.properties ? !editor.busy : editor.ready && !editor.busy && !readingProfile,
+                    cancel: { if !editor.publishing { editor.cancel() } }, primary: { editor.apply() })
+            } else { Text(editor.title).font(.headline) }
             EditorScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if editor.properties {
@@ -77,21 +82,21 @@ struct DocumentColorForm: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
-                Button(editor.properties ? editor.propertiesDone : text["common"]["cancel"].string) { editor.cancel() }
-                    .keyboardShortcut(.cancelAction).disabled(editor.publishing)
+                if !page { Button(editor.properties ? editor.propertiesDone : text["common"]["cancel"].string) { editor.cancel() }
+                    .keyboardShortcut(.cancelAction).disabled(editor.publishing) }
                 Spacer()
                 if editor.properties {
                     Button(editor.propertiesView["proof"].string) { editor.showAppearance() }
                         .disabled(editor.busy).accessibilityIdentifier("document-properties-appearance")
                 }
-                if !editor.properties && !editor.history {
+                if !page && !editor.properties && !editor.history {
                     Button(applyLabel) {
                         editor.apply()
                     }.keyboardShortcut(.defaultAction).disabled(!editor.ready || editor.busy || readingProfile)
                         .accessibilityIdentifier("document-color-apply")
                 }
             }
-        }.padding(24).frame(minWidth: 340, idealWidth: 520, maxWidth: 620, minHeight: 260, idealHeight: 640, maxHeight: 720)
+        }.padding(24).modifier(EditorDialogFrame(minWidth: 340, idealWidth: 520, maxWidth: 620, minHeight: 260, idealHeight: 640, maxHeight: 720))
             .onChange(of: language, initial: true) { _, _ in editor.refreshCopy() }
             .onChange(of: editor.color.stableKey, initial: true) { _, _ in
                 if editor.loaded {

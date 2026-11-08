@@ -5,13 +5,16 @@ import UIKit
 
 struct NewDrawingPresentation: ViewModifier {
     @ObservedObject var store: EditorStore
+    static func dialog(store: EditorStore) -> some View {
+        NewDrawingDialog(store: store)
+            .modifier(EditorDialogFrame(minWidth: 340, idealWidth: 720, maxWidth: 760, minHeight: 440, idealHeight: 500, maxHeight: 680))
+            .accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-dialog")
+    }
     func body(content: Content) -> some View {
         content.editorSheet(store: store, intent: store.state["new_drawing"]["dialog"], isPresented: Binding(get: { !store.state["new_drawing"].isNull }, set: {
             if !$0 && !store.state["new_drawing"].isNull { store.projectFiles.newDrawing(["op": "cancel"]) }
         }), onDismiss: { store.focusCanvas?() }) {
-            NewDrawingDialog(store: store)
-                .modifier(EditorDialogFrame(minWidth: 340, idealWidth: 720, maxWidth: 760, minHeight: 440, idealHeight: 500, maxHeight: 680))
-                .accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-dialog")
+            Self.dialog(store: store)
                 .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
     }
@@ -130,11 +133,8 @@ private struct NewDrawingForm: View {
             EditorScrollView {
                 VStack(spacing: 14) {
                     if !phonePage { EditorDialogTitle(text: copy["title"].string) }
-                    if narrow {
-                        VStack(spacing: 14) { preview; form }
-                    } else {
-                        HStack(alignment: .top, spacing: 24) { preview; form }
-                    }
+                    let layout = narrow ? AnyLayout(VStackLayout(spacing: 14)) : AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+                    layout { preview; form }
                 }.padding(20).frame(maxWidth: .infinity)
             }
             if let error {
@@ -501,11 +501,10 @@ private struct NewDrawingForm: View {
                     }.frame(maxWidth: 672).accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-papers")
                 }.padding(20).frame(maxWidth: .infinity)
             }
-            if !phonePage { EditorDialogFooter(label: copy["use_texture"].string, identifiers: (cancel: "new-drawing-paper-cancel", apply: "new-drawing-paper-use"),
+            EditorDialogFooter(label: copy["use_texture"].string, identifiers: (cancel: "new-drawing-paper-cancel", apply: "new-drawing-paper-use"), showsActions: !phonePage,
                 cancel: { _ = admissions.finish(true, only: Self.reliefField); send(["op": "close_drawer"]) }, apply: usePaper) {
                 reliefRow(drawer["relief"])
-            } }
-            if phonePage { reliefRow(drawer["relief"]).padding(16) }
+            }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-paper-drawer")
     }
 

@@ -399,10 +399,15 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testNewDrawingKeyboardHeightDark() { newDrawingDialog(theme: "dark", keyboardOnly: true) }
     @MainActor private func newDrawingDialog(theme: String, keyboardOnly: Bool = false) {
         let app = ignoringSavedWindows(editorTestApplication())
-        app.launch()
-        openEditorSettings(in: app, theme: theme)
-        workspaceActivate(app.buttons["settings-done"])
-        editorMenu(in: app, menu: "File", id: "new_document", label: "New…")
+        if keyboardOnly {
+            app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"invoke","command":"new_document"}]"#
+            app.launch()
+        } else {
+            app.launch()
+            openEditorSettings(in: app, theme: theme)
+            workspaceActivate(app.buttons["settings-done"])
+            editorMenu(in: app, menu: "File", id: "new_document", label: "New…")
+        }
         checkNewDrawingDialog(in: app, theme: theme, keyboardOnly: keyboardOnly)
     }
 

@@ -18074,6 +18074,7 @@ mod tests {
             assert_eq!(root.keymap.dialog, close);
             assert_eq!(root.keymap.import_dialog, crate::DialogIntent::alert());
             assert_eq!(root.navigation.back, None);
+            assert!(!root.navigation.subpage);
             assert_eq!(root.navigation.shortcuts, [Route::Root]);
             for (viewport, single) in [([412.,891.],true),([891.,412.],true),([600.,900.],false)] {
                 let layout = s.state.preferences_layout(viewport,viewport[0],[126.,265.]);
@@ -18083,6 +18084,7 @@ mod tests {
             s.dispatch(UiAction::OpenSettings { page: SettingsPage::Shortcuts }).unwrap();
             let direct = s.preferences().unwrap();
             assert_eq!(direct.navigation.back,Some(PreferenceAction::PageList));
+            assert!(!direct.navigation.subpage);
             for (viewport, single) in [([412.,891.],true),([891.,412.],true),([600.,900.],false)] {
                 let layout = s.state.preferences_layout(viewport,viewport[0],[126.,265.]);
                 assert_eq!(layout.single_pane,single,"direct {platform:?}/{viewport:?}");
@@ -18099,6 +18101,7 @@ mod tests {
             preference(&mut s, PreferenceAction::ShortcutCategory { id: Some(category) });
             let view = s.preferences().unwrap();
             assert_eq!(view.navigation.shortcuts,[Route::Root,Route::Category]);
+            assert!(view.navigation.subpage);
             assert!(view.navigation.title.is_some());
             assert_eq!(view.navigation.back,Some(PreferenceAction::ShortcutCategory { id: None }));
             let key = s.state.settings.hold_keys(platform)[0].key.clone();
@@ -18113,6 +18116,7 @@ mod tests {
             preference(&mut s, PreferenceAction::EditPenButton { trigger: "pen.button.primary".into() });
             let view = s.preferences().unwrap();
             assert_eq!(view.navigation.input,[Route::Root,Route::Pen]);
+            assert!(view.navigation.subpage);
             assert_eq!(view.navigation.back,Some(PreferenceAction::ClosePenButton));
             assert_eq!(view.pen_button_editor.unwrap().dialog,close);
             preference(&mut s, view.navigation.back.unwrap());

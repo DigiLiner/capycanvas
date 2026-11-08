@@ -58,11 +58,16 @@ def main():
         sources = ["Shared/Bridge/NativeInputGate.swift", "Shared/Editor/EditorScrollView.swift", "iOS/Platform/NativeScrollObservation.swift",
                    "iOS/Platform/NativePenScroll.swift", "tests/" + fixture]
     if args.fixture == "sheets":
-        sources = ["Shared/Editor/EditorLegacyFittedPresentation.swift", "tests/" + fixture]
+        sources = [str(path.relative_to(apple)) for folder in [apple / "Shared", apple / "iOS"]
+                   for path in sorted(folder.rglob("*.swift"))
+                   if "Tests" not in path.parts and path.name != "CapyCanvasApp.swift"] + ["tests/support/editor-store.swift", "tests/" + fixture]
     minimum = "17.5" if args.fixture in ("scroll", "sheets") else "18.0"
     run("compile", ["xcrun", "--sdk", "iphonesimulator", "swiftc", "-parse-as-library",
                     "-sdk", sdk, "-target", f"arm64-apple-ios{minimum}-simulator",
                     *(["-swift-version", "5", "-disable-sandbox"] if args.fixture in ("scroll", "sheets") else []),
+                    *(["-D", "DEBUG", "-whole-module-optimization", "-import-objc-header", str(apple / "native/include/CapyApple.h"),
+                       "-L", str(root / "target/ios-17.5/aarch64-apple-ios-sim/debug"), "-llayer_apple", "-lsqlite3", "-lc++",
+                       "-framework", "Metal", "-framework", "QuartzCore", "-framework", "Security"] if args.fixture == "sheets" else []),
                     *[str(apple / name) for name in sources], "-o", str(app / "RowChecks")])
     bundle = "art.capycanvas.tests.rowcallbacks.run" + token
     info = {

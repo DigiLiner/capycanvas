@@ -249,6 +249,7 @@ impl<P: Parked> DocumentWindow<P> {
     pub fn view(&self, host: &NativeHost, width: f32) -> Value {
         let documents = &self.documents;
         json!({
+            "dialog": layer_ui::DrawingSelector::DIALOG,
             "available": host.session.can_switch_document(),
             "tabs": documents.labels(&host.session.state().document_file, |p| &p.session().state().document_file, host.session.localization()),
             "selected": documents.selected(),
@@ -1637,6 +1638,7 @@ mod tests {
         assert_eq!(host.session.state().document_file.location, Some(location));
         assert!(!host.session.state().document_file.modified);
         let titles = window.view(&host, 800.);
+        assert_eq!(titles["dialog"], json!(layer_ui::DrawingSelector::DIALOG));
         assert_eq!(titles["tabs"][1]["title"], "Untitled.capy");
         let mut activation = switch(&mut window, &mut host, 1);
         assert_eq!(host.session.localization().language(), UiLanguage::Korean);

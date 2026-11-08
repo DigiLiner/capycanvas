@@ -11,11 +11,13 @@ struct CommandSearchLayer: View {
 }
 
 private struct CommandSearchBar: View {
-    let store: EditorStore
+    @ObservedObject var store: EditorStore
     let view: JSON
     @State private var text = ""
     @State private var shown = false
     @State private var origin = "canvas"
+    @State private var placement = JSON()
+    @State private var placementKey = ""
     #if os(iOS)
     @State private var focused = false
     #else
@@ -32,12 +34,12 @@ private struct CommandSearchBar: View {
     private var parameter: JSON { view["parameter"] }
     private var results: [JSON] { view["results"].array }
     private var selected: Int { Int(view["selected"].uint) }
-    private func rowHeight(narrow: Bool) -> CGFloat {
+    private var rowHeight: CGFloat {
         let shared = style["row_height"].isNull ? 44 : style["row_height"].number
         #if os(iOS)
         return max(shared, 48)
         #else
-        return narrow ? max(shared, 48) : shared
+        return shared
         #endif
     }
     private func send(_ action: [String: Any]) {
@@ -46,28 +48,31 @@ private struct CommandSearchBar: View {
     private func back() { send(["type": parameter.isNull ? "close" : "back"]) }
     private var detail: String { view["detail"].string }
     private var radius: CGFloat { style["radius"].isNull ? 12 : style["radius"].number }
-    private func top(_ height: CGFloat) -> CGFloat {
-        let low = style["top_min"].isNull ? 48 : style["top_min"].number, high = style["top_max"].isNull ? 192 : style["top_max"].number
-        return min(max(height / 5, low), high)
-    }
     private func explanation(_ command: JSON) -> String {
         command["disabled_reason"].isNull ? command["description"].string : command["disabled_reason"].string
     }
 
     var body: some View {
         GeometryReader { geometry in
-            let narrow = geometry.size.width <= 600
-            let top = narrow ? 16 : top(geometry.size.height)
-            let width = style["width"].isNull ? 560 : style["width"].number
-            ZStack(alignment: .top) {
+            let height = min(geometry.size.height, max(0, store.snapshot["layout"]["viewport"][1].number - store.keyboardInset))
+            let visible = JSON(["x": 0, "y": 0, "width": geometry.size.width, "height": height])
+            let key = JSON([visible.raw, store.snapshot["layout"]["phone"].raw]).stableKey
+            ZStack(alignment: .topLeading) {
                 Color.clear.contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0).onEnded { _ in send(["type": "close"]) })
                     .accessibilityHidden(true)
-                card(rowHeight: rowHeight(narrow: narrow))
-                    .frame(width: max(0, min(width, geometry.size.width - 32)))
-                    .frame(maxHeight: max(0, geometry.size.height - top - 16), alignment: .top)
-                    .padding(.top, top)
-                    .opacity(shown ? 1 : 0).offset(y: shown || reduceMotion ? 0 : -4)
+                if !placement.isNull {
+                    card(rowHeight: rowHeight)
+                        .frame(width: max(0, placement["width"].number))
+                        .frame(maxHeight: max(0, placement["height"].number), alignment: .top)
+                        .offset(x: placement["x"].number, y: placement["y"].number)
+                        .opacity(shown ? 1 : 0).offset(y: shown || reduceMotion ? 0 : -4)
+                }
+            }.onChange(of: key, initial: true) { _, expected in
+                placementKey = expected
+                store.query(["type": "command_search_placement", "visible": visible.raw]) { next in
+                    guard placementKey == expected else { return }; placement = next
+                }
             }
         }
         .onAppear {

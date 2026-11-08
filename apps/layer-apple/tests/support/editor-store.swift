@@ -46,6 +46,13 @@ func require(_ value: Bool, _ message: String) throws {
     }
 }
 
+@MainActor func desktopViewport(_ store: EditorStore) async throws {
+    store.native?.resize(width: 1200, height: 900, scale: 1)
+    try await wait("Desktop fixture viewport", failure: { store.failure }) {
+        store.snapshot["layout"]["viewport"].array.map(\.number) == [1200, 900]
+    }
+}
+
 @MainActor func frame(_ native: NativeOwner) async {
     let now = FrameTrace.now()
     await withCheckedContinuation { done in native.frame(now: now, target: now + 16_666_667) { _, _, _ in done.resume() } }

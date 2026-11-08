@@ -42,6 +42,10 @@ import SwiftUI
         refreshCopy()
     }
     var text: JSON { catalog["document_color_copy"] }
+    var dialog: JSON {
+        if properties { return loaded ? propertiesView["dialog"] : bootstrap["progress_dialog"] }
+        return text[history ? "progress_dialog" : "dialog"]
+    }
     var title: String {
         if properties { return propertiesView["title"].isNull ? bootstrap["preparing_document"].string : propertiesView["title"].string }
         if history { return text[redo ? "redo_title" : "undo_title"].string }

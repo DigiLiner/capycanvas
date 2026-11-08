@@ -17,13 +17,16 @@ struct EditorScrollView<Content: View>: View {
                 ScrollView(axes, showsIndicators: showsIndicators) {
                     content.background(NativePenScroll(showsIndicators: showsIndicators, axes: axes).frame(width: 0, height: 0))
                         .background(NativeScrollObservation(offsetChanged: { offsetChanged(max(0, $0)) }))
-                }
+                }.scrollDismissesKeyboard(.interactively)
                 #endif
             }
         } else { scroll }
     }
     private var scroll: some View {
         ScrollView(axes, showsIndicators: showsIndicators) { content.background(NativePenScroll(showsIndicators: showsIndicators, axes: axes).frame(width: 0, height: 0)) }
+            #if os(iOS)
+            .scrollDismissesKeyboard(.interactively)
+            #endif
     }
 }
 

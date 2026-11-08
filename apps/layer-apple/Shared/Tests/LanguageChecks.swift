@@ -139,6 +139,20 @@ extension XCTestCase {
             let closeCancel = dialogButtons[cancel].firstMatch
             XCTAssertTrue(closeCancel.exists)
             attachEditor(in: app, name: "language-close-" + tag + "-" + theme)
+            #if os(macOS)
+            app.typeKey(.return, modifierFlags: [])
+            let savePicker = app.windows.buttons["OKButton"].firstMatch
+            XCTAssertTrue(savePicker.waitForExistence(timeout: 15))
+            XCTAssertTrue(app.textFields["saveAsNameTextField"].exists, "Return must choose Save rather than discard the drawing")
+            let pickerCancel = app.windows.buttons["CancelButton"].firstMatch
+            XCTAssertTrue(pickerCancel.isHittable)
+            pickerCancel.click()
+            XCTAssertTrue(savePicker.waitForNonExistence(timeout: 15))
+            XCTAssertTrue(confirmation.waitForNonExistence(timeout: 10))
+            expectPixels(painted, in: app)
+            fileCommand("close_document", close)
+            XCTAssertTrue(confirmation.waitForExistence(timeout: 15))
+            #endif
             workspaceActivate(closeCancel)
             XCTAssertTrue(confirmation.waitForNonExistence(timeout: 10))
             XCTAssertTrue(app.state == .runningForeground)

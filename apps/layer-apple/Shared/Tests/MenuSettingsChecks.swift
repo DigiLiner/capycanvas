@@ -93,8 +93,9 @@ extension XCTestCase {
     }
 
     @MainActor func checkSettingsTextState(in app: XCUIApplication, theme: String = "light", keyboardSelection: Bool = true) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"invoke","command":"settings"},{"type":"preferences","action":{"type":"page","page":"appearance"}}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"invoke","command":"settings"}]"#
         app.launch()
+        assertEditorSettingsRoot(in: app, phone: false)
         func reopen() {
             workspaceActivate(app.buttons["settings-done"])
             XCTAssertTrue(app.buttons["settings-done"].waitForNonExistence(timeout: 5))
@@ -212,10 +213,20 @@ extension XCTestCase {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"settings"},{"type":"preferences","action":{"type":"reveal","id":"zen_icon"}}]"#
         app.launch()
         let first = app.buttons["preference-zen_icon-0"]
+        func revealChoice(_ choice: XCUIElement, id: String) {
+            let anchor = first.exists ? "preference-zen_icon-0" : "preference-theme"
+            #if os(macOS)
+            let form = app.scrollViews.containing(.any, identifier: anchor).firstMatch
+            #else
+            let form = app.collectionViews.containing(.any, identifier: anchor).firstMatch
+            #endif
+            revealEditorControl(choice, identifier: id, type: .button, in: form)
+        }
         XCTAssertTrue(first.waitForExistence(timeout: 20))
         XCTAssertTrue(first.isSelected)
         for index in 1...3 {
             let choice = app.buttons["preference-zen_icon-\(index)"]
+            revealChoice(choice, id: "preference-zen_icon-\(index)")
             workspaceActivate(choice)
             expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: choice)
             waitForExpectations(timeout: 5)
@@ -240,9 +251,14 @@ extension XCTestCase {
         #else
         editorMenu(in: app, menu: "Edit", id: "settings", label: "Settings…")
         #endif
+        assertEditorSettingsRoot(in: app, phone: false)
+        workspaceActivate(app.buttons["settings-page-appearance"])
+        revealChoice(first, id: "preference-zen_icon-0")
         XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(first.isSelected)
 
-        workspaceActivate(app.staticTexts["settings-page-shortcuts"])
+        let back = app.buttons["settings-back"]
+        if back.exists { workspaceActivate(back) }
+        workspaceActivate(app.buttons["settings-page-shortcuts"])
         let search = app.textFields["shortcut-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 5)); workspaceActivate(search); search.typeText("Zen")
         let shortcut = app.buttons["shortcut-command.ZenMode"]
@@ -265,10 +281,19 @@ extension XCTestCase {
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 
+    @MainActor func assertEditorSettingsRoot(in app: XCUIApplication, phone: Bool) {
+        let appearance = app.buttons["settings-page-appearance"]
+        XCTAssertTrue(appearance.waitForExistence(timeout: 10))
+        XCTAssertEqual(appearance.isSelected, !phone,
+            "Settings keeps Appearance selected beside the sidebar in wide windows and opens the list on phone pages")
+    }
+
     @MainActor func openEditorSettings(in app: XCUIApplication, theme: String) {
         waitForEditorInteraction(in: app)
         app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 10))
+        assertEditorSettingsRoot(in: app, phone: false)
+        workspaceActivate(app.buttons["settings-page-appearance"])
         let themePicker = app.descendants(matching: .any)["preference-theme"].firstMatch
         if !themePicker.waitForExistence(timeout: 3) { workspaceActivate(app.staticTexts["Appearance"].firstMatch) }
         workspaceActivate(themePicker)
@@ -312,11 +337,14 @@ extension XCTestCase {
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "1.25"), evaluatedWith: value)
         waitForExpectations(timeout: 5)
         attachEditor(in: app, name: "settings-numeric-done-\(theme)")
+        let back = app.buttons["settings-back"], phonePage = back.exists
+        if phonePage { workspaceActivate(back) }
         workspaceActivate(search); search.typeText("theme")
         #if os(iOS)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         #endif
-        let canvasPage = app.staticTexts["settings-page-canvas"]
+        if phonePage { search.typeKey("a", modifierFlags: .command); search.typeText(XCUIKeyboardKey.delete.rawValue) }
+        let canvasPage = app.buttons["settings-page-canvas"]
         XCTAssertTrue(canvasPage.waitForExistence(timeout: 5)); workspaceActivate(canvasPage)
         XCTAssertTrue(app.buttons["number-value-Scroll pan speed"].waitForExistence(timeout: 5))
         #if os(iOS)

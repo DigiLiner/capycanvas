@@ -33,27 +33,57 @@ struct CanvasFloorLayer: View {
     @ObservedObject var presence: CanvasNoticePresence
     @ObservedObject var bar: CanvasBarPresence
     @State private var previewBar: CGRect?
+    @State private var previewPresentation = JSON()
+    @State private var previewBounds = JSON()
+    @State private var previewHeight: CGFloat = 0
+    @State private var previewKey = ""
     private static let margin: CGFloat = 12, previewWidth: CGFloat = 360
     var body: some View {
         let tools = store.state["layer_tools"]
         let preview: (view: JSON, operations: CanvasPreviewPanel.Operations)? = !tools["selection_resize"].isNull ? (tools["selection_resize"], .refine)
             : !tools["frequency_separation"].isNull ? (tools["frequency_separation"], .frequencySeparation) : nil
-        ZStack(alignment: .topLeading) {
-            Color.clear.frame(width: 0, height: 0)
-            if !presence.notice.isNull || preview != nil {
-                let placement = store.snapshot["layout"]["notice"], anchor = CGFloat(placement["y"].number)
-                let below = preview == nil ? bar.bounds : previewBar
-                let bottom = below.map { $0.maxY > CGFloat(placement["bar_floor"].number) ? min(anchor, $0.minY - Self.margin) : anchor } ?? anchor
-                let width = CGFloat(placement["max_width"].number)
-                let palette = EditorPalette(source: store.state["palette"])
-                VStack(spacing: Self.margin) {
-                    if !presence.notice.isNull { notice(palette.glassy, width: width, minTextWidth: CGFloat(placement["min_text_width"].number)) }
-                    if let preview {
-                        CanvasPreviewPanel(store: store, view: preview.view, operations: preview.operations, palette: palette)
-                            .frame(width: min(Self.previewWidth, width))
+        GeometryReader { geometry in
+            let height = min(geometry.size.height, max(0, store.snapshot["layout"]["viewport"][1].number - store.keyboardInset))
+            let visible = JSON(["x": 0, "y": 0, "width": geometry.size.width, "height": height])
+            let key = JSON([visible.raw, store.snapshot["layout"]["phone"].raw,
+                preview?.operations.identifier ?? "", previewHeight]).stableKey
+            ZStack(alignment: .topLeading) {
+                Color.clear.frame(width: 0, height: 0)
+                if !presence.notice.isNull || preview != nil {
+                    let placement = store.snapshot["layout"]["notice"], anchor = CGFloat(placement["y"].number)
+                    let below = preview == nil ? bar.bounds : previewBar
+                    let bottom = below.map { $0.maxY > CGFloat(placement["bar_floor"].number) ? min(anchor, $0.minY - Self.margin) : anchor } ?? anchor
+                    let width = CGFloat(placement["max_width"].number)
+                    let palette = EditorPalette(source: store.state["palette"])
+                    VStack(spacing: Self.margin) {
+                        if !presence.notice.isNull { notice(palette.glassy, width: width, minTextWidth: CGFloat(placement["min_text_width"].number)) }
+                        if let preview, previewPresentation["kind"].string == "floating" {
+                            CanvasPreviewPanel(store: store, view: preview.view, operations: preview.operations, palette: palette)
+                                .frame(width: min(Self.previewWidth, width))
+                        }
+                    }.frame(width: width, height: max(0, bottom), alignment: .bottom)
+                        .offset(x: CGFloat(placement["x"].number) - width / 2)
+                }
+                if let preview, previewPresentation["kind"].string == "canvas_panel", !previewBounds.isNull {
+                    ScrollView {
+                        CanvasPreviewPanel(store: store, view: preview.view, operations: preview.operations,
+                            palette: EditorPalette(source: store.state["palette"]))
+                            .frame(maxWidth: .infinity)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewHeight = $0 }
+                    }.placed(previewBounds)
+                }
+            }.onChange(of: key, initial: true) { _, expected in
+                previewKey = expected
+                guard preview != nil else { previewPresentation = JSON(); previewBounds = JSON(); return }
+                store.query(["type": "dialog_presentation", "role": "canvas_panel", "visible": visible.raw]) { next in
+                    guard previewKey == expected else { return }
+                    previewPresentation = next
+                    guard next["kind"].string == "canvas_panel" else { previewBounds = JSON(); return }
+                    store.query(["type": "dialog_bounds", "role": "canvas_panel", "visible": visible.raw,
+                        "measured": [Self.previewWidth, previewHeight]]) { bounds in
+                        guard previewKey == expected else { return }; previewBounds = bounds
                     }
-                }.frame(width: width, height: max(0, bottom), alignment: .bottom)
-                    .offset(x: CGFloat(placement["x"].number) - width / 2)
+                }
             }
         }.onChange(of: preview == nil) { _, closed in if !closed { previewBar = bar.bounds } }
             .onChange(of: bar.bounds) { _, bounds in if let bounds { previewBar = bounds } }

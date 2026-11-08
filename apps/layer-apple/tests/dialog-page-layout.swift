@@ -45,15 +45,18 @@ import SwiftUI
             return false
         }
         profile.layoutSubtreeIfNeeded()
+        var ancestors: NSView? = profilePicker
+        while let view = ancestors, !(view is NSScrollView) { ancestors = view.superview }
+        guard ancestors is NSScrollView else { throw HostFailure(message: "The photo profile page body must have a native scroll container") }
         let pickerFrame = profile.convert(profilePicker!.bounds, from: profilePicker!)
         let pickerTop = profile.isFlipped ? pickerFrame.minY : profile.bounds.height - pickerFrame.maxY
         guard pickerTop < profile.bounds.height / 3 else {
             throw HostFailure(message: "Photo profile page picker must remain near the top: picker=\(pickerFrame), bounds=\(profile.bounds), top=\(pickerTop)")
         }
         print("PASS: Photo profile page places its native picker below the top header")
-        try await store.apply(["type": "invoke", "command": "new_document"])
-        try await wait("New drawing opens") { !store.state["new_drawing"].isNull }
         for width: CGFloat in [320, 402] {
+            try await store.apply(["type": "invoke", "command": "new_document"])
+            try await wait("New drawing opens") { !store.state["new_drawing"].isNull }
             let host = NSHostingView(rootView: NewDrawingDialog(store: store).environment(\.editorDialogPage, true)
                 .environment(\.editorPopupStore, store).environment(\.capyCommonCopy, store.bootstrap["common"]))
             window.setContentSize(CGSize(width: width, height: 874)); window.contentView = host
@@ -66,6 +69,58 @@ import SwiftUI
                 }
             }
             print("PASS: New drawing uses the \(Int(width)) point page allocation")
+            try await store.projectFiles.newDrawingStep(["op": "cancel"])
+            try await wait("New drawing closes before its native host retires") { store.state["new_drawing"].isNull }
+            host.layoutSubtreeIfNeeded()
+            let fitted = host.fittingSize
+            guard fitted.width.isFinite && fitted.height.isFinite else {
+                throw HostFailure(message: "Cleared page header must keep finite native layout")
+            }
+            print("PASS: Cleared New drawing header lays out at \(Int(width)) points")
         }
+        try await store.apply(["type": "customize", "action": ["type": "rename_toolbar", "panel": "toolbar"]])
+        precondition(store.snapshot["toolbar_prompt"]["dialog"]["role"].string == "editor")
+        let content = WorkspaceDialog(store: store).environment(\.editorPopupStore, store).font(.system(size: 44 / 3))
+        let rename = NSHostingView(rootView: content.environment(\.editorDialogPage, true))
+        window.contentView = rename
+        try await wait("The actual Rename page mounts its name field") { fields(rename).contains { $0.isEditable } }
+        let name = fields(rename).first { $0.isEditable }!
+        rename.rootView = content.environment(\.editorDialogPage, false)
+        rename.layoutSubtreeIfNeeded()
+        precondition(fields(rename).first { $0.isEditable } === name,
+            "Rename must keep its native field across page and floating layout")
+        try await store.apply(["type": "customize", "action": ["type": "cancel_toolbar"]])
+        try await store.apply(["type": "customize", "action": ["type": "delete_toolbar", "panel": "toolbar"]])
+        precondition(store.snapshot["toolbar_prompt"]["dialog"]["role"].string == "alert")
+        store.native?.resize(width: 320, height: 568, scale: 1)
+        try await wait("The toolbar alert viewport publishes") { store.snapshot["layout"]["viewport"][0].number == 320 }
+        let prompt = NSHostingView(rootView: content.environment(\.editorDialogPage, false))
+        window.setContentSize(CGSize(width: 320, height: 568)); window.contentView = prompt
+        prompt.layoutSubtreeIfNeeded()
+        let fitted = prompt.fittingSize
+        var pending = [prompt as NSView], scrolls: [NSScrollView] = []
+        while let view = pending.popLast() {
+            if let scroll = view as? NSScrollView { scrolls.append(scroll) }
+            pending += view.subviews
+        }
+        precondition(abs(fitted.width - 300) <= 1,
+            "The actual Delete Toolbar body retains the shared alert minimum in a 320 point allocation")
+        precondition(fitted.height < 568, "A short confirmation must fit below its available height")
+        precondition(!store.snapshot["toolbar_prompt"]["message"].string.isEmpty && scrolls.count == 1)
+        precondition(scrolls[0].documentView!.bounds.height > 0
+            && scrolls[0].documentView!.bounds.height <= scrolls[0].contentView.bounds.height + 1,
+            "The rendered Delete message must fit in the compact alert body")
+        try await store.apply(["type": "customize", "action": ["type": "cancel_toolbar"]])
+        try await wait("The toolbar alert closes") { store.snapshot["toolbar_prompt"].isNull }
+        print("PASS: Toolbar prompt roles, field lifetime and actual compact shared alert allocation")
+        try await store.apply(["type": "customize", "action": ["type": "insert_tools", "panel": "commands", "before": NSNull()]])
+        let tools = NSHostingView(rootView: content.environment(\.editorDialogPage, false))
+        window.styleMask = [.titled, .closable]; window.contentView = tools
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        try await wait("The floating Insert Tools picker mounts") { fields(tools).contains { $0.isEditable } }
+        try require(window.makeFirstResponder(nil), "The floating picker must have no focused field")
+        try NativeWorkspaceInputFixture.key("\u{1b}", code: 53, window: window)
+        try await wait("Escape without a focused field closes Insert Tools") { store.snapshot["picker"].isNull }
+        print("PASS: Floating Insert Tools retains native Escape without focused text")
     }
 }

@@ -19,20 +19,23 @@ struct WorkspaceDialogs: ViewModifier {
     }
 }
 
-private struct WorkspaceDialog: View {
+struct WorkspaceDialog: View {
     @ObservedObject var store: EditorStore
     @Environment(\.editorDialogPage) private var page
+    @Environment(\.editorDialogAvailableHeight) private var availableHeight
     @FocusState private var searchFocused: Bool
     private var snapshot: SnapshotProjection { store.snapshot }
     private var common: JSON { store.bootstrap["common"] }
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
+    private var alert: Bool { snapshot["toolbar_prompt"]["dialog"]["role"].string == "alert" }
     var body: some View {
         Group {
             if !snapshot["toolbar_prompt"].isNull { prompt(snapshot["toolbar_prompt"]) }
             else if !snapshot["picker"].isNull { picker(snapshot["picker"]) }
             else if !snapshot["toolbar_manager"].isNull { manager(snapshot["toolbar_manager"]) }
             else { colorPopup }
-        }.padding(page ? 0 : 24).frame(minWidth: page ? 0 : 320, idealWidth: page ? nil : 500, maxWidth: page ? .infinity : 560)
+        }.padding(alert || page ? 0 : 24).frame(minWidth: alert ? nil : page ? 0 : 320,
+            idealWidth: alert || page ? nil : 500, maxWidth: alert ? nil : page ? .infinity : 560)
             .buttonStyle(.bordered).modifier(EditorFittedPresentation())
             .id(!snapshot["toolbar_prompt"].isNull ? snapshot["toolbar_prompt"]["title"].string : "workspace")
             .onNativeTextKey(.escape) {
@@ -102,27 +105,54 @@ private struct WorkspaceDialog: View {
             }
         }.padding(page ? 8 : 0).accessibilityElement(children: .contain).accessibilityIdentifier("tool-picker")
     }
-    private func prompt(_ view: JSON) -> some View {
+    @ViewBuilder private func prompt(_ view: JSON) -> some View {
+        Group {
+            if alert {
+                EditorAlertLayout(viewport: CGSize(width: snapshot["layout"]["viewport"][0].number,
+                    height: availableHeight ?? max(0, snapshot["layout"]["viewport"][1].number - store.keyboardInset)),
+                    preferWide: view["dialog"]["frame"]["prefer_wide"].bool,
+                    fontPixels: CGFloat(store.catalog["text_size_pt"].number * 4 / 3)) {
+                    Text(view["title"].string).font(.headline).multilineTextAlignment(.center)
+                    EditorScrollView { promptBody(view) }
+                    promptCancel(view)
+                    promptConfirm(view)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    ZStack {
+                        if page {
+                            EditorPageHeader(intent: view["dialog"], title: view["title"].string, identifier: "toolbar-prompt",
+                                primaryLabel: view["confirm_label"].string, primaryEnabled: view["can_confirm"].bool,
+                                primaryIdentifier: "toolbar-prompt-confirm", cancel: { action("cancel_toolbar") }, primary: { action("confirm_toolbar") })
+                        } else { Text(view["title"].string).font(.headline) }
+                    }
+                    EditorScrollView { promptBody(view).padding(page ? 16 : 0) }
+                    if !page { HStack { Spacer(); promptCancel(view); promptConfirm(view) } }
+                }
+            }
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("toolbar-prompt")
+    }
+    private func promptBody(_ view: JSON) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(view["title"].string).font(.headline)
             if !view["message"].string.isEmpty { Text(view["message"].string) }
             if !view["name"].isNull {
                 EditorTextField(view["name_label"].string, value: view["name"].string) { store.customize(["type": "toolbar_name", "name": $0]) }
                     .textFieldStyle(.roundedBorder).accessibilityIdentifier("toolbar-name")
             }
             error(view)
-            HStack {
-                Spacer()
-                Button(view["cancel_label"].string, role: .cancel) { action("cancel_toolbar") }
-                    .keyboardShortcut(.cancelAction).accessibilityIdentifier("toolbar-prompt-cancel")
-                Button(view["confirm_label"].string, role: view["destructive"].bool ? .destructive : nil) { action("confirm_toolbar") }
-                    .buttonStyle(.borderedProminent)
-                    .foregroundStyle(view["destructive"].bool ? .white : palette.accentForeground)
-                    .tint(view["destructive"].bool ? .red : palette.accent)
-                    .keyboardShortcut(.defaultAction).disabled(!view["can_confirm"].bool)
-                    .accessibilityIdentifier("toolbar-prompt-confirm")
-            }
-        }.accessibilityElement(children: .contain).accessibilityIdentifier("toolbar-prompt")
+        }
+    }
+    private func promptCancel(_ view: JSON) -> some View {
+        Button(view["cancel_label"].string, role: .cancel) { action("cancel_toolbar") }
+            .keyboardShortcut(.cancelAction).accessibilityIdentifier("toolbar-prompt-cancel")
+    }
+    private func promptConfirm(_ view: JSON) -> some View {
+        Button(view["confirm_label"].string, role: view["destructive"].bool ? .destructive : nil) { action("confirm_toolbar") }
+            .buttonStyle(.borderedProminent)
+            .foregroundStyle(view["destructive"].bool ? .white : palette.accentForeground)
+            .tint(view["destructive"].bool ? .red : palette.accent)
+            .keyboardShortcut(.defaultAction).disabled(!view["can_confirm"].bool)
+            .accessibilityIdentifier("toolbar-prompt-confirm")
     }
     private func manager(_ view: JSON) -> some View {
         VStack(alignment: .leading, spacing: 16) {

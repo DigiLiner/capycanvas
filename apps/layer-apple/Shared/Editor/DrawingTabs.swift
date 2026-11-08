@@ -379,20 +379,41 @@ struct DrawingTabsPresentation: ViewModifier {
     func body(content: Content) -> some View {
         content.allowsHitTesting(!tabs.busy).overlay {
             if tabs.busy { ProgressView(store.catalog["document_delivery_copy"]["switching_drawing"].string).padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) }
-        }.sheet(isPresented: $tabs.presented) {
+        }.editorSheet(store: store, intent: tabs.view["dialog"], isPresented: $tabs.presented) {
+            DrawingSelectorForm(store: store, tabs: tabs)
+        }
+    }
+}
+
+private struct DrawingSelectorForm: View {
+    @ObservedObject var store: EditorStore
+    @ObservedObject var tabs: DrawingTabsController
+    @Environment(\.editorDialogPage) private var page
+    var body: some View {
+        VStack(spacing: 0) {
+            if page {
+                EditorPageHeader(intent: tabs.view["dialog"], title: tabs.copy["drawings"].string,
+                    identifier: "drawing-selector", cancel: { tabs.presented = false })
+            }
             VStack(alignment: .leading, spacing: 12) {
-                Text(store.catalog["native_copy"]["header"]["drawings"].string).font(.headline)
+                if !page { Text(tabs.copy["drawings"].string).font(.headline) }
                 EditorScrollView { DrawingTabList(store: store, tabs: tabs, vertical: true) }
                 if !tabs.view["storage_error"].isNull { Text(tabs.view["storage_error"].string).foregroundStyle(.red) }
                 HStack {
                     Button(tabs.copy["undo_order"].string) { tabs.edit(["op":"history","redo":false]) }.disabled(!tabs.view["can_undo"].bool)
                     Button(tabs.copy["redo_order"].string) { tabs.edit(["op":"history","redo":true]) }.disabled(!tabs.view["can_redo"].bool)
-                    Spacer(); Button(store.bootstrap["common"]["done"].string) { tabs.presented = false }.keyboardShortcut(.cancelAction)
+                    if !page {
+                        Spacer(); Button(store.bootstrap["common"]["done"].string) { tabs.presented = false }.keyboardShortcut(.cancelAction)
+                    }
                 }
-            }.padding(20).frame(minWidth: 340, idealWidth: 480, minHeight: 260, idealHeight: 440)
-                .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()).modifier(EditorPopoverHost())
-                .accessibilityElement(children: .contain).accessibilityIdentifier("drawing-selector")
-        }
+            }.padding(20)
+        }.modifier(EditorDialogFrame(minWidth: 340, idealWidth: 480, minHeight: 260, idealHeight: 440))
+            .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()).modifier(EditorPopoverHost())
+            .accessibilityElement(children: .contain).accessibilityIdentifier("drawing-selector")
+            .onNativeTextKey(.escape) {
+                guard DialogUI.resolve(["kind": "escape", "subpage": false, "search_focused": false, "search_has_text": false]).string == "cancel" else { return .ignored }
+                tabs.presented = false; return .handled
+            }
     }
 }
 

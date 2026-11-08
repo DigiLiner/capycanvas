@@ -18,7 +18,11 @@ import UIKit
     @Published var picker: Picker?
     @Published var cancelling = false
     @Published private(set) var creating = false
-    @Published var colorEditor: DocumentColorController?
+    @Published var colorEditor: DocumentColorController? {
+        didSet {
+            colorSubscription = colorEditor?.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        }
+    }
     @Published var exportEditor: ExportController? {
         didSet {
             exportSubscriptions.removeAll()
@@ -42,6 +46,7 @@ import UIKit
     @Published var profileError: String?
     @Published var interpreting = false
     @Published var copyProgress: String?
+    private var colorSubscription: AnyCancellable?
     private var exportSubscriptions = Set<AnyCancellable>()
     private var copying = false
     private var profileCompletion: ((JSON?) -> Void)?
@@ -301,6 +306,8 @@ import UIKit
             }
         }
     }
+    var alertIntent: JSON { error == nil ? store?.snapshot["document_options"]["dialog"] ?? JSON() : store?.bootstrap["file_error_dialog"] ?? JSON() }
+    var alertMessage: String { error ?? store?.snapshot["document_options"]["unsaved_description"].string ?? "" }
     var discardLabel: String { store?.catalog["new_document"]["discard"].string ?? "" }
     var documentSpaces: [JSON] { store?.catalog["document_spaces"].array ?? [] }
     private func openNewDrawing() {
@@ -867,28 +874,37 @@ import UIKit
 struct ProjectFilesModifier: ViewModifier {
     @ObservedObject var files: ProjectFiles
     @Environment(\.capyCommonCopy) private var common
+    @Environment(\.capyProfileCopy) private var profileCopy
+    @Environment(\.editorPopupStore) private var store
+    private var phone: Bool { store.map { !$0.snapshot["layout"]["phone"].isNull } ?? false }
+    private var alertResponses: [EditorAlertResponse] {
+        if files.error != nil {
+            return [EditorAlertResponse(label: common["ok"].string, identifier: "file-error-ok", cancel: true, action: { files.error = nil })]
+        }
+        let responses = [EditorAlertResponse(label: common["cancel"].string, identifier: "document-close-cancel", cancel: true, action: { files.choose("cancel") }),
+            EditorAlertResponse(label: files.discardLabel, identifier: "document-close-discard", destructive: true, action: { files.choose("discard") }),
+            EditorAlertResponse(label: common["save"].string, identifier: "document-close-save", accent: true, action: { files.choose("save") })]
+        return phone ? responses : Array(responses.reversed())
+    }
     func body(content: Content) -> some View {
         content.allowsHitTesting(!files.blocksEditor)
             .accessibilityHidden(files.blocksEditor)
-            .alert(files.alertTitle,
-                isPresented: Binding(get: { files.confirming || files.error != nil }, set: { if !$0 { files.dismissAlert() } })) {
-                if files.error != nil { Button(common["ok"].string, role: .cancel) { files.error = nil } }
-                else {
-                    Button(common["save"].string) { files.choose("save") }
-                    Button(files.discardLabel, role: .destructive) { files.choose("discard") }
-                    Button(common["cancel"].string, role: .cancel) { files.choose("cancel") }
-                }
-            } message: { if let error = files.error { Text(error) } }
-            .sheet(isPresented: Binding(get: { files.packageSummary != nil }, set: { if !$0 { files.closePackage() } })) {
+            .editorAlert(intent: files.alertIntent, title: files.alertTitle, message: files.alertMessage,
+                isPresented: Binding(get: { files.confirming || files.error != nil }, set: { if !$0 { files.dismissAlert() } }),
+                responses: alertResponses)
+            .editorSheet(intent: files.packageSummary?["dialog"] ?? JSON(), isPresented: Binding(get: { files.packageSummary != nil }, set: { if !$0 { files.closePackage() } })) {
                 if let summary = files.packageSummary {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(summary["status"].string).font(.headline)
+                        if phone {
+                            EditorPageHeader(intent: summary["dialog"], title: summary["status"].string, identifier: "preserved-package",
+                                primaryEnabled: !files.packageCopying, cancel: { files.closePackage() })
+                        } else { Text(summary["status"].string).font(.headline) }
                         if let image = files.packageImage {
                             Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 420)
                         }
                         if !summary["body"].string.isEmpty { Text(summary["body"].string) }
                         HStack {
-                            Button(summary["close"].string) { files.closePackage() }.disabled(files.packageCopying)
+                            if !phone { Button(summary["close"].string) { files.closePackage() }.disabled(files.packageCopying) }
                             Spacer()
                             if summary["capabilities"]["export"].bool {
                                 Button(summary["export_preview"].string) { files.exportPackagePreview() }.disabled(files.packageCopying)
@@ -897,24 +913,25 @@ struct ProjectFilesModifier: ViewModifier {
                             Button(summary["copy_original"].string) { files.copyPackage() }.disabled(files.packageCopying)
                                 .accessibilityIdentifier("copy-original-package")
                         }
-                    }.padding(24).frame(minWidth: 320, idealWidth: 560)
+                    }.padding(24).modifier(EditorDialogFrame(minWidth: 320, idealWidth: 560))
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("preserved-package-preview")
                         .interactiveDismissDisabled(files.packageCopying).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
                 }
             }
-            .sheet(isPresented: Binding(get: { files.pendingProfile != nil }, set: { if !$0 { files.chooseProfile(nil) } })) {
+            .editorSheet(intent: profileCopy["dialog"], isPresented: Binding(get: { files.pendingProfile != nil }, set: { if !$0 { files.chooseProfile(nil) } })) {
                 PhotoProfileForm(preferences: files.preferences, interpretation: files.pendingProfile ?? JSON(),
                     spaces: files.documentSpaces, error: files.profileError, busy: files.interpreting) {
                     files.chooseProfile($0)
                 }.interactiveDismissDisabled(files.interpreting).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
             }
-            .sheet(isPresented: Binding(get: { files.colorEditor != nil }, set: { if !$0 { files.colorEditor?.cancel() } })) {
+            .editorSheet(intent: files.colorEditor?.dialog ?? JSON(), isPresented: Binding(get: { files.colorEditor != nil && (!phone || files.colorEditor?.history != true) }, set: { if !$0 { files.colorEditor?.cancel() } })) {
                 if let editor = files.colorEditor {
                     DocumentColorForm(editor: editor, spaces: files.documentSpaces)
                         .interactiveDismissDisabled(editor.publishing).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
                 }
             }
+            .modifier(DocumentColorHistoryProgress(files: files, phone: phone))
             .editorSheet(intent: files.exportEditor?.view["dialog"] ?? JSON(), isPresented: Binding(get: { files.exportEditor != nil }, set: { if !$0 { files.exportEditor?.cancel() } }),
                 onDismiss: files.exportDismissed) {
                 if let editor = files.exportEditor { ExportForm(editor: editor).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
@@ -1042,3 +1059,24 @@ struct NativeDocumentPicker: UIViewControllerRepresentable {
     }
 }
 #endif
+
+
+private struct DocumentColorHistoryProgress: ViewModifier {
+    @ObservedObject var files: ProjectFiles
+    let phone: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if phone, let editor = files.colorEditor, editor.history { content.modifier(DocumentColorProgressAlert(editor: editor)) }
+        else { content }
+    }
+}
+
+private struct DocumentColorProgressAlert: ViewModifier {
+    @ObservedObject var editor: DocumentColorController
+    func body(content: Content) -> some View {
+        content.editorAlert(intent: editor.dialog, title: editor.title,
+            isPresented: Binding(get: { true }, set: { if !$0 { editor.cancel() } }), responses: [
+                EditorAlertResponse(label: editor.text["common"]["cancel"].string, identifier: "document-color-cancel", cancel: true,
+                    enabled: !editor.publishing, action: { editor.cancel() })],
+            bodyContent: AnyView(ProgressView(editor.publishing ? editor.text["applying"].string : editor.bootstrap["preparing_document"].string)))
+    }
+}

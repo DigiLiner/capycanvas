@@ -47,7 +47,7 @@ struct ProfileChooserButtons: View {
             ProfileImportButton(preferences: preferences, busy: $busy, onProfile: onProfile)
             Button(copy["saved_dialog"].string) { library = true }.disabled(busy)
                 .accessibilityIdentifier("color-profile-library")
-        }.sheet(isPresented: $library, onDismiss: { onLibraryDismiss?() }) {
+        }.editorSheet(intent: copy["library_dialog"], isPresented: $library, onDismiss: { onLibraryDismiss?() }) {
             ColorProfileLibrary(preferences: preferences) { profile in onProfile(profile); library = false }
                 .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
@@ -81,11 +81,15 @@ struct ColorProfileLibrary: View {
     @State private var error: String?
     @State private var query = ""
     @Environment(\.editorPopupStore) private var store
+    @Environment(\.editorDialogPage) private var page
     private var palette: EditorPalette { EditorPalette(source: store?.state["palette"] ?? JSON()) }
     var body: some View {
         let entries = entryCopy.rows(metadata, language: language, query: query)
         VStack(alignment: .leading, spacing: 16) {
-            Text(copy["library_title"].string).font(.headline)
+            if page {
+                EditorPageHeader(intent: copy["library_dialog"], title: copy["library_title"].string, identifier: "profile-library",
+                    primaryEnabled: !busy, cancel: { if !busy { dismiss() } })
+            } else { Text(copy["library_title"].string).font(.headline) }
             Text(copy["library_help"].string)
             if metadata.count > 7 || !query.isEmpty {
                 TextField(copy["search"].string, text: $query).editorSearchInput().textFieldStyle(.roundedBorder)
@@ -123,10 +127,10 @@ struct ColorProfileLibrary: View {
                 }
                 Button(nativeCopy["color"]["refresh"].string) { reload() }.disabled(busy)
                 Spacer()
-                Button(copy["common"]["done"].string) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
-                    .accessibilityIdentifier("profile-library-done")
+                if !page { Button(copy["common"]["done"].string) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                    .accessibilityIdentifier("profile-library-done") }
             }
-        }.padding(24).frame(minWidth: 340, idealWidth: 540, maxWidth: 620, minHeight: 300, idealHeight: 560, maxHeight: 720)
+        }.padding(24).modifier(EditorDialogFrame(minWidth: 340, idealWidth: 540, maxWidth: 620, minHeight: 300, idealHeight: 560, maxHeight: 720))
             .interactiveDismissDisabled(busy).task { reload() }
     }
     private func reload(removing id: String? = nil, showing: (String, Bool)? = nil) {

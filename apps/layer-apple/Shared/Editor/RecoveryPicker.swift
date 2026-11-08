@@ -3,6 +3,29 @@ import SwiftUI
 struct RecoveryPresentation: ViewModifier {
     @ObservedObject var store: EditorStore
     @ObservedObject var recovery: ArtworkRecovery
+    private var phone: Bool { !store.snapshot["layout"]["phone"].isNull }
+    private var responses: [EditorAlertResponse] {
+        [EditorAlertResponse(label: recovery.copy["retry"].string, identifier: "recovery-retry", accent: true,
+            enabled: !recovery.restoring && !recovery.saving, action: { recovery.retry() }),
+         EditorAlertResponse(label: recovery.copy["later"].string, identifier: "recovery-later", cancel: true,
+            action: { recovery.later() })]
+    }
+    private var recoveryBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(recovery.copy["explanation"].string)
+            if recovery.restoring || recovery.saving { ProgressView().controlSize(.small) }
+            if recovery.error == nil && !recovery.failedDrawings.isEmpty {
+                ForEach(recovery.failedDrawings, id: \.failedDrawingID) { drawing in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(drawing["error"].string).textSelection(.enabled)
+                        Button(recovery.copy["discard"].string, role: .destructive) { recovery.discard(drawing["id"].uint) }
+                            .disabled(recovery.restoring || recovery.saving)
+                            .accessibilityIdentifier("recovery-discard-\(drawing["id"].uint)")
+                    }
+                }
+            } else { Text(recovery.visibleError ?? "").textSelection(.enabled) }
+        }
+    }
     func body(content: Content) -> some View {
         content
             #if DEBUG
@@ -32,7 +55,7 @@ struct RecoveryPresentation: ViewModifier {
                         }
                         if let workspaces = store.workspaces { WorkspaceStartupNotice(workspaces: workspaces) }
                         ProjectProgressNotice(files: store.projectFiles, copy: recovery.copy)
-                        if let error = recovery.visibleError {
+                        if !phone, let error = recovery.visibleError {
                             if recovery.error == nil && !recovery.failedDrawings.isEmpty {
                                 ForEach(recovery.failedDrawings, id: \.failedDrawingID) { drawing in
                                     EditorNotice(message: drawing["error"].string, working: recovery.restoring || recovery.saving) {
@@ -52,13 +75,13 @@ struct RecoveryPresentation: ViewModifier {
                         EditorScrollView { notices }
                     }.padding(12).frame(maxWidth: .infinity, maxHeight: geometry.size.height, alignment: .bottom)
                 }
-            }
+            }.editorAlert(store: store, intent: recovery.copy["dialog"], title: recovery.copy["title"].string,
+                isPresented: Binding(get: { phone && recovery.visibleError != nil }, set: { if !$0 { recovery.later() } }),
+                responses: responses, bodyContent: AnyView(recoveryBody))
     }
     private var recoveryActions: some View {
-        Group {
-            Button(recovery.copy["retry"].string) { recovery.retry() }
-                .disabled(recovery.restoring || recovery.saving).accessibilityIdentifier("recovery-retry")
-            Button(recovery.copy["later"].string) { recovery.later() }.accessibilityIdentifier("recovery-later")
+        ForEach(responses) { response in
+            Button(response.label, action: response.action).disabled(!response.enabled).accessibilityIdentifier(response.identifier)
         }
     }
 }

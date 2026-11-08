@@ -1,4 +1,7 @@
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 extension XCTestCase {
     @MainActor func newDrawingNumber(_ name: String, in app: XCUIApplication) -> XCUIElement {
@@ -44,8 +47,17 @@ extension XCTestCase {
         XCTAssertTrue(create.waitForNonExistence(timeout: 60))
     }
 
-    @MainActor func createWhitePaperDrawing(width: String = "2400", height: String = "1800", in app: XCUIApplication) {
-        editorMenu(in: app, menu: "File", id: "new_document", label: "New…")
+    #if os(iOS)
+    @MainActor func revealNewDrawingControl(_ id: String, in app: XCUIApplication) {
+        let control = newDrawingElement(id, in: app)
+        let scroll = newDrawingElement("new-drawing-dialog", in: app).scrollViews.containing(.any, identifier: id).firstMatch
+        if scroll.exists && !control.isHittable { revealEditorControl(control, in: scroll) }
+    }
+    #endif
+
+    @MainActor func createWhitePaperDrawing(width: String = "2400", height: String = "1800", in app: XCUIApplication,
+        open: (() -> Void)? = nil) {
+        if let open { open() } else { editorMenu(in: app, menu: "File", id: "new_document", label: "New…") }
         XCTAssertTrue(app.buttons["new-drawing-create"].waitForExistence(timeout: 60))
         workspaceActivate(app.buttons["new-drawing-texture"])
         enterNewDrawingNumber("paper-relief", "0", in: app)
@@ -113,7 +125,15 @@ extension XCTestCase {
         checkDialogKeyboardHeight(dialog, in: app) { workspaceActivate(app.textFields["new-drawing-name"]) }
         #endif
         if keyboardOnly {
+            #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                let title = dialog.staticTexts["New drawing"]
+                XCTAssertTrue(title.isHittable)
+                title.swipeDown(velocity: .fast)
+            } else { workspaceActivate(app.buttons["new-drawing-cancel"]) }
+            #else
             workspaceActivate(app.buttons["new-drawing-cancel"])
+            #endif
             XCTAssertTrue(create.waitForNonExistence(timeout: 10))
             return
         }

@@ -4,9 +4,9 @@ struct SizeDialogs: ViewModifier {
     @ObservedObject var store: EditorStore
     private var tools: JSON { store.state["layer_tools"] }
     func body(content: Content) -> some View {
-        content.sheet(isPresented: presented("canvas_size")) {
+        content.editorSheet(store: store, intent: tools["canvas_size"]["dialog"], isPresented: presented("canvas_size")) {
             SizeForm(store: store, kind: .canvas).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
-        }.sheet(isPresented: presented("image_size")) {
+        }.editorSheet(store: store, intent: tools["image_size"]["dialog"], isPresented: presented("image_size")) {
             SizeForm(store: store, kind: .image).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
     }
@@ -24,6 +24,7 @@ private struct SizeForm: View {
     @ObservedObject var store: EditorStore
     let kind: SizeKind
     @State private var admissions = NumericAdmissions()
+    @Environment(\.editorDialogPage) private var page
     private var view: JSON { store.state["layer_tools"][kind.rawValue] }
     private func send(_ action: [String: Any]) { store.dispatch(["type": kind.rawValue, "action": action]) }
     private func finish(_ discard: Bool) -> Bool {
@@ -35,8 +36,13 @@ private struct SizeForm: View {
     }
     var body: some View {
         let palette = EditorPalette(source: store.state["palette"])
-        VStack(alignment: .leading, spacing: 12) {
-            Text(view["title"].string).font(.headline)
+        VStack(spacing: 0) {
+            if page {
+                EditorPageHeader(intent: view["dialog"], title: view["title"].string, identifier: kind.identifier, primaryLabel: view["apply_label"].string,
+                    primaryEnabled: view["can_apply"].bool, cancel: { _ = finish(true); send(["op": "cancel"]) }, primary: { choose(["op": "apply"]) })
+            }
+            EditorScrollView { VStack(alignment: .leading, spacing: 12) {
+            if !page { Text(view["title"].string).font(.headline) }
             ForEach(["width", "height"].indices, id: \.self) { axis in
                 let op = axis == 0 ? "width" : "height"
                 number(view["labels"][axis].string, value: view["values"][axis].number, control: view["numeric"][axis], op: op)
@@ -52,14 +58,15 @@ private struct SizeForm: View {
             }
             Text(view["message"].string).foregroundStyle(palette["text"].opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier(kind.identifier + "-message")
-            HStack {
+            if !page { HStack {
                 Spacer()
                 Button(view["cancel_label"].string) { _ = finish(true); send(["op": "cancel"]) }.keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier(kind.identifier + "-cancel")
                 Button(view["apply_label"].string) { choose(["op": "apply"]) }.keyboardShortcut(.defaultAction).disabled(!view["can_apply"].bool)
                     .accessibilityIdentifier(kind.identifier + "-apply")
-            }
-        }.padding(20).frame(width: 380)
+            } }
+        }.padding(20) }
+        }.frame(width: page ? nil : 380, height: nil)
             .accessibilityElement(children: .contain).accessibilityIdentifier(kind.identifier + "-dialog")
     }
     private func number(_ label: String, value: Double, control: JSON, op: String) -> some View {

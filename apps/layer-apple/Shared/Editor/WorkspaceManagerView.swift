@@ -50,6 +50,7 @@ struct WorkspaceManagerView: View {
     @Environment(\.capyNativeCopy) private var nativeCopy
     @Environment(\.capyCommonCopy) private var common
     @Environment(\.capyInterfaceLanguage) private var language
+    @Environment(\.editorDialogPage) private var page
     @ObservedObject var workspaces: WorkspaceController
     @State private var query = ""
     @FocusState private var searchFocused: Bool
@@ -69,7 +70,24 @@ struct WorkspaceManagerView: View {
         return view["switcher_error"].isNull ? nil : view["switcher_error"].string
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        Group {
+            if view["prompt"]["dialog"]["role"].string == "alert" || page && !view["prompt"].isNull && !workspaces.inlineRename {
+                WorkspaceManagerForm(workspaces: workspaces, spec: view["prompt"])
+            } else { manager }
+        }
+            .onNativeTextKey(.escape) { escape(); return .handled }
+            .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-manager")
+    }
+    private var manager: some View {
+        VStack(alignment: .leading, spacing: page ? 0 : 12) {
+            if page {
+                EditorPageHeader(intent: view["dialog"], title: subpage ? view["details"]["title"].string : view["title"].string,
+                    identifier: "workspace-manager", subpage: subpage, primaryLabel: view["primary"].string,
+                    primaryEnabled: view["enabled"].bool && (!workspaces.busy || workspaces.inlineRename),
+                    primaryIdentifier: workspaces.page == "history" ? "workspace-history-restore" : "workspace-manager-apply",
+                    backIdentifier: "workspace-manager-back", cancelIdentifier: "workspace-manager-close",
+                    cancel: escape, back: { workspaces.pageList() }, primary: { workspaces.send(["type": "confirm"]) })
+            } else {
             HStack(alignment: .top) {
                 if subpage {
                     Button { workspaces.pageList() } label: { SharedIcon(name: "go-previous") }
@@ -83,6 +101,7 @@ struct WorkspaceManagerView: View {
                         .keyboardShortcut(.cancelAction).disabled(workspaces.busy).accessibilityIdentifier("workspace-manager-close")
                 }
             }
+            }
             if !view["prompt"].isNull && !workspaces.inlineRename { WorkspaceManagerForm(workspaces: workspaces, spec: view["prompt"]) }
             else {
                 if let error = message {
@@ -90,14 +109,10 @@ struct WorkspaceManagerView: View {
                 }
                 if workspaces.page == "history" { history } else { browser }
             }
-        }.padding(20).frame(idealWidth: workspaces.page == "workspaces" ? 460 : workspaces.page == "history" ? 480 : 620, maxWidth: workspaces.page == "workspaces" ? 620 : 800,
-            idealHeight: workspaces.page == "workspaces" ? workspaceRowsHeight+176 : 600, maxHeight: 900)
-            .onNativeTextKey(.escape) {
-                escape()
-                return .handled
-            }
+        }.padding(page ? 0 : 20).frame(maxWidth: page ? .infinity : nil, maxHeight: page ? .infinity : nil, alignment: .topLeading)
+            .modifier(EditorDialogFrame(idealWidth: workspaces.page == "workspaces" ? 460 : workspaces.page == "history" ? 480 : 620, maxWidth: workspaces.page == "workspaces" ? 620 : 800,
+            idealHeight: workspaces.page == "workspaces" ? workspaceRowsHeight+176 : 600, maxHeight: 900))
             .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in workspaces.refreshLayout() }
-            .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-manager")
             .onChange(of: workspaces.page) { _, _ in query = "" }
     }
     private func escape() {
@@ -137,7 +152,7 @@ struct WorkspaceManagerView: View {
             if workspaces.page == "workspaces" {
                 VStack(alignment: .leading,spacing:6) {
                     WorkspaceSwitcherRows(workspaces: workspaces, reportRowHeights: rememberWorkspaceRowHeights)
-                        .frame(minHeight: 0, idealHeight: workspaceRowsHeight, maxHeight: workspaceRowsHeight)
+                        .frame(minHeight: 0, idealHeight: page ? nil : workspaceRowsHeight, maxHeight: page ? .infinity : workspaceRowsHeight)
                     HStack(spacing:4) {
                         Button {workspaces.form(["type":"new"])} label: {SharedIcon(name:"plus").frame(width:34,height:34)}
                             .buttonStyle(.plain).disabled(workspaces.busy && !workspaces.inlineRename).accessibilityLabel(header["new_workspace"].string).accessibilityIdentifier("workspace-action-new")
@@ -166,7 +181,7 @@ struct WorkspaceManagerView: View {
                     }.accessibilityIdentifier("workspace-manager-details")
                 }
             } }
-            if !toolbarMode {
+            if !toolbarMode && !page {
                 HStack(spacing: 8) {
                     Spacer()
                     Button(common["cancel"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
@@ -209,6 +224,7 @@ struct WorkspaceManagerView: View {
                     }
                 }
             }.disabled(workspaces.busy)
+            if !page {
             HStack {
                 Button(common["cancel"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
                     .buttonStyle(WorkspaceManagerButtonStyle())
@@ -216,6 +232,7 @@ struct WorkspaceManagerView: View {
                     .buttonStyle(WorkspaceManagerButtonStyle(primary: true))
                     .disabled(workspaces.busy || !view["enabled"].bool)
                     .accessibilityIdentifier("workspace-history-restore")
+            }
             }
         }
     }
@@ -247,9 +264,41 @@ private struct WorkspaceManagerForm: View {
     @Environment(\.capyInterfaceLanguage) private var language
     @Environment(\.capyCommonCopy) private var common
     @Environment(\.capyNativeCopy) private var nativeCopy
+    @Environment(\.editorDialogPage) private var page
     @ObservedObject var workspaces: WorkspaceController
     let spec: JSON
     var body: some View {
+        Group {
+            if spec["dialog"]["role"].string == "alert", let store = workspaces.store {
+                EditorAlertLayout(viewport: CGSize(width: store.snapshot["layout"]["viewport"][0].number,
+                    height: max(0, store.snapshot["layout"]["viewport"][1].number - store.keyboardInset)),
+                    preferWide: spec["dialog"]["frame"]["prefer_wide"].bool,
+                    fontPixels: CGFloat(store.catalog["text_size_pt"].number * 4 / 3)) {
+                    Text(spec["title"].string).font(.headline).multilineTextAlignment(.center)
+                    EditorScrollView { fields }
+                    cancel
+                    confirm
+                }
+            } else if page {
+                VStack(spacing: 0) {
+                    EditorPageHeader(intent: spec["dialog"], title: spec["title"].string, identifier: "workspace-form",
+                        primaryLabel: spec["confirm"].string, primaryEnabled: !workspaces.busy && !workspaces.validatingName && workspaces.nameError == nil,
+                        primaryIdentifier: "workspace-form-confirm", cancel: { workspaces.cancelPrompt() }, primary: { workspaces.submit() })
+                    EditorScrollView { fields.padding(16) }
+                }.modifier(EditorDialogFrame())
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    fields
+                    Spacer(minLength: 16)
+                    HStack { Spacer(); cancel; confirm }
+                }
+            }
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-form")
+            .onChange(of: workspaces.formName, initial: true) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
+            .onChange(of: spec.stableKey) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
+            .onChange(of: language) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
+    }
+    private var fields: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(spec["message"].string).fixedSize(horizontal: false, vertical: true)
             if !spec["name"].isNull {
@@ -266,20 +315,17 @@ private struct WorkspaceManagerForm: View {
                 }.accessibilityIdentifier("workspace-form-choice")
             }
             if let error = workspaces.nameError ?? workspaces.error { Text(error).foregroundStyle(.red).accessibilityIdentifier("workspace-form-error") }
-            Spacer(minLength: 16)
-            HStack {
-                Spacer()
-                Button(spec["cancel"].string.isEmpty ? common["cancel"].string : spec["cancel"].string, role: .cancel) { workspaces.cancelPrompt() }.keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier("workspace-form-cancel")
-                Button(spec["confirm"].string, role: spec["destructive"].bool ? .destructive : nil) { workspaces.submit() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(workspaces.busy || workspaces.validatingName || workspaces.nameError != nil)
-                    .accessibilityIdentifier("workspace-form-confirm")
-            }
-        }.accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-form")
-            .onChange(of: workspaces.formName, initial: true) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
-            .onChange(of: spec.stableKey) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
-            .onChange(of: language) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
+        }
+    }
+    private var cancel: some View {
+        Button(spec["cancel"].string.isEmpty ? common["cancel"].string : spec["cancel"].string, role: .cancel) { workspaces.cancelPrompt() }.keyboardShortcut(.cancelAction)
+            .accessibilityIdentifier("workspace-form-cancel")
+    }
+    private var confirm: some View {
+        Button(spec["confirm"].string, role: spec["destructive"].bool ? .destructive : nil) { workspaces.submit() }
+            .keyboardShortcut(.defaultAction)
+            .disabled(workspaces.busy || workspaces.validatingName || workspaces.nameError != nil)
+            .accessibilityIdentifier("workspace-form-confirm")
     }
 }
 

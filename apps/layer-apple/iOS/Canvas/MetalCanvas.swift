@@ -29,6 +29,8 @@ final class CanvasView: UIView {
     private var drawableExtent = CGSize.zero
     private var submittedScale: CGFloat = 0
     private var sceneGeometry: NSKeyValueObservation?
+    private weak var factsWindow: UIWindow?
+    private var keyboardScreenFrame: CGRect?
     private var keyboardCoversField = false
     private let shaderActivity = ShaderActivityRecognizer()
     private lazy var calibrationHover: UIHoverGestureRecognizer = {
@@ -103,12 +105,14 @@ final class CanvasView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        sceneGeometry = nil
         store.projectFiles.presentationScreen = window?.screen
         shaderActivity.view?.removeGestureRecognizer(shaderActivity)
         calibrationHover.view?.removeGestureRecognizer(calibrationHover)
         if window == nil { cancelPickerHold() }
         if let window {
+            if factsWindow !== window { keyboardScreenFrame = nil; keyboardCoversField = false }
+            factsWindow = window
+            sceneGeometry = nil
             store.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) })
             connectStore()
             shaderActivity.activity = { [weak store] in store?.native?.shaderInput() }
@@ -123,12 +127,23 @@ final class CanvasView: UIView {
             }
             sceneGeometry = window.windowScene?.observe(\.effectiveGeometry, options: [.initial, .new]) { [weak self] scene, _ in
                 DispatchQueue.main.async {
-                    guard let self, self.window?.windowScene === scene else { return }
+                    guard let self, self.factsWindow?.windowScene === scene else { return }
                     let space: any UICoordinateSpace
                     if #available(iOS 26.0, *) { space = scene.effectiveGeometry.coordinateSpace }
                     else { space = scene.coordinateSpace }
                     let display = scene.screen.coordinateSpace
                     self.store.windowPresentation.observe(fullscreen: space.convert(space.bounds, to: display) == display.bounds)
+                    guard let window = self.factsWindow else { return }
+                    let scale = window.screen.scale
+                    let extent = CGSize(width: (window.bounds.width * scale).rounded(), height: (window.bounds.height * scale).rounded())
+                    if extent.width > 0 && extent.height > 0 && (extent != self.drawableExtent || scale != self.submittedScale) {
+                        self.drawableExtent = extent; self.submittedScale = scale
+                        self.store.native?.observeDisplay(width: UInt32(extent.width), height: UInt32(extent.height), scale: Float(scale),
+                            maximumRefreshRate: window.screen.maximumFramesPerSecond)
+                        self.store.native?.resize(width: UInt32(extent.width), height: UInt32(extent.height), scale: Float(scale))
+                    }
+                    self.reportPhoneMetrics()
+                    self.measureWorkspaceBottom()
                 }
             }
             store.projectFiles.closeWindow = { [weak window, weak store] in
@@ -196,12 +211,12 @@ final class CanvasView: UIView {
         wake()
     }
     private func reportPhoneMetrics() {
-        guard window != nil, let owner = store.native, store.state["workspace_ready"].bool else { return }
+        guard let window = factsWindow, let owner = store.native, store.state["workspace_ready"].bool else { return }
         let edge = store.snapshot["layout"]["phone"]["edge"].string
         let insets: UIEdgeInsets
         if #available(iOS 26.0, *), !edge.isEmpty {
-            insets = edgeInsets(for: .safeArea(cornerAdaptation: edge == "top" ? .horizontal : .vertical))
-        } else { insets = safeAreaInsets }
+            insets = window.edgeInsets(for: .safeArea(cornerAdaptation: edge == "top" ? .horizontal : .vertical))
+        } else { insets = window.safeAreaInsets }
         let metrics = JSON(["kind": "metrics", "insets": [insets.left, insets.top, insets.right, insets.bottom],
             "corners": [0, 0, 0, 0], "native": [0, 0], "native_counts": [0, 0], "movable": false])
         guard phoneMetricsOwner !== owner || phoneMetricsKey != metrics.stableKey else { return }
@@ -213,11 +228,13 @@ final class CanvasView: UIView {
         setNeedsLayout()
     }
     @objc private func keyboardChanged(_ notification: Notification) {
-        // Read UIKit's per-window guide after its layout update. Shared workspace
-        // clearance moves controls above the keyboard without resizing the canvas.
+        guard let window = factsWindow else { return }
+        let field = FocusedResponder.find() as? UIView
+        keyboardScreenFrame = field?.window != nil && field?.window !== window ? nil
+            : (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            window?.layoutIfNeeded()
+            factsWindow?.layoutIfNeeded()
             if let keyboard = keyboardFrame {
                 keyboardCoversField = keyboardCoversField || (focusedFieldBottom ?? 0) > keyboard.minY
             } else { keyboardCoversField = false }
@@ -225,15 +242,19 @@ final class CanvasView: UIView {
         }
     }
     private var keyboardFrame: CGRect? {
-        let keyboard = bounds.intersection(keyboardLayoutGuide.layoutFrame)
-        return keyboard.isNull || keyboard.height <= safeAreaInsets.bottom + 0.5 ? nil : keyboard
+        guard let window = factsWindow, let screenFrame = keyboardScreenFrame else { return nil }
+        let frame = window.screen.coordinateSpace.convert(screenFrame, to: window)
+        guard frame.minX <= window.bounds.minX, frame.maxX >= window.bounds.maxX,
+            frame.maxY >= window.bounds.maxY else { return nil }
+        let keyboard = window.bounds.intersection(frame)
+        return keyboard.isNull || keyboard.height <= window.safeAreaInsets.bottom + 0.5 ? nil : keyboard
     }
     private var focusedFieldBottom: CGFloat? {
-        guard let field = FocusedResponder.find() as? UIView, field.window === window else { return nil }
-        return field.convert(field.bounds, to: self).maxY
+        guard let window = factsWindow, let field = FocusedResponder.find() as? UIView, field.window === window else { return nil }
+        return field.convert(field.bounds, to: window).maxY
     }
     private func measureWorkspaceBottom() {
-        guard window != nil, bounds.height > 0 else { return }
+        guard let window = factsWindow, window.bounds.height > 0 else { return }
         let keyboardInset = keyboardFrame?.height ?? 0
         if store.keyboardInset != keyboardInset {
             DispatchQueue.main.async { [weak store = store] in

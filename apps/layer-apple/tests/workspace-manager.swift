@@ -206,6 +206,7 @@ import SwiftUI
         for response in ["cancel", "dismiss", "restore"] {
             try await workspaces.perform(["type": "form", "action": ["type": "reset", "value": id]])
             precondition(workspaces.view["prompt"]["confirm"].string == "Restore")
+            if response == "cancel" { try await compactRestorePrompt(editor) }
             baseline = editor.state["workspace"]["layout"].stableKey
             precondition(baseline != original, "The starting layout must be visible before its confirmation")
             try require(SnapshotProjection.equal(await workspaces.capture().raw, before.raw),
@@ -280,6 +281,30 @@ import SwiftUI
         workspaces.dismiss()
         workspaces.send(["type": "cancel"])
         try await workspaces.settle()
+    }
+    @MainActor static func compactRestorePrompt(_ editor: EditorStore) async throws {
+        let workspaces = editor.workspaces!
+        precondition(workspaces.view["prompt"]["dialog"]["role"].string == "alert")
+        _ = NSApplication.shared
+        for width: CGFloat in [320, 402] {
+            editor.native?.resize(width: UInt32(width), height: 568, scale: 1)
+            try await wait("Restore prompt viewport") { editor.snapshot["layout"]["viewport"][0].number == width }
+            for dark in [false, true] {
+                let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: width, height: 568),
+                    styleMask: [.borderless], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                defer { window.contentView = nil; window.close() }
+                let host = NSHostingView(rootView: WorkspaceManagerView(workspaces: workspaces)
+                    .environment(\.editorPopupStore, editor).environment(\.capyCommonCopy, editor.bootstrap["common"])
+                    .environment(\.capyNativeCopy, editor.catalog["native_copy"]).environment(\.colorScheme, dark ? .dark : .light)
+                    .frame(width: width))
+                window.contentView = host
+                host.layoutSubtreeIfNeeded()
+                precondition(host.fittingSize.height > 0 && host.fittingSize.height < 568,
+                    "The actual shared Restore alert must fit its content at 320/402 without manager expansion")
+            }
+        }
+        try await desktopViewport(editor)
     }
     @MainActor static func capture(_ workspaces: WorkspaceController, platform: UInt32, phase: String) async throws {
         guard let path = ProcessInfo.processInfo.environment["CAPY_WORKSPACE_CAPTURES"] else { return }

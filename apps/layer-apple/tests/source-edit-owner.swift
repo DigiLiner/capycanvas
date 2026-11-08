@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import QuartzCore
 import CoreGraphics
 import ImageIO
@@ -66,6 +67,24 @@ import UniformTypeIdentifiers
                 try require(editor.ready && editor.previews.count==2,editor.error ?? "Complete comparisons")
             }
             try await invoke("open_document");try await idle()
+            let properties = DocumentColorController(store: store, request: JSON(["type": "properties"]), expected: nil, completion: { _ in })
+            store.projectFiles.colorEditor = properties
+            try require(properties.dialog["role"].string == "alert", "Properties starts with the shared progress intent")
+            var propertiesPublications = 0
+            let propertiesObservation = store.projectFiles.objectWillChange.sink { propertiesPublications += 1 }
+            properties.load()
+            try await wait("Document Properties", store: store) { properties.loaded || properties.error != nil }
+            try require(properties.error == nil && properties.loaded, properties.error ?? "Properties details must load")
+            propertiesPublications = 0
+            properties.refreshCopy()
+            try require(propertiesPublications > 0 && properties.dialog["role"].string == "editor",
+                "The presentation owner must publish loaded Document Properties' shared Editor intent")
+            store.projectFiles.colorEditor = nil
+            propertiesPublications = 0
+            properties.error = "Detached properties"
+            try require(propertiesPublications == 0, "A dismissed properties owner must stop forwarding changes")
+            propertiesObservation.cancel()
+            properties.cancel()
             let count=store.state["layers"].array.count
             let target=store.state["layer_tools"]["editing_layer"]["id"].uint
             var editor=try await dialog("repair_source_profile")

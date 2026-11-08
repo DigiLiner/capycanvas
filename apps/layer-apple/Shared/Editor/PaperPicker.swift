@@ -219,10 +219,10 @@ struct PaperFiles: ViewModifier {
     let store: EditorStore
     @ObservedObject var controller: PaperController
     func body(content: Content) -> some View {
-        content.sheet(item:controller.texture == nil ? $controller.rename : Binding<PaperRename?>.constant(nil)) { draft in
+        content.editorSheet(intent: controller.copy["rename_dialog"], item:controller.texture == nil ? $controller.rename : Binding<PaperRename?>.constant(nil)) { draft in
             PaperNameForm(controller:controller,draft:draft).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
-            .sheet(item:$controller.texture,onDismiss:{ controller.textureClosed() }) { request in
+            .editorSheet(intent: store.state["layer_properties"]["controls"].array.first { !$0["paper"].isNull }?["paper"]["dialog"] ?? JSON(), item:$controller.texture,onDismiss:{ controller.textureClosed() }) { request in
                 TextureDialog(store:store,controller:controller,request:request).modifier(EditorDialogPresentation(identifier:"texture-dialog",idealHeight:600))
             }
             .overlay(alignment:.top) {
@@ -237,6 +237,7 @@ struct PaperFiles: ViewModifier {
 
 private struct PaperNameForm: View {
     @Environment(\.capyNativeCopy) private var copy
+    @Environment(\.editorDialogPage) private var page
     @ObservedObject var controller: PaperController
     let draft: PaperRename
     @State private var name: String
@@ -247,17 +248,21 @@ private struct PaperNameForm: View {
     }
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
-            Text(copy["paper"]["rename_title"].string).font(.headline)
+            if page {
+                EditorPageHeader(intent: controller.copy["rename_dialog"], title: copy["paper"]["rename_title"].string, identifier: "paper-name",
+                    primaryLabel: controller.copy["rename"].string, primaryEnabled: !saving, primaryIdentifier: "paper-name-save",
+                    cancel: { controller.rename = nil }, primary: save)
+            } else { Text(copy["paper"]["rename_title"].string).font(.headline) }
             TextField(controller.common["name"].string,text:$name).textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("paper-library-name").onNativeTextSubmit(name) { name = $0; save() }
             if let error { Text(error).foregroundStyle(.red).accessibilityIdentifier("paper-name-error") }
-            HStack {
+            if !page { HStack {
                 Spacer()
                 Button(controller.common["cancel"].string,role:.cancel) { controller.rename = nil }.keyboardShortcut(.cancelAction)
                 Button(controller.copy["rename"].string,action:save).disabled(saving).keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("paper-name-save")
-            }
-        }.padding(20).frame(minWidth:320)
+            } }
+        }.padding(20).modifier(EditorDialogFrame(minWidth:320))
             .accessibilityElement(children:.contain).accessibilityIdentifier("paper-name-dialog")
     }
     private func save() {
@@ -287,6 +292,7 @@ private struct TextureDialog: View {
     @ObservedObject var store: EditorStore
     @ObservedObject var controller: PaperController
     let request: PaperTexture
+    @Environment(\.editorDialogPage) private var page
     @State private var started = false
     @State private var pending: String?
     @State private var width: CGFloat = 0
@@ -301,10 +307,14 @@ private struct TextureDialog: View {
     var body: some View {
         let control = self.control, tiles = control["paper"]["tiles"].array
         VStack(spacing:0) {
+            if page {
+                EditorPageHeader(intent: control["paper"]["dialog"], title: nativeCopy["paper"]["choose"].string, identifier: "texture",
+                    primaryLabel: nativeCopy["paper"]["use_texture"].string, cancel: { controller.closeTexture() }, primary: useTexture)
+            }
             ScrollViewReader { proxy in
                 EditorScrollView {
                     VStack(spacing:16) {
-                        EditorDialogTitle(text:nativeCopy["paper"]["choose"].string)
+                        if !page { EditorDialogTitle(text:nativeCopy["paper"]["choose"].string) }
                         LazyVGrid(columns:[GridItem(.adaptive(minimum:102,maximum:102),spacing:12,alignment:.top)],spacing:14) {
                             ForEach(tiles.indices,id:\.self) { index in tile(tiles[index],index:index).id(index) }
                         }.frame(maxWidth:672)
@@ -315,7 +325,7 @@ private struct TextureDialog: View {
                 }.onChange(of:started) { _, _ in reveal(proxy) }
                     .onChange(of:pending) { _, _ in reveal(proxy) }
             }
-            EditorDialogFooter(label:nativeCopy["paper"]["use_texture"].string,identifiers:(cancel:"texture-cancel",apply:"texture-apply"),
+            if !page { EditorDialogFooter(label:nativeCopy["paper"]["use_texture"].string,identifiers:(cancel:"texture-cancel",apply:"texture-apply"),
                 cancel:{ controller.closeTexture() },apply:useTexture) {
                 let item = control["paper"]["import"]
                 if !item.isNull {
@@ -323,10 +333,14 @@ private struct TextureDialog: View {
                         .accessibilityIdentifier("texture-import")
                 }
                 Spacer(minLength:8)
+            } }
+            if page, !control["paper"]["import"].isNull {
+                Button(control["paper"]["import"]["label"].string) { controller.closeTexture(then: control["paper"]["import"]) }
+                    .accessibilityIdentifier("texture-import").padding(16)
             }
         }.onChange(of:JSON([control["paper"]["tiles"].raw,control["value"].raw]).stableKey,initial:true) { _, _ in follow() }
             .onAppear { focused = true }
-            .sheet(item:$controller.rename) { draft in PaperNameForm(controller:controller,draft:draft).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
+            .editorSheet(intent: controller.copy["rename_dialog"], item:$controller.rename) { draft in PaperNameForm(controller:controller,draft:draft).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
     }
     private func tile(_ item: JSON, index: Int) -> some View {
         let id = item["id"].raw as? String, actions = item["actions"].array

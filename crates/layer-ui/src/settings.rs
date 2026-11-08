@@ -734,6 +734,7 @@ pub enum PreferencesRoute { Root, Category, Modifier, Pen }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PreferencesNavigation {
+    pub subpage: bool,
     pub shortcuts: Vec<PreferencesRoute>,
     pub input: Vec<PreferencesRoute>,
     pub title: Option<String>,
@@ -743,11 +744,19 @@ pub struct PreferencesNavigation {
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct PreferencesLayout { pub single_pane: bool, pub subpage: bool }
 
+impl PreferencesLayout {
+    pub fn in_panes(single_pane: bool, subpage: bool, page_requested: bool) -> Self {
+        Self { single_pane, subpage: subpage || single_pane && page_requested }
+    }
+    pub fn resolve(phone: bool, width: f32, minimum: [f32; 2], subpage: bool, page_requested: bool) -> Self {
+        Self::in_panes(phone || !crate::dialog_panes_fit(width, minimum, 0.), subpage, page_requested)
+    }
+}
+
 impl crate::UiState {
     pub fn preferences_layout(&self, viewport: [f32; 2], width: f32, minimum: [f32; 2]) -> PreferencesLayout {
-        let single_pane = self.dialog_presentation(crate::DialogRole::Editor, viewport).single_pane()
-            || !crate::dialog_panes_fit(width, minimum, 0.);
-        PreferencesLayout { single_pane, subpage: self.preferences.subpage() || single_pane && self.preferences.page_requested }
+        PreferencesLayout::resolve(self.dialog_presentation(crate::DialogRole::Editor, viewport).single_pane(),
+            width, minimum, self.preferences.subpage(), self.preferences.page_requested)
     }
 }
 
@@ -1786,7 +1795,7 @@ impl PreferencesState {
             crate::shortcut_page::modifier_editor_localized(settings, platform, key, *per_tool, localizer));
         let pen_button_editor = self.pen_editor.as_ref().and_then(|(trigger, per_tool)|
             crate::shortcut_page::pen_editor_localized(settings, platform, trigger, *per_tool, localizer));
-        let mut navigation = PreferencesNavigation { shortcuts: vec![PreferencesRoute::Root], input: vec![PreferencesRoute::Root],
+        let mut navigation = PreferencesNavigation { subpage: self.subpage(), shortcuts: vec![PreferencesRoute::Root], input: vec![PreferencesRoute::Root],
             title: None, back: self.page_requested.then_some(PreferenceAction::PageList) };
         if shortcut_page.category.is_some() { navigation.shortcuts.push(PreferencesRoute::Category); }
         if modifier_editor.is_some() { navigation.shortcuts.push(PreferencesRoute::Modifier); }

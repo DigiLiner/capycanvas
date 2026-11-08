@@ -27,7 +27,7 @@ extension XCTestCase {
             #else
             editorMenu(in: app, menu: "Edit", id: "settings", label: "Settings…")
             #endif
-            workspaceActivate(app.staticTexts["settings-page-input"])
+            workspaceActivate(app.buttons["settings-page-input"])
         }
         func pointCount(_ count: Int) {
             let graph = panel.descendants(matching: .any)["effect-curve"].firstMatch
@@ -132,7 +132,7 @@ extension XCTestCase {
             #else
             editorMenu(in: app, menu: "Edit", id: "settings", label: "Settings…")
             #endif
-            let input = app.staticTexts["settings-page-input"]
+            let input = app.buttons["settings-page-input"]
             XCTAssertTrue(input.waitForExistence(timeout: 10)); workspaceActivate(input)
             let adjust = app.buttons["preference-pen_pressure"]
             if !adjust.exists || !adjust.isHittable {

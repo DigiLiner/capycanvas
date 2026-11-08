@@ -147,7 +147,7 @@ struct ProofDial: View {
                 }
                 .accessibilityIdentifier("proof-dial")
         }.aspectRatio(1, contentMode: .fit).frame(minWidth: 128, minHeight: 128)
-            .sheet(isPresented: $numeric) { ProofNumbers(store: store, controller: controller).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
+            .editorSheet(store: store, intent: copy["profile_dialog"], isPresented: $numeric) { ProofNumbers(store: store, controller: controller).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
     }
     private func adjust(_ key: String, _ direction: Double) {
         let part = ["balance": 0, "contrast": 0, "exposure": 1, "highlight_color": 2][key] ?? 0
@@ -177,10 +177,13 @@ private struct ProofNumbers: View {
     @ObservedObject var store: EditorStore
     let controller: ProofController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.editorDialogPage) private var page
     private var copy: JSON { store.catalog["proof_copy"] }
     var body: some View {
         VStack(spacing: 12) {
-            Text(copy["sdr_appearance"].string).font(.headline)
+            if page {
+                EditorPageHeader(intent: copy["profile_dialog"], title: copy["sdr_appearance"].string, identifier: "proof-numbers", cancel: { dismiss() })
+            } else { Text(copy["sdr_appearance"].string).font(.headline) }
             ForEach(store.snapshot["proof_panel"]["numbers"].array, id: \.stableKey) { spec in
                 let key = spec["key"].string
                 NumberControl(store: store, label: spec["label"].string, value: spec["value"].number, control: spec["numeric"], gestureChange: { phase, value, completion in
@@ -189,8 +192,8 @@ private struct ProofNumbers: View {
                     controller.action(["type": "number", "key": key, "value": value]); completion(nil)
                 }
             }
-            Button(copy["common"]["done"].string) { dismiss() }.keyboardShortcut(.defaultAction)
-        }.padding(20).frame(minWidth: 300)
+            if !page { Button(copy["common"]["done"].string) { dismiss() }.keyboardShortcut(.defaultAction) }
+        }.padding(20).modifier(EditorDialogFrame(minWidth: 300))
     }
 }
 
@@ -294,7 +297,7 @@ private struct PrintProfileMenu: View {
                 .accessibilityIdentifier("proof-profile")
         }
         .onAppear { mounted = true; reload() }.onDisappear { mounted = false }
-        .sheet(isPresented: $library, onDismiss: reload) {
+        .editorSheet(intent: copy["library_dialog"], isPresented: $library, onDismiss: reload) {
             ColorProfileLibrary(preferences: controller.preferences) { choose($0); library = false }
                 .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }

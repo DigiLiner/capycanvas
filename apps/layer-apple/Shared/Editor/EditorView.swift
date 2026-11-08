@@ -116,7 +116,7 @@ struct EditorView<Canvas: View>: View {
             store.workspace.tabFrames = $0
             store.glass.panelTabsChanged()
         }
-        .ignoresSafeArea()
+        .ignoresSafeArea(.container)
         .overlay { CommandSearchLayer(store: store).ignoresSafeArea(.container) }
         .onChange(of: [reduceMotion, store.snapshot["gpu_ready"].bool], initial: true) { _, _ in store.dispatch(["type": "system_motion_changed", "reduced": reduceMotion]) }
         .foregroundStyle(palette["text"])
@@ -136,9 +136,7 @@ struct EditorView<Canvas: View>: View {
         .modifier(StrokeRecordingFiles(recording: store.strokeRecording))
         .modifier(ColorEditingPresentation(controller: store.colorEditing))
         .editorSheet(store: store, intent: store.snapshot["preferences"]["dialog"], isPresented: Binding(get: { !store.snapshot["preferences"].isNull }, set: { if !$0 { store.dispatch(["type": "close_settings"]) } }), onDismiss: { store.focusCanvas?() }) {
-            SettingsView(store: store).modifier(StorageAlert(store: store)).modifier(EditorPopoverHost())
-                .foregroundStyle(.primary).presentationBackground(.background)
-                .modifier(EditorPresentationAppearance())
+            SettingsView(store: store).modifier(StorageAlert(store: store)).modifier(EditorPopupPresentation())
         }
         .environment(\.editorPopupStore, store)
         .environment(\.capyInterfaceLanguage, store.interfaceLanguage)
@@ -207,13 +205,21 @@ private struct OptionalWorkspaceManager: ViewModifier {
 private struct StorageAlert: ViewModifier {
     @ObservedObject var store: EditorStore
     var active = true
+    private var responses: [EditorAlertResponse] {
+        var responses: [EditorAlertResponse] = []
+        if store.canRetryStorage {
+            responses.append(EditorAlertResponse(label: store.bootstrap["recovery"]["retry"].string,
+                identifier: "storage-retry", accent: true, action: { store.native?.retryPersistence() }))
+        }
+        responses.append(EditorAlertResponse(label: store.bootstrap["common"]["ok"].string,
+            identifier: "storage-ok", cancel: true, action: { store.storageFailure = nil }))
+        return responses
+    }
     func body(content: Content) -> some View {
-        content.alert(store.bootstrap["recovery"]["attention"].string, isPresented: Binding(
+        content.editorAlert(store: store, intent: store.bootstrap["recovery"]["dialog"],
+            title: store.bootstrap["recovery"]["attention"].string, message: store.storageFailure ?? "", isPresented: Binding(
             get: { active && store.storageFailure != nil },
-            set: { if !$0 && active { store.storageFailure = nil } })) {
-            if store.canRetryStorage { Button(store.bootstrap["recovery"]["retry"].string) { store.native?.retryPersistence() } }
-            Button(store.bootstrap["common"]["ok"].string) { store.storageFailure = nil }
-        } message: { Text(store.storageFailure ?? "") }
+            set: { if !$0 && active { store.storageFailure = nil } }), responses: responses)
     }
 }
 

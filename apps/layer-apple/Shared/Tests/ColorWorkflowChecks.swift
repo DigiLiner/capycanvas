@@ -1,4 +1,7 @@
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 extension XCTestCase {
     #if os(iOS)
@@ -118,8 +121,28 @@ extension XCTestCase {
             guard result == .completed else { fail("The number pad must close while its editor fields remain visible"); return }
         }
         if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in keyboardShown() }, object: app)], timeout: 5) == .completed {
-            guard hide.waitForExistence(timeout: 15), hide.isHittable else { fail("The keyboard needs a hittable Hide button"); return }
-            hide.clickOrTap()
+            let hasHide = UIDevice.current.userInterfaceIdiom == .phone ? hide.exists : hide.waitForExistence(timeout: 15)
+            if hasHide && hide.isHittable { hide.clickOrTap() }
+            else {
+                let field = app.textFields.matching(NSPredicate(format: "hasKeyboardFocus == YES")).firstMatch
+                guard field.exists, !field.identifier.isEmpty else { fail("Keyboard dismissal needs its identified editor field"); return }
+                let identifier = field.identifier, value = field.value as? String
+                let scroll = app.scrollViews.allElementsBoundByIndex.filter {
+                    $0.isHittable && $0.frame.maxY <= keyboard.frame.minY
+                }.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+                guard let scroll else { fail("The keyboard needs a visible editor page scroll"); return }
+                let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                let end = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+                let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !keyboardShown() }, object: app)
+                guard XCTWaiter.wait(for: [gone], timeout: 5) == .completed else {
+                    fail("Scrolling the editor page must dismiss its keyboard"); return
+                }
+                XCTAssertTrue(scroll.exists, "Dismissing the keyboard keeps the editor page")
+                let retained = app.textFields[identifier]
+                XCTAssertTrue(retained.exists)
+                XCTAssertEqual(retained.value as? String, value, "Dismissing the keyboard keeps the editor draft")
+            }
             let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !keyboardShown() }, object: app)
             XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, "Hide keyboard uncovers the editor")
         }
