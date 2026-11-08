@@ -196,7 +196,7 @@ fn restart_collects_unpublished_partial_output_and_preserves_the_head() {
     let resource:Resource<[u8]>=vec![109;CHUNK_BYTES as usize+19].into();
     store.store_inputs(vec![input(resource.clone())],&AtomicBool::new(false)).wait().unwrap().commit().unwrap();let old=sparse_dead_tail(&mut store);
     assert!(matches!(step(&mut store).unwrap(),CompactionStep::Copied(_)));
-    let partial=fs::read_dir(directory.0.join("packs")).unwrap().map(|entry|entry.unwrap().path()).filter(|path|*path!=store.pack_path(old)).collect::<Vec<_>>();assert_eq!(partial.len(),1);
+    let partial=fs::read_dir(store.path.join("packs")).unwrap().map(|entry|entry.unwrap().path()).filter(|path|*path!=store.pack_path(old)).collect::<Vec<_>>();assert_eq!(partial.len(),1);
     drop((store,resource));let mut reopened=open_store(&directory.0).wait().unwrap();
     assert!(reopened.head==head);assert!(partial.iter().all(|path|!path.exists()));
     assert_eq!(reopened.load(ProjectLimits::default(),&AtomicBool::new(false)).wait().unwrap().unwrap().metadata.value["marker"],107);
@@ -273,7 +273,7 @@ fn retirement_releases_failed_publication_roots_and_pending_copy_state() {
             let error=loop {match step(&mut store) {Ok(CompactionStep::Copied(_))=>{},Err(error)=>break error,other=>panic!("expected flush interruption: {other:?}")}};
             assert_eq!(error,"Interrupted flush");state.lock().unwrap().fault=None;assert!(store.compaction_fallback.is_some());
         }else {assert!(matches!(step(&mut store).unwrap(),CompactionStep::Copied(_)));assert!(store.compaction.is_some());}
-        let output=fs::read_dir(directory.0.join("packs")).unwrap().map(|entry|entry.unwrap().path()).filter(|path|*path!=store.pack_path(old)).collect::<Vec<_>>();assert!(!output.is_empty());
+        let output=fs::read_dir(store.path.join("packs")).unwrap().map(|entry|entry.unwrap().path()).filter(|path|*path!=store.pack_path(old)).collect::<Vec<_>>();assert!(!output.is_empty());
         store.retire().wait().unwrap();
         assert!(store.compaction.is_none());assert!(store.compaction_fallback.is_none());assert!(store.compaction_refusal.is_none());
         for generation in std::iter::once(&old_head.current).chain(old_head.previous.as_ref()) {assert!(!store.generation_path(generation.id).exists());}

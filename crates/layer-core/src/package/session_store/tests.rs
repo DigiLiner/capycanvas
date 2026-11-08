@@ -342,16 +342,17 @@
     }
     #[test]
     fn released_generation_import_preserves_history_aliases_and_fallback_without_changing_inputs() {
-        fn input_bytes(root:&Path)->BTreeMap<PathBuf,Vec<u8>> {
+        fn input_bytes(root:&Path,owner_lock:Option<&Path>)->BTreeMap<PathBuf,Vec<u8>> {
             let mut bytes=BTreeMap::new();
             for entry in fs::read_dir(root).unwrap() {
                 let path=entry.unwrap().path();
-                if path.is_dir() {for (name,value) in input_bytes(&path) {bytes.insert(path.file_name().map(PathBuf::from).unwrap().join(name),value);}}
+                if Some(path.as_path())==owner_lock {continue;}
+                if path.is_dir() {for (name,value) in input_bytes(&path,owner_lock) {bytes.insert(path.file_name().map(PathBuf::from).unwrap().join(name),value);}}
                 else {bytes.insert(path.file_name().map(PathBuf::from).unwrap(),fs::read(path).unwrap());}
             }bytes
         }
         let fixture=Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/compat/1.0.15/session");
-        let original=input_bytes(&fixture);let head:Head=serde_json::from_slice(&fs::read(fixture.join("head.json")).unwrap()).unwrap();
+        let original=input_bytes(&fixture,None);let head:Head=serde_json::from_slice(&fs::read(fixture.join("head.json")).unwrap()).unwrap();
         let metadata=fs::read(fixture.join("generations").join(format!("{}.json",head.current.id))).unwrap();
         let value:serde_json::Value=serde_json::from_slice(&metadata).unwrap();
         let mut ranges=BTreeMap::<(String,u64,u64),ImmutableBacking>::new();let mut resources=BTreeMap::new();
@@ -381,9 +382,10 @@
             for id in &ids[1..] {let alias=&store.index[id].location;assert_eq!(first.range().pack.id,alias.range().pack.id);assert_eq!(first.range().offset,alias.range().offset);}
         }
         let mut opened=store.load(ProjectLimits::default(),&cancel).wait().unwrap().unwrap();assert_eq!(restored_history(&mut opened),expected);drop(opened);
-        let before=input_bytes(&directory.0);
+        let owner_lock=directory.0.join(".lock");assert!(OwnerLock::claim(&owner_lock).unwrap().is_none());
+        let before=input_bytes(&directory.0,Some(&owner_lock));
         assert!(matches!(store.import_generation(Some(previous),&metadata,resources.clone(),&cancel).wait(),Err(ImportFailure::Changed)));
-        assert_eq!(store.generation(),Some(current));assert_eq!(input_bytes(&directory.0),before);
+        assert_eq!(store.generation(),Some(current));assert_eq!(input_bytes(&directory.0,Some(&owner_lock)),before);assert!(OwnerLock::claim(&owner_lock).unwrap().is_none());
         fs::write(store.generation_path(current),b"incomplete imported generation").unwrap();
         let mut opened=store.load(ProjectLimits::default(),&cancel).wait().unwrap().unwrap();assert_eq!(store.loaded_generation(),Some(previous));assert_eq!(restored_history(&mut opened),expected_previous);drop(opened);
         let bad=Directory::new();let mut bad_store=SessionStore::open(&bad.0).wait().unwrap();
@@ -391,7 +393,7 @@
         resources.insert(id,ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap());
         assert!(bad_store.import_generation(None,&metadata,resources,&cancel).wait().unwrap_err().message().contains("checksum"));
         assert!(bad_store.generation().is_none());assert!(head::read(&*bad_store._owner.io).wait().unwrap().is_none());
-        assert_eq!(input_bytes(&fixture),original);
+        assert_eq!(input_bytes(&fixture,None),original);
     }
     #[test]
     fn flat_session_moves_resume_at_every_store_manifest_and_lock_boundary() {
