@@ -871,6 +871,7 @@ impl Input {
         self.timestamp_at(ms, glib::monotonic_time().max(0) as u64 * 1000)
     }
     fn timestamp_at(&self, ms: u32, received_ns: u64) -> u64 {
+        if ms == gdk::CURRENT_TIME { return received_ns; }
         let (previous, previous_ns) = self.clock.get().unwrap_or((ms, received_ns));
         let delta = ms.wrapping_sub(previous) as i32 as i64 * 1_000_000;
         let mapped = previous_ns.saturating_add_signed(delta);
@@ -1244,6 +1245,7 @@ mod tests {
                 for i in 0..100u64 {
                     let elapsed_ms = i * 1000 / hz;
                     let ms = origin_ms.wrapping_add(elapsed_ms as u32);
+                    if ms == gdk::CURRENT_TIME { continue; }
                     let ideal = origin_ns + elapsed_ms * 1_000_000;
                     // A slow first callback, subsequent batching, then a quiet
                     // low-latency stream; this includes the real +8.625 ms case.
@@ -1258,8 +1260,10 @@ mod tests {
                     let mapped = input.timestamp_at(ms, received);
                     assert!(mapped <= received);
                     assert!(mapped >= last);
-                    let history = input.timestamp_at(ms.wrapping_sub(1), received);
-                    assert_eq!(history, mapped - 1_000_000);
+                    if ms.wrapping_sub(1) != gdk::CURRENT_TIME {
+                        let history = input.timestamp_at(ms.wrapping_sub(1), received);
+                        assert_eq!(history, mapped - 1_000_000);
+                    }
                     assert_eq!(input.timestamp_at(ms, received + 2_000_000), mapped);
                     if i > 50 {
                         assert_eq!(mapped, ideal + 300_000);
@@ -1275,9 +1279,25 @@ mod tests {
     fn native_clock_preserves_history_and_u32_wrap() {
         let input = Input::default();
         input.clock.set(Some((u32::MAX - 2, 1_000_000_000)));
-        assert_eq!(input.timestamp(1), 1_004_000_000);
-        assert_eq!(input.timestamp(0), 1_003_000_000);
-        assert_eq!(input.timestamp(1), 1_004_000_000);
-        assert_eq!(input.timestamp(3), 1_006_000_000);
+        assert_eq!(input.timestamp_at(1, 1_004_000_000), 1_004_000_000);
+        assert_eq!(input.timestamp_at(u32::MAX, 1_006_000_000), 1_002_000_000);
+        assert_eq!(input.timestamp_at(1, 1_006_000_000), 1_004_000_000);
+        assert_eq!(input.timestamp_at(3, 1_008_000_000), 1_006_000_000);
+    }
+
+    #[test]
+    fn native_clock_ignores_current_time_past_i32_uptime() {
+        let ms = 2_233_366_000;
+        let received = 2_233_366_000_000_000 + 8_000_000;
+        let input = Input::default();
+        assert_eq!(input.timestamp_at(ms, received), received);
+        assert_eq!(input.timestamp_at(gdk::CURRENT_TIME, received + 5_000_000), received + 5_000_000);
+        let mapped = input.timestamp_at(ms + 12, received + 14_000_000);
+        assert_eq!(mapped, received + 12_000_000);
+        assert!((received..=received + 14_000_000).contains(&mapped));
+
+        let input = Input::default();
+        assert_eq!(input.timestamp_at(gdk::CURRENT_TIME, received), received);
+        assert_eq!(input.timestamp_at(ms, received + 5_000_000), received + 5_000_000);
     }
 }
