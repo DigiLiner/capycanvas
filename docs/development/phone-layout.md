@@ -282,8 +282,8 @@ matching arrow slots, keeping the title centered independently of text width.
 Native scrolling cancels the shared press and resets descendant input
 controllers, releasing GTK's button state when the scroller takes the contact.
 
-Search uses `CommandSearchStyle::placement` on both hosts. Escape leaves a
-parameter page first, clears a focused nonempty search next, and otherwise
+Search uses `CommandSearchStyle::placement` on both hosts. Escape clears a
+focused nonempty search first, leaves a parameter page next, and otherwise
 closes it; `dialog_escape` owns that ordering.
 
 Undo and Redo (finger taps and Edit), Save and Open (File) and toolbar editing
@@ -472,8 +472,8 @@ Specialty controllers report Escape through their existing shared actions.
   meaning for the common header. `DialogFrame` is independent of the role: an
   editor hosted by GTK in an AlertDialog still becomes a phone page. Keep
   close-only Done distinct from a declared primary named Done. Hosts project existing controls and preserve their draft and focus when
-  presentation changes. `dialog_escape` leaves a subpage first, then clears a
-  focused nonempty search, and otherwise cancels.
+  presentation changes. `dialog_escape` clears a focused nonempty search first, then leaves a
+  subpage, and otherwise cancels.
 - **Pages live inside the window**, as Android's Settings overlay does, rather than
   in a toolkit dialog. GTK's automatic bottom sheet (at most 450 wide or 360 tall)
   and Apple's fitted sheets don't apply in the phone layout.

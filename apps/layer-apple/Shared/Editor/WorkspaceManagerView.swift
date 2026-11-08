@@ -3,11 +3,14 @@ import SwiftUI
 struct WorkspaceManagerPresentation: ViewModifier {
     @ObservedObject var workspaces: WorkspaceController
     func body(content: Content) -> some View {
-        content
-            .sheet(isPresented: Binding(get: { workspaces.presented }, set: { if !$0 { workspaces.dismiss() } })) {
+        if let store = workspaces.store {
+            content.editorSheet(store: store, intent: workspaces.view["prompt"].isNull || workspaces.inlineRename
+                ? workspaces.view["dialog"] : workspaces.view["prompt"]["dialog"],
+                isPresented: Binding(get: { workspaces.presented }, set: { if !$0 { workspaces.dismiss() } })) {
                 WorkspaceManagerView(workspaces: workspaces)
                     .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
             }
+        } else { content }
     }
 }
 
@@ -76,8 +79,8 @@ struct WorkspaceManagerView: View {
                     .font(.title2).fontWeight(.semibold)
                 Spacer()
                 if view["prompt"].isNull && toolbarMode {
-                    Button(common["close"].string, role: .cancel) { workspaces.dismiss() }
-                        .disabled(workspaces.busy).accessibilityIdentifier("workspace-manager-close")
+                    Button(common["close"].string, role: .cancel) { escape() }
+                        .keyboardShortcut(.cancelAction).disabled(workspaces.busy).accessibilityIdentifier("workspace-manager-close")
                 }
             }
             if !view["prompt"].isNull && !workspaces.inlineRename { WorkspaceManagerForm(workspaces: workspaces, spec: view["prompt"]) }
@@ -90,20 +93,23 @@ struct WorkspaceManagerView: View {
         }.padding(20).frame(idealWidth: workspaces.page == "workspaces" ? 460 : workspaces.page == "history" ? 480 : 620, maxWidth: workspaces.page == "workspaces" ? 620 : 800,
             idealHeight: workspaces.page == "workspaces" ? workspaceRowsHeight+176 : 600, maxHeight: 900)
             .onNativeTextKey(.escape) {
-                if workspaces.inlineRename { workspaces.cancelPrompt() }
-                else {
-                    switch DialogUI.resolve(["kind": "escape", "subpage": subpage,
-                        "search_focused": searchFocused, "search_has_text": !query.isEmpty]).string {
-                    case "clear_search": query = ""
-                    case "back": workspaces.pageList()
-                    default: workspaces.dismiss()
-                    }
-                }
+                escape()
                 return .handled
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in workspaces.refreshLayout() }
             .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-manager")
             .onChange(of: workspaces.page) { _, _ in query = "" }
+    }
+    private func escape() {
+        if workspaces.inlineRename { workspaces.cancelPrompt() }
+        else {
+            switch DialogUI.resolve(["kind": "escape", "subpage": subpage,
+                "search_focused": searchFocused, "search_has_text": !query.isEmpty]).string {
+            case "clear_search": query = ""
+            case "back": workspaces.pageList()
+            default: workspaces.dismiss()
+            }
+        }
     }
     private func rememberWorkspaceRowHeights(_ heights: [String: CGFloat]) {
         var measured = workspaceRowHeights

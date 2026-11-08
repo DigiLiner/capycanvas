@@ -39,8 +39,9 @@ import SwiftUI
         try await wait("First Escape clears focused search without leaving the manager") {
             workspaces.presented && workspaces.view["query"].string.isEmpty && field.string.isEmpty
         }
+        try require(window.makeFirstResponder(nil), "The toolbar manager must release native search focus")
         try key("\u{1b}", code: 53, window: window)
-        try await wait("Second Escape closes the empty-search manager") { !workspaces.presented }
+        try await wait("Escape without a focused field closes the empty-search manager") { !workspaces.presented }
         try await workspaces.perform(["type": "open", "page": "workspaces"])
         note("PASS: native focused manager search clears before Escape cancels")
     }

@@ -44,33 +44,44 @@ private struct ColorEditingHost: View {
     @Environment(\.editorPopupStore) private var store
     @ObservedObject var session: ColorEditorSession
     var body: some View {
-        Color.clear.allowsHitTesting(false)
-            .sheet(isPresented: Binding(get: { !session.picking }, set: { if !$0 && !session.picking { session.close(apply: false) } }), onDismiss: { store?.focusCanvas?() }) {
-                ColorEditor(session: session).modifier(EditorDialogPresentation(identifier: "edit-color-dialog"))
-            }
-            .overlay(alignment: .topLeading) { if session.picking, let store { ColorPickStrip(store: store, session: session) } }
+        if let store {
+            Color.clear.allowsHitTesting(false)
+                .editorSheet(store: store, intent: session.view["dialog"],
+                    isPresented: Binding(get: { !session.picking }, set: { if !$0 && !session.picking { session.close(apply: false) } }), onDismiss: { store.focusCanvas?() }) {
+                    ColorEditor(session: session).modifier(EditorDialogPresentation(identifier: "edit-color-dialog"))
+                }
+                .overlay(alignment: .topLeading) { if session.picking { ColorPickStrip(store: store, session: session) } }
+        }
     }
 }
 
 struct ColorEditor: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
+    @Environment(\.editorDialogPage) private var phonePage
     @Environment(\.capyNativeCopy) private var nativeCopy
     @Environment(\.editorPopupStore) private var store
     @ObservedObject var session: ColorEditorSession
     @State private var drafts: [String: String] = [:]
-    @State private var sheetOpen = false
     @State private var search = ""
     @State private var searchFocused = false
     @FocusState private var focused: String?
     private var view: JSON { session.view }
+    private var sheetOpen: Bool { view["route"].string == "swatches" }
     private var copy: JSON { nativeCopy["color"] }
     private var palette: EditorPalette { EditorPalette(source: store?.state["palette"] ?? JSON()) }
     var body: some View {
         VStack(spacing: 0) {
+            if phonePage {
+                EditorPageHeader(intent: view["dialog"], title: sheetOpen ? copy["all_swatches"].string : copy["edit"].string,
+                    identifier: "color", subpage: sheetOpen, primaryLabel: copy["use_color"].string,
+                    primaryEnabled: !session.blocked, primaryIdentifier: "color-use", cancelsOnEscape: !sheetOpen,
+                    cancel: { session.close(apply: false) }, back: { setSheet(false) },
+                    primary: useColor)
+            }
             ZStack(alignment: .bottom) {
                 EditorScrollView {
                     VStack(spacing: 16) {
-                        EditorDialogTitle(text: copy["edit"].string)
+                        if !phonePage { EditorDialogTitle(text: copy["edit"].string) }
                         ColorEditorForm(session: session, drafts: $drafts, focus: $focused)
                     }.padding(20).frame(maxWidth: .infinity).disabled(sheetOpen)
                 }
@@ -93,30 +104,42 @@ struct ColorEditor: View {
                 paste: { if let text = UIPasteboard.general.string { session.act(["op": "text", "text": text]) } }).frame(width: 0, height: 0))
             #endif
     }
-    private var footer: some View {
-        EditorDialogFooter(label: copy["use_color"].string, identifiers: (cancel: "color-cancel", apply: "color-use"),
-            cancelsOnEscape: !sheetOpen, blocked: session.blocked,
-            cancel: { session.close(apply: false) }, apply: { commitFocused(); session.close(apply: true) }) {
-            if sheetOpen {
-                HStack(spacing: 6) {
-                    HStack(spacing: 0) {
-                        ColorSwatch(rgba: view["current"]["rgba"]).frame(width: 36, height: 32)
-                            .accessibilityLabel(copy["current"].string).accessibilityIdentifier("color-footer-current")
-                        ColorSwatch(rgba: view["new"]["rgba"]).frame(width: 36, height: 32)
-                            .accessibilityLabel(copy["new"].string).accessibilityIdentifier("color-footer-new")
-                    }.clipShape(SquircleShape.control)
-                    Text(view["hex"].string).monospacedDigit()
-                }
-            } else {
-                HStack(spacing: 4) { ForEach(Array(session.recent.prefix(8).enumerated()), id: \.offset) { tile($0.element, kind: "recent") } }.transition(.opacity)
+    @ViewBuilder private var footer: some View {
+        if phonePage {
+            VStack(spacing: 0) {
+                EditorLine(color: palette.settingsBorder)
+                HStack(spacing: 8) { footerContents }.padding(.horizontal, 16).padding(.vertical, 8)
             }
-            Spacer(minLength: 8)
-            Button { setSheet(!sheetOpen) } label: {
-                SharedIcon(name: "chevron-down").rotationEffect(.degrees(sheetOpen ? 0 : 180)).frame(width: 32, height: 32).contentShape(Rectangle())
-            }.buttonStyle(EditorControlButtonStyle()).help(sheetOpen ? copy["close_swatches"].string : copy["all_swatches"].string)
-                .accessibilityLabel(sheetOpen ? copy["close_swatches"].string : copy["all_swatches"].string)
-                .accessibilityIdentifier("color-swatches")
+        } else {
+            EditorDialogFooter(label: copy["use_color"].string, identifiers: (cancel: "color-cancel", apply: "color-use"),
+                cancelsOnEscape: !sheetOpen, blocked: session.blocked,
+                cancel: { session.close(apply: false) }, apply: useColor) { footerContents }
         }
+    }
+    @ViewBuilder private var footerContents: some View {
+        if sheetOpen {
+            HStack(spacing: 6) {
+                HStack(spacing: 0) {
+                    ColorSwatch(rgba: view["current"]["rgba"]).frame(width: 36, height: 32)
+                        .accessibilityLabel(copy["current"].string).accessibilityIdentifier("color-footer-current")
+                    ColorSwatch(rgba: view["new"]["rgba"]).frame(width: 36, height: 32)
+                        .accessibilityLabel(copy["new"].string).accessibilityIdentifier("color-footer-new")
+                }.clipShape(SquircleShape.control)
+                Text(view["hex"].string).monospacedDigit().lineLimit(1)
+            }
+        } else if phonePage {
+            ScrollView(.horizontal) { recentSwatches }.scrollIndicators(.hidden).frame(height: 32)
+                .accessibilityIdentifier("color-recent")
+        } else { recentSwatches }
+        Spacer(minLength: 8)
+        Button { setSheet(!sheetOpen) } label: {
+            SharedIcon(name: "chevron-down").rotationEffect(.degrees(sheetOpen ? 0 : 180)).frame(width: 32, height: 32).contentShape(Rectangle())
+        }.buttonStyle(EditorControlButtonStyle()).help(sheetOpen ? copy["close_swatches"].string : copy["all_swatches"].string)
+            .accessibilityLabel(sheetOpen ? copy["close_swatches"].string : copy["all_swatches"].string)
+            .accessibilityIdentifier("color-swatches")
+    }
+    private var recentSwatches: some View {
+        HStack(spacing: 4) { ForEach(Array(session.recent.prefix(8).enumerated()), id: \.offset) { tile($0.element, kind: "recent") } }
     }
     private var swatchSheet: some View {
         let sheet = session.sheet
@@ -127,7 +150,7 @@ struct ColorEditor: View {
                     submit: { _ in true }, cancel: escapeSearch)
                     .frame(height: 28).padding(.horizontal, 6)
                     .background(palette.field, in: SquircleShape.control)
-                    .onChange(of: search) { _, text in session.search(text) }
+                    .onChange(of: search) { _, text in if text != session.search { session.search(text) } }
                 Button { setSheet(false) } label: { SharedIcon(name: "chevron-down").frame(width: 28, height: 28).contentShape(Rectangle()) }
                     .buttonStyle(EditorControlButtonStyle()).help(copy["close_swatches"].string)
                     .accessibilityLabel(copy["close_swatches"].string).accessibilityIdentifier("color-sheet-close")
@@ -166,13 +189,19 @@ struct ColorEditor: View {
             .accessibilityIdentifier("color-tile-\(kind)")
     }
     private func escapeSearch() {
-        if searchFocused && !search.isEmpty { search = "" } else { setSheet(false) }
+        let action = DialogUI.resolve(["kind": "escape", "subpage": sheetOpen,
+            "search_focused": searchFocused, "search_has_text": !search.isEmpty]).string
+        if action == "clear_search" { search = ""; session.search("") }
+        else if action == "back" { setSheet(false) }
+        else { session.close(apply: false) }
     }
     private func setSheet(_ open: Bool) {
+        guard open != sheetOpen else { return }
         if open { search = session.search; session.refreshSwatches(sheetOpen: true) }
         searchFocused = open
-        withAnimation(.easeOut(duration: 0.25)) { sheetOpen = open }
+        withAnimation(.easeOut(duration: 0.25)) { session.act(["op": open ? "toggle_swatches" : "back"]) }
     }
+    private func useColor() { commitFocused(); if !session.blocked { session.close(apply: true) } }
     private func commitFocused() { if let focused { ColorEditorForm.commit(focused, drafts: $drafts, session: session) } }
     static func copy(_ text: String) {
         #if os(macOS)

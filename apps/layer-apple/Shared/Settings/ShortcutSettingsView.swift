@@ -25,20 +25,16 @@ struct ShortcutSettingsView: View {
                 RootPane(store: store)
             }
         }
-        .sheet(isPresented: Binding(get: { !model["shortcut_editor"].isNull }, set: { if !$0 { closeEditor() } })) {
+        .editorSheet(store: store, intent: model["shortcut_editor"]["dialog"], isPresented: Binding(get: { !model["shortcut_editor"].isNull }, set: { if !$0 { closeEditor() } })) {
             ShortcutEditorSheet(store: store).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
-        .sheet(isPresented: Binding(get: { model["capture"]["id"].string == "modifier" }, set: { if !$0 { action(["type": "cancel_shortcut"]) } })) {
+        .editorSheet(store: store, intent: model["dialog"], isPresented: Binding(get: { model["capture"]["id"].string == "modifier" }, set: { if !$0 { action(["type": "cancel_shortcut"]) } })) {
             ModifierCaptureSheet(store: store).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
         .background {
             Color.clear
-                .sheet(isPresented: Binding(get: { keymap["details"].bool }, set: { if !$0 { action(["type": "keymap_details", "open": false]) } })) {
+                .editorSheet(store: store, intent: keymap["dialog"], isPresented: Binding(get: { keymap["details"].bool }, set: { if !$0 { action(["type": "keymap_details", "open": false]) } })) {
                     KeymapDetailsSheet(store: store).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
-                }
-            Color.clear
-                .sheet(isPresented: Binding(get: { !keymap["import"].isNull }, set: { if !$0 { action(["type": "cancel_keymap_import"]) } })) {
-                    KeymapImportSheet(store: store).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
                 }
         }
         .fileExporter(isPresented: Binding(get: { exporting != nil }, set: { if !$0 { exporting = nil } }),
@@ -507,7 +503,7 @@ private struct ShortcutEditorSheet: View {
                             .accessibilityIdentifier("shortcut-editor-done")
                     }
                 }
-        }.frame(minWidth: 360, idealWidth: 460, minHeight: 320)
+        }.modifier(EditorDialogFrame(minWidth: 360, idealWidth: 460, minHeight: 320))
             .onChange(of: [store.interfaceLanguage] + editor["defaults"].array.map(\.string), initial: true) { _, _ in
                 defaultsCaption = NativeTextContext.caption(["type": "shortcut_defaults", "keys": editor["defaults"].array.map(\.string)],
                     language: store.interfaceLanguage)
@@ -524,7 +520,7 @@ private struct ModifierCaptureSheet: View {
                 Text(store.catalog["native_copy"]["shortcuts"]["press_hold_key"].string).foregroundStyle(.secondary)
                 if !capture.isNull { Section { RecordingRow(store: store, capture: capture) } }
             }.formStyle(.grouped).navigationTitle(store.catalog["native_copy"]["shortcuts"]["new_modifier"].string)
-        }.frame(minWidth: 360, idealWidth: 420, minHeight: 220)
+        }.modifier(EditorDialogFrame(minWidth: 360, idealWidth: 420, minHeight: 220))
     }
 }
 
@@ -569,7 +565,7 @@ struct ActionPickerSheet: View {
                         Button(store.bootstrap["common"]["done"].string) { action(["type": "close_action_picker"]) }.accessibilityIdentifier("action-picker-close")
                     }
                 }
-        }.frame(minWidth: 380, idealWidth: 460, minHeight: 420)
+        }.modifier(EditorDialogFrame(minWidth: 380, idealWidth: 460, minHeight: 420))
     }
     private func choice(id: String, label: String, detail: String, selected: Bool) -> some View {
         Button { action(["type": "choose_action", "id": id]) } label: {
@@ -618,7 +614,7 @@ private struct KeymapDetailsSheet: View {
                         }.accessibilityIdentifier("keymap-details-done")
                     }
                 }
-        }.frame(minWidth: 380, idealWidth: 480, minHeight: 360)
+        }.modifier(EditorDialogFrame(minWidth: 380, idealWidth: 480, minHeight: 360))
     }
     private func difference(_ trigger: String, _ note: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -633,34 +629,23 @@ private struct KeymapDetailsSheet: View {
     }
 }
 
-private struct KeymapImportSheet: View {
+struct KeymapImportChanges: View {
     @ObservedObject var store: EditorStore
     private var preview: JSON { store.snapshot["preferences"]["keymap"]["import"] }
-    private func action(_ value: [String: Any]) { store.dispatch(["type": "preferences", "action": value]) }
     private var sections: [(String, [JSON])] {
         [(store.catalog["native_copy"]["shortcuts"]["added"].string, preview["added"].array), (store.catalog["native_copy"]["shortcuts"]["changed"].string, preview["changed"].array), (store.catalog["native_copy"]["shortcuts"]["removed"].string, preview["removed"].array),
          (store.catalog["native_copy"]["shortcuts"]["not_available"].string, preview["unavailable"].array)].filter { !$0.1.isEmpty }
     }
     var body: some View {
-        NavigationStack {
-            Form {
-                if sections.isEmpty { Text(store.catalog["native_copy"]["shortcuts"]["no_changes"].string) }
-                ForEach(sections, id: \.0) { title, items in
-                    Section(title) {
-                        ForEach(items.indices, id: \.self) { index in Text(items[index].string) }
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            if sections.isEmpty { Text(store.catalog["native_copy"]["shortcuts"]["no_changes"].string) }
+            ForEach(sections, id: \.0) { title, items in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.headline)
+                    ForEach(items.indices, id: \.self) { index in Text(items[index].string) }
                 }
-            }.formStyle(.grouped)
-                .navigationTitle(preview["heading"].string)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(preview["cancel_label"].string) { action(["type": "cancel_keymap_import"]) }.accessibilityIdentifier("cancel-keymap-import")
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(preview["import_label"].string) { action(["type": "confirm_keymap_import"]) }.accessibilityIdentifier("confirm-keymap-import")
-                    }
-                }
-        }.frame(minWidth: 380, idealWidth: 460, minHeight: 320)
+            }
+        }
     }
 }
 

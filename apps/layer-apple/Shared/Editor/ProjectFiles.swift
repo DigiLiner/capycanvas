@@ -915,7 +915,7 @@ struct ProjectFilesModifier: ViewModifier {
                         .interactiveDismissDisabled(editor.publishing).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
                 }
             }
-            .sheet(isPresented: Binding(get: { files.exportEditor != nil }, set: { if !$0 { files.exportEditor?.cancel() } }),
+            .editorSheet(intent: files.exportEditor?.view["dialog"] ?? JSON(), isPresented: Binding(get: { files.exportEditor != nil }, set: { if !$0 { files.exportEditor?.cancel() } }),
                 onDismiss: files.exportDismissed) {
                 if let editor = files.exportEditor { ExportForm(editor: editor).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
             }

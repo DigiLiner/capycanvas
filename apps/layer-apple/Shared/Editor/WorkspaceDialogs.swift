@@ -6,8 +6,14 @@ struct WorkspaceDialogs: ViewModifier {
         ["picker", "toolbar_prompt", "toolbar_manager"].contains { !store.snapshot[$0].isNull }
             || !store.state["customization"]["control"].isNull
     }
+    private var intent: JSON {
+        for key in ["toolbar_prompt", "picker", "toolbar_manager"] where !store.snapshot[key].isNull {
+            return store.snapshot[key]["dialog"]
+        }
+        return store.catalog["native_copy"]["color"]["control_dialog"]
+    }
     func body(content: Content) -> some View {
-        content.sheet(isPresented: Binding(get: { open }, set: { _ in })) {
+        content.editorSheet(store: store, intent: intent, isPresented: Binding(get: { open }, set: { _ in })) {
             WorkspaceDialog(store: store).interactiveDismissDisabled().modifier(EditorPopupPresentation())
         }
     }
@@ -15,6 +21,8 @@ struct WorkspaceDialogs: ViewModifier {
 
 private struct WorkspaceDialog: View {
     @ObservedObject var store: EditorStore
+    @Environment(\.editorDialogPage) private var page
+    @FocusState private var searchFocused: Bool
     private var snapshot: SnapshotProjection { store.snapshot }
     private var common: JSON { store.bootstrap["common"] }
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
@@ -24,9 +32,22 @@ private struct WorkspaceDialog: View {
             else if !snapshot["picker"].isNull { picker(snapshot["picker"]) }
             else if !snapshot["toolbar_manager"].isNull { manager(snapshot["toolbar_manager"]) }
             else { colorPopup }
-        }.padding(24).frame(minWidth: 320, idealWidth: 500, maxWidth: 560)
+        }.padding(page ? 0 : 24).frame(minWidth: page ? 0 : 320, idealWidth: page ? nil : 500, maxWidth: page ? .infinity : 560)
             .buttonStyle(.bordered).modifier(EditorFittedPresentation())
             .id(!snapshot["toolbar_prompt"].isNull ? snapshot["toolbar_prompt"]["title"].string : "workspace")
+            .onNativeTextKey(.escape) {
+                escape()
+                return .handled
+            }
+    }
+    private func escape() {
+        let reply = DialogUI.resolve(["kind": "escape", "subpage": false,
+            "search_focused": searchFocused, "search_has_text": !snapshot["picker"]["query"].string.isEmpty]).string
+        if reply == "clear_search" { store.customize(["type": "picker_search", "query": ""]) }
+        else if !snapshot["toolbar_prompt"].isNull { action("cancel_toolbar") }
+        else if !snapshot["picker"].isNull { action("cancel_tools") }
+        else if !snapshot["toolbar_manager"].isNull { action("close_toolbar_manager") }
+        else { action("close_control") }
     }
     private func action(_ name: String) { store.customize(["type": name]) }
     private func error(_ value: JSON) -> some View {
@@ -34,13 +55,17 @@ private struct WorkspaceDialog: View {
     }
     private func picker(_ view: JSON) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(view["title"].string).font(.headline)
+            if page {
+                EditorPageHeader(intent: view["dialog"], title: view["title"].string, identifier: "tool-picker",
+                    primaryLabel: view["confirm_label"].string, primaryEnabled: view["can_confirm"].bool,
+                    primaryIdentifier: "tool-picker-confirm", cancelsOnEscape: false, cancel: { action("cancel_tools") }, primary: { action("confirm_tools") })
+            } else { Text(view["title"].string).font(.headline) }
             if !view["name"].isNull {
                 EditorTextField(view["name_label"].string, value: view["name"].string) { store.customize(["type": "picker_name", "name": $0]) }
                     .textFieldStyle(.roundedBorder).accessibilityIdentifier("toolbar-name")
             }
             EditorTextField(view["search_hint"].string, value: view["query"].string) { store.customize(["type": "picker_search", "query": $0]) }
-                .editorSearchInput().textFieldStyle(.roundedBorder).accessibilityIdentifier("tool-picker-search")
+                .editorSearchInput().focused($searchFocused).textFieldStyle(.roundedBorder).accessibilityIdentifier("tool-picker-search")
             EditorScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(view["choices"].array, id: \.workspaceChoiceKey) { choice in
@@ -55,23 +80,27 @@ private struct WorkspaceDialog: View {
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                                 SharedIcon(name: choice["selected"].bool ? "selection-checked" : "selection-empty")
                             }.frame(minHeight: 50).padding(.horizontal, 8).contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityIdentifier("tool-choice-" + choice["label"].string)
+                        }.buttonStyle(.plain)
+                            .disabled(view["disabled"].array.contains { $0.stableKey == choice["control"].stableKey })
+                            .accessibilityIdentifier("tool-choice-" + choice["label"].string)
                             .accessibilityAddTraits(choice["selected"].bool ? .isSelected : [])
                         EditorLine(color: palette.settingsBorder)
                     }
                 }
-            }.frame(minHeight: 120, idealHeight: 340, maxHeight: 400)
+            }.frame(minHeight: page ? 0 : 120, idealHeight: page ? nil : 340, maxHeight: page ? .infinity : 400)
             error(view)
             HStack {
                 Text(view["selected_label"].string).foregroundStyle(.secondary)
                 Spacer()
-                Button(common["cancel"].string, role: .cancel) { action("cancel_tools") }.keyboardShortcut(.cancelAction)
+                if !page {
+                Button(common["cancel"].string, role: .cancel) { escape() }.keyboardShortcut(.cancelAction)
                 Button(view["confirm_label"].string) { action("confirm_tools") }
                     .buttonStyle(.borderedProminent).foregroundStyle(.white)
                     .keyboardShortcut(.defaultAction).disabled(!view["can_confirm"].bool)
                     .accessibilityIdentifier("tool-picker-confirm")
+                }
             }
-        }.accessibilityElement(children: .contain).accessibilityIdentifier("tool-picker")
+        }.padding(page ? 8 : 0).accessibilityElement(children: .contain).accessibilityIdentifier("tool-picker")
     }
     private func prompt(_ view: JSON) -> some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -97,7 +126,10 @@ private struct WorkspaceDialog: View {
     }
     private func manager(_ view: JSON) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(view["title"].string).font(.headline)
+            if page {
+                EditorPageHeader(intent: view["dialog"], title: view["title"].string, identifier: "toolbar-manager",
+                    cancel: { action("close_toolbar_manager") })
+            } else { Text(view["title"].string).font(.headline) }
             Text(view["description"].string).foregroundStyle(.secondary)
             EditorScrollView {
                 VStack(spacing: 0) {
@@ -118,15 +150,15 @@ private struct WorkspaceDialog: View {
                         EditorLine(color: palette.settingsBorder)
                     }
                 }
-            }.frame(minHeight: 120, idealHeight: 250, maxHeight: 340)
+            }.frame(minHeight: page ? 0 : 120, idealHeight: page ? nil : 250, maxHeight: page ? .infinity : 340)
             HStack {
-                Button(view["close_label"].string, role: .cancel) { action("close_toolbar_manager") }.keyboardShortcut(.cancelAction)
+                if !page { Button(view["close_label"].string, role: .cancel) { action("close_toolbar_manager") }.keyboardShortcut(.cancelAction) }
                 Spacer()
                 Button(view["delete_label"].string, role: .destructive) { store.customize(view["delete_action"].object) }
                     .buttonStyle(.borderedProminent).tint(.red).foregroundStyle(.white)
                     .disabled(view["delete_action"].isNull).accessibilityIdentifier("delete-managed-toolbar")
             }
-        }.accessibilityElement(children: .contain).accessibilityIdentifier("toolbar-manager")
+        }.padding(page ? 8 : 0).accessibilityElement(children: .contain).accessibilityIdentifier("toolbar-manager")
     }
     private var colorPopup: some View {
         VStack(alignment: .leading, spacing: 14) {

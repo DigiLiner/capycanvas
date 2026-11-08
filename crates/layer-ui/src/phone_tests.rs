@@ -99,6 +99,31 @@ fn phone_editor_pages_clip_to_the_visible_viewport_without_changing_modes() {
 }
 
 #[test]
+fn stateless_dialog_presentations_match_the_published_phone_context() {
+    let mut s = phone_session([412, 891]);
+    let phone = s.state.workspace.layout.phone.clone();
+    for enabled in [false, true] {
+        s.state.workspace.layout.phone = if enabled { phone.clone() } else { None };
+        for viewport in [[320.,568.],[479.,700.],[480.,700.],[700.,479.],[1000.,800.]] {
+            s.set_viewport(viewport, viewport.map(|v| v as u32)).unwrap();
+            for insets in [[0.;4],[5.,7.,11.,13.]] {
+                s.state.phone.insets = insets;
+                let work_area = s.state.phone_presentation(viewport).map(|phone| phone.work_area);
+                for visible in [Bounds {x:0.,y:0.,width:viewport[0],height:viewport[1]},
+                    Bounds {x:20.,y:10.,width:viewport[0]-40.,height:200.}, Bounds {x:2000.,y:2000.,width:10.,height:10.}] {
+                    for role in [DialogRole::Alert,DialogRole::Editor,DialogRole::CanvasPanel] {
+                        let request = serde_json::json!({"kind":"presentation","role":role,"viewport":viewport,
+                            "insets":insets,"work_area":work_area,"visible":visible});
+                        assert_eq!(crate::dialog_ui(&request.to_string()).unwrap(),
+                            serde_json::to_value(s.state.dialog_presentation_in(role,viewport,visible)).unwrap(),"{request}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn phone_menu_search_escape_clears_then_closes_and_backs_out_of_parameters() {
     let mut s = phone_session([412, 891]);
     s.dispatch(UiAction::Invoke { command: CommandId::SearchCommands }).unwrap();

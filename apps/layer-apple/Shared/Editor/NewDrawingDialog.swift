@@ -6,11 +6,11 @@ import UIKit
 struct NewDrawingPresentation: ViewModifier {
     @ObservedObject var store: EditorStore
     func body(content: Content) -> some View {
-        content.sheet(isPresented: Binding(get: { !store.state["new_drawing"].isNull }, set: {
+        content.editorSheet(store: store, intent: store.state["new_drawing"]["dialog"], isPresented: Binding(get: { !store.state["new_drawing"].isNull }, set: {
             if !$0 && !store.state["new_drawing"].isNull { store.projectFiles.newDrawing(["op": "cancel"]) }
         }), onDismiss: { store.focusCanvas?() }) {
             NewDrawingDialog(store: store)
-                .frame(minWidth: 340, idealWidth: 720, maxWidth: 760, minHeight: 440, idealHeight: 500, maxHeight: 680)
+                .modifier(EditorDialogFrame(minWidth: 340, idealWidth: 720, maxWidth: 760, minHeight: 440, idealHeight: 500, maxHeight: 680))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-dialog")
                 .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
@@ -21,11 +21,21 @@ private extension EditorPalette {
     var newDrawingField: Color { self["text"].opacity(0.07) }
 }
 
-private struct NewDrawingDialog: View {
+struct NewDrawingDialog: View {
+    @ObservedObject var store: EditorStore
+    var body: some View {
+        GeometryReader { allocation in
+            NewDrawingForm(store: store, width: allocation.size.width)
+                .frame(width: allocation.size.width, height: allocation.size.height)
+        }
+    }
+}
+
+private struct NewDrawingForm: View {
     @ObservedObject var store: EditorStore
     @State private var error: String?
     @State private var admissions = NumericAdmissions()
-    @State private var width: CGFloat = 720
+    let width: CGFloat
     @State private var name = ""
     @State private var query = ""
     @State private var presetName = ""
@@ -41,7 +51,9 @@ private struct NewDrawingDialog: View {
     private var page: JSON { view["page"] }
     private var drawer: JSON { view["drawer"] }
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
-    private var narrow: Bool { width < 640 }
+    @Environment(\.editorDialogPage) private var phonePage
+    private var sizing: JSON { DialogUI.resolve(["kind": "new_drawing_layout", "width": width]) }
+    private var narrow: Bool { sizing["single_pane"].bool }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -52,7 +64,6 @@ private struct NewDrawingDialog: View {
             }
         }.clipped()
             .animation(reduceMotion ? nil : .timingCurve(0.215, 0.61, 0.355, 1, duration: 0.25), value: drawer["kind"].string)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onAppear { name = view["name"].string }
             .onChange(of: name) { _, text in if text != view["name"].string { send(["op": "name", "text": text]) } }
             .onChange(of: drawer["kind"].string, initial: true) { _, kind in follow(kind) }
@@ -62,7 +73,11 @@ private struct NewDrawingDialog: View {
             }
             .onChange(of: drawer["query"].string) { _, shared in if shared.isEmpty { query = "" } }
             .onNativeTextKey(.escape) {
-                send(["op": "back"]); return .handled
+                let action = DialogUI.resolve(["kind": "escape", "subpage": !drawer.isNull,
+                    "search_focused": focused == "search", "search_has_text": !query.isEmpty]).string
+                if action == "clear_search" { query = "" }
+                else { send(["op": "back"]) }
+                return .handled
             }
             .onDisappear { closePaperColor() }
     }
@@ -107,9 +122,14 @@ private struct NewDrawingDialog: View {
 
     private var main: some View {
         VStack(spacing: 0) {
+            if phonePage {
+                EditorPageHeader(intent: view["dialog"], title: copy["title"].string, identifier: "new-drawing", primaryLabel: copy["create"].string,
+                    primaryEnabled: view["can_create"].bool, primaryIdentifier: "new-drawing-create", cancel: { send(["op": "cancel"]) }, primary: create)
+                EditorLine(color: palette.settingsBorder)
+            }
             EditorScrollView {
                 VStack(spacing: 14) {
-                    EditorDialogTitle(text: copy["title"].string)
+                    if !phonePage { EditorDialogTitle(text: copy["title"].string) }
                     if narrow {
                         VStack(spacing: 14) { preview; form }
                     } else {
@@ -121,18 +141,22 @@ private struct NewDrawingDialog: View {
                 Text(error).font(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20).padding(.bottom, 6).accessibilityIdentifier("new-drawing-error")
             }
-            EditorDialogFooter(label: copy["create"].string, identifiers: (cancel: "new-drawing-cancel", apply: "new-drawing-create"),
+            if !phonePage { EditorDialogFooter(label: copy["create"].string, identifiers: (cancel: "new-drawing-cancel", apply: "new-drawing-create"),
                 blocked: !view["can_create"].bool, cancel: { send(["op": "cancel"]) }, apply: create) {
                 Button { open("presets", source: "presets") } label: {
                     HStack(spacing: 6) { Text(copy["presets"].string); SharedIcon(name: "chevron-down", size: 12).rotationEffect(.degrees(180)) }
                 }.buttonStyle(.bordered).focusable().focused($focused, equals: "presets").accessibilityIdentifier("new-drawing-presets-button")
                 Spacer(minLength: 8)
+            } }
+            if phonePage {
+                Button(copy["presets"].string) { open("presets", source: "presets") }
+                    .accessibilityIdentifier("new-drawing-presets-button").padding(12)
             }
         }
     }
 
     private var preview: some View {
-        let bounds = narrow ? CGSize(width: min(348, max(120, width - 40)), height: 140) : CGSize(width: 232, height: 250)
+        let bounds = CGSize(width: sizing["preview"][0].number, height: sizing["preview"][1].number)
         return VStack(spacing: 8) {
             Button { open("presets", source: "preview") } label: {
                 NewDrawingSheet(previews: store.papers.previews, sheet: view["sheet"],
@@ -165,24 +189,22 @@ private struct NewDrawingDialog: View {
             }
             section(copy["size"].string) {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) {
+                    ConfigurationFlow(spacing: 6) {
                         HStack(spacing: 0) { dimension(0); link; dimension(1) }
                         choice(copy["unit"].string, view["units"].array, value: view["setup"]["unit"], identifier: "new-drawing-unit") { ["op": "unit", "unit": $0.raw] }
                             .fixedSize()
-                        Spacer(minLength: 0)
                         orientation
                     }
-                    HStack(spacing: 6) {
+                    ConfigurationFlow(spacing: 6) {
                         Text(copy["resolution"].string).padding(.trailing, 4)
                         resolution
                         Text(page["size"].string).font(.caption).foregroundStyle(page["problem"].bool ? Color.red : Color.secondary)
                             .lineLimit(2).padding(.leading, 10).accessibilityIdentifier("new-drawing-size")
-                        Spacer(minLength: 0)
                     }
                 }
             }
             section(copy["color"].string) {
-                HStack(alignment: .top, spacing: 6) {
+                ConfigurationFlow(spacing: 6) {
                     captioned(copy["space"].string) {
                         choice(copy["space"].string, view["spaces"].array, value: view["setup"]["color"]["space"], identifier: "new-drawing-space") { ["op": "space", "space": $0.raw] }
                     }
@@ -197,7 +219,7 @@ private struct NewDrawingDialog: View {
                 }
             }
             section(copy["paper"].string) {
-                HStack(spacing: 6) {
+                ConfigurationFlow(spacing: 6) {
                     paperTile("new-drawing-texture", label: page["texture"].string, detail: page["relief"].raw as? String,
                         help: copy["paper"].string, enabled: true, op: "paper") {
                         PaperPreview(previews: store.papers.previews, id: view["setup"]["paper"]["texture"].raw as? String, side: 36, placeholder: "none")
@@ -324,6 +346,14 @@ private struct NewDrawingDialog: View {
     private var presets: some View {
         let tiles = drawer["tiles"].array, tabs = drawer["tabs"].array
         return VStack(spacing: 0) {
+            if phonePage {
+                EditorPageHeader(intent: view["dialog"], title: copy["presets"].string, identifier: "new-drawing-browser", subpage: true,
+                    primaryLabel: drawer["save"].isNull ? copy["select"].string : drawer["save"]["confirm"].string,
+                    primaryEnabled: drawer["save"].isNull ? drawer["can_select"].bool : drawer["save"]["can_save"].bool,
+                    primaryIdentifier: drawer["save"].isNull ? "new-drawing-select" : "new-drawing-save-confirm", cancelsOnEscape: false,
+                    cancel: { send(["op": "cancel"]) }, back: { send(["op": "back"]) },
+                    primary: { send(["op": drawer["save"].isNull ? "use_preset" : "save_preset"]) })
+            }
             HStack(spacing: 8) {
                 SharedIcon(name: "search").opacity(0.6)
                 TextField(copy["search"].string, text: $query).textFieldStyle(.plain).autocorrectionDisabled()
@@ -349,13 +379,15 @@ private struct NewDrawingDialog: View {
                 }.padding(.horizontal, 20).padding(.bottom, 20).frame(maxWidth: .infinity, alignment: .leading)
             }
             EditorLine(color: palette.settingsBorder)
-            HStack(spacing: 10) {
-                summary
-                Spacer(minLength: 8)
+            VStack(alignment: .leading, spacing: 10) {
+                if phonePage { summary }
+                HStack(spacing: 10) {
+                if !phonePage { summary; Spacer(minLength: 8) }
                 ZStack {
                     if drawer["save"].isNull { browserActions.transition(.opacity) }
                     else { saveRow(drawer["save"]).transition(.opacity) }
                 }.animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: drawer["save"].isNull)
+                }
             }.padding(.horizontal, 20).padding(.vertical, 12)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-browser")
     }
@@ -418,17 +450,17 @@ private struct NewDrawingDialog: View {
 
     private var browserActions: some View {
         HStack(spacing: 6) {
-            Button(copy["cancel"].string) { send(["op": "close_drawer"]) }.buttonStyle(.bordered)
-                .accessibilityIdentifier("new-drawing-browser-cancel")
+            if !phonePage { Button(copy["cancel"].string) { send(["op": "close_drawer"]) }.buttonStyle(.bordered)
+                .accessibilityIdentifier("new-drawing-browser-cancel") }
             Button(drawer["save_label"].string) { send(["op": "save_as"]) }.buttonStyle(.bordered)
                 .accessibilityIdentifier("new-drawing-save-as")
-            Button(copy["select"].string) { send(["op": "use_preset"]) }.buttonStyle(.borderedProminent).tint(palette.accent)
-                .disabled(!drawer["can_select"].bool).keyboardShortcut(.defaultAction).accessibilityIdentifier("new-drawing-select")
+            if !phonePage { Button(copy["select"].string) { send(["op": "use_preset"]) }.buttonStyle(.borderedProminent).tint(palette.accent)
+                .disabled(!drawer["can_select"].bool).keyboardShortcut(.defaultAction).accessibilityIdentifier("new-drawing-select") }
         }.fixedSize()
     }
 
     private func saveRow(_ save: JSON) -> some View {
-        HStack(spacing: 6) {
+        ConfigurationFlow(spacing: 6) {
             TextField(copy["preset_name"].string, text: $presetName).textFieldStyle(.plain).autocorrectionDisabled()
                 .focused($focused, equals: "preset-name")
                 .onAppear { focused = "preset-name" }
@@ -445,17 +477,22 @@ private struct NewDrawingDialog: View {
             }.fixedSize().help(copy["preset_category"].string)
             Button(copy["cancel"].string) { send(["op": "cancel_save"]) }.buttonStyle(.bordered)
                 .accessibilityIdentifier("new-drawing-save-cancel")
-            Button(save["confirm"].string) { send(["op": "save_preset"]) }.buttonStyle(.borderedProminent).tint(palette.accent)
-                .disabled(!save["can_save"].bool).keyboardShortcut(.defaultAction).accessibilityIdentifier("new-drawing-save-confirm")
-        }.fixedSize()
+            if !phonePage { Button(save["confirm"].string) { send(["op": "save_preset"]) }.buttonStyle(.borderedProminent).tint(palette.accent)
+                .disabled(!save["can_save"].bool).keyboardShortcut(.defaultAction).accessibilityIdentifier("new-drawing-save-confirm") }
+        }.fixedSize(horizontal: !phonePage, vertical: true)
     }
 
     private var papers: some View {
         let tiles = drawer["tiles"].array
         return VStack(spacing: 0) {
+            if phonePage {
+                EditorPageHeader(intent: view["dialog"], title: copy["paper"].string, identifier: "new-drawing-paper", subpage: true,
+                    primaryLabel: copy["use_texture"].string, primaryIdentifier: "new-drawing-paper-use",
+                    cancel: { send(["op": "cancel"]) }, back: { send(["op": "back"]) }, primary: usePaper)
+            }
             EditorScrollView {
                 VStack(spacing: 16) {
-                    EditorDialogTitle(text: copy["paper"].string)
+                    if !phonePage { EditorDialogTitle(text: copy["paper"].string) }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 102, maximum: 102), spacing: 12, alignment: .top)], spacing: 14) {
                         ForEach(tiles.indices, id: \.self) { index in paperChoice(tiles[index], index: index) }
                         TextureTile(previews: store.papers.previews, id: nil, label: copy["import"].string, pending: false,
@@ -464,10 +501,11 @@ private struct NewDrawingDialog: View {
                     }.frame(maxWidth: 672).accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-papers")
                 }.padding(20).frame(maxWidth: .infinity)
             }
-            EditorDialogFooter(label: copy["use_texture"].string, identifiers: (cancel: "new-drawing-paper-cancel", apply: "new-drawing-paper-use"),
+            if !phonePage { EditorDialogFooter(label: copy["use_texture"].string, identifiers: (cancel: "new-drawing-paper-cancel", apply: "new-drawing-paper-use"),
                 cancel: { _ = admissions.finish(true, only: Self.reliefField); send(["op": "close_drawer"]) }, apply: usePaper) {
                 reliefRow(drawer["relief"])
-            }
+            } }
+            if phonePage { reliefRow(drawer["relief"]).padding(16) }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-paper-drawer")
     }
 
@@ -504,6 +542,7 @@ private struct NewDrawingDialog: View {
 
 private struct NewDrawingPaperColor: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
+    @Environment(\.editorDialogPage) private var phonePage
     @ObservedObject var store: EditorStore
     @ObservedObject var session: ColorEditorSession
     let copy: JSON
@@ -516,15 +555,20 @@ private struct NewDrawingPaperColor: View {
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     var body: some View {
         VStack(spacing: 0) {
+            if phonePage {
+                EditorPageHeader(intent: session.view["dialog"], title: copy["paper_color"].string, identifier: "new-drawing-color", subpage: true,
+                    primaryLabel: copy["use_color"].string, primaryEnabled: !session.blocked, primaryIdentifier: "new-drawing-color-use",
+                    cancel: { send(["op": "cancel"]) }, back: { send(["op": "back"]) }, primary: use)
+            }
             EditorScrollView {
                 VStack(spacing: 16) {
-                    EditorDialogTitle(text: copy["paper_color"].string)
+                    if !phonePage { EditorDialogTitle(text: copy["paper_color"].string) }
                     ColorEditorForm(session: session, drafts: $drafts, focus: $focused, tools: false,
                         transparent: transparent ? copy["transparent"].string : nil, accessory: AnyView(mode), below: AnyView(colors))
                 }.padding(20).frame(maxWidth: .infinity)
             }
-            EditorDialogFooter(label: copy["use_color"].string, identifiers: (cancel: "new-drawing-color-cancel", apply: "new-drawing-color-use"),
-                blocked: session.blocked, cancel: { send(["op": "close_drawer"]) }, apply: use) { Spacer(minLength: 8) }
+            if !phonePage { EditorDialogFooter(label: copy["use_color"].string, identifiers: (cancel: "new-drawing-color-cancel", apply: "new-drawing-color-use"),
+                blocked: session.blocked, cancel: { send(["op": "close_drawer"]) }, apply: use) { Spacer(minLength: 8) } }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-color-drawer")
             .onAppear { if sent == nil { sent = session.view["value"].stableKey } }
             .onChange(of: session.view["value"].stableKey) { _, _ in report() }

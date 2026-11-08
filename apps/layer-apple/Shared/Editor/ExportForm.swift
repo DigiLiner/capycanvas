@@ -3,6 +3,7 @@ import SwiftUI
 struct ExportForm: View {
     @ObservedObject var editor: ExportController
     @Environment(\.capyInterfaceLanguage) private var language
+    @Environment(\.editorDialogPage) private var phonePage
     @State private var drafts: [String: String] = [:]
     @State private var readingProfile = false
     @FocusState private var focused: String?
@@ -21,13 +22,22 @@ struct ExportForm: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
+            if phonePage {
+                EditorPageHeader(intent: page == "save_preset" ? copy["preset_dialog"] : view["dialog"], title: title,
+                    identifier: "export", subpage: page != "root", primaryLabel: copy[page == "save_preset" ? "save_preset" : "choose_file"].string,
+                    primaryEnabled: editor.loaded && !editor.busy && !readingProfile && (page == "save_preset" ? drafts["name"] != nil || view["name_valid"].bool : view["can_export"].bool),
+                    primaryIdentifier: page == "save_preset" ? "export-preset-confirm" : "export-choose-file",
+                    backIdentifier: page == "save_preset" ? "export-preset-cancel" : "export-back",
+                    cancel: { editor.cancel() }, back: back, primary: {
+                        if commit() { if page == "save_preset" { editor.storePreset() } else { editor.choose() } }
+                    })
+            } else { HStack {
                 if page != "root" && page != "save_preset" && !page.isEmpty {
-                    Button { back() } label: { SharedIcon(name: "go-previous") }
+                    Button { commit(); editor.act(["type": "back"]) } label: { SharedIcon(name: "go-previous") }
                         .accessibilityLabel(copy["common"]["back"].string).accessibilityIdentifier("export-back")
                 }
                 Text(title).font(.headline)
-            }
+            } }
             EditorScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if editor.loaded { choices.disabled(editor.busy || readingProfile) }
@@ -37,16 +47,21 @@ struct ExportForm: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            if page != "save_preset" { HStack {
+            if !phonePage && page != "save_preset" { HStack {
                 Button(copy["common"]["cancel"].string) { editor.cancel() }.keyboardShortcut(.cancelAction).disabled(readingProfile)
                     .accessibilityIdentifier("export-cancel")
                 Spacer()
                 Button(copy["choose_file"].string) { if commit() { editor.choose() } }.keyboardShortcut(.defaultAction)
                     .disabled(!editor.loaded || editor.busy || readingProfile || !view["can_export"].bool).accessibilityIdentifier("export-choose-file")
             } }
-        }.padding(24).frame(idealWidth: 520, maxWidth: 620, idealHeight: 660, maxHeight: 760)
+        }.padding(phonePage ? 8 : 24).modifier(EditorDialogFrame(idealWidth: 520, maxWidth: 620, idealHeight: 660, maxHeight: 760))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("export-dialog")
+            .onNativeTextKey(.escape) {
+                let next = DialogUI.resolve(["kind": "escape", "subpage": page != "root", "search_focused": false, "search_has_text": false]).string
+                if next == "back" { back() } else { editor.cancel() }
+                return .handled
+            }
             .onChange(of: language, initial: true) { _, _ in editor.refreshCopy() }
             .onChange(of: page) { previous, next in if previous == "save_preset" || next == "save_preset" { drafts["name"] = nil } }
             .onChange(of: focused) { previous, _ in if let previous { commit(previous) } }
@@ -103,12 +118,12 @@ struct ExportForm: View {
             TextField(copy["preset_name"].string, text: Binding(get: { drafts["name"] ?? view["name"].string }, set: { drafts["name"] = $0 }))
                 .focused($focused, equals: "name").onSubmit { if commit("name") { editor.storePreset() } }
                 .textFieldStyle(.roundedBorder).accessibilityIdentifier("export-preset-name")
-            HStack {
+            if !phonePage { HStack {
                 Button(copy["common"]["cancel"].string) { drafts["name"] = nil; editor.act(["type": "preset_cancel"]) }.keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("export-preset-cancel")
                 Button(copy["common"]["save"].string) { if commit("name") { editor.storePreset() } }.keyboardShortcut(.defaultAction)
                     .disabled(drafts["name"] == nil && !view["name_valid"].bool).accessibilityIdentifier("export-preset-confirm")
-            }
+            } }
         default:
             if view["show_output"].bool {
                 FormPicker(copy["output"].string, selection: Binding(get: { view["output"].string }, set: { editor.act(["type": "output", "value": $0]) })) {
@@ -166,7 +181,9 @@ struct ExportForm: View {
         HStack {
             Text(label); Spacer()
             TextField(label, text: Binding(get: { drafts[id] ?? String(value.uint) }, set: { drafts[id] = $0 }))
-                .focused($focused, equals: id).onSubmit { commit(id) }.textFieldStyle(.roundedBorder).frame(width: 120)
+                .focused($focused, equals: id).onSubmit {
+                    if phonePage { commit(id) } else if commit() { editor.choose() }
+                }.textFieldStyle(.roundedBorder).frame(width: 120)
                 .accessibilityLabel(label).accessibilityIdentifier("export-\(id)")
         }
     }

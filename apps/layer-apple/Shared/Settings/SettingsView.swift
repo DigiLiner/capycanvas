@@ -18,6 +18,7 @@ struct SettingsView: View {
     private var sidebarVisible: Bool { !singlePane || !model["page_requested"].bool }
     private var contentVisible: Bool { !singlePane || model["page_requested"].bool }
     private var model: JSON { store.snapshot["preferences"] }
+    private var keymap: JSON { model["keymap"] }
     private var color: JSON { store.catalog["native_copy"]["color"] }
     private var page: JSON { model["pages"].array.first { $0["id"].string == model["page"].string } ?? JSON() }
     var body: some View {
@@ -60,11 +61,19 @@ struct SettingsView: View {
             }.opacity(sidebarVisible ? 1 : 0).allowsHitTesting(sidebarVisible).accessibilityHidden(!sidebarVisible)
             detail.opacity(contentVisible ? 1 : 0).allowsHitTesting(contentVisible).accessibilityHidden(!contentVisible)
             }
-        }.sheet(isPresented: Binding(get: { !model["shortcut_page"]["picker"].isNull },
+        }.editorSheet(store: store, intent: model["shortcut_page"]["picker"]["dialog"], isPresented: Binding(get: { !model["shortcut_page"]["picker"].isNull },
             set: { if !$0 { action(["type": "close_action_picker"]) } })) {
             ActionPickerSheet(store: store).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
-        .sheet(isPresented: $profiles) { ColorProfileLibrary(preferences: store.colorPreferences).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
+        .editorSheet(store: store, intent: store.catalog["profile_copy"]["library_dialog"], isPresented: $profiles) { ColorProfileLibrary(preferences: store.colorPreferences).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation()) }
+        .editorAlert(store: store, intent: keymap["import_dialog"], title: keymap["import"]["heading"].string,
+            isPresented: Binding(get: { !keymap["import"].isNull }, set: { if !$0 { action(["type": "cancel_keymap_import"]) } }),
+            responses: [
+                EditorAlertResponse(label: keymap["import"]["cancel_label"].string, identifier: "cancel-keymap-import", cancel: true,
+                    action: { action(["type": "cancel_keymap_import"]) }),
+                EditorAlertResponse(label: keymap["import"]["import_label"].string, identifier: "confirm-keymap-import", accent: true,
+                    action: { action(["type": "confirm_keymap_import"]) })
+            ], bodyContent: AnyView(KeymapImportChanges(store: store)))
             .onChange(of: model["search_focus"].uint) { _, request in
                 DispatchQueue.main.async {
                     let current = store.snapshot["preferences"]
