@@ -278,9 +278,49 @@ fn relief_full_ramp(o:vec2<f32>,v:vec2<f32>,bounds:vec2<f32>,gap:f32,k:f32,profi
     return half*dot(z*z*(3.0-2.0*z),vec3<f32>(0.5555555555555556,0.8888888888888889,0.5555555555555556));
 }
 
+fn relief_still(dab: Dab, world: vec2<f32>, paper: f32) -> f32 {
+    let relative = world-dab.center+dab.motion;
+    let o = vec2<f32>(dot(relative,dab.metric.xy),dot(relative,dab.metric.zw));
+    let corner = style.material_a.x;
+    let rounded = contact_feature(4096u,corner>0.0);
+    var v = vec2<f32>(-dab.invariants.x,0.0);
+    if rounded { v=dab.invariants.xy; }
+    let progress = clamp(-dot(o,v)/max(dot(v,v),0.000001),0.0,1.0);
+    let input = mix(dab.previous_contact,dab.contact,progress);
+    let p = clamp(input.x,0.0,1.0);
+    if p <= 0.0 { return 0.0; }
+    let d = 0.5-clamp(0.5+style.contact_a.y*(paper-0.5),0.0,1.0);
+    let gap = 0.5*p-d;
+    let k = 1.0+0.25*d;
+    let profile = input.yzw;
+    if gap <= k*profile.x { return 0.0; }
+    let loading=1.0-style.material_a.z+style.material_a.z*p*p;
+    if !rounded {
+        let nearest = o+v*progress;
+        let q = dot(nearest,nearest);
+        var engaged = q <= 1.0;
+        if !contact_feature(32768u,style.contact_c.z!=0.0) {
+            engaged = engaged && gap > k*(profile.x+q*(profile.y+profile.z*q));
+        }
+        if !engaged { return 0.0; }
+    }
+    var q = dot(o,o);
+    if rounded {
+        let axes = max(dab.radii,vec2<f32>(0.005));
+        let rim = vec2<f32>(corner*min(axes.x,axes.y))/axes;
+        let edge = max(abs(o)-(vec2<f32>(1.0)-rim),vec2<f32>(0.0))/rim;
+        q = (edge.x+edge.y)*(edge.x+edge.y);
+    }
+    if q > 1.0 { return 0.0; }
+    if contact_feature(32768u,style.contact_c.z!=0.0) {
+        let point=relief_origin(dab,o);q=dot(point,point);
+    }
+    return clamp(relief_transfer((gap-k*(profile.x+q*(profile.y+profile.z*q)))*style.material_a.y),0.0,1.0)*loading;
+}
+
 fn relief_exposure(dab:Dab,world:vec2<f32>,paper:f32,held:f32,required:bool)->vec2<f32> {
     if contact_uniform() {return vec2<f32>(relief_evaluate(dab,world,paper,false,false,0.0).x,0.0);}
-    if all(dab.motion==vec2<f32>(0.0)) {return vec2<f32>(relief_evaluate(dab,world,paper,false,false,0.0).x);}
+    if all(dab.motion==vec2<f32>(0.0)) {return vec2<f32>(relief_still(dab,world,paper));}
     let exposure=relief_evaluate(dab,world,paper,false,required,held);
     if exposure.x<=0.0 {return vec2<f32>(0.0);}
     return vec2<f32>(exposure.x,max(exposure.x,exposure.y));

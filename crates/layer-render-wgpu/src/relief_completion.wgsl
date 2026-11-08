@@ -89,8 +89,10 @@ fn completion_exposure(dab:Dab,world:vec2<f32>,paper:f32)->vec2<f32> {
     if !rounded && !contact_feature(32768u,style.contact_c.z!=0.0) {
         limits=vec2<f32>(relief_inverse(gap/k,profile),relief_inverse((gap-1.0/style.material_a.y)/k,profile));
     }
-    let a=completion_line(dab,o,dab.invariants.xy,gap,k,profile,limits);
-    let b=completion_line(dab,o,dab.invariants.zw,gap,k,profile,limits);
+    var lines=array<vec2<f32>,2>();
+    for(var i=0u;i<2u;i+=1u) {lines[i]=completion_line(dab,o,select(dab.invariants.xy,dab.invariants.zw,i==1u),gap,k,profile,limits);}
+    let a=lines[0];
+    let b=lines[1];
     let exposure=dab.texture_sign.y*window*max(0.0,max(a.y,b.y)-a.x-b.x);
     return vec2<f32>(exposure,max(max(a.y,b.y),a.x+b.x+exposure))
         *(1.0-style.material_a.z+style.material_a.z*p*p);
