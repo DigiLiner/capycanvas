@@ -37,6 +37,7 @@ In-place native paint writes require the adapter extension and read/write
 storage support for both RGBA and coverage float textures. Windows uses the
 shared renderer capability check when requesting device features.
 
+The app prefers a supported GPU driving the window's display; Windows Graphics settings choose another GPU.
 Painting needs a hardware D3D12 GPU. On Linux, [Windows VMs](windows-vm.md) build
 the client and run tests and UI fixtures on the software adapter by default.
 The optional [hardware GPU pool](windows-vm.md#hardware-gpu-pool) assigns a real

@@ -423,10 +423,12 @@ impl CapyHost {
             // reject those while allowing an in-flight CPU Save to complete.
             self.poll_services()?;
         }
+        self.display_probe.poll(self.window);
+        let drives_display = |adapter: &wgpu::Adapter| self.display_probe.is_display_adapter(adapter);
         let same_gpu = |adapter: &wgpu::Adapter| crate::display::adapter_luid(adapter) == self.gpu_luid;
         let choice = if recovering && self.gpu_luid.map_or(Ok(false), crate::display::adapter_present)? {
             layer_host::gpu::AdapterChoice::Require(&same_gpu)
-        } else { layer_host::gpu::AdapterChoice::Request(wgpu::PowerPreference::HighPerformance) };
+        } else { layer_host::gpu::AdapterChoice::Prefer(&drives_display) };
         let gpu = pollster::block_on(layer_host::gpu::process_gpu(
             &self.instance, &self.surface, self.native.session.localization(), choice,
         ))?;
@@ -1837,6 +1839,55 @@ pub unsafe extern "C" fn capy_paper_previews(host: u64, json: *const c_char) -> 
         Ok(0)
     });
     result
+}
+
+#[cfg(test)]
+mod display_adapter_tests {
+    use super::*;
+    use windows::Win32::{Foundation::POINT, Graphics::{Dxgi::{CreateDXGIFactory1, IDXGIFactory1}, Gdi::{MONITOR_DEFAULTTOPRIMARY, MonitorFromPoint}}};
+
+    #[test]
+    fn primary_output_adapter_is_selected_without_a_window_or_device() {
+        let monitor = unsafe { MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY) };
+        let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.unwrap();
+        let mut expected = None;
+        let mut index = 0;
+        while let Ok(adapter) = unsafe { factory.EnumAdapters1(index) } {
+            index += 1;
+            let mut output_index = 0;
+            while let Ok(output) = unsafe { adapter.EnumOutputs(output_index) } {
+                output_index += 1;
+                if unsafe { output.GetDesc() }.unwrap().Monitor == monitor {
+                    let luid = unsafe { adapter.GetDesc1() }.unwrap().AdapterLuid;
+                    expected = Some((luid.LowPart, luid.HighPart));
+                    break;
+                }
+            }
+            if expected.is_some() { break; }
+        }
+        let mut probe = crate::display::DisplayProbe::default();
+        probe.poll_monitor(Some(monitor));
+        assert_eq!(probe.adapter_luid, expected);
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::DX12;
+        let instance = wgpu::Instance::new(descriptor);
+        let (surface, _handle) = CapyHost::composition_surface(&instance).unwrap();
+        let drives_display = |adapter: &wgpu::Adapter| probe.is_display_adapter(adapter);
+        let available = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::DX12)).into_iter()
+            .any(|adapter| drives_display(&adapter) && adapter.is_surface_supported(&surface)
+                && layer_host::gpu::unsupported_adapter(&adapter, &layer_render_wgpu::rendering_limits(adapter.limits())).is_none());
+        let select = |preferred: &dyn Fn(&wgpu::Adapter) -> bool| {
+            pollster::block_on(layer_host::gpu::surface_adapter(&instance, &surface, layer_host::gpu::AdapterChoice::Prefer(preferred)))
+                .map(|adapter| (drives_display(&adapter), adapter.get_info()))
+        };
+        let selected = select(&drives_display);
+        if available {
+            assert!(selected.as_ref().is_ok_and(|(matched, _)| *matched), "selected {selected:?} instead of primary DXGI adapter {expected:?}");
+        } else {
+            assert_eq!(selected, select(&|_| false));
+        }
+        eprintln!("primary output selection: {selected:?}; admitted output: {available}");
+    }
 }
 
 #[cfg(test)]

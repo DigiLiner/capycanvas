@@ -89,14 +89,18 @@ pub(crate) struct DisplayProbe {
     factory: Option<IDXGIFactory1>,
     monitor: Option<usize>,
     display: Display,
+    pub(crate) adapter_luid: Option<(u32, i32)>,
 }
 impl DisplayProbe {
+    pub(crate) fn is_display_adapter(&self, adapter: &wgpu::Adapter) -> bool {
+        self.adapter_luid.is_some_and(|luid| adapter_luid(adapter) == Some(luid))
+    }
     pub(crate) fn poll(&mut self, window: usize) -> &Display {
         self.poll_monitor((window != 0).then(|| unsafe {
             MonitorFromWindow(HWND(window as *mut _), MONITOR_DEFAULTTONEAREST)
         }))
     }
-    fn poll_monitor(&mut self, monitor: Option<HMONITOR>) -> &Display {
+    pub(super) fn poll_monitor(&mut self, monitor: Option<HMONITOR>) -> &Display {
         let monitor=monitor.map(|monitor|monitor.0 as usize);
         let current = self
             .factory
@@ -109,6 +113,7 @@ impl DisplayProbe {
             self.factory = None;
         }
         self.monitor = monitor;
+        self.adapter_luid = None;
         self.display = self.read().unwrap_or_else(|error| Display {
             error: Some(error),
             ..Default::default()
@@ -134,6 +139,8 @@ impl DisplayProbe {
                 if desc.Monitor.0 as usize != monitor {
                     continue;
                 }
+                let luid = unsafe { adapter.GetDesc1() }.map_err(|e| e.to_string())?.AdapterLuid;
+                self.adapter_luid = Some((luid.LowPart, luid.HighPart));
                 let output: IDXGIOutput6 = output.cast().map_err(|e| e.to_string())?;
                 let desc = unsafe { output.GetDesc1() }.map_err(|e| e.to_string())?;
                 let end = desc

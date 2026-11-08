@@ -89,14 +89,21 @@ fn healthy_cached<T: Clone>(cache: &std::sync::Mutex<Option<T>>, healthy: impl F
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn preferred_candidate<T>(candidates: impl IntoIterator<Item = T>, admitted: impl Fn(&T) -> bool, prefer: impl Fn(&T) -> bool) -> Option<T> {
-    candidates.into_iter().find(|candidate| admitted(candidate) && prefer(candidate))
+fn preferred_candidate<T>(candidates: impl IntoIterator<Item = T>, admitted: impl Fn(&T) -> bool, prefer: impl Fn(&T) -> bool, required: bool) -> Option<T> {
+    let mut first = None;
+    for candidate in candidates {
+        if !admitted(&candidate) { continue; }
+        if prefer(&candidate) { return Some(candidate); }
+        if first.is_none() { first = Some(candidate); }
+    }
+    if required { None } else { first }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 pub enum AdapterChoice<'a> {
     Request(wgpu::PowerPreference),
+    Prefer(&'a dyn Fn(&wgpu::Adapter) -> bool),
     Require(&'a dyn Fn(&wgpu::Adapter) -> bool),
 }
 
@@ -109,10 +116,14 @@ impl From<wgpu::PowerPreference> for AdapterChoice<'_> {
 pub async fn surface_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>, choice: AdapterChoice<'_>) -> Result<wgpu::Adapter, String> {
     let power_preference = match choice {
         AdapterChoice::Request(preference) => preference,
-        AdapterChoice::Require(required) => return preferred_candidate(instance.enumerate_adapters(wgpu::Backends::all()).await,
-            |adapter| adapter.is_surface_supported(surface)
-                && unsupported_adapter(adapter, &layer_render_wgpu::rendering_limits(adapter.limits())).is_none(), required)
-            .ok_or_else(|| "The canvas GPU is still releasing its removed device".into()),
+        AdapterChoice::Prefer(preferred) | AdapterChoice::Require(preferred) => {
+            let required = matches!(choice, AdapterChoice::Require(_));
+            if let Some(adapter) = preferred_candidate(instance.enumerate_adapters(wgpu::Backends::all()).await,
+                |adapter| adapter.is_surface_supported(surface)
+                    && unsupported_adapter(adapter, &layer_render_wgpu::rendering_limits(adapter.limits())).is_none(), preferred, required) { return Ok(adapter); }
+            if required { return Err("The canvas GPU is still releasing its removed device".into()); }
+            wgpu::PowerPreference::None
+        }
     };
     instance.request_adapter(&wgpu::RequestAdapterOptions {
         compatible_surface: Some(surface), power_preference, force_fallback_adapter: false, apply_limit_buckets: false,
@@ -219,10 +230,12 @@ mod tests {
 
     #[test]
     fn adapter_order_prefers_only_admitted_candidates() {
-        assert_eq!(preferred_candidate([1, 2, 3], |_| true, |candidate| *candidate > 1), Some(2));
-        assert_eq!(preferred_candidate([1, 2, 3], |candidate| *candidate != 1, |candidate| *candidate == 1), None);
-        assert_eq!(preferred_candidate([1, 2, 3], |_| false, |_| true), None);
-        assert_eq!(preferred_candidate([1, 2, 3], |_| true, |_| false), None);
+        assert_eq!(preferred_candidate([1, 2, 3], |_| true, |candidate| *candidate > 1, false), Some(2));
+        assert_eq!(preferred_candidate([1, 2, 3], |candidate| *candidate != 1, |candidate| *candidate == 1, false), Some(2));
+        assert_eq!(preferred_candidate([1, 2, 3], |_| false, |_| true, false), None);
+        assert_eq!(preferred_candidate([1, 2, 3], |_| true, |candidate| *candidate > 1, true), Some(2));
+        assert_eq!(preferred_candidate([1, 2, 3], |candidate| *candidate != 1, |candidate| *candidate == 1, true), None);
+        assert_eq!(preferred_candidate([1, 2, 3], |_| true, |_| false, true), None);
     }
 
     #[test]
