@@ -2284,3 +2284,50 @@ Write-Output 'Actual clipboard Copy routing rejects stale native context and rev
  }
  'Actual cursor readiness waits for optional presentation preparation before its unchanged pixel reference and exact leave assertion.'
 }
+
+& {
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-toolbar-library.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $helper=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-ceq'Toolbar-Action'},$true)
+ if(!$helper){throw 'Missing actual Toolbar-Action'}
+ . ([scriptblock]::Create($helper.Extent.Text))
+ $call=$source.Find({param($n)$n-is[Management.Automation.Language.CommandAst]-and$n.GetCommandName()-ceq'Toolbar-Action'-and$n.CommandElements.Count-eq2-and$n.CommandElements[1].Value-ceq'delete'},$true)
+ $statement=$call.Parent;$statements=@($statement.Parent.Statements);$index=[array]::IndexOf($statements,$statement)
+ $sequence=($statements[$index..($index+2)]|ForEach-Object {$_.Extent.Text})-join"`n"
+ if($sequence-notlike"*Invoke 'Cancel'*"){throw 'Missing actual delete-to-Cancel journey'}
+ function Manager{
+  $state=$script:toolbarPrompt
+  if($state.requested-and$state.core-ge0-and$state.poll-ge$state.core){[pscustomobject]@{prompt=[pscustomobject]@{confirm='Delete'}}}else{[pscustomobject]@{prompt=$null}}
+ }
+ function Control($Id){if($Id-cne'workspace-manager'){throw 'Unexpected toolbar prompt owner'};'owned-manager'}
+ function Find($Id,[switch]$Name,$Within,$Type,[switch]$Visible){
+  if($Id-cne'Delete'-or!$Name-or$Within-cne'owned-manager'-or!$Visible-or$Type-ne[System.Windows.Automation.ControlType]::Button){throw 'Toolbar prompt acknowledgement lost its native owner/button/visibility'}
+  $state=$script:toolbarPrompt;if($state.native-ge0-and$state.poll-ge$state.native){[pscustomobject]@{Current=[pscustomobject]@{IsEnabled=$true}}}
+ }
+ function Invoke($Id,[switch]$Name,$Within,$Type){
+  $state=$script:toolbarPrompt;$state.inputs+=,$Id
+  if($Id-eq'workspace-toolbar-delete'){$state.requested=$true}
+  if($Id-eq'Cancel'){
+   if(!$state.requested-or$state.core-lt0-or$state.native-lt0-or$state.poll-lt[Math]::Max($state.core,$state.native)){throw 'Toolbar Cancel reached the page before the native prompt'}
+   $state.canceled++
+  }
+ }
+ function Settled{}
+ function Wait-Until([scriptblock]$Condition,[string]$Message){
+  if($Message-cne'Toolbar delete prompt did not open'-or$args.Count){throw 'Toolbar prompt changed its normal wait bound'}
+  for($i=1;$i-le6;$i++){$script:toolbarPrompt.poll=$i;if(& $Condition){return}};throw $Message
+ }
+ foreach($case in @(@{core=1;native=1},@{core=1;native=4},@{core=4;native=1},@{core=-1;native=1},@{core=1;native=-1})){
+  $script:toolbarPrompt=@{core=$case.core;native=$case.native;poll=0;requested=$false;canceled=0;inputs=@()}
+  $failure=$null;try{. ([scriptblock]::Create($sequence))}catch{$failure=$_}
+  if($case.core-lt0-or$case.native-lt0){
+   if(!$failure-or$failure.Exception.Message-cne'Toolbar delete prompt did not open'-or$script:toolbarPrompt.canceled-ne0){throw 'Missing toolbar prompt did not retain its failure'}
+  }else{
+   if($failure){throw $failure}
+   if($script:toolbarPrompt.poll-ne[Math]::Max($case.core,$case.native)-or$script:toolbarPrompt.canceled-ne1){throw 'Toolbar Cancel did not await both shared and native prompt'}
+  }
+  if(($script:toolbarPrompt.inputs|Where-Object {$_-eq'workspace-toolbar-delete'}).Count-ne1){throw 'Toolbar delete was replayed'}
+ }
+ 'Actual Toolbar-Action waits for its shared prompt and visible native confirm before the original Cancel journey.'
+}

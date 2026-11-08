@@ -66,6 +66,7 @@ function Saved-Page {
 }
 function Toolbar-Action([string]$Type) {
     Invoke 'workspace-toolbar-actions'; Invoke ('workspace-toolbar-'+$Type)
+    Wait-Until {$prompt=(Manager).prompt;$prompt -and (Find $prompt.confirm -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button) -Visible)} "Toolbar $Type prompt did not open"
 }
 function Source-Choice([string]$Name) {
     (Control 'workspace-manager-choice').GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
