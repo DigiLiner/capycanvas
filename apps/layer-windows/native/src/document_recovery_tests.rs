@@ -15,12 +15,13 @@ struct Fixture {
     service: DocumentService,
     done: mpsc::Receiver<()>,
     device: DeviceWatch,
+    luid: (u32, i32),
     directory: TempDir,
 }
 impl Fixture {
     fn new() -> Self {
         crate::test_support::temporary_files();
-        let (renderer, device) = renderer();
+        let (renderer, device, luid) = renderer(None);
         let mut host = NativeHost::new(Platform::Windows).unwrap();
         *host.session = UiSession::from_project(
             renderer,
@@ -42,6 +43,7 @@ impl Fixture {
             service,
             done,
             device,
+            luid,
             directory: TempDir::new(),
         }
     }
@@ -73,7 +75,7 @@ impl Fixture {
         self.host.startup = Default::default();
     }
     fn restore_renderer(&mut self) {
-        let (renderer, device) = renderer();
+        let (renderer, device, _) = renderer(Some(self.luid));
         let revision = self.host.session.state().revision;
         let (old, change) = self.host.session.replace_renderer(renderer).unwrap();
         self.host.apply_change(revision, change);

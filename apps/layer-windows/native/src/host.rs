@@ -87,6 +87,7 @@ pub struct CapyHost {
     // UI thread before destruction. The surface retains its native COM reference.
     gpu: layer_host::DeviceWatch,
     gpu_generation: u64,
+    gpu_luid: Option<(u32, i32)>,
     localization_generation: Option<u64>,
     localization_input_busy: bool,
     document_epoch: u64,
@@ -153,7 +154,7 @@ impl AsMut<NativeHost> for CapyHost {
     fn as_mut(&mut self) -> &mut NativeHost { &mut self.native }
 }
 impl CapyHost {
-    fn composition_surface(instance: &wgpu::Instance) -> Result<(wgpu::Surface<'static>, OwnedHandle), String> {
+    pub(crate) fn composition_surface(instance: &wgpu::Instance) -> Result<(wgpu::Surface<'static>, OwnedHandle), String> {
         let raw = unsafe { windows::Win32::Graphics::DirectComposition::DCompositionCreateSurfaceHandle(3, None) }.map_err(err)?;
         let handle = unsafe { OwnedHandle::from_raw_handle(raw.0) };
         let surface = unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::SurfaceHandle(handle.as_raw_handle())) }.map_err(err)?;
@@ -270,6 +271,7 @@ impl CapyHost {
         Ok(Self {
             gpu: Default::default(),
             gpu_generation: 0,
+            gpu_luid: None,
             localization_generation: None,
             localization_input_busy: false,
             document_epoch: native.session.state().document_file.epoch,
@@ -398,7 +400,8 @@ impl CapyHost {
     }
 
     fn prepare_gpu(&mut self) -> Result<(), String> {
-        if self.device_is_lost() && std::env::var_os("CAPY_TEST_GPU_UNAVAILABLE").is_some()
+        let recovering = self.device_is_lost();
+        if recovering && std::env::var_os("CAPY_TEST_GPU_UNAVAILABLE").is_some()
             && std::env::var_os("CAPY_SMOKE_TEST").is_some()
             && crate::storage::isolated()
         {
@@ -407,10 +410,7 @@ impl CapyHost {
         if self.config.is_some() {
             return Ok(());
         }
-        if self.device_is_lost() {
-            // D3D12 devices are process/adapter singletons. Release the removed
-            // renderer and presenter before requesting another device. Retained
-            // CPU assets, history and input remain in the same UiSession.
+        if recovering {
             if let Some(service) = &mut self.documents { service.renderer_unavailable(&mut self.native)?; }
             self.presenter = None;
             self.held_canvas = None;
@@ -423,10 +423,15 @@ impl CapyHost {
             // reject those while allowing an in-flight CPU Save to complete.
             self.poll_services()?;
         }
+        let same_gpu = |adapter: &wgpu::Adapter| crate::display::adapter_luid(adapter) == self.gpu_luid;
+        let choice = if recovering && self.gpu_luid.map_or(Ok(false), crate::display::adapter_present)? {
+            layer_host::gpu::AdapterChoice::Require(&same_gpu)
+        } else { layer_host::gpu::AdapterChoice::Request(wgpu::PowerPreference::HighPerformance) };
         let gpu = pollster::block_on(layer_host::gpu::process_gpu(
-            &self.instance, &self.surface, self.native.session.localization(), wgpu::PowerPreference::HighPerformance,
+            &self.instance, &self.surface, self.native.session.localization(), choice,
         ))?;
         let adapter = gpu.factory.adapter();
+        let adapter_luid = crate::display::adapter_luid(adapter);
         let gpu_state = gpu.watch;
         let [width, height] = self.native.session.state().camera.viewport;
         let mut config = self
@@ -461,6 +466,7 @@ impl CapyHost {
             self.native.error = None;
         }
         self.gpu = gpu_state;
+        self.gpu_luid = adapter_luid;
         self.gpu_generation = self.gpu_generation.saturating_add(1);
         self.pacing = Default::default();
         self.surface_ready = Default::default();

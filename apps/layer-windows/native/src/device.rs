@@ -36,14 +36,12 @@ mod tests {
         descriptor.backends = wgpu::Backends::DX12;
         descriptor.flags.remove(wgpu::InstanceFlags::DEBUG);
         let instance = wgpu::Instance::new(descriptor);
-        let request = || {
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                ..Default::default()
-            }))
-            .unwrap()
-        };
-        let adapter = request();
+        let (surface, _handle) = crate::host::CapyHost::composition_surface(&instance).unwrap();
+        let request = |choice| pollster::block_on(layer_host::gpu::surface_adapter(&instance, &surface, choice));
+        let adapter = request(layer_host::gpu::AdapterChoice::Request(wgpu::PowerPreference::HighPerformance)).unwrap();
+        let luid = crate::display::adapter_luid(&adapter).unwrap();
+        assert!(crate::display::adapter_present(luid).unwrap());
+        let same_gpu = |adapter: &wgpu::Adapter| crate::display::adapter_luid(adapter) == Some(luid);
         assert_ne!(adapter.get_info().device_type, wgpu::DeviceType::Cpu);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_limits: layer_render_wgpu::rendering_limits(adapter.limits()),
@@ -102,15 +100,17 @@ mod tests {
         }
         assert!(state.is_lost(Some(&device)));
         let _ = device.poll(wgpu::PollType::Poll);
+        let held = request(layer_host::gpu::AdapterChoice::Require(&same_gpu));
+        assert!(held.is_err(), "removed adapter {luid:?} is still owned; selected {:?}",
+            held.as_ref().map(|adapter| (crate::display::adapter_luid(adapter), adapter.get_info())));
         drop(queue);
         drop(device);
         drop(adapter);
-        // Retaining the callback state must not retain its device.
         assert!(state.is_lost(None));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            let replacement = request();
-            if replacement.get_info().device_type != wgpu::DeviceType::Cpu {
+            if let Ok(replacement) = request(layer_host::gpu::AdapterChoice::Require(&same_gpu)) {
+                assert_eq!(crate::display::adapter_luid(&replacement), Some(luid));
                 let (device, _queue) =
                     pollster::block_on(replacement.request_device(&Default::default())).unwrap();
                 let clean = DeviceWatch::observe(&device);
@@ -122,7 +122,6 @@ mod tests {
                 std::time::Instant::now() < deadline,
                 "removed device is still retained"
             );
-            drop(replacement);
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }

@@ -89,16 +89,46 @@ fn healthy_cached<T: Clone>(cache: &std::sync::Mutex<Option<T>>, healthy: impl F
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn process_gpu(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>,
-    localization: &layer_ui::Localizer, power_preference: wgpu::PowerPreference) -> Result<ProcessGpu, String> {
+fn preferred_candidate<T>(candidates: impl IntoIterator<Item = T>, admitted: impl Fn(&T) -> bool, prefer: impl Fn(&T) -> bool) -> Option<T> {
+    candidates.into_iter().find(|candidate| admitted(candidate) && prefer(candidate))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy)]
+pub enum AdapterChoice<'a> {
+    Request(wgpu::PowerPreference),
+    Require(&'a dyn Fn(&wgpu::Adapter) -> bool),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<wgpu::PowerPreference> for AdapterChoice<'_> {
+    fn from(preference: wgpu::PowerPreference) -> Self { Self::Request(preference) }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn surface_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>, choice: AdapterChoice<'_>) -> Result<wgpu::Adapter, String> {
+    let power_preference = match choice {
+        AdapterChoice::Request(preference) => preference,
+        AdapterChoice::Require(required) => return preferred_candidate(instance.enumerate_adapters(wgpu::Backends::all()).await,
+            |adapter| adapter.is_surface_supported(surface)
+                && unsupported_adapter(adapter, &layer_render_wgpu::rendering_limits(adapter.limits())).is_none(), required)
+            .ok_or_else(|| "The canvas GPU is still releasing its removed device".into()),
+    };
+    instance.request_adapter(&wgpu::RequestAdapterOptions {
+        compatible_surface: Some(surface), power_preference, force_fallback_adapter: false, apply_limit_buckets: false,
+    }).await.map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn process_gpu<'a>(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>,
+    localization: &layer_ui::Localizer, choice: impl Into<AdapterChoice<'a>>) -> Result<ProcessGpu, String> {
     let _initializing = INITIALIZING.lock().await;
     if let Some(gpu) = healthy_cached(&PROCESS_GPU, |gpu| gpu.watch.failure().is_none())? {
         return if gpu.factory.adapter().is_surface_supported(surface) { Ok(gpu.clone()) }
             else { Err(layer_ui::gpu_unsupported(localization, "The canvas GPU cannot present this window's surface")) };
     }
-    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(surface), power_preference, force_fallback_adapter: false, apply_limit_buckets: false,
-    }).await.map_err(|e| layer_ui::gpu_unsupported(localization, &e.to_string()))?;
+    let adapter = surface_adapter(instance, surface, choice.into()).await
+        .map_err(|e| layer_ui::gpu_unsupported(localization, &e))?;
     let saved = std::thread::spawn({
         let info = adapter.get_info();
         move || layer_render_wgpu::SavedPipelines::read_file(&info)
@@ -186,6 +216,14 @@ impl DeviceWatch {
 mod tests {
     use super::*;
     use layer_render::CanvasRenderer;
+
+    #[test]
+    fn adapter_order_prefers_only_admitted_candidates() {
+        assert_eq!(preferred_candidate([1, 2, 3], |_| true, |candidate| *candidate > 1), Some(2));
+        assert_eq!(preferred_candidate([1, 2, 3], |candidate| *candidate != 1, |candidate| *candidate == 1), None);
+        assert_eq!(preferred_candidate([1, 2, 3], |_| false, |_| true), None);
+        assert_eq!(preferred_candidate([1, 2, 3], |_| true, |_| false), None);
+    }
 
     #[test]
     fn failed_process_cache_releases_its_owner_before_replacement_outside_the_lock() {

@@ -11,11 +11,12 @@ struct Fixture {
     native: NativeHost,
     service: FilterService,
     device: DeviceWatch,
+    luid: (u32, i32),
     directory: TempDir,
 }
 impl Fixture {
     fn new() -> Self {
-        let (renderer, device) = renderer();
+        let (renderer, device, luid) = renderer(None);
         let mut native = NativeHost::new(Platform::Windows).unwrap();
         *native.session = UiSession::from_project(
             renderer,
@@ -68,6 +69,7 @@ impl Fixture {
             native,
             service,
             device,
+            luid,
             directory,
         }
     }
@@ -98,7 +100,7 @@ impl Fixture {
         self.native.startup = Default::default();
     }
     fn restore(&mut self) {
-        let (renderer, device) = renderer();
+        let (renderer, device, _) = renderer(Some(self.luid));
         let revision = self.native.session.state().revision;
         let (old, change) = self.native.session.replace_renderer(renderer).unwrap();
         self.native.apply_change(revision, change);

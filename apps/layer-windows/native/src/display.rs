@@ -3,17 +3,28 @@ use layer_render_wgpu::SdrSurfaceColor;
 use serde::Serialize;
 use windows::{
     Win32::{
-        Foundation::HWND,
+        Foundation::{HWND, LUID},
         Graphics::{
             Dxgi::{
-                Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, CreateDXGIFactory1,
-                IDXGIFactory1, IDXGIOutput6,
+                Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, CreateDXGIFactory1, DXGI_ERROR_NOT_FOUND,
+                IDXGIAdapter1, IDXGIFactory1, IDXGIFactory4, IDXGIOutput6,
             },
             Gdi::{HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
         },
     },
     core::Interface,
 };
+
+pub(crate) fn adapter_luid(adapter: &wgpu::Adapter) -> Option<(u32, i32)> {
+    unsafe { adapter.as_hal::<wgpu::hal::api::Dx12>() }
+        .and_then(|adapter| unsafe { adapter.raw_adapter().GetDesc1() }.ok())
+        .map(|desc| (desc.AdapterLuid.LowPart, desc.AdapterLuid.HighPart))
+}
+pub(crate) fn adapter_present((low, high): (u32, i32)) -> Result<bool, String> {
+    let factory = unsafe { CreateDXGIFactory1::<IDXGIFactory4>() }.map_err(|error| error.to_string())?;
+    unsafe { factory.EnumAdapterByLuid::<IDXGIAdapter1>(LUID { LowPart: low, HighPart: high }) }
+        .map(|_| true).or_else(|error| if error.code() == DXGI_ERROR_NOT_FOUND { Ok(false) } else { Err(error.to_string()) })
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub(crate) struct Display {

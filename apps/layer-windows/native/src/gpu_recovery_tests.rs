@@ -5,28 +5,30 @@ use layer_render_wgpu::WgpuRasterizer;
 use std::time::{Duration, Instant};
 use windows::{Win32::Graphics::Direct3D12::ID3D12Device5, core::Interface};
 
-pub(crate) fn renderer() -> (Renderer, DeviceWatch) {
+pub(crate) fn renderer(luid: Option<(u32, i32)>) -> (Renderer, DeviceWatch, (u32, i32)) {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::DX12;
     descriptor.flags.remove(wgpu::InstanceFlags::DEBUG);
     let instance = wgpu::Instance::new(descriptor);
+    let (surface, _handle) = crate::host::CapyHost::composition_surface(&instance).unwrap();
+    let same_gpu = |adapter: &wgpu::Adapter| crate::display::adapter_luid(adapter) == luid;
+    let choice = match luid {
+        Some(_) => layer_host::gpu::AdapterChoice::Require(&same_gpu),
+        None => layer_host::gpu::AdapterChoice::Request(wgpu::PowerPreference::HighPerformance),
+    };
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .unwrap();
+        let adapter = match pollster::block_on(layer_host::gpu::surface_adapter(&instance, &surface, choice)) {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                assert!(Instant::now() < deadline, "{error}");
+                std::thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+        };
         assert_eq!(adapter.get_info().backend, wgpu::Backend::Dx12);
-        if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
-            assert!(
-                Instant::now() < deadline,
-                "Removed hardware device is still retained"
-            );
-            drop(adapter);
-            std::thread::sleep(Duration::from_millis(50));
-            continue;
-        }
+        assert_ne!(adapter.get_info().device_type, wgpu::DeviceType::Cpu);
+        let luid = crate::display::adapter_luid(&adapter).unwrap();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: adapter.features()
                 & (wgpu::Features::FLOAT32_FILTERABLE
@@ -42,7 +44,7 @@ pub(crate) fn renderer() -> (Renderer, DeviceWatch) {
                 .unwrap();
         assert!(!state.is_lost(Some(gpu.device())));
         state.check().unwrap();
-        return (Renderer(Some(gpu.into())), state);
+        return (Renderer(Some(gpu.into())), state, luid);
     }
 }
 
