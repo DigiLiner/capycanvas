@@ -3094,7 +3094,7 @@ mod shader_tests {
     #[test]
     fn fragment_families_omit_unrelated_operations() {
         let families = ["gradient_shape", "ellipse_distance", "scene_image", "hdr_map_sdr", "blend_layer", "blend_composite", "blend_clip", "paper_sample",
-            "fill_plateau", "fill_anchor", "fill_feasible_neighbour", "fill_reconstruct"];
+            "fill_plateau_of", "fill_anchor", "fill_feasible_of", "fill_reconstruct_of"];
         for space in layer_core::color::RgbSpace::ALL {
             let source = shader_source(space);
             let module = crate::shader_limits::ValidatedModule::parse(&source).unwrap().into_parts().0;
@@ -3103,7 +3103,7 @@ mod shader_tests {
                 ("fragment_coverage", &[][..]),
                 ("fragment_fill_lines", &[][..]),
                 ("fragment_fill", &["paper_sample"][..]),
-                ("fragment_fill_opaque", &["paper_sample", "fill_plateau", "fill_anchor", "fill_feasible_neighbour", "fill_reconstruct"][..]),
+                ("fragment_fill_opaque", &["paper_sample", "fill_plateau_of", "fill_anchor", "fill_feasible_of", "fill_reconstruct_of"][..]),
                 ("fragment_gradient", &["gradient_shape", "paper_sample"][..]),
                 ("fragment_figure", &["ellipse_distance"][..]),
                 ("fragment_blend", &["blend_layer"][..]),

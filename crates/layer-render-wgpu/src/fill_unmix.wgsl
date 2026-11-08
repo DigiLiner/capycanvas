@@ -41,11 +41,13 @@ fn fill_ratio_greater(a:vec2<i32>,b:vec2<i32>)->bool {
     if a.x<0 {return right.x>left.x || (right.x==left.x && right.y>left.y);}
     return left.x>right.x || (left.x==right.x && left.y>right.y);
 }
-fn fill_fraction(pixel:vec4<f32>,seed:vec4<f32>,neighbour:vec4<f32>)->f32 {
-    let p=fill_sample(pixel);let s=fill_sample(seed);let n=fill_sample(neighbour);
-    let largest=max(max(abs(p.value)+max(p.low,p.high),abs(s.value)+max(s.low,s.high)),abs(n.value)+max(n.low,n.high));
+fn fill_bounds_scale(largest:vec4<f32>)->vec4<f32> {
     let exponent=vec4<i32>((bitcast<vec4<u32>>(largest)>>vec4<u32>(23))&vec4<u32>(255))-127;
-    let scale=exp2(vec4<f32>(min(vec4(127),vec4(27)-exponent)));
+    return exp2(vec4<f32>(min(vec4(127),vec4(27)-exponent)));
+}
+fn fill_fraction_of(p:FillSample,s:FillSample,n:FillSample)->f32 {
+    let largest=max(max(abs(p.value)+max(p.low,p.high),abs(s.value)+max(s.low,s.high)),abs(n.value)+max(n.low,n.high));
+    let scale=fill_bounds_scale(largest);
     let qp=vec4<i32>(round(p.value*scale));let qs=vec4<i32>(round(s.value*scale));let qn=vec4<i32>(round(n.value*scale));
     let pl=vec4<i32>(ceil(p.low*scale+.5));let ph=vec4<i32>(ceil(p.high*scale+.5));
     let sl=vec4<i32>(ceil(s.low*scale+.5));let sh=vec4<i32>(ceil(s.high*scale+.5));
@@ -66,11 +68,9 @@ fn fill_fraction(pixel:vec4<f32>,seed:vec4<f32>,neighbour:vec4<f32>)->f32 {
     if fill_ratio_greater(lower,upper) {return -1.;}
     return .5*(f32(lower.x)/f32(lower.y)+f32(upper.x)/f32(upper.y));
 }
-fn fill_equal(a:vec4<f32>,b:vec4<f32>)->bool {
-    let p=fill_sample(a);let q=fill_sample(b);
+fn fill_equal_of(p:FillSample,q:FillSample)->bool {
     let largest=max(abs(p.value)+max(p.low,p.high),abs(q.value)+max(q.low,q.high));
-    let exponent=vec4<i32>((bitcast<vec4<u32>>(largest)>>vec4<u32>(23))&vec4<u32>(255))-127;
-    let scale=exp2(vec4<f32>(min(vec4(127),vec4(27)-exponent)));
+    let scale=fill_bounds_scale(largest);
     let qp=vec4<i32>(round(p.value*scale));let qq=vec4<i32>(round(q.value*scale));
     let pl=vec4<i32>(ceil(p.low*scale+.5));let ph=vec4<i32>(ceil(p.high*scale+.5));
     let ql=vec4<i32>(ceil(q.low*scale+.5));let qh=vec4<i32>(ceil(q.high*scale+.5));
@@ -84,13 +84,12 @@ fn fill_seed_limit(pixel:vec4<f32>,seed:vec4<f32>)->f32 {
     }
     return clamp(limit,0.,1.);
 }
-fn fill_reconstruct(pixel:vec4<f32>,seed:vec4<f32>,neighbour:vec4<f32>,paint:vec4<f32>,amount:f32)->vec4<f32> {
-    let fraction=fill_fraction(pixel,seed,neighbour);
+fn fill_reconstruct_of(pixel:vec4<f32>,p:FillSample,seed:vec4<f32>,s:FillSample,neighbour:vec4<f32>,n:FillSample,paint:vec4<f32>,amount:f32)->vec4<f32> {
+    let fraction=fill_fraction_of(p,s,n);
     if fraction<0. {
-        let p=fill_sample(pixel).value;let s=fill_sample(seed).value;let n=fill_sample(neighbour).value;
-        let delta=s-n;let square=dot(delta,delta);
+        let delta=s.value-n.value;let square=dot(delta,delta);
         if square==0. {return pixel;}
-        let t=min(clamp(dot(p-n,delta)/square,0.,1.),fill_seed_limit(p,s));
+        let t=min(clamp(dot(p.value-n.value,delta)/square,0.,1.),fill_seed_limit(p.value,s.value));
         return pixel+amount*t*(paint-seed);
     }
     return mix(pixel,mix(neighbour,paint,fraction),amount);

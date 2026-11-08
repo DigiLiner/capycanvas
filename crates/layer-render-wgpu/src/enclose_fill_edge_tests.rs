@@ -449,7 +449,8 @@ fn check(@builtin(global_invocation_id) id:vec3<u32>) {
     let item=cases[id.x];let pixel=stored(item.pixel);let seed=stored(item.seed);let neighbour=stored(item.neighbour);
     let delta=seed-neighbour;
     let fraction=clamp(dot(pixel-neighbour,delta)/max(dot(delta,delta),1e-12),0.,1.);
-    results[id.x]=TestResult(fill_reconstruct(pixel,seed,neighbour,item.paint,1.),vec4(u32(fill_fraction(pixel,seed,neighbour)<0.),bitcast<u32>(fraction),0u,0u));
+    let p=fill_sample(pixel);let s=fill_sample(seed);let n=fill_sample(neighbour);
+    results[id.x]=TestResult(fill_reconstruct_of(pixel,p,seed,s,neighbour,n,item.paint,1.),vec4(u32(fill_fraction_of(p,s,n)<0.),bitcast<u32>(fraction),0u,0u));
 }
 "#].concat();
     unmix_gpu_source(r,cases,codes,&source)
@@ -567,7 +568,7 @@ fn check(@builtin(global_invocation_id) id:vec3<u32>) {
     if id.x>=arrayLength(&cases) {return;}
     let item=cases[id.x];
     let before=old_fill_fraction(item.pixel,item.seed,item.seed)>=0.;
-    let after=fill_equal(item.pixel,item.seed);
+    let after=fill_equal_of(fill_sample(item.pixel),fill_sample(item.seed));
     results[id.x]=TestResult(vec4(f32(u32(before)),f32(u32(after)),0.,0.),vec4(0u));
 }
 "#].concat();

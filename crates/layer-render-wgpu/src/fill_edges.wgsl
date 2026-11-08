@@ -5,11 +5,14 @@
 fn fill_source_at(p:vec2<i32>)->vec4<f32> {
     return textureLoad(fill_source,p-fill_precision.extent.zw-vec2<i32>(settings.backdrop.xy),0);
 }
-fn fill_near_seed(pixel:vec4<f32>,seed:vec4<f32>)->bool {
-    let delta=fill_sample(pixel).value-fill_sample(seed).value;
+fn fill_near_of(value:vec4<f32>,s:FillSample)->bool {
+    let delta=value-s.value;
     return dot(delta,delta)<settings.operation_linear.x*settings.operation_linear.x;
 }
-fn fill_feasible_neighbour(p:vec2<i32>,pixel:vec4<f32>,seed:vec4<f32>)->vec4<f32> {
+fn fill_near_seed(pixel:vec4<f32>,seed:vec4<f32>)->bool {
+    return fill_near_of(fill_sample(pixel).value,fill_sample(seed));
+}
+fn fill_feasible_of(p:vec2<i32>,pixel:vec4<f32>,seed:vec4<f32>,s:FillSample)->vec4<f32> {
     let radius=i32(settings.operation_linear.y);
     var neighbour=pixel;var score=-1.;
     let local=p-fill_precision.extent.zw-vec2<i32>(settings.backdrop.xy);
@@ -20,7 +23,7 @@ fn fill_feasible_neighbour(p:vec2<i32>,pixel:vec4<f32>,seed:vec4<f32>)->vec4<f32
         let candidate=textureLoad(fill_source,sample,0);let delta=candidate-seed;let distance=dot(delta,delta);
         if distance>score {score=distance;neighbour=candidate;}
     }}
-    if fill_fraction(pixel,seed,neighbour)<0. {return vec4(-1.);}
+    if fill_fraction_of(fill_sample(pixel),s,fill_sample(neighbour))<0. {return vec4(-1.);}
     return neighbour;
 }
 fn fill_anchor(p:vec2<i32>,limit:i32)->vec2<i32> {
@@ -31,25 +34,30 @@ fn fill_anchor(p:vec2<i32>,limit:i32)->vec2<i32> {
     }}}
     return best;
 }
-fn fill_plateau(at:vec2<i32>,seed:vec4<f32>)->vec4<f32> {
+fn fill_plateau_of(at:vec2<i32>,seed:vec4<f32>,s:FillSample)->vec4<f32> {
     let p=at+vec2<i32>(settings.backdrop.xy)+fill_precision.extent.zw;
     let radius=i32(settings.operation_linear.y);
     let q=fill_anchor(p,select(radius*radius,2,fill_precision.mode.x!=0u));if q.x<0 {return vec4(-1.);}
     let delta=p-q;let steps=max(abs(delta.x),abs(delta.y));let square=dot(vec2<f32>(delta),vec2<f32>(delta));
     var current=fill_source_at(q);
-    if steps==0 {return fill_feasible_neighbour(p,current,seed);}
-    for(var i=1;i<=radius;i++) {
-        if f32(i*i)*square>f32(radius*radius*steps*steps) {break;}
-        let next_at=q+sign(delta)*((abs(delta)*i+vec2(steps/2))/steps);
-        if any(next_at<vec2(0)) || any(next_at>=fill_precision.extent.xy) {return fill_feasible_neighbour(p,fill_source_at(p),seed);}
-        let next=fill_source_at(next_at);
-        if fill_equal(current,next) && !fill_near_seed(current,seed) {
-            if i-1<steps {return vec4(-1.);}
-            return current;
+    var start=current;
+    if steps!=0 {
+        var walked=true;
+        for(var i=1;i<=radius;i++) {
+            if f32(i*i)*square>f32(radius*radius*steps*steps) {break;}
+            let next_at=q+sign(delta)*((abs(delta)*i+vec2(steps/2))/steps);
+            if any(next_at<vec2(0)) || any(next_at>=fill_precision.extent.xy) {start=fill_source_at(p);walked=false;break;}
+            let next=fill_source_at(next_at);
+            let c=fill_sample(current);
+            if fill_equal_of(c,fill_sample(next)) && !fill_near_of(c.value,s) {
+                if i-1<steps {return vec4(-1.);}
+                return current;
+            }
+            current=next;
         }
-        current=next;
+        if walked {return current;}
     }
-    return current;
+    return fill_feasible_of(p,start,seed,s);
 }
 
 fn fill_line_coverage(at:vec2<i32>)->f32 {
@@ -124,12 +132,13 @@ fn fill_edge_value(world:vec2<f32>,pixel:vec4<f32>,paint:vec4<f32>,support:bool)
 fn fill_opaque_edge_value(world:vec2<f32>,pixel:vec4<f32>,paint:vec4<f32>,support:bool)->vec4<f32> {
     let input=fill_edge_input(world,paint);
     if input.seed.a<.99999 || pixel.a<.99999 {return fill_alpha_edge_value(world,pixel,support,input);}
-    let delta=fill_sample(pixel).value-fill_sample(input.seed).value;
-    if dot(delta,delta)<settings.operation_linear.x*settings.operation_linear.x {
+    let p=fill_sample(pixel);let s=fill_sample(input.seed);
+    if fill_near_of(p.value,s) {
         return vec4(settings.color.rgb,1.)*input.amount+pixel*(1.-input.amount);
     }
-    let neighbour=fill_plateau(input.local,input.seed);
+    let neighbour=fill_plateau_of(input.local,input.seed,s);
     if neighbour.a<0. {return pixel;}
-    if fill_equal(pixel,neighbour) {return pixel;}
-    return fill_reconstruct(pixel,input.seed,neighbour,vec4(settings.color.rgb,1.),input.amount);
+    let n=fill_sample(neighbour);
+    if fill_equal_of(p,n) {return pixel;}
+    return fill_reconstruct_of(pixel,p,input.seed,s,neighbour,n,vec4(settings.color.rgb,1.),input.amount);
 }
