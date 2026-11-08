@@ -868,6 +868,21 @@ function Fit-Canvas{
     $drawing=Owned-DrawingWindow $review
     $drawingWindow=$drawing.Handle
     $statePath=State-File
+    if(!$statePath){
+        foreach($id in @('fit_canvas','zoom_in')){
+            & (Join-Path $script:CapyScripts 'open-application-menu.ps1') -Root $root -Name 'View'
+            $item=@{node=$null}
+            Wait-Until {$item.node=Zoom-Item $id;$item.node -and !$item.node.Current.IsOffscreen -and $item.node.Current.IsEnabled} "Missing enabled View command: $id"
+            $item.node.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            Wait-Until {!(Zoom-Item $id) -and (Control 'drawing-canvas').Current.IsEnabled} "View command did not settle: $id"
+            if($id -eq 'fit_canvas'){$fitted=(Control 'canvas-camera').Current.Name}
+            else{Wait-Until {(Control 'canvas-camera').Current.Name -ne $fitted} 'Zoom In did not acknowledge a distinct camera'}
+        }
+        Wait-Until $focus 'The canvas did not take focus before Fit'
+        [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x30)
+        Wait-Until {(Control 'canvas-camera').Current.Name -eq $fitted} 'Fit did not restore the native camera readout'
+        return
+    }
     Wait-CanvasViewport $drawing $review $statePath
     $hit=@{receipt=$null};$fitted=$null
     $identity=Camera-Receipt

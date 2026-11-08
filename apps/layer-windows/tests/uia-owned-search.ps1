@@ -1574,10 +1574,10 @@ namespace CapyFitReceiptTest {
   public string Id;public int ProcessId=33;public bool IsEnabled=true,IsKeyboardFocusable=true,HasKeyboardFocus=true,IsOffscreen=false;
   public Node Current{get{return this;}}public void SetFocus(){Driver.Focus++;}
   public Node GetCurrentPattern(object pattern){if(!Object.Equals(pattern,InvokePattern.Pattern)||ProcessId!=33)throw new Exception("Foreign Fit command owner");return this;}
-  public void Invoke(){if(ProcessId!=33)throw new Exception("Foreign Fit invocation");Driver.Commands.Add(Id);Driver.Stage=Id=="fit_canvas"?1:2;Driver.Reads=0;}
+  public void Invoke(){if(ProcessId!=33)throw new Exception("Foreign Fit invocation");Driver.Commands.Add(Id);Driver.Stage=Id=="fit_canvas"?1:2;Driver.Reads=0;Driver.MenuOpen=false;}
  }
  public static class Driver {
-  public static int Stage,Reads,Focus,Chords;public static IntPtr Foreground;public static List<string> Commands=new List<string>();
+  public static int Stage,Reads,Focus,Chords;public static bool MenuOpen;public static IntPtr Foreground;public static List<string> Commands=new List<string>();
   public static bool SetForegroundWindow(IntPtr window){if(window!=new IntPtr(333))throw new Exception("Foreign Fit foreground owner");Foreground=window;return true;}
   public static void Chord(uint process,ushort[] modifiers,ushort key){if(process!=33||Foreground!=new IntPtr(333)||modifiers.Length!=1||modifiers[0]!=17||key!=48)throw new Exception("Foreign Fit shortcut owner");Chords++;Stage=3;Reads=0;}
  }
@@ -1621,6 +1621,37 @@ namespace CapyFitReceiptTest {
   }elseif(!$failure){throw "Fit accepted $case without its owned navigation acknowledgement"}
  }
  'Actual Fit retains command-owned same-packet camera receipts through resize, same-value Fit and both command paths, and rejects missing acknowledgements and foreign identities.'
+ & {
+  function State-File{}
+  function Wait-CanvasViewport{throw 'Trace-free Fit requested a traced viewport'}
+  function Camera-Receipt{throw 'Trace-free Fit requested a camera receipt'}
+  function Model{throw 'Trace-free Fit requested a model'}
+  function Native-OpenMenu($Root,$Name,$Caption){
+   if(![object]::ReferenceEquals($Root,$seen.root)-or$Name-cne'View'-or$Caption){throw 'Trace-free Fit opened another menu'}
+   $seen.menus++;[CapyFitReceiptTest.Driver]::MenuOpen=$true
+  }
+  function Zoom-Item($Id){if([CapyFitReceiptTest.Driver]::MenuOpen){$node=[CapyFitReceiptTest.Node]::new();$node.Id=$Id;$node}}
+  function Control($Id){
+   if($Id-eq'drawing-canvas'){return $root}
+   if($Id-ne'canvas-camera'){throw 'Trace-free Fit read another control'}
+   $stage=[CapyFitReceiptTest.Driver]::Stage;$read=[CapyFitReceiptTest.Driver]::Reads++
+   $name=if($stage-eq2-and($read-ge2-or$case-eq'missing-shortcut')-and$case-ne'missing-zoom'){'93%'}elseif($stage-eq3-and($read-lt2-or$case-eq'missing-shortcut')){'93%'}else{'66%'}
+   [pscustomobject]@{Current=[pscustomobject]@{Name=$name}}
+  }
+  foreach($case in 'scheduled','missing-zoom','missing-shortcut'){
+   [CapyFitReceiptTest.Driver]::Stage=0;[CapyFitReceiptTest.Driver]::Reads=0;[CapyFitReceiptTest.Driver]::Focus=0;[CapyFitReceiptTest.Driver]::Chords=0;[CapyFitReceiptTest.Driver]::MenuOpen=$false;[CapyFitReceiptTest.Driver]::Commands.Clear()
+   $seen=@{root=$root;menus=0};$failure=$null
+   try{Fit-Canvas}catch{$failure=$_}
+   if($case-eq'scheduled'){
+    if($failure){throw $failure}
+    if(([CapyFitReceiptTest.Driver]::Commands-join',')-cne'fit_canvas,zoom_in'-or[CapyFitReceiptTest.Driver]::Chords-ne1-or[CapyFitReceiptTest.Driver]::Focus-ne2-or$seen.menus-ne2){throw 'Trace-free Fit changed command cardinality or focus checks'}
+   }else{
+    $expected=if($case-eq'missing-zoom'){'Zoom In did not acknowledge a distinct camera'}else{'Fit did not restore the native camera readout'}
+    if(!$failure-or$failure.Exception.Message-cne$expected){throw "Trace-free Fit accepted missing native acknowledgement: $case; $failure"}
+   }
+  }
+  'Actual trace-free Fit restores the native readout through View commands and Ctrl+0; missing Zoom In or shortcut acknowledgement fails.'
+ }
 }
 
 & {
