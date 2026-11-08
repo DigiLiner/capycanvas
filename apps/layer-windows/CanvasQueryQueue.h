@@ -50,6 +50,8 @@ inline CanvasRenderStep NextCanvasRenderStep(bool canvasPending,CanvasWorkBuffer
     return canvasPending||!work.Empty()?CanvasRenderStep::Frame:queries.Empty()?CanvasRenderStep::Wait:CanvasRenderStep::Answer;
 }
 
+inline bool CanAnswerCanvasQueryAfterFrame(bool closing){return !closing;}
+
 class CanvasQuerySlots {
     struct Slot {
         std::shared_ptr<std::atomic<size_t>> count;

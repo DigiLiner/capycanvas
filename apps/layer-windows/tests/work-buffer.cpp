@@ -720,6 +720,26 @@ int main() {
         queries.Clear();
     }
     {
+        assert(CanAnswerCanvasQueryAfterFrame(false));
+        assert(!CanAnswerCanvasQueryAfterFrame(true));
+        for(bool command:{false,true}){
+            CanvasWorkBuffer pendingInput;
+            if(command)assert(pendingInput.Push(CanvasCommand{CanvasCommandKind::Action,"held-ring"}));
+            else assert(pendingInput.Push(std::vector<CapyPointer>(1)));
+            CanvasQueryQueue afterFrame;
+            assert(afterFrame.Push({CanvasQueryKind::Workspace,"bubble_motion",{}}));
+            assert(afterFrame.Push({CanvasQueryKind::Workspace,"bubble_stamp",{}}));
+            assert(NextCanvasRenderStep(false,pendingInput,afterFrame)==(command?CanvasRenderStep::Commands:CanvasRenderStep::Frame));
+            assert(CanAnswerCanvasQueryAfterFrame(false)&&"Post-frame UI query must run despite pending input");
+            size_t answered=0;
+            auto service=[&](bool closing){if(CanAnswerCanvasQueryAfterFrame(closing))if(afterFrame.Take())++answered;};
+            service(true);assert(answered==0&&!afterFrame.Empty()&&!pendingInput.Empty());
+            service(false);assert(answered==1&&!afterFrame.Empty()&&!pendingInput.Empty());
+            service(false);assert(answered==2&&afterFrame.Empty()&&!pendingInput.Empty());
+            service(false);assert(answered==2);
+        }
+    }
+    {
         CanvasWorkBuffer admitted;
         assert(admitted.Push(CanvasCommand{CanvasCommandKind::Document,R"({"operation":"close"})"}));
         assert(NextCanvasRenderStep(false,admitted,queries)==CanvasRenderStep::Commands);

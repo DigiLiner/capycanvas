@@ -1311,10 +1311,8 @@ void CanvasWindow::Run() {
                 TraceState("presentation-probe",to_string(model.Stringify()));
                 probeReady=true;
             }
-            // Optional readbacks run after painting and yield to newly queued input.
-            // The GPU poll never waits; CPU conversion belongs to another worker.
             std::optional<CanvasQuery> preview;
-            {std::lock_guard lock(mutex);if(!closing&&work.Empty())preview=previewWork.Take();}
+            {std::lock_guard lock(mutex);if(CanAnswerCanvasQueryAfterFrame(closing))preview=previewWork.Take();}
             if(preview)answer(*preview);
             if(overflow)break;
         }
