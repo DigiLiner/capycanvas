@@ -225,21 +225,22 @@ struct ColorEditorForm: View {
         }.padding(2).background(Capsule().fill(palette.field)).fixedSize()
     }
     private var head: some View {
-        HStack(alignment: .center, spacing: 12) {
+        ColorEditorRowsLayout(gap: 12, rowGap: 6) {
+            HStack(alignment: .top, spacing: 12) {
             if tools {
-                HStack(spacing: 0) {
-                    pairCell(session.viewing["hdr"].bool ? view["current_value"] : JSON(), rgba: view["current"]["rgba"])
-                        .contentShape(Rectangle()).onTapGesture { session.act(["op": "revert"]) }
-                        .accessibilityLabel(copy["current"].string).accessibilityAddTraits(.isButton).accessibilityIdentifier("color-current")
-                    pairCell(session.viewing["hdr"].bool ? view["value"] : JSON(), rgba: view["new"]["rgba"])
-                        .accessibilityLabel(copy["new"].string).accessibilityIdentifier("color-new")
-                }.clipShape(SquircleShape.control)
-                    .overlay(alignment: .bottom) {
-                        HStack(spacing: 0) {
-                            Text(copy["current"].string).frame(width: 54)
-                            Text(copy["new"].string).frame(width: 54)
-                        }.font(.caption).foregroundStyle(.secondary).lineLimit(1).offset(y: 18)
-                    }
+                VStack(spacing: 2) {
+                    HStack(spacing: 0) {
+                        pairCell(session.viewing["hdr"].bool ? view["current_value"] : JSON(), rgba: view["current"]["rgba"])
+                            .contentShape(Rectangle()).onTapGesture { session.act(["op": "revert"]) }
+                            .accessibilityLabel(copy["current"].string).accessibilityAddTraits(.isButton).accessibilityIdentifier("color-current")
+                        pairCell(session.viewing["hdr"].bool ? view["value"] : JSON(), rgba: view["new"]["rgba"])
+                            .accessibilityLabel(copy["new"].string).accessibilityIdentifier("color-new")
+                    }.clipShape(SquircleShape.control)
+                    HStack(spacing: 0) {
+                        Text(copy["current"].string).frame(width: 54).accessibilityIdentifier("color-current-caption")
+                        Text(copy["new"].string).frame(width: 54).accessibilityIdentifier("color-new-caption")
+                    }.font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Button { session.startPicking(touchOffset: 44 * displayScale) } label: {
                     SharedIcon(name: "eyedropper").frame(width: 48, height: 48).contentShape(Rectangle())
                 }.buttonStyle(EditorControlButtonStyle()).help(copy["pick_canvas"].string)
@@ -249,6 +250,8 @@ struct ColorEditorForm: View {
                     .accessibilityElement().accessibilityLabel(copy["new"].string)
                     .accessibilityValue(transparent ?? view["hex"].string).accessibilityIdentifier("color-new")
             }
+            }
+            HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 if !view["hex_note"].isNull {
                     Text(view["hex_note"]["text"].string).font(.caption).foregroundStyle(.secondary).help(view["hex_note"]["tip"].string)
@@ -265,24 +268,25 @@ struct ColorEditorForm: View {
                     if tools { copyButton("hex", text: view["hex"].string) }
                 }
             }
-            if let accessory { Spacer(minLength: 8); accessory }
-        }.padding(.bottom, 18)
+            if let accessory { accessory }
+            }
+        }
     }
     private func pairCell(_ hdr: JSON, rgba: JSON) -> some View {
         Group { if hdr.isNull { ColorSwatch(rgba: rgba) } else { HDRColorSwatch(color: hdr, viewing: session.viewing) } }.frame(width: 54, height: 48)
     }
     private var rows: some View {
-        Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 8) {
+        ColorEditorRowsLayout {
             ForEach(0..<3, id: \.self) { row in
                 let shown = view["rows"][row]
-                GridRow {
-                    HStack(spacing: 6) {
-                        formatMenu(row, shown: shown)
-                        if !shown["space"].isNull {
-                            Text(shown["space"].string).font(.caption).lineLimit(1).fixedSize().padding(.horizontal, 5)
-                                .background(palette["text"].opacity(0.08), in: SquircleShape.control)
-                        }
-                    }.gridColumnAlignment(.leading)
+                HStack(spacing: 6) {
+                    formatMenu(row, shown: shown)
+                    if !shown["space"].isNull {
+                        Text(shown["space"].string).font(.caption).lineLimit(1).fixedSize().padding(.horizontal, 5)
+                            .background(palette["text"].opacity(0.08), in: SquircleShape.control)
+                    }
+                }
+                HStack(spacing: 8) {
                     ForEach(0..<3, id: \.self) { index in
                         ColorValueField(name: "\(row)-\(index)", shown: shown["values"][index], width: 64,
                             scrub: ["kind": "value", "row": row, "index": index], draft: draft("\(row)-\(index)"), focus: focus, session: session)
@@ -291,12 +295,9 @@ struct ColorEditorForm: View {
                 }
             }
             if !view["intensity"].isNull {
-                GridRow {
-                    Text(copy["intensity_ev"].string).gridColumnAlignment(.leading)
-                    ColorValueField(name: "ev", shown: view["intensity"], width: 80, scrub: ["kind": "intensity"],
-                        draft: draft("ev"), focus: focus, session: session).gridCellColumns(3)
-                    if tools { Color.clear.frame(width: 1, height: 1) }
-                }
+                Text(copy["intensity_ev"].string)
+                ColorValueField(name: "ev", shown: view["intensity"], width: 80, scrub: ["kind": "intensity"],
+                    draft: draft("ev"), focus: focus, session: session)
             }
         }
     }
@@ -390,7 +391,8 @@ private struct ColorEditorLayout: Layout {
     private let columns: CGFloat = 24, rows: CGFloat = 16, below: CGFloat = 18
     private func sizes(_ subviews: Subviews) -> [CGSize] { subviews.map { $0.sizeThatFits(.unspecified) } }
     private func wide(_ sizes: [CGSize], width: CGFloat?) -> Bool {
-        sizes.count == 3 && (width ?? .infinity) >= sizes[1].width + columns + max(sizes[0].width, sizes[2].width)
+        sizes.count == 3 && DialogUI.resolve(["kind": "color_editor_layout", "width": Double(width.flatMap { $0.isFinite ? $0 : nil } ?? (sizes[1].width + columns + max(sizes[0].width, sizes[2].width))),
+            "minimum": [Double(sizes[1].width), Double(max(sizes[0].width, sizes[2].width))]])["split"].bool
     }
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let sizes = sizes(subviews)
@@ -399,7 +401,9 @@ private struct ColorEditorLayout: Layout {
             return CGSize(width: sizes[1].width + columns + max(sizes[0].width, sizes[2].width),
                 height: max(sizes[1].height, sizes[0].height + below + sizes[2].height))
         }
-        return CGSize(width: sizes.map(\.width).max() ?? 0, height: sizes[0].height + sizes[1].height + sizes[2].height + rows * 2)
+        let width = min(proposal.width ?? .infinity, sizes.map(\.width).max() ?? 0)
+        let stacked = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)) }
+        return CGSize(width: width, height: stacked.map(\.height).reduce(0, +) + rows * 2)
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let sizes = sizes(subviews)
@@ -413,9 +417,44 @@ private struct ColorEditorLayout: Layout {
         } else {
             var y = bounds.minY
             for index in [0, 1, 2] {
-                subviews[index].place(at: CGPoint(x: bounds.midX - sizes[index].width / 2, y: y), proposal: ProposedViewSize(sizes[index]))
-                y += sizes[index].height + rows
+                let size = subviews[index].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+                subviews[index].place(at: CGPoint(x: bounds.midX - size.width / 2, y: y), proposal: ProposedViewSize(size))
+                y += size.height + rows
             }
+        }
+    }
+}
+
+private struct ColorEditorRowsLayout: Layout {
+    var gap: CGFloat = 8
+    var rowGap: CGFloat = 8
+    private func geometry(_ width: CGFloat?, _ subviews: Subviews) -> (sizes: [CGSize], compact: Bool, label: CGFloat, value: CGFloat) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let label = sizes.enumerated().filter { $0.offset.isMultiple(of: 2) }.map { $0.element.width }.max() ?? 0
+        let value = sizes.enumerated().filter { !$0.offset.isMultiple(of: 2) }.map { $0.element.width }.max() ?? 0
+        let compact = DialogUI.resolve(["kind": "color_editor_layout", "width": Double(width.flatMap { $0.isFinite ? $0 : nil } ?? (label + gap + value)),
+            "minimum": [0, Double(label + gap + value)]])["compact_fields"].bool
+        return (sizes, compact, label, value)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let g = geometry(proposal.width, subviews), count = g.sizes.count / 2
+        let height = (0..<count).reduce(CGFloat.zero) { sum, row in
+            sum + (g.compact ? g.sizes[row * 2].height + rowGap + g.sizes[row * 2 + 1].height
+                : max(g.sizes[row * 2].height, g.sizes[row * 2 + 1].height))
+        }
+        return CGSize(width: g.compact ? max(g.label, g.value) : g.label + gap + g.value,
+            height: height + rowGap * CGFloat(max(0, count - 1)))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let g = geometry(bounds.width, subviews)
+        var y = bounds.minY
+        for row in 0..<(g.sizes.count / 2) {
+            let first = row * 2, second = first + 1
+            let height = max(g.sizes[first].height, g.sizes[second].height)
+            subviews[first].place(at: CGPoint(x: bounds.minX, y: y + (g.compact ? 0 : (height - g.sizes[first].height) / 2)), proposal: ProposedViewSize(g.sizes[first]))
+            subviews[second].place(at: CGPoint(x: g.compact ? bounds.minX : bounds.minX + g.label + gap,
+                y: g.compact ? y + g.sizes[first].height + rowGap : y + (height - g.sizes[second].height) / 2), proposal: ProposedViewSize(g.sizes[second]))
+            y += (g.compact ? g.sizes[first].height + rowGap + g.sizes[second].height : height) + rowGap
         }
     }
 }

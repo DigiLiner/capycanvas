@@ -25,6 +25,18 @@ import SwiftUI
     @MainActor static func inputs(_ view: NSView) -> [ControlInput.InputView] {
         (view as? ControlInput.InputView).map { [$0] } ?? view.subviews.flatMap(inputs)
     }
+    @MainActor static func accessibilityFrames(_ node: Any) -> [(String, CGRect)] {
+        if let view = node as? NSView {
+            let identifier: String? = view.accessibilityIdentifier()
+            return [(identifier ?? "", view.accessibilityFrame())]
+                + (view.accessibilityChildren() ?? []).flatMap(accessibilityFrames)
+        }
+        if let element = node as? NSAccessibilityElement {
+            return [(element.accessibilityIdentifier() ?? "", element.accessibilityFrame())]
+                + (element.accessibilityChildren() ?? []).flatMap(accessibilityFrames)
+        }
+        return []
+    }
     @MainActor static func canceledScrub(_ host: NSView, session: ColorEditorSession, window: NSWindow) throws {
         guard let input = inputs(host).first(where: { $0.identity == "0-0" }) else { throw HostFailure(message: "Missing native color readout") }
         let before = session.view["value"].stableKey
@@ -76,10 +88,37 @@ import SwiftUI
                     styleMask: [.titled, .closable], backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
                 let host = NSHostingView(rootView: ColorEditor(session: session))
+                host.sizingOptions.insert(.maxSize)
                 window.contentView = host; window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
                 defer { window.contentView = nil; window.close() }
                 try await Task.sleep(for: .milliseconds(100))
+                host.updateConstraintsForSubtreeIfNeeded()
+                let fitting = host.fittingSize
+                try require([fitting.width, fitting.height].allSatisfy { $0.isFinite && $0 > 0 },
+                    "Native color editor fitting size must be finite and nonempty")
                 try require(fields(host).isEmpty, "Values show as text until they are tapped")
+                if space == "Srgb" && mode == "unchanged" {
+                    window.setContentSize(CGSize(width: 320, height: 700))
+                    try await wait("Compact native color fields") {
+                        host.layoutSubtreeIfNeeded()
+                        let values = inputs(host).filter { ["0-0", "0-1", "0-2"].contains($0.identity) }
+                        return values.count == 3 && values.allSatisfy { input in
+                            let bounds = input.convert(input.bounds, to: host)
+                            return bounds.minX >= 0 && bounds.maxX <= host.bounds.width
+                        }
+                    }
+                    try await wait("Compact captions reserve space before the hex readout") {
+                        host.layoutSubtreeIfNeeded()
+                        let frames = accessibilityFrames(host)
+                        guard let hex = frames.first(where: { $0.0 == "color-value-hex" })?.1,
+                            hex.width > 0, hex.height > 0 else { return false }
+                        let captions = frames.filter { ["color-current-caption", "color-new-caption"].contains($0.0) }
+                        return captions.count == 2 && captions.allSatisfy { caption in
+                            caption.1.width > 0 && caption.1.height > 0 && caption.1.minY >= hex.maxY
+                        }
+                    }
+                    window.setContentSize(CGSize(width: 720, height: 520))
+                }
                 try canceledScrub(host, session: session, window: window)
                 if mode == "rgb" {
                     try require(session.act(["op": "value", "row": 0, "index": 0, "text": "32"], target: "0-0"), "Only a valid value commits")
