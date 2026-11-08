@@ -862,6 +862,8 @@ pub trait CanvasRenderer {
     /// holds admission during a stroke/gesture or unfinished document edit.
     fn shader_input(&mut self) {}
     fn shader_idle(&mut self, _idle: bool, _speculative_idle: bool) {}
+    /// Prepare optional brush pipelines before a selection is created.
+    fn prepare_selection_brush(&mut self, _document: &layer_core::Document, _brush: &layer_core::BrushSnapshot) {}
     /// UI-only tool changes may still need a first-use preparation callback.
     fn shaders_need_update(&self, _document: &layer_core::Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool { false }
     /// Native interpretation configured on this renderer. Adoption/recovery

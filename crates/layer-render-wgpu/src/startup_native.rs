@@ -371,17 +371,43 @@ mod tests {
     }
 
     #[test]
+    fn anticipated_pipelines_run_before_remaining_speculative_warming() {
+        let compiler=Compiler::with_workers(1).unwrap();
+        let (entered,started)=mpsc::channel();let (release,held)=mpsc::channel();
+        let first=Deferred::pipeline(move |_| {
+            entered.send(()).unwrap();held.recv_timeout(Duration::from_secs(10)).unwrap();Compilation::Ready(())
+        });
+        compiler.background(&first,BACKGROUND,||true);
+        let (ran,events)=mpsc::channel();
+        for label in ["background first","background second"] {
+            let ran=ran.clone();
+            let pipeline=Deferred::pipeline(move |_| {ran.send(label).unwrap();Compilation::Ready(())});
+            compiler.background(&pipeline,BACKGROUND,||true);
+        }
+        compiler.start();started.recv_timeout(Duration::from_secs(2)).unwrap();
+        let anticipated=Deferred::pipeline(move |_| {ran.send("anticipated").unwrap();Compilation::Ready(())});
+        compiler.background(&anticipated,ANTICIPATED,||true);
+        assert!(events.try_recv().is_err(),"optional pipelines stay serialized while warming is in flight");
+        release.send(()).unwrap();
+        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(),"anticipated");
+        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(),"background first");
+        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(),"background second");
+        drop(compiler);finish_shader_compiler_shutdown();
+    }
+
+    #[test]
     fn required_completion_leaves_a_quiet_interval_before_speculation() {
         let compiler = Compiler::new().unwrap();
         let (ran, events) = mpsc::channel();
-        for (priority, label) in [(BRUSH, "required"), (BACKGROUND, "first"), (BACKGROUND, "second")] {
+        for (priority, label) in [(BRUSH, "required"), (BACKGROUND, "first"), (BACKGROUND, "second"), (ANTICIPATED, "anticipated")] {
             let ran = ran.clone();
             compiler.enqueue(priority, move || { ran.send(label).unwrap(); Ok(()) });
         }
         compiler.start();
         assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(), "required");
         assert!(events.recv_timeout(Duration::from_millis(200)).is_err());
-        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(), "first");
+        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(), "anticipated");
+        assert_eq!(events.recv_timeout(Duration::from_millis(200)).unwrap(), "first");
         assert_eq!(events.recv_timeout(Duration::from_millis(200)).unwrap(), "second");
     }
 
@@ -494,7 +520,7 @@ mod tests {
 
     #[test]
     fn generic_data_and_optional_pipeline_jobs_stay_serial() {
-        for kind in 0..4 {
+        for kind in 0..5 {
             let compiler = Compiler::with_workers(2).unwrap();
             let (entered, events) = mpsc::channel();
             let mut releases = Vec::new();
@@ -513,7 +539,7 @@ mod tests {
                 } else {
                     let pipeline = if kind == 1 {Deferred::new(work)}
                         else {Deferred::pipeline(move |_| Compilation::Ready(work()))};
-                    compiler.pipeline(&pipeline, match kind {1 => BRUSH, 2 => OTHER, _ => BACKGROUND});
+                    compiler.pipeline(&pipeline, match kind {1 => BRUSH, 2 => OTHER, 3 => ANTICIPATED, _ => BACKGROUND});
                     pipelines.push(pipeline);
                 }
             }

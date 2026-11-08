@@ -10,7 +10,8 @@ pub(super) const DOCUMENT: u8 = 2;
 pub(super) const BRUSH: u8 = 3;
 pub(super) const VALIDATION: u8 = 4;
 pub(super) const OTHER: u8 = 5;
-pub(super) const BACKGROUND: u8 = OTHER + 1;
+pub(super) const ANTICIPATED: u8 = OTHER + 1;
+pub(super) const BACKGROUND: u8 = OTHER + 2;
 #[path = "shader_admission.rs"]
 mod admission;
 #[cfg(not(target_arch = "wasm32"))]
@@ -451,6 +452,32 @@ impl WgpuRasterizer {
         let prepared = self.prepare_startup_into(&mut startup, document, brush, transform);
         self.startup = Some(startup);
         prepared
+    }
+    pub fn prepare_selection_brush(&mut self, document: &Document, brush: &BrushSnapshot) {
+        let Some(startup) = &self.startup else { return };
+        if document.working.selection.is_some() { return; }
+        let mask = DocumentKey::new(document).mask;
+        if mask { return; }
+        let [width, height] = document.composition().size.map(|size| size as f32);
+        let Ok(selection) = layer_core::Selection::polygon(vec![layer_core::Point { x: 0., y: 0. },
+            layer_core::Point { x: width, y: 0. }, layer_core::Point { x: width, y: height }, layer_core::Point { x: 0., y: height }]) else { return };
+        let selection = Arc::new(selection);
+        let generation = startup.preparation.load(std::sync::atomic::Ordering::Relaxed);
+        let current = || {
+            let preparation = startup.preparation.clone();
+            move || preparation.load(std::sync::atomic::Ordering::Relaxed) == generation
+        };
+        for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
+            let style = layer_render::DabStyle { selection: Some(selection.clone()), ..brush_style(document, brush, tool) };
+            let mut required = Requirements::default();
+            required.style(self, &style, dry_material::Reach::of(brush), mask, true);
+            for pipeline in required.render.iter().filter(|pipeline| !pipeline.ready()) {
+                startup.compiler.background(pipeline, ANTICIPATED, current());
+            }
+            for pipeline in required.compute.iter().filter(|pipeline| !pipeline.ready()) {
+                startup.compiler.background(pipeline, ANTICIPATED, current());
+            }
+        }
     }
     fn prepare_startup_into(
         &mut self,
@@ -1645,6 +1672,42 @@ mod gpu_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn choosing_a_selection_tool_warms_pencil_without_changing_readiness() {
+        let color=Default::default();let reference=WgpuRasterizer::new_native_headless(color).unwrap();
+        let mut r=crate::test_support::staged_renderer(&reference,color);
+        let mut document=Document::new(layer_core::PortableId::random(),64,64,
+            layer_core::DocumentNames {paint:"Ink".into(),paper:"Paper".into()});
+        let brush=layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        let selection=Arc::new(layer_core::Selection::polygon(vec![layer_core::Point{x:0.,y:0.},
+            layer_core::Point{x:64.,y:0.},layer_core::Point{x:0.,y:64.}]).unwrap());
+        let mut required=Requirements::default();
+        for tool in [StrokeTool::Brush,StrokeTool::Eraser] {
+            let style=layer_render::DabStyle {selection:Some(selection.clone()),..brush_style(&document,&brush,tool)};
+            required.style(&r,&style,dry_material::Reach::of(&brush),false,true);
+        }
+        r.shader_idle(true,false);r.prepare_startup(&document,&brush,false).unwrap();
+        let deadline=std::time::Instant::now()+Duration::from_secs(60);
+        crate::test_support::wait_startup(&mut r,deadline,|p|p.complete,format_args!("initial Pencil readiness"));
+        assert!(!required.ready(),"Pencil starts without its selection kernels");
+        let generation=r.startup.as_ref().unwrap().preparation.load(std::sync::atomic::Ordering::Relaxed);
+        layer_render::CanvasRenderer::prepare_selection_brush(&mut r,&document,&brush);
+        assert!(!r.startup_needs_update(&document,&brush,false));
+        assert!(r.startup.as_ref().unwrap().brush_ready && r.startup.as_ref().unwrap().finished);
+        assert_eq!(r.startup.as_ref().unwrap().preparation.load(std::sync::atomic::Ordering::Relaxed),generation);
+        assert_eq!(r.startup.as_ref().unwrap().compiler.pending(),0);
+        let (drained,done)=mpsc::channel();
+        r.startup.as_ref().unwrap().compiler.enqueue_untracked(BACKGROUND,false,move||{drained.send(()).unwrap();Ok(())});
+        r.shader_idle(true,true);
+        crate::test_support::wait_startup(&mut r,deadline,|p|p.brush_ready && done.try_recv().is_ok(),format_args!("selection brush background work"));
+        assert!(required.ready(),"choosing a selection tool prepares both Pencil strokes before selection commit");
+        document.working.selection=Some((*selection).clone());document.revision+=1;
+        r.shader_idle(false,false);r.prepare_startup(&document,&brush,false).unwrap();
+        assert!(r.poll_startup().unwrap().brush_ready,"committing the selection needs no new brush compilation");
+        assert_eq!(r.startup.as_ref().unwrap().compiler.pending(),0);
+        drop(r);drop(reference);finish_shader_compiler_shutdown();
     }
 
     #[test]

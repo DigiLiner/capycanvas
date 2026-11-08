@@ -3861,6 +3861,9 @@ impl WgpuRasterizer {
 impl CanvasRenderer for WgpuRasterizer {
     fn shader_input(&mut self) { WgpuRasterizer::shader_input(self); }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { WgpuRasterizer::shader_idle(self, idle, speculative_idle); }
+    fn prepare_selection_brush(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot) {
+        WgpuRasterizer::prepare_selection_brush(self, document, brush);
+    }
     fn shaders_need_update(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
         self.startup_needs_update(document, brush, transform)
     }

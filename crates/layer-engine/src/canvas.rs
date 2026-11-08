@@ -340,6 +340,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         &mut self.backend
     }
 
+    pub fn prepare_selection_brush(&mut self) {
+        let brush = self.brush().clone();
+        self.backend.prepare_selection_brush(self.editor.document(), &brush);
+    }
+
     pub fn retained_tiles(&self) -> layer_core::raster_storage::RetainedTiles {
         self.editor.retained_tiles()
     }

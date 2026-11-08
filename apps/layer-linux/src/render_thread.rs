@@ -465,6 +465,7 @@ enum Command {
         Box<(layer_core::Document, layer_core::BrushSnapshot, bool)>,
     ),
     FinishStartupCatalog,
+    PrepareSelectionBrush(Box<(layer_core::Document, layer_core::BrushSnapshot)>),
     SelectionPaint(u64, layer_render::SelectionPaint),
     CancelSelectionPaint(u64),
     QuickMaskThumbnail(Option<layer_core::Selection>),
@@ -1146,6 +1147,9 @@ impl Drop for RenderWorker {
 impl CanvasRenderer for RenderWorker {
     fn shader_input(&mut self) { if let Some(activity) = &self.shader_activity { activity.input(); } }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { if let Some(activity) = &self.shader_activity { activity.idle(idle, speculative_idle); } }
+    fn prepare_selection_brush(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot) {
+        let _ = self.send(Command::PrepareSelectionBrush(Box::new((document.clone(), brush.clone()))));
+    }
     fn shaders_need_update(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
         self.startup_needs_update(document, brush, transform)
     }
@@ -2036,6 +2040,10 @@ impl Worker {
                     startup_progress = Default::default();
                 }
                 Command::FinishStartupCatalog => self.renderer.finish_startup_catalog(),
+                Command::PrepareSelectionBrush(inputs) => {
+                    let (document, brush) = *inputs;
+                    self.renderer.prepare_selection_brush(&document, &brush);
+                }
                 Command::SelectionPaint(generation, update) => {
                     if generation != selection_generation { continue; }
                     let result = self.renderer.paint_selection(&update).map_err(error);

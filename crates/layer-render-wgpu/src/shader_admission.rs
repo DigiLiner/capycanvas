@@ -57,21 +57,23 @@ mod tests {
 
     #[test]
     fn short_pauses_admit_visible_previews_but_keep_background_work_parked() {
-        use super::super::{BRUSH, OTHER, BACKGROUND};
+        use super::super::{BRUSH, OTHER, ANTICIPATED, BACKGROUND};
         let mut admission = Admission {last_activity:Some(Instant::now() - Duration::from_millis(500)),..Default::default()};
         assert!(admission.allows(BRUSH) && admission.allows(OTHER));
-        assert!(!admission.allows(BACKGROUND));
-        assert_eq!(admission.delay([OTHER, BACKGROUND].into_iter()), Duration::ZERO);
-        assert!(!admission.delay([BACKGROUND].into_iter()).is_zero());
+        for priority in [ANTICIPATED, BACKGROUND] {
+            assert!(!admission.allows(priority));
+            assert_eq!(admission.delay([OTHER, priority].into_iter()), Duration::ZERO);
+            assert!(!admission.delay([priority].into_iter()).is_zero());
+        }
         assert!(!admission.delay(std::iter::empty()).is_zero());
         admission.last_activity = Some(Instant::now() - BACKGROUND_QUIET);
-        assert!(admission.allows(BACKGROUND));
+        for priority in [ANTICIPATED, BACKGROUND] { assert!(admission.allows(priority)); }
         admission.speculative_idle = false;
         assert!(admission.allows(OTHER));
-        assert!(!admission.allows(BACKGROUND));
+        for priority in [ANTICIPATED, BACKGROUND] { assert!(!admission.allows(priority)); }
         assert!(admission.allows(BRUSH));
         admission.idle = false;
-        assert!(!admission.allows(BACKGROUND));
+        for priority in [ANTICIPATED, BACKGROUND] { assert!(!admission.allows(priority)); }
         assert!(admission.allows(BRUSH));
     }
 }

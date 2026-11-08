@@ -2,6 +2,25 @@ mod selection_tools_checks {
     use super::*;
 
     #[test]
+    fn choosing_selection_tools_prepares_the_brush_once_until_leaving() {
+        for platform in Platform::ALL { for command in [CommandId::Lasso, CommandId::RectangleSelect] {
+            let mut s=session(platform);
+            assert_eq!(s.engine.backend().selection_brush_preparations,0);
+            invoke(&mut s,command);
+            assert_eq!(s.engine.backend().selection_brush_preparations,1,"{platform:?}/{command:?}");
+            invoke(&mut s,command);invoke(&mut s,CommandId::SelectionAdd);s.frame(1,1).unwrap();
+            invoke(&mut s,if command==CommandId::Lasso {CommandId::RectangleSelect}else{CommandId::Lasso});
+            assert_eq!(s.engine.backend().selection_brush_preparations,1);
+            invoke(&mut s,CommandId::Brush);invoke(&mut s,command);
+            assert_eq!(s.engine.backend().selection_brush_preparations,2);
+            invoke(&mut s,CommandId::SelectAll);
+            assert!(s.engine.document().working.selection.is_some());
+            invoke(&mut s,CommandId::Brush);invoke(&mut s,command);s.frame(2,2).unwrap();
+            assert_eq!(s.engine.backend().selection_brush_preparations,2,"an existing selection needs no speculative preparation");
+        }}
+    }
+
+    #[test]
     fn region_radio_bars_place_whole_pixel_value_under_edges() {
         for platform in Platform::ALL {
         let mut s = session(platform);

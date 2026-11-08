@@ -22,6 +22,7 @@ pub(crate) struct Recorder {
     pub(crate) refining: bool,
     pub(crate) shader_inputs: usize,
     pub(crate) shader_idle: (bool, bool),
+    pub(crate) selection_brush_preparations: usize,
     pub(crate) color: layer_core::color::DocumentColor,
     pub(crate) prepared_color: Option<layer_core::color::DocumentColor>,
     pub(crate) tiled_sources: bool,
@@ -109,6 +110,7 @@ impl CanvasRenderer for Recorder {
     fn has_pending_work(&self) -> bool { self.refining }
     fn shader_input(&mut self) { self.shader_inputs += 1; }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { self.shader_idle = (idle, speculative_idle); }
+    fn prepare_selection_brush(&mut self, _document: &Document, _brush: &layer_core::BrushSnapshot) { self.selection_brush_preparations += 1; }
     fn can_submit(&self) -> bool { !self.settling }
     fn raster_dependencies_ready(&mut self, _packet: FramePacket<'_>, _preview: Option<&layer_render::TransformPreview>) -> bool {
         !self.raster_dependencies_blocked
