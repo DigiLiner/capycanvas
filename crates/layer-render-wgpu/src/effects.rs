@@ -867,15 +867,6 @@ fn fx_window_gather(image:texture_2d<f32>,origin:vec2<i32>,f:vec2<f32>)->vec4<f3
     let c=fx_load(image,origin+vec2<i32>(0,1));let d=fx_load(image,origin+vec2<i32>(1,1));
     return working_sample_mix(working_sample_mix(a,b,f.x),working_sample_mix(c,d,f.x),f.y);
 }
-fn fx_window_sample(image:texture_2d<f32>,point:vec2<f32>)->vec4<f32> {
-    let p=point-.5;
-    return fx_window_gather(image,vec2<i32>(floor(p)),fract(p));
-}
-fn fx_grid_unit_sample(image:texture_2d<f32>,point:vec2<f32>,grid:vec2<f32>)->vec4<f32> {
-    let p=point-.5;let phase=fract(p)-fract(grid);let carry=floor(phase);
-    let origin=vec2<i32>(floor(p)-floor(grid))+vec2<i32>(carry);
-    return fx_window_gather(image,origin,fract(phase));
-}
 fn fx_finite_support_bounds(bounds:vec4<f32>,origin:vec2<f32>,step:f32)->vec4<f32> {
     let first=origin+floor((bounds.xy-origin)/step)*step;
     let last=origin+(ceil((bounds.zw-origin)/step)-1.)*step;
@@ -909,17 +900,23 @@ fn fx_reference_sample(image:texture_2d<f32>,p:vec2<f32>,context:FxGrid)->vec4<f
     var point=p;
     if !FX_REFERENCE_IDENTITY {let m=fx_reference_linear;point=vec2(m.x*p.x+m.z*p.y,m.y*p.x+m.w*p.y);}
     if !context.reference {point+=fx_reference_frame.xy;}
-    if context.grid.z<=0. {return fx_window_sample(image,point);}
-    if any(context.bounds.zw<=context.bounds.xy) {return vec4(0.);}
-    if !FX_CLAMP_INPUT&&(any(point<context.bounds.xy)||any(point>=context.bounds.zw)) {return vec4(0.);}
-    if any(context.support.zw<context.support.xy) {return vec4(0.);}
-    let sample=select(point,clamp(point,context.support.xy,context.support.zw),FX_CLAMP_INPUT);
-    if context.step==1. {
-        if context.integral {let q=sample-.5;return fx_window_gather(image,vec2<i32>(floor(q)-context.grid.xy),fract(q));}
-        return fx_grid_unit_sample(image,sample,context.grid.xy);
+    var q=point-.5;var origin=floor(q);var f=fract(q);
+    if context.grid.z>0. {
+        if any(context.bounds.zw<=context.bounds.xy) {return vec4(0.);}
+        if !FX_CLAMP_INPUT&&(any(point<context.bounds.xy)||any(point>=context.bounds.zw)) {return vec4(0.);}
+        if any(context.support.zw<context.support.xy) {return vec4(0.);}
+        let sample=select(point,clamp(point,context.support.xy,context.support.zw),FX_CLAMP_INPUT);
+        if context.step==1. {
+            q=sample-.5;
+            if context.integral {origin=floor(q)-context.grid.xy;f=fract(q);}
+            else {let phase=fract(q)-fract(context.grid.xy);origin=floor(q)-floor(context.grid.xy)+floor(phase);f=fract(phase);}
+        } else {
+            q=vec2(fx_grid_coordinate(sample.x,context.bounds.x,context.bounds.z,context.grid.x,context.step),
+                fx_grid_coordinate(sample.y,context.bounds.y,context.bounds.w,context.grid.y,context.step))-.5;
+            origin=floor(q);f=fract(q);
+        }
     }
-    return fx_window_sample(image,vec2(fx_grid_coordinate(sample.x,context.bounds.x,context.bounds.z,context.grid.x,context.step),
-        fx_grid_coordinate(sample.y,context.bounds.y,context.bounds.w,context.grid.y,context.step)));
+    return fx_window_gather(image,vec2<i32>(origin),f);
 }
 fn fx_sample(p:vec2<f32>)->vec4<f32> {
     return fx_reference_sample(front,p,fx_front_grid);
