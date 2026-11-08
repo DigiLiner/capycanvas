@@ -8,36 +8,58 @@ struct SettingsView: View {
     @State private var linkFailed = false
     @State private var profiles = false
     @State private var headroomCaption = ""
+    @State private var layout = JSON()
+    @State private var allocation = CGSize.zero
+    @State private var minimum: [CGFloat] = [0, 0]
+    @State private var layoutRequest = UUID()
+    @State private var layoutModel = ""
+    private var layoutReady: Bool { layoutModel == model.stableKey }
+    private var singlePane: Bool { layout["single_pane"].bool }
+    private var sidebarVisible: Bool { !singlePane || !model["page_requested"].bool }
+    private var contentVisible: Bool { !singlePane || model["page_requested"].bool }
     private var model: JSON { store.snapshot["preferences"] }
     private var color: JSON { store.catalog["native_copy"]["color"] }
     private var page: JSON { model["pages"].array.first { $0["id"].string == model["page"].string } ?? JSON() }
     var body: some View {
-        NavigationSplitView {
+        VStack(spacing: 0) {
+            HStack {
+                if layoutReady && layout["subpage"].bool {
+                    Button { action(model["navigation"]["back"].object) } label: { SharedIcon(name: "go-previous") }
+                        .accessibilityLabel(store.bootstrap["common"]["back"].string).accessibilityIdentifier("settings-back")
+                }
+                Text(model["navigation"]["title"].isNull ? (sidebarVisible && singlePane
+                    ? store.catalog["native_copy"]["shortcuts"]["settings"].string : page["title"].string)
+                    : model["navigation"]["title"].string).font(.headline).accessibilityIdentifier("shortcut-pane-title")
+                Spacer()
+                SettingsDoneButton(store: store, label: store.bootstrap["common"]["done"].string)
+            }.padding()
+            SettingsPanesLayout(single: singlePane, requested: model["page_requested"].bool, measured: { size, widths in
+                DispatchQueue.main.async {
+                    if allocation != size || minimum != widths { allocation = size; minimum = widths; refreshLayout() }
+                }
+            }) {
             VStack {
                 searchField
                     .editorSearchInput().textFieldStyle(.roundedBorder).padding(.horizontal)
                     .accessibilityIdentifier("settings-search")
-                List(selection: Binding<String?>(get: { model["query"].string.isEmpty ? model["page"].string : nil }, set: { if let next = $0 {
-                    searching = false
-                    action(["type": "page", "page": next])
-                } })) {
-                    ForEach(model["pages"].array.indices, id: \.self) { index in
-                        let p = model["pages"][index]
-                        HStack {
-                            SharedIcon(name: p["icon"].string).accessibilityHidden(true)
-                            Text(p["title"].string)
-                        }.tag(p["id"].string)
-                            .background(NativePenScroll().frame(width: 0, height: 0))
-                            .accessibilityIdentifier("settings-page-" + p["id"].string)
-                    }
-                }
-            }.navigationTitle(store.catalog["native_copy"]["shortcuts"]["settings"].string)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220)
-        } detail: {
-            detail.navigationTitle(page["title"].string)
-                .toolbar { ToolbarItem(placement: .confirmationAction) {
-                    SettingsDoneButton(store: store, label: store.bootstrap["common"]["done"].string)
-                } }
+                if model["query"].string.isEmpty { EditorScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model["pages"].array.indices, id: \.self) { index in
+                            let p = model["pages"][index]
+                            Button { searching = false; action(["type": "page", "page": p["id"].string]) } label: {
+                                HStack {
+                                    SharedIcon(name: p["icon"].string).accessibilityHidden(true)
+                                    Text(p["title"].string)
+                                    if singlePane { Spacer(); SharedIcon(name: "go-next") }
+                                }.padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(EditorControlButtonStyle(selected: contentVisible && model["page"].string == p["id"].string))
+                                .accessibilityIdentifier("settings-page-" + p["id"].string)
+                        }
+                    }.padding(.horizontal)
+                } } else { searchResults }
+            }.opacity(sidebarVisible ? 1 : 0).allowsHitTesting(sidebarVisible).accessibilityHidden(!sidebarVisible)
+            detail.opacity(contentVisible ? 1 : 0).allowsHitTesting(contentVisible).accessibilityHidden(!contentVisible)
+            }
         }.sheet(isPresented: Binding(get: { !model["shortcut_page"]["picker"].isNull },
             set: { if !$0 { action(["type": "close_action_picker"]) } })) {
             ActionPickerSheet(store: store).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
@@ -51,14 +73,30 @@ struct SettingsView: View {
                 }
             }
             .onKeyPress(phases: [.down, .repeat]) { typedSearch($0) ? .handled : .ignored }
-            .frame(minHeight: 420)
-            #if os(macOS)
-            .frame(minWidth: 560)
-            #endif
+            .onChange(of: model.stableKey, initial: true) { _, _ in refreshLayout() }
+            .onNativeTextKey(.escape) {
+                guard layoutReady else { return .handled }
+                let reply = DialogUI.resolve(["kind": "escape", "subpage": layout["subpage"].bool,
+                    "search_focused": searching, "search_has_text": !model["query"].string.isEmpty]).string
+                if reply == "clear_search" { action(["type": "search", "query": ""]) }
+                else if reply == "back" { action(model["navigation"]["back"].object) }
+                else { store.dispatch(["type": "close_settings"]) }
+                return .handled
+            }
             .environment(\.openURL, OpenURLAction { url in
                 openURL(url) { accepted in linkFailed = !accepted }
                 return .handled
             })
+    }
+    private func refreshLayout() {
+        guard !model.isNull, allocation.width > 0 else { return }
+        let request = UUID(), key = model.stableKey
+        layoutRequest = request
+        store.query(["type": "preferences_layout", "width": Double(allocation.width), "minimum": minimum.map(Double.init)]) { response in
+            guard layoutRequest == request, model.stableKey == key else { return }
+            if !SnapshotProjection.equal(layout.raw, response.raw) { layout = response }
+            layoutModel = key
+        }
     }
     private var searchField: some View {
         let field = EditorTextField(store.catalog["native_copy"]["shortcuts"]["search_settings"].string, value: model["query"].string) {
@@ -66,21 +104,22 @@ struct SettingsView: View {
         }
         return field.editorFocus($searching, identifier: "settings-search")
     }
-    @ViewBuilder private var detail: some View {
-        if !model["query"].string.isEmpty {
-            List {
-                ForEach(model["search_results"].array.indices, id: \.self) { index in
-                    let result = model["search_results"][index]
-                    Button { searching = false; action(result["action"].object) } label: {
-                        VStack(alignment: .leading) {
-                            Text(result["title"].string)
-                            Text(result["description"].string).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }.background(NativePenScroll().frame(width: 0, height: 0))
-                }
-                if model["search_results"].array.isEmpty { Text(store.catalog["native_copy"]["shortcuts"]["no_matching_settings"].string) }
+    private var searchResults: some View {
+        EditorScrollView { VStack(alignment: .leading, spacing: 4) {
+            ForEach(model["search_results"].array.indices, id: \.self) { index in
+                let result = model["search_results"][index]
+                Button { searching = false; action(result["action"].object) } label: {
+                    VStack(alignment: .leading) {
+                        Text(result["title"].string)
+                        Text(result["description"].string).font(.caption).foregroundStyle(.secondary)
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(EditorControlButtonStyle(selected: false))
             }
-        } else if model["page"].string == "shortcuts" {
+            if model["search_results"].array.isEmpty { Text(store.catalog["native_copy"]["shortcuts"]["no_matching_settings"].string) }
+        }.padding(.horizontal) }
+    }
+    @ViewBuilder private var detail: some View {
+        if model["page"].string == "shortcuts" {
             ShortcutSettingsView(store: store)
         } else if model["page"].string == "input" && !model["pen_button_editor"].isNull {
             PenButtonPane(store: store)
@@ -237,6 +276,32 @@ struct SettingsView: View {
                 }
             }.accessibilityIdentifier("preference-" + row["id"].string)
                 .accessibilityValue(kind["options"][Int(kind["selected"].number)].string)
+        }
+    }
+}
+
+private struct SettingsPanesLayout: Layout {
+    let single: Bool
+    let requested: Bool
+    let measured: (CGSize, [CGFloat]) -> Void
+    init(single: Bool, requested: Bool, measured: @escaping (CGSize, [CGFloat]) -> Void) {
+        self.single = single; self.requested = requested; self.measured = measured
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let size = CGSize(width: proposal.width ?? 600, height: proposal.height ?? 600)
+        return size
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        measured(bounds.size, subviews.map { $0.sizeThatFits(.unspecified).width })
+        let sidebar = single ? bounds.width : subviews[0].sizeThatFits(.unspecified).width
+        for index in 0..<2 {
+            let visible = !single || (index == 1) == requested
+            let available = single ? bounds.width : index == 0 ? sidebar : max(0, bounds.width - sidebar)
+            let width = index == 0 ? available : CGFloat(DialogUI.resolve(["kind": "preferences_content_width",
+                "width": Double(available), "minimum": Double(subviews[index].sizeThatFits(.unspecified).width)]).number)
+            subviews[index].place(at: CGPoint(x: bounds.minX + (!single && index == 1 ? sidebar : 0) + (available - width) / 2, y: bounds.minY),
+                proposal: visible ? ProposedViewSize(width: width, height: bounds.height) : .zero)
         }
     }
 }

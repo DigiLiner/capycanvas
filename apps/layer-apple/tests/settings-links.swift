@@ -78,6 +78,55 @@ import Vision
                         "Link failure and retry must preserve the drawing")
                 }
             }
+            window.setContentSize(CGSize(width: 320, height: 568))
+            try await store.apply(["type": "preferences", "action": ["type": "page_list"]])
+            try await drain()
+            let rootText = try text(in: host)
+            let appearancePage = store.snapshot["preferences"]["pages"].array.first { $0["id"].string == "appearance" }!
+            let appearance = appearancePage["title"].string
+            guard let line = rootText.first(where: { $0.string.contains(appearance) }),
+                let range = line.string.range(of: appearance), let box = try line.boundingBox(for: range) else {
+                throw HostFailure(message: "Narrow Settings root presents the shared page list")
+            }
+            let bounds = box.boundingBox
+            let point = CGPoint(x: host.bounds.minX + host.bounds.width * 0.7,
+                y: host.bounds.minY + (host.isFlipped ? 1 - bounds.midY : bounds.midY) * host.bounds.height)
+            try require(point.x > host.bounds.minX + bounds.maxX * host.bounds.width + 8 && host.bounds.contains(point),
+                "The Settings page contact must land in the row's blank area beyond its text")
+            for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp] {
+                try event(type, at: point, marker: host, number: 9); try await drain()
+            }
+            try await wait("The full Settings Appearance row activates its page", seconds: 5, failure: { store.failure }) {
+                store.snapshot["preferences"]["page_requested"].bool && store.snapshot["preferences"]["page"].string == "appearance"
+            }
+            let theme = appearancePage["groups"].array.flatMap { $0["rows"].array }.first { $0["id"].string == "theme" }!
+            try require(try text(in: host).contains { $0.string.contains(theme["title"].string) },
+                "Activating Appearance must allocate and render its native preference Form")
+            try await store.apply(["type": "preferences", "action": ["type": "search", "query": "github"]])
+            let result = store.snapshot["preferences"]["search_results"].array.first { $0["title"].string == "Source code" }
+            try require(result != nil && !store.snapshot["preferences"]["page_requested"].bool,
+                "Settings search must publish the Source code result in its navigation pane")
+            var results: [VNRecognizedText] = []
+            try await wait("Narrow Settings search renders its published Source code result", seconds: 5,
+                failure: { store.failure }, step: {
+                    results = try text(in: host, capture: "\(platform)-search-results")
+                }) { results.contains { $0.string.contains(result!["title"].string) } }
+            guard let line = results.first(where: { $0.string.contains(result!["title"].string) }),
+                let range = line.string.range(of: result!["title"].string), let box = try line.boundingBox(for: range) else {
+                throw HostFailure(message: "Narrow Settings search must render its published Source code result")
+            }
+            let resultPoint = CGPoint(x: host.bounds.minX + box.boundingBox.midX * host.bounds.width,
+                y: host.bounds.minY + (host.isFlipped ? 1 - box.boundingBox.midY : box.boundingBox.midY) * host.bounds.height)
+            try require(host.bounds.contains(resultPoint), "The Settings search result must be visible in the owned window")
+            for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp] {
+                try event(type, at: resultPoint, marker: host, number: 10); try await drain()
+            }
+            try await wait("The rendered Settings search result opens About", seconds: 5, failure: { store.failure }) {
+                let preferences = store.snapshot["preferences"]
+                return preferences["page_requested"].bool && preferences["page"].string == "about" && preferences["query"].string.isEmpty
+            }
+            try require(try text(in: host).contains { $0.string.contains("github.com/capyatelier/capycanvas") },
+                "Opening the Settings search result must render its shared Source code destination")
             note("PASS platform \(platform): native Settings Website/Source code rejection displays an error; accepted retry clears it and preserves artwork")
         }
     }

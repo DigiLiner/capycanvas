@@ -179,9 +179,6 @@ private struct CategoryPane: View {
     @ObservedObject var store: EditorStore
     private var page: JSON { store.snapshot["preferences"]["shortcut_page"] }
     var body: some View {
-        PaneHeader(title: page["categories"].array.first { $0["id"].string == page["category"].string }?["label"].string ?? "") {
-            store.dispatch(["type": "preferences", "action": ["type": "shortcut_category", "id": NSNull()]])
-        }
         Form {
             if page["category"].string == "Modifier keys" {
                 Section {
@@ -268,7 +265,6 @@ private struct ModifierKeyPane: View {
     private var editor: JSON { store.snapshot["preferences"]["modifier_editor"] }
     private func action(_ value: [String: Any]) { store.dispatch(["type": "preferences", "action": value]) }
     var body: some View {
-        PaneHeader(title: editor["label"].string) { action(["type": "close_modifier_key"]) }
         Form {
             Section {
                 Toggle(store.catalog["native_copy"]["shortcuts"]["same_all_tools"].string, isOn: Binding(get: { !editor["per_tool"].bool },
@@ -333,7 +329,6 @@ struct PenButtonPane: View {
     private func action(_ value: [String: Any]) { store.dispatch(["type": "preferences", "action": value]) }
     var body: some View {
         VStack(spacing: 0) {
-            PaneHeader(title: editor["label"].string) { action(["type": "close_pen_button"]) }
             Form {
                 Section {
                     Toggle(store.catalog["native_copy"]["shortcuts"]["same_all_tools"].string, isOn: Binding(get: { !editor["per_tool"].bool },
@@ -357,20 +352,6 @@ struct PenButtonPane: View {
                 }
             }.formStyle(.grouped)
         }
-    }
-}
-
-private struct PaneHeader: View {
-    @Environment(\.capyCommonCopy) private var commonCopy
-    let title: String
-    let back: () -> Void
-    var body: some View {
-        HStack(spacing: 8) {
-            Button(action: back) { SharedIcon(name: "go-previous").contentShape(Rectangle()) }
-                .buttonStyle(.borderless).accessibilityLabel(commonCopy["back"].string).help(commonCopy["back"].string).accessibilityIdentifier("settings-back")
-            Text(title).font(.headline).accessibilityIdentifier("shortcut-pane-title")
-            Spacer()
-        }.padding(.horizontal, 20).padding(.top, 12)
     }
 }
 
