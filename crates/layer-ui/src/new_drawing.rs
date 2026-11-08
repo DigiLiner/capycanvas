@@ -406,16 +406,16 @@ pub fn built_in_presets() -> &'static [BuiltInPreset] {
             p("letter", M::DOCUMENTS_PRESET_LETTER, Prints, sheet(In, 11., 8.5, 300, Adobe, U16, Some("hot_press"), 0, WHITE, false)),
             p("tabloid", M::DOCUMENTS_PRESET_TABLOID, Prints, sheet(In, 17., 11., 300, Adobe, U16, Some("hot_press"), 0, WHITE, false)),
             p("sticker", M::DOCUMENTS_PRESET_STICKER, Prints, sheet(In, 3., 3., 300, Srgb, U8, Some("drawing_paper"), 0, WHITE, true)),
-            p(THIS_SCREEN, M::DOCUMENTS_PRESET_THIS_SCREEN, Digital, sheet(Px, 2560., 1600., SCREEN_PPI, Srgb, U8, None, 0, WHITE, false)),
-            p("full-hd", M::DOCUMENTS_PRESET_FULL_HD, Digital, sheet(Px, 1920., 1080., SCREEN_PPI, Srgb, U8, None, 0, WHITE, false)),
-            p("uhd", M::DOCUMENTS_PRESET_UHD, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, U8, None, 0, WHITE, false)),
-            p("uhd-hdr", M::DOCUMENTS_PRESET_UHD_HDR, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, F16, None, 0, WHITE, false)),
-            p("cinematic", M::DOCUMENTS_PRESET_CINEMATIC, Digital, sheet(Px, 3840., 1608., SCREEN_PPI, P3, U16, None, 0, PEARL, false)),
-            p("phone", M::DOCUMENTS_PRESET_PHONE, Digital, sheet(Px, 1290., 2796., SCREEN_PPI, P3, U8, None, 0, WHITE, false)),
-            p("tablet", M::DOCUMENTS_PRESET_TABLET, Digital, sheet(Px, 2048., 2732., SCREEN_PPI, P3, U8, None, 0, WHITE, false)),
-            p("square-post", M::DOCUMENTS_PRESET_SQUARE_POST, Digital, sheet(Px, 2160., 2160., SCREEN_PPI, Srgb, U8, None, 0, WHITE, false)),
-            p("portrait-post", M::DOCUMENTS_PRESET_PORTRAIT_POST, Digital, sheet(Px, 2160., 2700., SCREEN_PPI, Srgb, U8, None, 0, WHITE, false)),
-            p("story", M::DOCUMENTS_PRESET_STORY, Digital, sheet(Px, 2160., 3840., SCREEN_PPI, Srgb, U8, None, 0, WHITE, false)),
+            p(THIS_SCREEN, M::DOCUMENTS_PRESET_THIS_SCREEN, Digital, sheet(Px, 2560., 1600., SCREEN_PPI, Srgb, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("full-hd", M::DOCUMENTS_PRESET_FULL_HD, Digital, sheet(Px, 1920., 1080., SCREEN_PPI, Srgb, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("uhd", M::DOCUMENTS_PRESET_UHD, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("uhd-hdr", M::DOCUMENTS_PRESET_UHD_HDR, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, F16, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("cinematic", M::DOCUMENTS_PRESET_CINEMATIC, Digital, sheet(Px, 3840., 1608., SCREEN_PPI, P3, U16, Some(layer_core::paper::NO_TEXTURE), 0, PEARL, false)),
+            p("phone", M::DOCUMENTS_PRESET_PHONE, Digital, sheet(Px, 1290., 2796., SCREEN_PPI, P3, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("tablet", M::DOCUMENTS_PRESET_TABLET, Digital, sheet(Px, 2048., 2732., SCREEN_PPI, P3, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("square-post", M::DOCUMENTS_PRESET_SQUARE_POST, Digital, sheet(Px, 2160., 2160., SCREEN_PPI, Srgb, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("portrait-post", M::DOCUMENTS_PRESET_PORTRAIT_POST, Digital, sheet(Px, 2160., 2700., SCREEN_PPI, Srgb, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
+            p("story", M::DOCUMENTS_PRESET_STORY, Digital, sheet(Px, 2160., 3840., SCREEN_PPI, Srgb, U8, Some(layer_core::paper::NO_TEXTURE), 0, WHITE, false)),
         ]
     })
 }
@@ -895,12 +895,13 @@ mod tests {
         for preset in presets {
             assert_eq!(preset.setup.validate(CanvasLimits::default()), Ok(()), "{}", preset.id);
             assert!(english().text(preset.name).chars().count() <= 13, "{}", preset.id);
-            assert_eq!(preset.setup.paper.texture.is_none(), preset.group == PresetGroup::Digital, "{}", preset.id);
+            assert!(preset.setup.paper.texture.is_some(), "{}", preset.id);
+            assert_eq!(preset.setup.paper.texture.as_deref() == Some(layer_core::paper::NO_TEXTURE), preset.group == PresetGroup::Digital, "{}", preset.id);
             if let Some(texture) = preset.setup.paper.texture.as_deref() {
                 assert!(layer_core::paper::built_in_paper(texture).is_some(), "{}", preset.id);
             }
         }
-        for paper in layer_core::paper::built_in_papers().iter().filter(|paper| paper.id.as_ref() != layer_core::paper::NO_TEXTURE) {
+        for paper in layer_core::paper::built_in_papers() {
             assert!(presets.iter().any(|preset| preset.setup.paper.texture.as_deref() == Some(&*paper.id)), "{}", paper.id);
         }
         for (_, color) in PAPER_COLORS {
@@ -911,6 +912,43 @@ mod tests {
         }
         assert!(presets.iter().all(|preset| preset.setup.paper.relief <= 300));
         assert_eq!(built_in("sketchbook-a4", None).unwrap().extent(), [3508, 2480]);
+    }
+
+    #[test]
+    fn digital_presets_create_a_visible_paper_without_texture() {
+        use crate::{NewDrawingAction, NewDrawingDrawerView, UiAction, Platform};
+        use crate::session::test_support::{session, invoke};
+        let l = english();
+        let presets: Vec<_> = built_in_presets().iter().filter(|preset| preset.group == PresetGroup::Digital).collect();
+        assert_eq!(presets.len(), 10);
+        for preset in presets {
+            let setup = &preset.setup;
+            assert_eq!(setup.paper.color, if preset.id == "cinematic" { PEARL } else { WHITE });
+            let doc = setup.project(PortableId::random(), None, CanvasLimits::default(), &l).unwrap();
+            let paper = doc.bottom_paper().unwrap();
+            assert!(doc.scene().visible(paper), "{}", preset.id);
+            let effect = doc.scene().effect(paper).unwrap();
+            assert_eq!(effect.value("texture"), Some(&layer_core::EffectValue::Texture(None)));
+            assert_eq!(effect.constant_color(), Some(setup.paper.color));
+            assert_eq!(effect.value(layer_core::paper::RELIEF), Some(&layer_core::EffectValue::Number(0.)));
+            let mut s = session(Platform::Gtk);
+            invoke(&mut s, crate::CommandId::NewDocument);
+            let act = |s: &mut crate::UiSession<_>, action| s.dispatch(UiAction::NewDrawing { action }).unwrap();
+            act(&mut s, NewDrawingAction::Open { screen: None, untitled: 2 });
+            act(&mut s, NewDrawingAction::Presets);
+            let name = l.text(preset.name).to_string();
+            act(&mut s, NewDrawingAction::Search { query: name.clone() });
+            let Some(NewDrawingDrawerView::Presets(browser)) = &s.state().new_drawing.as_ref().unwrap().drawer else { panic!() };
+            let index = browser.tiles.iter().position(|tile| tile.name == name).unwrap();
+            act(&mut s, NewDrawingAction::PickPreset { index });
+            act(&mut s, NewDrawingAction::UsePreset);
+            act(&mut s, NewDrawingAction::Paper);
+            let Some(NewDrawingDrawerView::Paper { relief, .. }) = &s.state().new_drawing.as_ref().unwrap().drawer else { panic!() };
+            assert!(!relief.enabled, "{}", preset.id);
+        }
+        let mut absent = built_in("full-hd", None).unwrap();
+        absent.paper.texture = None;
+        assert_eq!(absent.project(PortableId::random(), None, CanvasLimits::default(), &l).unwrap().bottom_paper(), None);
     }
 
     #[test]
@@ -1159,10 +1197,9 @@ mod tests {
         assert_eq!((screen.setup.extent(), screen.setup.resolution), ([2880, 1800], 220));
         let summary = catalog.summary("Kraft paper", &built_in("kraft-paper", None).unwrap());
         assert_eq!((summary.size.as_str(), summary.details.as_str()), ("11 × 8.5 in · 300 ppi", "sRGB 8-bit SDR · Cold press 100 %, Kraft"));
-        assert_eq!(catalog.get(&PresetKey::BuiltIn("uhd-hdr".into())).unwrap().details, "144 ppi · No paper · HDR");
+        assert_eq!(catalog.get(&PresetKey::BuiltIn("uhd-hdr".into())).unwrap().details, "144 ppi · None · HDR");
         assert_eq!(catalog.tiles(BrowserTab::Group(PresetGroup::Digital), "").len(), 10);
         let mut plain = built_in("uhd-hdr", None).unwrap();
-        plain.paper.texture = Some(layer_core::paper::NO_TEXTURE.into());
         plain.paper.relief = 150;
         assert_eq!(catalog.view(PresetKey::Last, "Plain".into(), PresetGroup::Digital, plain.clone(), true).details, "144 ppi · None · HDR");
         assert_eq!(catalog.summary("Plain", &plain).details, "sRGB 16-bit float HDR · None, White");

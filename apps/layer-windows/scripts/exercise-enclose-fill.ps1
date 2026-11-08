@@ -145,7 +145,7 @@ function Check-Textures{
         Wait-Until {@((Model).state.new_drawing.drawer.tiles).Count -eq 1 -and (Model).state.new_drawing.drawer.tiles[0].name -eq 'Full HD'} 'Digital Full HD preset was not found'
         Invoke 'new-drawing-preset-0';Invoke 'new-drawing-select'
         Wait-Until {!(Model).state.new_drawing.drawer -and (Model).state.new_drawing.values[0] -eq 1920 -and (Model).state.new_drawing.values[1] -eq 1080} 'Full HD did not apply'
-        if($null -ne (Model).state.new_drawing.setup.paper.texture){throw 'Digital Full HD retained paper'}
+        if((Model).state.new_drawing.setup.paper.texture -ne 'none'){throw 'Digital Full HD did not choose Texture None'}
         New-DrawingPixels 384 256
         if($paper -ne 'none'){
             Invoke 'new-drawing-texture';Wait-Until {(Model).state.new_drawing.drawer.kind -eq 'paper'} 'Paper drawer did not open'
@@ -157,7 +157,7 @@ function Check-Textures{
             Invoke 'new-drawing-paper-use';Wait-Until {(Model).state.new_drawing.setup.paper.texture -eq $paper -and !(Model).state.new_drawing.drawer} 'Paper did not apply'
         }
         Invoke 'new-drawing-create';Wait-Until {!(Model).state.new_drawing -and (Model).brush_ready -and !(Model).state.document_file.busy} 'Texture drawing did not become ready' 45
-        if(($paper -eq 'none') -and @((Model).state.layers|Where-Object content_icon -eq 'layer-paper-symbolic').Count){throw 'Digital Full HD created a Paper layer'}
+        if(($paper -eq 'none') -and @((Model).state.layers|Where-Object {$_.paper.id -eq 'none'}).Count -ne 1){throw 'Digital Full HD did not create a None Paper'}
         Fit-Canvas;Command 'pen'
         $start=Screen 50 50;[CapyRowPointer]::Down('mouse',$start.x,$start.y)
         try{foreach($point in @(@(300,50),@(300,170),@(50,170),@(50,50))){$at=Screen $point[0] $point[1];[CapyRowPointer]::Move($at.x,$at.y)}}finally{[CapyRowPointer]::Up()}
@@ -176,7 +176,7 @@ function Check-Textures{
                 Wait-Until {(Revision) -ne $emptyRevision} "Texture $tool did not paint at $percent%" 30
                 Settled;Park;$filled=Texture-Samples
                 if($filled -eq $empty){throw "Texture $tool left sampled pixels empty at $percent%"}
-                if($percent -eq 0){$flat=$filled}elseif($paper -eq 'none' -and $filled -ne $flat){throw "No paper changed $tool pixels at $percent%"}
+                if($percent -eq 0){$flat=$filled}elseif($paper -eq 'none' -and $filled -ne $flat){throw "Texture None changed $tool pixels at $percent%"}
                 if($paper -ne 'none' -and $percent -eq 200 -and $filled -eq $flat){throw "$paper did not texture $tool at 200%"}
                 if($percent -eq 100){Capture "texture-$paper-$tool-$Theme" -WithModel}
                 Chord @(0x11) 0x5A;Wait-Until {(Revision) -eq $emptyRevision} 'Texture Undo did not restore the target';Settled;Park
@@ -190,7 +190,7 @@ function Check-Textures{
         }
     }
     $records|ConvertTo-Json -Depth 4|Set-Content (Join-Path $run 'texture-results.json')
-    @{theme=$Theme;cases=$records.Count;digital_no_paper='passed';evidence=$run}|ConvertTo-Json
+    @{theme=$Theme;cases=$records.Count;digital_none_paper='passed';evidence=$run}|ConvertTo-Json
 }
 try {
     Enter-CapyEnvironment

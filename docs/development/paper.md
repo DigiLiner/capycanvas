@@ -158,7 +158,7 @@ hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
   clipping affect only how Paper looks. A Transparent background hides the
   Paper but keeps its tooth.
 - **No Paper below, or Texture None,** uses Fine tooth
-  (`drawing_paper`) at 100% of the drawing resolution. Fills get no texture in
+  (`drawing_paper`) at 100% of the paper resolution. Fills get no texture in
   either case.
 - **The stroke keeps its paper.** It is resolved at pen-down and held with the
   stroke's view and brush settings, so queued contacts are unaffected by later

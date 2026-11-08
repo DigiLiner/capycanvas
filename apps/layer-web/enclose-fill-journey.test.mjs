@@ -549,10 +549,11 @@ export async function checkEncloseFill({call,evaluate,settle,fillAreasOnly=false
       assert.equal(await evaluate('layerApp.state().new_drawing.drawer.query'),'Full HD');
       const preset=await evaluate('layerApp.state().new_drawing.drawer.tiles.findIndex(t=>t.name==="Full HD")');assert.ok(preset>=0);
       await contact(`#new-drawing-presets [data-new-drawing-preset="${preset}"]`);await contact('#new-drawing-select');
-      assert.equal(await evaluate('layerApp.state().new_drawing.setup.paper.texture??null'),null,'Digital Full HD uses No paper');
+      assert.equal(await evaluate('layerApp.state().new_drawing.setup.paper.texture'),'none','Digital Full HD uses Texture None');
       await wait(`(()=>{const n=document.querySelector('#new-drawing-create'),r=n.getBoundingClientRect();return !layerApp.state().new_drawing.drawer&&n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`);
       await contact('#new-drawing-create');await wait('!layerApp.state().new_drawing');await idle();
-      assert.ok(await evaluate('!!layerApp.state().layer_tools.add_paper'),'Digital drawing has no Paper layer');
+      assert.equal(await evaluate('layerApp.state().layer_tools.add_paper'),null,'Digital drawing has a Paper layer');
+      assert.equal(await evaluate('layerApp.state().layers.at(-1).paper.id'),'none');
       await edgePlates(theme);
       for(const paper of ['cold_press','rough'])await scribblePaper(theme,paper);
       assert.equal(await evaluate('layerApp.state().host_error??null'),null);

@@ -227,8 +227,8 @@ fn native_new_drawing_dialog_review() {
         input.click(screen_point(full_hd.upcast_ref(), &w.window, [0.5, 0.5]));
         input.click(screen_point(part::<gtk::Button>(&w, "new-drawing-select").upcast_ref(), &w.window, [0.5, 0.5]));
         pump(200);
-        assert!(state(&w).new_drawing.as_ref().unwrap().setup.paper.texture.is_none());
-        shot("2-digital-no-paper");
+        assert_eq!(state(&w).new_drawing.as_ref().unwrap().setup.paper.texture.as_deref(), Some(layer_core::paper::NO_TEXTURE));
+        shot("2-digital-none");
         input.click(screen_point(part::<gtk::Button>(&w, "new-drawing-presets-button").upcast_ref(), &w.window, [0.5, 0.5]));
         pump(200);
         tab(&w, "Mixed media");
