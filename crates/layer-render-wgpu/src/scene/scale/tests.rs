@@ -2094,6 +2094,48 @@ fn reduction_samplers_live_with_records_not_page_views() {
 }
 
 #[test]
+fn first_tiled_transform_draw_waits_for_its_fine_resample_entries() {
+    let extent = [6000, 4000];
+    let mut doc = Document::new(PortableId::random(), extent[0], extent[1],
+        layer_core::DocumentNames { paint: "Fine transform".into(), paper: "Paper".into() });
+    crate::layer_tests::placement::set_source(&mut doc, rgba8_source(extent, |_, _| [127, 63, 191, 255]));
+    let reference = crate::memory::memory_tests::legacy_scene_renderer(Default::default());
+    let mut r = crate::test_support::staged_renderer(&reference, Default::default());
+    let brush = layer_core::default_brush(DefaultBrushPreset::GPen);
+    r.prepare_startup(&doc, &brush, true).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    crate::test_support::wait_startup(&mut r, deadline, |progress| progress.brush_ready,
+        format_args!("Fine transform startup timed out"));
+    let mut frame = packet(doc.scene(), extent);
+    frame.view = layer_render::ViewState { width_px: 1920, height_px: 1080,
+        document_to_surface: [0.27, 0., 0., 0.27, 0., 0.] };
+    let preview = layer_render::TransformPreview { transaction: 1, moving: true,
+        target: crate::layer_tests::placement::target(&doc), selection: None,
+        transform: layer_core::ImageTransform { placement: layer_core::LayerPlacement::from_projective(
+            layer_core::Projective::rect_to_quad(layer_core::Rect::from_extent(extent),
+                [[900., 150.], [5140., 100.], [5900., 3920.], [150., 3940.]]
+                    .map(|[x, y]| layer_core::Point { x, y })).unwrap()), ..Default::default() } };
+    r.set_transform_preview(Some(&preview)).unwrap();
+    crate::memory::memory_tests::legacy_scene_frame(&mut r, frame);
+    let selected = request(&r, frame).unwrap();
+    assert_eq!(selected.plan.level, 1);
+    assert!(matches!(selected.evaluation, Evaluation::Tiled(_)));
+    assert!(r.scene_pipelines.fine_resample.mesh.iter().all(|p| !p.ready()));
+    assert!(!r.prepare_transform_preview(frame, Some(&preview)), "the first fine draw must wait for its cold pipelines");
+    while !r.raster_dependencies_ready(frame, Some(&preview)) {
+        r.poll_startup().unwrap();
+        assert!(std::time::Instant::now() < deadline, "Fine transform preparation timed out");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(r.scene_pipelines.fine_resample.mesh[4..].iter().all(|p| p.ready()));
+    assert!(r.scene_pipelines.fine_resample.mesh[..4].iter().all(|p| !p.ready()));
+    assert!(r.scene_pipelines.resample.mesh[..4].iter().all(|p| !p.ready()));
+    crate::test_support::submit_published(&mut r, frame);
+    assert!(matches!(r.scale_display.as_ref().unwrap().evaluation, Evaluation::Tiled(_)));
+    assert!(r.scene_pipelines.fine_resample.mesh[..4].iter().all(|p| !p.ready()));
+}
+
+#[test]
 fn fitted_projective_preview_reuses_coarse_pixels_and_bounds_fine_source_ownership() {
     let extent=[6000,4000];
     let mut doc=layer_core::Document::new(layer_core::PortableId::random(),extent[0],extent[1],layer_core::DocumentNames {paint:"bounded projective source".into(),paper:"Paper".into()});

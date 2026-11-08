@@ -273,6 +273,13 @@ impl WgpuRasterizer {
         };
         let request=match scene::scale::request(self,packet) {Ok(request)=>request,Err(_)=>return true};
         if request.plan.level==0 || request.evaluation==scene::scale::Evaluation::Native {self.transforms.as_mut().unwrap().cancel_preparation();return true;}
+        let pipelines=if request.evaluation.fine_capacity().is_some() {&self.scene_pipelines.fine_resample} else {&self.scene_pipelines.resample};
+        let entries:&[usize]=if preview.transform.placement.mesh.is_some() {&[0,1,2,3]} else {&[4,5]};
+        if let Some(compiler)=self.startup.as_ref().map(|startup|&startup.compiler).or(self.preparation_compiler.as_ref()) {
+            let ready=compiler.require(entries.iter().map(|&i|&pipelines.mesh[i]),startup::BRUSH);
+            compiler.start();
+            if !ready {return false;}
+        }
         let mut transforms=self.transforms.take().unwrap();
         let result=self.record_restore_uploads(|r,encoder|transforms.prepare_preview(r,encoder,preview,packet.scene,request.plan.level,request.evaluation.fine_capacity().is_some()));
         self.transforms=Some(transforms);

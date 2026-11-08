@@ -601,8 +601,7 @@ impl WgpuRasterizer {
         if transform {
             current.render.extend(self.transforms.as_ref().unwrap().pipelines());
             current.compute.extend(self.transforms.as_ref().unwrap().display_pipelines());
-            current.render.extend(self.scene_pipelines.resample.mesh.iter().cloned());
-            current.render.extend(self.scene_pipelines.fine_resample.mesh.iter().cloned());
+            current.render.extend([4, 5].map(|i| self.scene_pipelines.resample.mesh[i].clone()));
             current.compute.extend(self.selection_clip.pipelines().map(Clone::clone));
         }
         if let Some(retouch) = self.retouch.as_ref().filter(|r| r.prepared()) {
@@ -1395,9 +1394,7 @@ mod gpu_tests {
             "a demanded transform must be ready before drawing");
         assert!(transforms.mesh_pipelines().into_iter().all(|p| !p.ready()),
             "ordinary transforms must not prepare unused warp meshes");
-        let meshes: Vec<_> = transforms.mesh_pipelines().into_iter()
-            .chain(renderer.scene_pipelines.resample.mesh.iter().cloned())
-            .chain(renderer.scene_pipelines.fine_resample.mesh.iter().cloned()).collect();
+        let meshes = transforms.mesh_pipelines();
         let target = document.scene().targets().find(|target| matches!(target, SourceTarget::Paint(_))).unwrap();
         let mesh = layer_core::MeshMap::identity(layer_core::Rect::from_extent([128; 2]), [3, 3]).unwrap()
             .move_node(1, layer_core::Point { x: 0., y: 40. }).unwrap();
@@ -1414,10 +1411,70 @@ mod gpu_tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(meshes.iter().all(|p| p.ready()), "prepared warp dependencies must be reused");
+        assert!(renderer.scene_pipelines.resample.mesh[..4].iter().all(|p| !p.ready())
+            && renderer.scene_pipelines.fine_resample.mesh.iter().all(|p| !p.ready()),
+            "a native warp must not prepare unused display resampling");
         renderer.prepare_startup(&document, &brush, false).unwrap();
         assert!(renderer.poll_startup().unwrap().brush_ready, "cached dependencies resume immediately");
         renderer.prepare_startup(&document, &brush, true).unwrap();
         assert!(renderer.poll_startup().unwrap().brush_ready, "revisiting the transform must reuse its prepared dependencies");
+    }
+
+    #[test]
+    fn transform_display_frames_prepare_only_the_resample_entries_they_draw() {
+        let extent = [512; 2];
+        let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
+        let mut document = crate::layer_tests::placement::paint_document(extent, "Display transform");
+        crate::layer_tests::placement::set_source(&mut document,
+            layer_core::color::source::rgba8_source(extent, |_, _| [127, 63, 191, 255]));
+        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        renderer.prepare_startup(&document, &brush, true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready,
+            format_args!("Transform startup timed out"));
+        let cold = |renderer: &WgpuRasterizer| {
+            assert!(renderer.scene_pipelines.resample.mesh[..4].iter().all(|p| !p.ready()));
+            assert!(renderer.scene_pipelines.fine_resample.mesh.iter().all(|p| !p.ready()));
+        };
+        cold(&renderer);
+        assert!(renderer.scene_pipelines.resample.mesh[4..].iter().all(|p| p.ready()));
+        let mut packet = crate::test_support::packet(document.scene(), extent);
+        packet.view = layer_render::ViewState { width_px: 128, height_px: 128,
+            document_to_surface: [0.25, 0., 0., 0.25, 0., 0.] };
+        let mut preview = layer_render::TransformPreview { transaction: 1, moving: true,
+            target: crate::layer_tests::placement::target(&document), selection: None,
+            transform: layer_core::ImageTransform::affine(layer_core::Affine::translation(layer_core::Point { x: 1.25, y: 0.5 })) };
+        renderer.set_transform_preview(Some(&preview)).unwrap();
+        let request = scene::scale::request(&renderer, packet).unwrap();
+        assert!(request.plan.level > 0);
+        assert!(matches!(request.evaluation, scene::scale::Evaluation::Display));
+        while !renderer.raster_dependencies_ready(packet, Some(&preview)) {
+            renderer.poll_startup().unwrap();
+            assert!(std::time::Instant::now() < deadline, "Display transform preparation timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        crate::test_support::submit_published(&mut renderer, packet);
+        cold(&renderer);
+        assert!(matches!(renderer.scale_display.as_ref().unwrap().evaluation, scene::scale::Evaluation::Display));
+        let mesh = layer_core::MeshMap::identity(layer_core::Rect::from_extent(extent), [3, 3]).unwrap()
+            .move_node(1, layer_core::Point { x: 0., y: 40. }).unwrap();
+        preview.transform.placement = layer_core::LayerPlacement { mesh: Some(Arc::new(mesh)), ..Default::default() };
+        renderer.set_transform_preview(Some(&preview)).unwrap();
+        let mut required = Requirements::default();
+        let transforms = renderer.transforms.as_ref().unwrap();
+        transforms.require_frame(&renderer, packet, Some(&preview), &mut required);
+        assert_eq!(required.render.len(), 1 + transforms.mesh_pipelines().len());
+        assert!(!renderer.prepare_transform_preview(packet, Some(&preview)), "cold warp resampling must defer preparation");
+        while !renderer.raster_dependencies_ready(packet, Some(&preview)) {
+            renderer.poll_startup().unwrap();
+            assert!(std::time::Instant::now() < deadline, "Warp display preparation timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(renderer.scene_pipelines.resample.mesh.iter().all(|p| p.ready()));
+        assert!(renderer.scene_pipelines.fine_resample.mesh.iter().all(|p| !p.ready()));
+        crate::test_support::submit_published(&mut renderer, packet);
+        assert!(renderer.scene_pipelines.fine_resample.mesh.iter().all(|p| !p.ready()));
     }
 
     #[test]
