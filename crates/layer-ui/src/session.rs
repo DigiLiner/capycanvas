@@ -1330,7 +1330,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                     && self.state.phone.menu
                     && !facts.content_drawer.is_some_and(|b| b.contains(position[0], position[1]))
                     && !facts.drawer_connection.is_some_and(|b| b.contains(position[0], position[1]))
-                    && !self.phone_layout().is_some_and(|p| p.capy.contains(position[0], position[1])) {
+                    && !self.phone_layout().and_then(|p| p.anchor_hit(&self.state.workspace.layout, crate::PhoneDrawerAnchor::Capy))
+                        .is_some_and(|bounds| bounds.contains(position[0], position[1])) {
                     self.state.phone.menu = false;
                     reply.change = self.changed(regions::CUSTOMIZATION, false);
                     reply.handled |= canvas;
@@ -1439,6 +1440,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                     && !facts
                         .drawer_connection
                         .is_some_and(|b| b.contains(position[0], position[1]))
+                    && !self.phone_layout().and_then(|phone| match drawer.anchor {
+                        DrawerAnchor::Phone { anchor } => phone.anchor_hit(&self.state.workspace.layout, anchor),
+                        _ => None,
+                    }).is_some_and(|bounds| bounds.contains(position[0], position[1]))
                     && !self
                         .state
                         .customization

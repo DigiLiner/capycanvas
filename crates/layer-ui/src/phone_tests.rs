@@ -483,6 +483,22 @@ fn phone_menu_keeps_its_bridge_and_dismisses_only_outside_contacts() {
             }
         }
     }
+    let viewport = [375, 667];
+    let mut s = phone_session(viewport);
+    s.dispatch(UiAction::Phone { action: PhoneAction::Capy }).unwrap();
+    let phone = s.phone_layout().unwrap();
+    let placement = phone.menu(viewport.map(|v| v as f32), 242., 500., 32.).unwrap();
+    let bridge = placement.connection().unwrap().bounds;
+    let position = [phone.capy.x + phone.capy.width + 0.5, phone.capy.y + phone.capy.height * 0.5];
+    assert!(phone.capy_target.contains(position[0], position[1]));
+    assert!(!phone.capy.contains(position[0], position[1]));
+    assert!(!placement.bounds.contains(position[0], position[1]) && !bridge.contains(position[0], position[1]));
+    s.input(UiInput::Chrome { event: ChromeEvent::Contact { position, canvas: false },
+        facts: ChromeFacts { content_drawer: Some(placement.bounds), drawer_connection: Some(bridge), ..Default::default() },
+        viewport: viewport.map(|v| v as f32) }).unwrap();
+    let after_contact = s.state.phone.menu;
+    s.dispatch(UiAction::Phone { action: PhoneAction::Capy }).unwrap();
+    assert_eq!((after_contact, s.state.phone.menu), (true, false));
 }
 
 #[test]
@@ -1211,3 +1227,42 @@ fn phone_picker_limits_tools_keeps_divider_enabled_and_records_one_edit() {
 }
 
 include!("phone_restore_tests.rs");
+
+#[test]
+fn phone_drawer_opener_contacts_keep_extended_hits_until_release() {
+    for viewport in [[402, 874], [874, 402]] {
+        for swapped in [false, true] {
+            for opener in 0..3 {
+                let mut s = phone_session(viewport);
+                s.dispatch(UiAction::Phone { action: PhoneAction::Metrics { native: [0.; 2], native_counts: [0; 2],
+                    insets: [62., 62., 34., 34.], corners: [0.; 4], movable: false } }).unwrap();
+                if swapped { s.dispatch(UiAction::Phone { action: PhoneAction::SwapSides }).unwrap(); }
+                let phone = s.phone_layout().unwrap();
+                let tiles = s.state.workspace.layout.phone.as_ref().unwrap();
+                let index = tiles.iter().position(|tile| tile.control == ToolbarControl::Panel { panel: Panel::Layers }).unwrap();
+                let (action, visual, hit) = match opener {
+                    0 => (PhoneAction::Tool { tile: tiles[index].id }, phone.tools[index], phone.tool_hits[index]),
+                    1 => (PhoneAction::ToolSettings, phone.settings, phone.settings_hit),
+                    _ => (PhoneAction::Capy, phone.capy, phone.capy_target),
+                };
+                let center = [hit.x + hit.width / 2., hit.y + hit.height / 2.];
+                let position = [center, [center[0], hit.y + 0.5], [center[0], hit.y + hit.height - 0.5],
+                    [hit.x + 0.5, center[1]], [hit.x + hit.width - 0.5, center[1]]].into_iter()
+                    .find(|point| !visual.contains(point[0], point[1])).unwrap();
+                assert!(hit.contains(position[0], position[1]));
+                s.dispatch(UiAction::Phone { action: action.clone() }).unwrap();
+                assert!(if opener == 2 { s.state.phone.menu } else { s.state.customization.drawer.is_some() },
+                    "{viewport:?}, swapped {swapped}, opener {opener}: opener creates its surface");
+                let checkpoint = s.engine().checkpoint();
+                s.input(UiInput::Chrome { event: ChromeEvent::Contact { position, canvas: false },
+                    facts: ChromeFacts::default(), viewport: viewport.map(|v| v as f32) }).unwrap();
+                assert!(if opener == 2 { s.state.phone.menu } else { s.state.customization.drawer.is_some() },
+                    "{viewport:?}, swapped {swapped}, opener {opener}: contact must retain its opener");
+                s.dispatch(UiAction::Phone { action }).unwrap();
+                assert!(!s.state.phone.menu && s.state.customization.drawer.is_none(),
+                    "{viewport:?}, swapped {swapped}, opener {opener}: release closes once");
+                assert_eq!(s.engine().checkpoint(), checkpoint);
+            }
+        }
+    }
+}

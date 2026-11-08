@@ -328,6 +328,13 @@ impl PhoneLayout {
             crate::PhoneDrawerAnchor::Tool(id) => layout.phone.as_ref()?.iter().position(|t| t.id == id).map(|i| self.tools[i]),
         }
     }
+    pub fn anchor_hit(&self, layout: &DockLayout, anchor: crate::PhoneDrawerAnchor) -> Option<Bounds> {
+        match anchor {
+            crate::PhoneDrawerAnchor::Capy => Some(self.capy_target),
+            crate::PhoneDrawerAnchor::ToolSettings => Some(self.settings_hit),
+            crate::PhoneDrawerAnchor::Tool(id) => layout.phone.as_ref()?.iter().position(|t| t.id == id).map(|i| self.tool_hits[i]),
+        }
+    }
     pub fn drawer(&self, anchor: Bounds, viewport: [f32; 2], widths: &[f32], heights: &[f32], gap: f32) -> Option<DrawerPlacement> {
         if !gap.is_finite() || gap < 0. || widths.is_empty() || heights.len() != widths.len()
             || widths.iter().chain(heights).any(|v| !v.is_finite() || *v < 0.) { return None; }
