@@ -1,6 +1,7 @@
 struct DitherSample {
     lightness: f32,
     index: u32,
+    paint: vec4<f32>,
 }
 
 const DITHER_OFFSETS = array<vec2<f32>, 7>(
@@ -86,7 +87,7 @@ fn dither_paint(index: u32, world: vec2<f32>, original: vec4<f32>) -> vec4<f32> 
 fn dither_sample(index: u32, world: vec2<f32>, original: vec4<f32>) -> DitherSample {
     let point = dither_point(index, world);
     if any(point < vec2<f32>(0.0)) || any(point >= render_target.document_extent.xy) || brush_selection_at(point) <= 0.0 {
-        return DitherSample(dot(original.rgb, WORKING_LUMA), index);
+        return DitherSample(dot(original.rgb, WORKING_LUMA), index, original);
     }
     var paint = canvas_load(point);
     if style.color.a > 0.5 {
@@ -94,26 +95,18 @@ fn dither_sample(index: u32, world: vec2<f32>, original: vec4<f32>) -> DitherSam
         else if DITHER_CELLS { paint = vec4<f32>(working_unassociate(paint), 1.0); }
         else if paint.a != original.a { paint = vec4<f32>(working_unassociate(paint) * original.a, original.a); }
     }
-    return DitherSample(dot(paint.rgb, WORKING_LUMA), index | select(0u, 8u, any(paint != original)));
+    return DitherSample(dot(paint.rgb, WORKING_LUMA), index | select(0u, 8u, any(paint != original)), paint);
 }
 
-fn dither_before(a: DitherSample, b: DitherSample, world: vec2<f32>, original: vec4<f32>) -> bool {
+fn dither_before(a: DitherSample, b: DitherSample) -> bool {
     if a.lightness != b.lightness { return a.lightness < b.lightness; }
     if ((a.index | b.index) & 8u) == 0u { return false; }
-    let ca = dither_paint(a.index, world, original);
-    let cb = dither_paint(b.index, world, original);
+    let ca = a.paint;
+    let cb = b.paint;
     if ca.r != cb.r { return ca.r < cb.r; }
     if ca.g != cb.g { return ca.g < cb.g; }
     if ca.b != cb.b { return ca.b < cb.b; }
     return ca.a < cb.a;
-}
-
-fn dither_order(a: ptr<function, DitherSample>, b: ptr<function, DitherSample>, world: vec2<f32>, original: vec4<f32>) {
-    if dither_before(*b, *a, world, original) {
-        let saved = *a;
-        *a = *b;
-        *b = saved;
-    }
 }
 
 fn dither_exposure(previous: vec4<f32>, dose: vec4<f32>) -> vec4<f32> {
@@ -205,38 +198,26 @@ fn smudge_fragment(fragment_position: vec2<f32>, world: vec2<f32>, first: u32, c
 
 fn dither_palette(world: vec2<f32>) -> f32 {
     let original = dither_original(world);
-    var s0 = DitherSample(dot(original.rgb, WORKING_LUMA), 0u);
-    var s1 = dither_sample(1u, world, original);
-    var s2 = dither_sample(2u, world, original);
-    var s3 = dither_sample(3u, world, original);
-    var s4 = dither_sample(4u, world, original);
-    var s5 = dither_sample(5u, world, original);
-    var s6 = dither_sample(6u, world, original);
-    var s7 = dither_sample(7u, world, original);
-    if !DITHER_CELLS && ((s1.index | s2.index | s3.index | s4.index | s5.index | s6.index | s7.index) & 8u) == 0u {
+    var samples = array<DitherSample, 8>();
+    samples[0] = DitherSample(dot(original.rgb, WORKING_LUMA), 0u, original);
+    var changed = 0u;
+    for (var i = 1u; i < 8u; i += 1u) {
+        samples[i] = dither_sample(i, world, original);
+        changed |= samples[i].index;
+    }
+    if !DITHER_CELLS && (changed & 8u) == 0u {
         return -1.0;
     }
-    dither_order(&s0, &s1, world, original);
-    dither_order(&s2, &s3, world, original);
-    dither_order(&s4, &s5, world, original);
-    dither_order(&s6, &s7, world, original);
-    dither_order(&s0, &s2, world, original);
-    dither_order(&s1, &s3, world, original);
-    dither_order(&s4, &s6, world, original);
-    dither_order(&s5, &s7, world, original);
-    dither_order(&s1, &s2, world, original);
-    dither_order(&s5, &s6, world, original);
-    dither_order(&s0, &s4, world, original);
-    dither_order(&s3, &s7, world, original);
-    dither_order(&s1, &s5, world, original);
-    dither_order(&s2, &s6, world, original);
-    dither_order(&s1, &s4, world, original);
-    dither_order(&s3, &s6, world, original);
-    dither_order(&s2, &s4, world, original);
-    dither_order(&s3, &s5, world, original);
-    dither_order(&s3, &s4, world, original);
-    return f32((s0.index & 7u) | ((s1.index & 7u) << 3u) | ((s2.index & 7u) << 6u) | ((s3.index & 7u) << 9u)
-        | ((s4.index & 7u) << 12u) | ((s5.index & 7u) << 15u) | ((s6.index & 7u) << 18u) | ((s7.index & 7u) << 21u));
+    var code = 0u;
+    for (var i = 0u; i < 8u; i += 1u) {
+        var rank = 0u;
+        for (var j = 0u; j < 8u; j += 1u) {
+            if dither_before(samples[j], samples[i])
+                || (j < i && !dither_before(samples[i], samples[j])) { rank += 1u; }
+        }
+        code |= (samples[i].index & 7u) << (rank * 3u);
+    }
+    return f32(code);
 }
 
 fn dither_source_weight(index: u32, world: vec2<f32>, weight: f32) -> f32 {
@@ -247,34 +228,24 @@ fn dither_source_weight(index: u32, world: vec2<f32>, weight: f32) -> f32 {
     return weight * brush_selection_at(point);
 }
 
-fn dither_weight(index: u32, weights: vec4<f32>, pairs: vec4<f32>) -> f32 {
-    let low = select(weights.xy, weights.zw, (index & 2u) != 0u);
-    let high = select(pairs.xy, pairs.zw, (index & 2u) != 0u);
-    let pair = select(low, high, (index & 4u) != 0u);
-    return select(pair.x, pair.y, (index & 1u) != 0u);
-}
-
 fn dither_choice(world: vec2<f32>, state: MaterialOutput) -> u32 {
     if state.coverage.x <= 0.0 || style.canvas_opacity.z <= 0.0 { return 0u; }
-    var weights = dither_weights(vec4<f32>(0.0, state.coverage.yzw));
+    let weights = dither_weights(vec4<f32>(0.0, state.coverage.yzw));
     let pairs = dither_weights(state.wetness);
-    let w1 = dither_source_weight(1u, world, weights[1u]);
-    let w2 = dither_source_weight(2u, world, weights[2u]);
-    let w3 = dither_source_weight(3u, world, weights[3u]);
-    let w4 = dither_source_weight(4u, world, pairs[0u]);
-    let w5 = dither_source_weight(5u, world, pairs[1u]);
-    let w6 = dither_source_weight(6u, world, pairs[2u]);
-    let w7 = dither_source_weight(7u, world, pairs[3u]);
-    weights = vec4<f32>(max(1.0 - (w1 + w2 + w3 + w4 + w5 + w6 + w7), 0.0), w1, w2, w3);
-    let selected_pairs = vec4<f32>(w4, w5, w6, w7);
+    var selected = array<f32, 8>();
+    var others = 0.0;
+    for (var index = 1u; index < 8u; index += 1u) {
+        selected[index] = dither_source_weight(index, world, select(pairs[index & 3u], weights[index & 3u], index < 4u));
+        others += selected[index];
+    }
+    selected[0] = max(1.0 - others, 0.0);
     let order = u32(state.coverage.x);
     let threshold = dither_rank(select(world, floor(world / style.deformation.w), DITHER_CELLS), dither_hash(u32(style.transport_b.z)));
     var cumulative = 0.0;
     var chosen = 0u;
     for (var slot = 0u; slot < 8u; slot += 1u) {
         let reference = (order >> (slot * 3u)) & 7u;
-        let index = reference & 7u;
-        let weight = dither_weight(index, weights, selected_pairs);
+        let weight = selected[reference];
         if weight <= 0.0 { continue; }
         chosen = reference;
         cumulative += weight;
