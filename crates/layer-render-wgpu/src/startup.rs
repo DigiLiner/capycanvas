@@ -571,26 +571,29 @@ impl WgpuRasterizer {
             current.compute.extend(native.required_pipelines(document.composition().color.depth,startup.document_key.as_ref().unwrap().key.gray).cloned());
         }
         // A physical eraser can select the erase variant without a UI change.
-        for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
-            let style = layer_render::DabStyle {
-                selection: document.working.selection.clone().map(Arc::new),
-                ..brush_style(document, brush, tool)
-            };
-            startup.masks.style(&startup.compiler, &style, BRUSH);
-            if let Some(binding) = style.grain.and(style.paper.as_ref()) {
-                self.papers.require(&self.device, Some(&startup.compiler), binding, BRUSH)?;
-            }
+        let styles = [StrokeTool::Brush, StrokeTool::Eraser].map(|tool| layer_render::DabStyle {
+            selection: document.working.selection.clone().map(Arc::new),
+            ..brush_style(document, brush, tool)
+        });
+        for style in &styles {
             let mask = startup.document_key.as_ref().unwrap().key.mask;
             let reach = dry_material::Reach::of(brush);
-            strokes.style(self, &style, reach, mask, true);
-            let plan = BrushPassPlan::for_device(&style, &self.device);
-            if !mask && pointwise(&style) && plan.direct.is_none() {
-                for extra in reach.any_size().batch_variants(&style).filter(|&extra| !reach.required_variants(&style).any(|required| required == extra)) {
+            strokes.style(self, style, reach, mask, true);
+            let plan = BrushPassPlan::for_device(style, &self.device);
+            if !mask && pointwise(style) && plan.direct.is_none() {
+                for extra in reach.any_size().batch_variants(style).filter(|&extra| !reach.required_variants(style).any(|required| required == extra)) {
                     for coverage in [Some(plan.state.coverage), plan.state.coverage.then_some(false)].into_iter().flatten() {
-                        let pipeline = self.pipelines.dry_material.selected_kernel(&style, plan.material, coverage, extra);
+                        let pipeline = self.pipelines.dry_material.selected_kernel(style, plan.material, coverage, extra);
                         if !warming.iter().any(|p| std::ptr::eq(*p, pipeline)) { warming.push(pipeline); }
                     }
                 }
+            }
+        }
+        strokes.enqueue(&startup.compiler, BRUSH);
+        for style in &styles {
+            startup.masks.style(&startup.compiler, style, BRUSH);
+            if let Some(binding) = style.grain.and(style.paper.as_ref()) {
+                self.papers.require(&self.device, Some(&startup.compiler), binding, BRUSH)?;
             }
         }
         // Live transforms do not change document revision or brush settings.
@@ -608,7 +611,6 @@ impl WgpuRasterizer {
             current.compute.extend(compute);
         }
         current.enqueue(&startup.compiler, BRUSH);
-        strokes.enqueue(&startup.compiler, BRUSH);
         startup.current = current;
         startup.strokes = strokes;
         startup.warming = warming.into_iter().cloned().collect();

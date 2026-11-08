@@ -64,6 +64,8 @@ impl Activity {
         }
     }
 }
+fn workers(parallelism: usize) -> usize { (parallelism * 3).div_ceil(8).clamp(1, 6) }
+
 impl Compiler {
     pub fn activity(&self) -> Activity { Activity(self.0.clone()) }
     pub fn input(&self) { self.activity().input(); }
@@ -74,7 +76,7 @@ impl Compiler {
         queue.admission.delay(queue.jobs.iter().map(|job| job.priority))
     }
     pub fn new() -> Result<Self, GpuRasterError> {
-        let workers = std::thread::available_parallelism().map_or(1, |n| (n.get() / 4).clamp(1, 4));
+        let workers = std::thread::available_parallelism().map_or(1, |n| workers(n.get()));
         Self::with_workers(workers)
     }
     fn with_workers(workers: usize) -> Result<Self, GpuRasterError> {
@@ -213,6 +215,13 @@ impl Drop for Compiler {
 mod tests {
     use super::*;
     use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn worker_counts_follow_parallelism() {
+        for (parallelism, expected) in [(2, 1), (4, 2), (6, 3), (8, 3), (12, 5), (16, 6), (32, 6)] {
+            assert_eq!(workers(parallelism), expected, "parallelism {parallelism}");
+        }
+    }
 
     fn finish_jobs(compiler: &Compiler) {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
