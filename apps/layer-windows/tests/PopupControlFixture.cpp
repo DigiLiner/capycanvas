@@ -15,6 +15,7 @@
 #include "PalettesView.h"
 #include "TextureDialog.h"
 #include "HeaderView.h"
+#include "HeaderInput.h"
 #include <future>
 #include <msctf.h>
 #pragma comment(lib,"uuid.lib")
@@ -156,6 +157,48 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
     bool visiblePopup(){for(auto const& popup:VisualTreeHelper::GetOpenPopupsForXamlRoot(root.XamlRoot()))if(popup.IsOpen())return true;return false;}
     void pending(){require(owner.Pending()&&!owner.Open()&&data->transients.size()==1,L"Pending popup lacks immediate unique cancellation registration");}
     void empty(){require(!owner.Active()&&!owner.Pending()&&!owner.Open()&&data->transients.empty()&&data->popupCount==0,L"Popup cancellation left retained state or registrations");}
+    winrt::Windows::Foundation::IAsyncAction headerContextOrdering(){
+        auto source=std::make_shared<WorkspaceData>();context.apply(source);
+        A choices,section;section.Append(O({{L"label",S(L"Fixture workspace")},{L"action",O({{L"type",S(L"workspace_manager")},{L"command",O({{L"type",S(L"show_in_switcher")},{L"id",S(L"fixture-header")}})}})}}));choices.Append(section);
+        A zones,items;for(uint32_t id:{1u,2u})items.Append(O({{L"id",N(id)},{L"item",O({{L"kind",S(L"workspaces")}})}}));zones.Append(items);
+        auto header=O({{L"editing",B(true)},{L"zones",zones}});
+        source->state=O({{L"theme",S(root.RequestedTheme()==ElementTheme::Light?L"light":L"dark")}});
+        source->model=O({{L"header",header},{L"state",source->state},{L"windows_workspace",O({{L"switcher_options",O({{L"sections",choices}})}})}});
+        unsigned queries=0,nativeOpened=0,nativeClosed=0;source->popupChanged=[&](bool open){if(open)++nativeOpened;else ++nativeClosed;};source->query=[&](CanvasQueryKind,std::string,PreviewReply){++queries;return false;};source->send=[](std::string){};
+        Canvas surface;surface.Width(380);surface.Height(130);surface.Background(clear());Button sources[2],editors[2];
+        for(uint32_t index=0;index<2;++index){
+            sources[index].Content(box_value(L"Workspace source "+to_hstring(index+1)));editors[index].Content(box_value(L"Workspace editor "+to_hstring(index+1)));
+            for(auto const& control:{sources[index],editors[index]}){control.Width(160);control.Height(34);Canvas::SetLeft(control,float(10+index*190));surface.Children().Append(control);}
+            Canvas::SetTop(sources[index],8);Canvas::SetTop(editors[index],70);
+        }
+        uint32_t focusedItem=0;std::unique_ptr<HeaderInput> input;A history;
+        auto record=[&](hstring const& step){unsigned popups=0;for(auto const& popup:VisualTreeHelper::GetOpenPopupsForXamlRoot(root.XamlRoot()))if(popup.IsOpen())++popups;history.Append(O({{L"step",S(step)},{L"selected",N(input?input->Selected():0)},{L"focused_item",N(focusedItem)},{L"popup_count",N(source->popupCount)},{L"registrations",N(double(source->transients.size()))},{L"native_popups",N(popups)},{L"native_opened",N(nativeOpened)},{L"native_closed",N(nativeClosed)}}));};
+        input=std::make_unique<HeaderInput>(source,surface,[&]{
+            if(input&&input->Selected()!=focusedItem){record(L"before-editor-focus");focusedItem=input->Selected();if(focusedItem>=1&&focusedItem<=2)editors[focusedItem-1].Focus(FocusState::Programmatic);record(L"after-editor-focus");}
+        });
+        for(uint32_t index=0;index<2;++index)input->Source(sources[index],O({{L"kind",S(L"item")},{L"value",N(index+1)}}),L"Workspace source");
+        input->Configure(header,true,J{});root.Children().InsertAt(0,surface);
+        auto cleanup=[&]{if(input)input->Cancel();uint32_t at;if(root.Children().IndexOf(surface,at))root.Children().RemoveAt(at);input.reset();};
+        auto shown=[&]{auto command=workspaceElement(L"workspace-switcher-show-fixture-header");return source->popupCount==1&&visiblePopup()&&command&&command.IsLoaded()&&command.ActualWidth()>0;};
+        std::exception_ptr failure;
+        try{
+            co_await wait([&]{return sources[0].IsLoaded()&&sources[1].ActualWidth()==160&&editors[0].IsLoaded()&&editors[1].ActualWidth()==160;},L"Header context sources and editors did not arrange");
+            input->Select(1);co_await wait([&]{return focusedItem==1&&FocusManager::GetFocusedElement(root.XamlRoot())==editors[0];},L"Header context initial editor did not take native focus");privacy();
+            input->Context(2,sources[1]);record(L"direct-return");
+            co_await wait(shown,L"Header direct context closed before native Opened after editor selection");co_await settle();
+            require(shown()&&input->Selected()==2&&focusedItem==2&&queries==0,L"Header direct context lost its native menu or selected editor");
+            input->Cancel();co_await wait([&]{return source->popupCount==0&&source->transients.empty()&&!visiblePopup();},L"Header direct context did not acknowledge native Closed");
+            input->Select(1);co_await wait([&]{return focusedItem==1&&FocusManager::GetFocusedElement(root.XamlRoot())==editors[0];},L"Header right-click initial editor did not take native focus");
+            nativePress(sources[1],true);
+            co_await wait(shown,L"Header ContextRequested closed before native Opened after editor selection");co_await settle();
+            require(shown()&&input->Selected()==2&&focusedItem==2&&queries==0,L"Header ContextRequested lost its native menu or selected editor");
+            input->Cancel();co_await wait([&]{return source->popupCount==0&&source->transients.empty()&&!visiblePopup();},L"Header ContextRequested did not acknowledge native Closed");
+            ++checks;
+        }catch(...){failure=std::current_exception();}
+        record(L"before-cleanup");cleanup();auto evidence=to_string(history.Stringify());auto path=output.parent_path()/L"header-context-ordering.json";
+        co_await resume_background();{std::ofstream file(path);file<<evidence;if(!file&&!failure)failure=std::make_exception_ptr(hresult_error(E_FAIL,L"Header context native evidence was not saved"));}co_await apartment;
+        if(failure)std::rethrow_exception(failure);
+    }
     winrt::Windows::Foundation::IAsyncAction ordinaryOpening(){
         struct Observation{unsigned opening=0,opened=0,closed=0;bool cancelOpening=true;hstring error;};
         auto observed=std::make_shared<Observation>();MenuFlyout ordinary;MenuFlyoutItem item;item.Text(L"Ordinary popup action");ordinary.Items().Append(item);
@@ -984,6 +1027,7 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
             require(opened==beforeOpen+1&&owner.Open()&&data->transients.size()==1,L"Popup registration did not survive ShowAt through Opened");
             require(data->dismissTransients(),L"Visible popup ignored cancellation registry");co_await wait([this,beforeClosed]{return closedCount==beforeClosed+1&&!visiblePopup();},L"Native popup Closed acknowledgement or visible-popup retirement timed out");
             require(!shown.Current()&&!shown.Show(anchor,{}),L"Reply reopened closed popup");empty();++checks;
+            phase=L"header-context-ordering";co_await headerContextOrdering();
             phase=L"workspace-ime";co_await workspaceIme();
             phase=L"shortcut-search-ime";co_await shortcutSearchIme();
             phase=L"customization-name-ack";co_await customizationDraft();

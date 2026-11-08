@@ -308,7 +308,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
             auto item=object(element.Tag().as<J>(),L"header_source");auto kind=str(item,L"kind");
             if(kind!=L"item"&&kind!=L"background"&&kind!=L"capy")return;
             Point at{};if(!e.TryGetPosition(self->root,at)){auto box=visibleBounds(element,self->root);at={box.X,box.Y+box.Height};}
-            self->selected=uint32_t(num(item,L"value"));self->context(self->selected,at,false,self->focusSource(e.OriginalSource()));self->notify();
+            self->selected=uint32_t(num(item,L"value"));self->notify();self->context(self->selected,at,false,self->focusSource(e.OriginalSource()));
         }});
         root.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->deferCancel();});
         root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock())self->deferCancel();});
@@ -334,7 +334,7 @@ void HeaderInput::WorkspaceOptions(FrameworkElement const& invoking){
 void HeaderInput::Context(uint32_t id,FrameworkElement const& invoking){
     if(impl->active())return;
     impl->hideMenu();auto box=visibleBounds(invoking,impl->root);
-    impl->selected=id;impl->context(id,{box.X,box.Y+box.Height},false,invoking);impl->notify();
+    impl->selected=id;impl->notify();impl->context(id,{box.X,box.Y+box.Height},false,invoking);
 }
 void HeaderInput::Configure(J const& model,bool editing,J const& request){
     auto identity=model.Stringify()+request.Stringify();
