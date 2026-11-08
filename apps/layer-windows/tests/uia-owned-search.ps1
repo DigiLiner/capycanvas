@@ -2331,3 +2331,21 @@ Write-Output 'Actual clipboard Copy routing rejects stale native context and rev
  }
  'Actual Toolbar-Action waits for its shared prompt and visible native confirm before the original Cancel journey.'
 }
+
+& {
+    $tokens=$null;$errors=$null
+    $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-tool-variations.ps1'),[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw ($errors|Out-String)}
+    $actual=$source.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Sketch-Drawers'},$true)
+    $ready=$actual.Body.Find({param($node)$node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Wait-Until'},$true)
+    $predicate=$ready.CommandElements[1].ScriptBlock.GetScriptBlock()
+    $blank=$actual.Body.Find({param($node)$node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$blank'},$true)
+    if(!$blank -or $ready.Extent.EndOffset -ge $blank.Extent.StartOffset){throw 'Sketch readiness is not before the exact blank baseline'}
+    function Model {$script:sample}
+    foreach($canvas in @($false,$true)){foreach($brush in @($false,$true)){foreach($shaders in @($false,$true)){
+        $script:sample=[pscustomobject]@{canvas_ready=$canvas;brush_ready=$brush;shaders_ready=$shaders}
+        $accepted=[bool](& $predicate);$expected=$canvas -and $brush -and $shaders
+        if($accepted -ne $expected){throw 'Sketch blank baseline accepted unfinished paper shaders'}
+    }}}
+}
+'Sketch blank baseline requires canvas, brush and paper shader readiness'

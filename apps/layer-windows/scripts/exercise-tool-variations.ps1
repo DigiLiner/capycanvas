@@ -152,7 +152,7 @@ function Workspace([string]$Id){
 function Sketch-Drawers {
     Workspace 'builtin:workspace:painter'
     Maximize-DrawingWindow
-    Wait-Until {(Model).canvas_ready -and (Model).brush_ready} 'Sketch canvas did not become ready' 120
+    Wait-Until {(Model).canvas_ready -and (Model).brush_ready -and (Model).shaders_ready} 'Sketch canvas did not become ready' 120
     $paperPoint=Clear-CanvasPoint 'title-bar' 40 0;$park=Point 'title-bar'
     [CapyRowPointer]::Hover($park.x,$park.y)
     $blank=Wait-StablePixels {Screen-Pixels $paperPoint[0] $paperPoint[1]}
