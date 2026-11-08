@@ -132,5 +132,29 @@ namespace CapyRegisteredDiscoveryTest {
   }
   Remove-Variable activationWindows -Scope Script
  }
+ & {
+  $scrollPath=Join-Path (Split-Path $Helper) 'exercise-scroll-indicators.ps1'
+  $scroll=[Management.Automation.Language.Parser]::ParseFile($scrollPath,[ref]$tokens,[ref]$errors)
+  if($errors.Count){throw 'Actual scroll fixture did not parse'}
+  $body=@($scroll.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.TryStatementAst]})[0].Body.Statements
+  $setup=@($body|Where-Object {$_.Extent.Text.Contains('$env:CAPY_FIXTURE_CONTEXT') -or ($_ -is [Management.Automation.Language.PipelineAst] -and $_.PipelineElements[0] -is [Management.Automation.Language.CommandAst] -and $_.PipelineElements[0].GetCommandName() -eq 'Update-CapyFixtureContext')})
+  if(!$setup.Count){throw 'Missing actual scroll context setup'}
+  $operation=[scriptblock]::Create(($setup.Extent.Text -join "`n"))
+  foreach($inherited in @($true,$false)){
+   $run=Join-Path $Output ('scroll-'+$inherited);New-Item -ItemType Directory -Force $run|Out-Null
+   $parent=Join-Path $Output ('parent-'+$inherited+'.json')
+   $windows=@(@{process_id=33;hwnd=123456;window_id=77})
+   if($inherited){@{marker='keep';windows=$windows}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $parent;$env:CAPY_FIXTURE_CONTEXT=$parent}
+   else{Remove-Item Env:CAPY_FIXTURE_CONTEXT -ErrorAction SilentlyContinue}
+   & $operation
+   $expected=if($inherited){$parent}else{Join-Path $run 'context.json'}
+   if($env:CAPY_FIXTURE_CONTEXT -cne $expected){throw 'Scroll fixture replaced its inherited row context'}
+   if(!(Test-Path -LiteralPath $expected)){throw 'Scroll fixture did not publish its evidence context'}
+   $context=Get-Content -LiteralPath $expected -Raw|ConvertFrom-Json
+   if($context.run -cne $run){throw 'Scroll fixture context omitted the actual child run directory'}
+   if($inherited -and ($context.marker -cne 'keep' -or @($context.windows).Count -ne 1 -or $context.windows[0].process_id -ne 33 -or $context.windows[0].hwnd -ne 123456 -or $context.windows[0].window_id -ne 77)){throw 'Scroll evidence setup changed the recorded window identity'}
+   $script:checks++
+  }
+ }
  @{status='passed';cases=$checks;ps=$PSVersionTable.PSVersion.ToString();native_stub_scope='Registered HWND/native-owner/FromHandle only; desktop and descendant identity discovery throw; no app/window/input';helper_sha256=(Get-FileHash $Helper).Hash}|ConvertTo-Json|Set-Content (Join-Path $Output 'result.json')
 } finally {$env:CAPY_FIXTURE_CONTEXT=$before}

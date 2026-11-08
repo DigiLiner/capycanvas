@@ -64,7 +64,9 @@ function Offset([string]$Family,[double]$Offset){
     Wait-Until {[math]::Abs((State).$Family.offset-$Offset)-lt1} "$Family offset did not converge to $Offset"
 }
 try{
-    $env:CAPY_SCROLL_INDICATORS='1';$env:CAPY_FEEDBACK_THEME=$Theme;$env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_FIXTURE_CONTEXT=Join-Path $run 'context.json'
+    $env:CAPY_SCROLL_INDICATORS='1';$env:CAPY_FEEDBACK_THEME=$Theme;$env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
+    if(!$env:CAPY_FIXTURE_CONTEXT){$env:CAPY_FIXTURE_CONTEXT=Join-Path $run 'context.json'}
+    Update-CapyFixtureContext {param($context);$context.run=$run}
     $Executable=(Resolve-Path -LiteralPath $Executable).Path
     Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $run 'executed-controller.ps1')
     Get-FileHash -LiteralPath $Executable,(Join-Path (Split-Path $Executable) 'Microsoft.UI.Xaml.dll') | Select-Object Path,Hash | ConvertTo-Json | Set-Content (Join-Path $run 'identities.json')
