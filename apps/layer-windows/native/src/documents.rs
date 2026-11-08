@@ -1185,6 +1185,25 @@ mod tests {
     }
 
     #[test]
+    fn retained_pressure_failure_preserves_drawings_and_retries_real_storage() {
+        let mut f = Fixture::new();
+        let pressure = f.hold_pressure();
+        let (service, host) = (&mut f.service, &mut f.host);
+        assert_eq!(service.window.documents.order(), [1, 2]);
+        let failed = pressure.queued.lock().unwrap().pop_front().unwrap();
+        drop(failed);
+        assert!(service.window.documents.storage_error().is_some());
+        assert!(service.window.documents.resident_bytes() > 0);
+        assert_eq!(service.window.documents.order(), [1, 2]);
+        service.tab_action(host, tabs::Action::RetryStorage).unwrap();
+        assert!(service.window.documents.trim_in_flight());
+        pressure.drain();
+        assert!(service.window.documents.storage_error().is_none());
+        assert_eq!(service.window.documents.resident_bytes(), 0);
+        assert_eq!(service.window.documents.order(), [1, 2]);
+    }
+
+    #[test]
     fn an_explicit_close_keeps_the_pending_spill_barrier() {
         let mut f = Fixture::new();
         let _pressure=f.hold_pressure();

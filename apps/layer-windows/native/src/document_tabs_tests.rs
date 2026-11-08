@@ -274,19 +274,12 @@ fn d3d12_retained_drawing_tabs_spill_history_save_close_and_cancel() {
             assert_eq!(super::super::gpu_tests::image(&mut host).bytes, original_pixels.bytes);
         }
     }
-    let temporary = layer_core::temp_files::directory().unwrap();
-    let _ = std::fs::remove_dir(temporary);
-    std::fs::write(temporary, b"fixture blocks temporary storage").unwrap();
     service.window.documents.set_inactive_ram_budget(0);
     settle(&mut service, &mut host);
-    assert!(service.window.documents.storage_error().is_some());
-    assert!(service.window.documents.resident_bytes() > 0);
-    assert_eq!(service.window.documents.order(), [1, 2]);
-    std::fs::remove_file(temporary).unwrap();
-    service.tab_action(&mut host, Action::RetryStorage).unwrap();
-    settle(&mut service, &mut host);
     assert!(service.window.documents.storage_error().is_none());
+    assert!(!service.window.documents.trim_in_flight());
     assert_eq!(service.window.documents.resident_bytes(), 0);
+    assert_eq!(service.window.documents.order(), [1, 2]);
     let hits = |order: [u64; 2]| {
         order
             .iter()
