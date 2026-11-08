@@ -30,9 +30,10 @@ fn pyramid_sample(image:texture_2d<f32>,linear_sampler:sampler,extent:vec2<f32>,
     if all(q<=(floor(extent/side)-.5)*side) {
         return sample_float(image,linear_sampler,q/vec2<f32>(textureDimensions(image)),level);
     }
-    let a=mip_sample(image,linear_sampler,extent,outside,q,low);
+    var a=vec4(0.);var b=vec4(0.);
+    for (var i=0u;i<select(2u,1u,weight<0.00001);i++) {b=mip_sample(image,linear_sampler,extent,outside,q,low+i);if i==0u {a=b;}}
     if weight<0.00001 {return a;}
-    return mix(a,mip_sample(image,linear_sampler,extent,outside,q,low+1u),weight);
+    return mix(a,b,weight);
 }
 fn area_sample(image:texture_2d<f32>,linear_sampler:sampler,extent:vec2<f32>,outside:f32,
     center:vec2<f32>,dx:vec2<f32>,dy:vec2<f32>)->vec4<f32> {
