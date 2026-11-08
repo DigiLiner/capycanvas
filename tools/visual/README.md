@@ -7,7 +7,7 @@ reference at the same viewport, scale, theme, document and workspace.
 | --- | --- |
 | `chrome-capture.mjs` | Captures the Web editor or a component fixture in headless Chrome. |
 | `compare.py` | Full-image comparison of two PNGs. |
-| `phone_audit.py` | Paired GTK/Web phone allocations, or Android captures against a reference manifest, with a reference, candidate, difference sheet. |
+| `phone_audit.py` | Paired GTK/Web phone allocations, or native captures against a reference manifest, with a reference, candidate, difference sheet. |
 | `check_color_wheel.py` | Checks sampled color-wheel pixels against the shared Rust picker. |
 | `check_icon_paints.py`, `check_control_colors.py` | Flat-fill checks for icon and control-color fixtures. |
 | `tool_action_fixture.py` | Builds the tool-action fixture from an inventory. |
@@ -119,7 +119,7 @@ Compare one matched state with:
 python3 tools/visual/phone_audit.py gtk/state.allocations.json web/state.allocations.json --output artifacts/phone-audit/state
 ```
 
-`--reference manifest.json --candidate <dir>` pairs each Android capture JSON by family, state, case, theme, text size and fixture, writes `<family>/<case>/<state>/sheet.png` and an `index.md`, and lists captures without a reference as missing.
+`--reference manifest.json --candidate <dir>` pairs capture JSON from any host by family, state, case, theme, text size and fixture, writes a comparison sheet per complete key and an `index.md`, and lists captures without a reference as missing. Web phone-audit `index.json` supplies this reference manifest; DPR 2/3 cases use names such as `402x874-light@3`.
 
 The allocation report requires matching state, viewport, DPR, theme, text scale
 and preset. It lists missing elements and every rectangle differing by more than

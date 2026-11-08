@@ -131,9 +131,9 @@ extension XCTestCase {
                     $0.isHittable && $0.frame.maxY <= keyboard.frame.minY
                 }.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
                 guard let scroll else { fail("The keyboard needs a visible editor page scroll"); return }
-                let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                guard let snapshot = try? scroll.snapshot() else { fail("The editor scroll needs its current native contents"); return }
                 let end = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
-                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+                guard dragEditorScroll(scroll, snapshot: snapshot, towardEnd: false, endingAt: end) else { return }
                 let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !keyboardShown() }, object: app)
                 guard XCTWaiter.wait(for: [gone], timeout: 5) == .completed else {
                     fail("Scrolling the editor page must dismiss its keyboard"); return

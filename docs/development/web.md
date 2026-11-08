@@ -127,8 +127,8 @@ Run both Node batches for every Web gate. Dialog fakes must include the shared
 
 Run `bash tools/performance/workspace-motion.sh web --phone-customize` for
 phone toolbar holds, reorder, capacity, picker pages and scoped Restore. Set
-`LAYER_PHONE_GTK_ALLOCATIONS` to the matching native capture directory; picker
-checks consume its exported allocations instead of fixed expected bounds.
+`LAYER_PHONE_GTK_ALLOCATIONS` to the matching native capture directory for GTK-paired
+cases; explicit iPhone cases capture Web references without that prerequisite.
 `LAYER_PHONE_AUDIT_CASES=412x891-light,891x412-dark` selects focused cases from
 the phone audit matrix. The same picker and prompt controls survive page,
 floating and visual-viewport changes; shared Rust supplies role, headers,
@@ -188,7 +188,7 @@ their native GPU backend.
 | `LAYER_TEST_THEME` | Initial theme, `light` or `dark`. |
 | `LAYER_TEST_VERBOSE=1` | Prints browser diagnostics. |
 | `LAYER_TEST_ARTIFACTS` | Where journeys that save captures write them. |
-| `LAYER_PHONE_AUDIT_CASES` | Comma-separated phone audit cases such as `412x891-light,891x412-dark`; omitted means the full matrix. |
+| `LAYER_PHONE_AUDIT_CASES` | Comma-separated phone audit cases such as `412x891-light,402x874-light@3`; DPR 1 keeps its original name, and customization defaults to the existing GTK cases. |
 | `LAYER_PHONE_DRAWER_STATES` | Comma-separated existing `--phone-drawers` state IDs for focused captures; omitted runs every drawer state. |
 | `LAYER_PHONE_DIALOG_ROWS` | Comma-separated row IDs from the selected `--phone-dialogs` batch; captures retain each row's variants and report the requested subset. |
 
@@ -246,7 +246,7 @@ Chrome tests can miss; it doesn't exercise pen pressure.
 | `--phone-input` | Exercises coarse-screen Auto/On/Off, pen takeover, held-picker rendering and recordings, rollback, navigation, taps and transient Zen through browser input. Uses the phone audit matrix and common capture schema; run headed with the Cargo target on scratch storage. |
 | `--phone-dialogs <batch>` | Visits Settings (`w6a`), forms (`w6b`), managers/alerts (`w6c`), canvas panels/search (`w6d`), photo forms (`w7-photo`), or phone menus, gestures and overlays (`m0`); `all` selects every row. Uses 412×891 light and 891×412 dark and exports actual shell parts for GTK comparison. Generate `pkg/prophoto16.png` before photo rows. |
 | `--dialog-layout` | Captures the shared dialog table's desktop baselines at 600/700/800/1024×900 in both themes. |
-| `--phone-audit` | Captures the resting frame at five sizes in both themes, DPR1; 320×320 uses 16 pt text. Use the family flags for frame interactions, drawers, menus, input and customization, and `--phone-dialogs` for dialog rows. Use `LAYER_TEST_ARTIFACTS` for output. Run headed through `workspace-motion.sh web`; pair with GTK allocations using the [phone comparator](../../tools/visual/README.md#comparing-images). |
+| `--phone-audit` | Captures the resting frame across `phoneAuditMatrix` in both themes, including iPhone DPR 2/3; 320×320 uses 16 pt text. Its index includes the native reference manifest. Use the family flags for frame interactions, drawers, menus, input and customization, and `--phone-dialogs` for dialog rows. Use `LAYER_TEST_ARTIFACTS` for output. Run headed through `workspace-motion.sh web`; pair with GTK allocations using the [phone comparator](../../tools/visual/README.md#comparing-images). |
 | `--palettes` | Imports its own exports unless `LAYER_PALETTE_SAMPLES` names a directory with `gpl`, `aco`, `ase`, `swatches` and `kpl` subdirectories of files from other applications. |
 | `--image-object-fixture` | Opens the packages in `apps/layer-web/fixtures/`, authored with the `layer-color` `object_fixture` example from generated sample patterns. `LAYER_OBJECT_FIXTURE_URLS` selects equivalent fixtures as a JSON URL array. |
 | `--tool-bubbles`, `--hdr-bubbles` | `LAYER_BUBBLE_THEMES` and `LAYER_BUBBLE_DEVICES` take comma-separated focused cases. With `--tool-bubbles`, `LAYER_BUBBLE_INPUT_TRACE=1` records native event cancellation on failure. |

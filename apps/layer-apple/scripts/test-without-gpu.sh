@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 CAPY_APP="$(cd "$(dirname "$0")/.." && pwd)"
-CAPY_REPORTS="$CAPY_APP/../../artifacts/release-tests/apple"
+CAPY_REPORTS="${CAPY_REPORTS:-$CAPY_APP/../../artifacts/release-tests/apple}"
 mkdir -p "$CAPY_REPORTS/tmp"
 export TMPDIR="$(cd "$CAPY_REPORTS/tmp" && pwd)"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"

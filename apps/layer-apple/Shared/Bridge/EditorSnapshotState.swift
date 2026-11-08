@@ -17,7 +17,16 @@ import Foundation
     func applicationMenu(_ id: String) -> JSON { menus[id] }
 
     @discardableResult func receive(_ next: JSON) -> Update {
-        var changes: [SnapshotSignal]
+        var changes: [SnapshotSignal] = []
+        defer {
+            #if DEBUG
+            let ready = next["initial_actions_ready"]
+            if !ready.isNull, !SnapshotProjection.equal(snapshotFields.unobserved["initial_actions_ready"].raw, ready.raw) {
+                changes += snapshotFields.stagePatch(["initial_actions_ready": ready])
+            }
+            #endif
+            changes.forEach { $0.publish() }
+        }
         let full = !next["state"].isNull, motion = next["workspace_update"]
         let kind: Update
         if full {
@@ -76,7 +85,6 @@ import Foundation
         // All reads, including those in synchronous observation callbacks, now
         // see coherent retained models and their matching presentation.
         if !full, !next["main_menu"].isNull { changes += snapshotFields.stagePatch(["main_menu": next["main_menu"]]) }
-        changes.forEach { $0.publish() }
         return kind
     }
     private func reflowWorkspace(_ next: JSON) -> JSON? {

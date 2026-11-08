@@ -1301,6 +1301,48 @@
 			"path" = "iOS/Tests/NativeContextMenuChecks.swift";
 			"sourceTree" = "<group>";
 		};
+		"08D1565757A28CDB784AD0B9" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Tests/PhoneAlertChecks.swift";
+			"sourceTree" = "<group>";
+		};
+		"2CCE5255B4389B535B831BBF" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Tests/PhoneCaptureChecks.swift";
+			"sourceTree" = "<group>";
+		};
+		"C8BE55F7E7F3C5086B8EFAAD" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Tests/PhoneCustomizationChecks.swift";
+			"sourceTree" = "<group>";
+		};
+		"B64425C7C8188CE5103E6975" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Tests/PhoneDialogChecks.swift";
+			"sourceTree" = "<group>";
+		};
+		"61BCE7A055C61F6DECD79302" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Tests/PhoneDrawerChecks.swift";
+			"sourceTree" = "<group>";
+		};
+		"20500BEBF7E9828F8AC323E7" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Tests/PhoneLayoutChecks.swift";
+			"sourceTree" = "<group>";
+		};
+		"584AA39A467EDCA1BF566885" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Tests/PhoneSourceChecks.swift";
+			"sourceTree" = "<group>";
+		};
 		"4AC35E74B9B49A72BF6AB181" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -1565,6 +1607,12 @@
 				"67FFE4E545B4BEBEA69FC0A4",
 				"F442593CDC29D01FD4D4675E",
 			);
+		};
+		"FCB81CC9C86BCD49D813BF38" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.json";
+			"path" = "../../tools/visual/phone-capture-ids.json";
+			"sourceTree" = "<group>";
 		};
 		"7274CC092D14B33D3B863BE4" = {
 			"isa" = "PBXFileReference";
@@ -2799,6 +2847,34 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "21F7AEBB59275D0F3D4BAC13";
 		};
+		"DBE94A5BF7768463BF46C927" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "08D1565757A28CDB784AD0B9";
+		};
+		"C26E677ED916EEDE0844BC5B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2CCE5255B4389B535B831BBF";
+		};
+		"7AE53682E49BF64B336633FC" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "C8BE55F7E7F3C5086B8EFAAD";
+		};
+		"695D93ABFD5B671BB449648A" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B64425C7C8188CE5103E6975";
+		};
+		"3E5795DC3F9C2052D046C197" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "61BCE7A055C61F6DECD79302";
+		};
+		"E96C8046F717725F8836E8A7" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "20500BEBF7E9828F8AC323E7";
+		};
+		"6D3ACA790BE37177ED3271FF" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "584AA39A467EDCA1BF566885";
+		};
 		"599E04C69B9F05AF9D2425E3" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "4AC35E74B9B49A72BF6AB181";
@@ -2872,8 +2948,27 @@
 				"23AF6EF3A0D280233F55CDB4",
 				"47DD520DE94CA98F7063E9C7",
 				"E9BE3D34665786C3B8FF2B11",
+				"DBE94A5BF7768463BF46C927",
+				"C26E677ED916EEDE0844BC5B",
+				"7AE53682E49BF64B336633FC",
+				"695D93ABFD5B671BB449648A",
+				"3E5795DC3F9C2052D046C197",
+				"E96C8046F717725F8836E8A7",
+				"6D3ACA790BE37177ED3271FF",
 				"599E04C69B9F05AF9D2425E3",
 				"E3F46F0FEC67C3D9C998E0C3",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"95CC3C8BB0CF89470D54A482" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "FCB81CC9C86BCD49D813BF38";
+		};
+		"016743951E76DE1FB5DD5D45" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+				"95CC3C8BB0CF89470D54A482",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -2949,6 +3044,7 @@
 			"buildConfigurationList" = "35FF17D80C3A94C20F6D2B9E";
 			"buildPhases" = (
 				"CD9746FFB707F79FE4FD8788",
+				"016743951E76DE1FB5DD5D45",
 			);
 			"buildRules" = (
 			);
@@ -4583,6 +4679,13 @@
 				"1FEA291CA42DBDBB1ECE030A",
 				"FEA89FD6C38666D4D7087F49",
 				"21F7AEBB59275D0F3D4BAC13",
+				"08D1565757A28CDB784AD0B9",
+				"2CCE5255B4389B535B831BBF",
+				"C8BE55F7E7F3C5086B8EFAAD",
+				"B64425C7C8188CE5103E6975",
+				"61BCE7A055C61F6DECD79302",
+				"20500BEBF7E9828F8AC323E7",
+				"584AA39A467EDCA1BF566885",
 				"4AC35E74B9B49A72BF6AB181",
 				"E3074AFA18004156B1184C29",
 				"38A94B87502172530B078A49",
@@ -4607,6 +4710,7 @@
 				"915157684DB88C8E3DCE8F38",
 				"E48FE4ABFC68C8E9A0F71404",
 				"89832BF4CA493217BDB4BD8B",
+				"FCB81CC9C86BCD49D813BF38",
 				"0A3E27B8CA818264D75C8D81",
 			);
 			"sourceTree" = "<group>";

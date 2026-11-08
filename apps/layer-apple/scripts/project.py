@@ -57,6 +57,8 @@ for name, kind in [("Generated/SharedAssets.xcassets", "folder.assetcatalog"), (
 refs['InfoPlist.strings'] = obj('InfoPlist.strings', 'PBXVariantGroup', name='InfoPlist.strings', sourceTree='<group>',
     children=[obj(f'InfoPlist.strings/{tag}', 'PBXFileReference', lastKnownFileType='text.plist.strings',
         name=tag, path=f'Generated/AppNames/{tag}.lproj/InfoPlist.strings', sourceTree='<group>') for tag in names])
+phone_capture_ids = obj('phone-capture-ids.json', 'PBXFileReference', lastKnownFileType='text.json',
+    path='../../tools/visual/phone-capture-ids.json', sourceTree='<group>')
 
 targets, products = [], []
 for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")]:
@@ -111,6 +113,9 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
         if name.startswith(platform + "/Tests/") or name.startswith("Shared/Tests/")]
     test_phase = obj(test_name + "sources", "PBXSourcesBuildPhase", buildActionMask=2147483647, files=test_builds, runOnlyForDeploymentPostprocessing=0)
     test_phases = [test_phase]
+    if platform == "iOS":
+        test_phases.append(obj(test_name + "resources", "PBXResourcesBuildPhase", buildActionMask=2147483647,
+            files=[obj(test_name + "capture-ids", "PBXBuildFile", fileRef=phone_capture_ids)], runOnlyForDeploymentPostprocessing=0))
     if platform == "macOS":
         test_phases.append(obj(test_name + "photo-drag-source", "PBXShellScriptBuildPhase", buildActionMask=2147483647,
             files=[], inputPaths=["$(SRCROOT)/scripts/photo-drag-source.sh", "$(SRCROOT)/tests/photo-drag-source.swift"],
@@ -151,7 +156,7 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
 ''')
 
 product_group = obj("products", "PBXGroup", name="Products", children=products, sourceTree="<group>")
-main_group = obj("main", "PBXGroup", children=list(refs.values()) + [product_group], sourceTree="<group>")
+main_group = obj("main", "PBXGroup", children=list(refs.values()) + [phone_capture_ids, product_group], sourceTree="<group>")
 root = obj("project", "PBXProject", attributes={"LastUpgradeCheck": "2660", "BuildIndependentTargetsInParallel": "YES"},
     buildConfigurationList=configs("project", {"MARKETING_VERSION": ".".join(map(str, VERSION)),
         "CURRENT_PROJECT_VERSION": VERSION[0] * 1_000_000 + VERSION[1] * 1_000 + VERSION[2]}), compatibilityVersion="Xcode 14.0", developmentRegion="en",

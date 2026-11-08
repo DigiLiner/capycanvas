@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {runInNewContext} from 'node:vm';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {measurePhoneAuditElements,phoneAuditMatrix,dialogAuditMatrix,auditModes,dialogAuditRows,selectDialogAuditRows,selectPhoneDrawerStates,installPhoneAuditWorkerBoundary,installPhoneAuditColorHistoryProvider,openPhoneDrawerTile,dialogAuditSpecifications,dialogPhoneSpecifications,phoneAuditFrameSpecifications,phoneAuditDrawerSpecifications,takeStrokeRecording,verifyPickerAllocations,dialogScrollerIssues,failedSavePlacementIssues,auditBarMenu} from './phone-audit.mjs';
+import {measurePhoneAuditElements,phoneAuditCase,phoneAuditStem,phoneAuditDeviceMetrics,phoneAuditIdentity,phoneCaptureIDs,phoneAuditCaptureID,phoneAuditInventoryID,phoneAuditMenuID,selectPhoneAuditCases,writePhoneAuditIndex,phoneAuditMatrix,dialogAuditMatrix,auditModes,dialogAuditRows,selectDialogAuditRows,selectPhoneDrawerStates,installPhoneAuditWorkerBoundary,installPhoneAuditColorHistoryProvider,openPhoneDrawerTile,dialogAuditSpecifications,dialogPhoneSpecifications,phoneAuditFrameSpecifications,phoneAuditDrawerSpecifications,takeStrokeRecording,phoneAuditPickerInClient,verifyPickerAllocations,dialogScrollerIssues,failedSavePlacementIssues,auditBarMenu} from './phone-audit.mjs';
 import {strokeRecordingControl} from './stroke-recording.js';
 
 test('collapsed canvas fields open their menu title rather than the current value',async()=>{
@@ -61,6 +61,19 @@ test('collecting a recording cannot leave its completion prompt over the next co
   assert.equal(dialogs,0);
 });
 
+test('picker readback uses client units for contact and loupe checks at every capture DPR',()=>{
+  for(const dpr of [1,2,3]){
+    const canvas={width:402*dpr,height:874*dpr,getBoundingClientRect:()=>({left:13,top:27,width:402,height:874})};
+    const picker={sample_point:[160*dpr,437*dpr],loupe_point:[160*dpr,393*dpr],preview:{rgba:[1,1,1,1]}};
+    const client=phoneAuditPickerInClient(picker,canvas);
+    assert.deepEqual(client.sample_point,[173,464]);
+    assert.deepEqual(client.loupe_point,[173,420]);
+    assert.equal(client.sample_point[1]-client.loupe_point[1],44);
+    assert.equal(client.preview,picker.preview);
+    assert.deepEqual(picker.sample_point,[160*dpr,437*dpr]);
+  }
+});
+
 test('phone frame IDs preserve authored tiles and expose actual slider parts',()=>{
   const specs=phoneAuditFrameSpecifications([{id:88,control:{kind:'color'}},{id:91,control:{kind:'divider'}},{id:204,control:{kind:'command',command:'eraser'}}]);
   assert.deepEqual(specs.filter(s=>s.id.startsWith('tile.')).map(s=>[s.id,s.selector]),[
@@ -75,14 +88,111 @@ test('phone frame IDs preserve authored tiles and expose actual slider parts',()
   assert.deepEqual(phoneAuditFrameSpecifications([]).filter(s=>/^tile\.\d+$/.test(s.id)),[]);
 });
 
-test('phone audit covers both themes at DPR1 and actual 16pt enlarged text',()=>{
-  assert.equal(phoneAuditMatrix.length,10);
-  assert.deepEqual([...new Set(phoneAuditMatrix.map(c=>c.viewport.join('x')))],['412x891','891x412','320x568','320x320','280x560']);
-  for(const entry of phoneAuditMatrix){
+test('phone audit preserves GTK cases and adds iPhone viewport and DPR pairs',()=>{
+  assert.equal(phoneAuditMatrix.length,18);
+  const legacy=phoneAuditMatrix.slice(0,10);
+  assert.deepEqual([...new Set(legacy.map(c=>c.viewport.join('x')))],['412x891','891x412','320x568','320x320','280x560']);
+  for(const entry of legacy){
     assert.equal(entry.dpr,1);
     assert.equal(entry.text_scale,entry.text_pt/11);
     assert.equal(entry.text_pt,entry.viewport.join('x')==='320x320'?16:11);
   }
+  const iphone=phoneAuditMatrix.slice(10);
+  assert.deepEqual(iphone.filter(c=>c.theme==='light').map(c=>[c.viewport,c.dpr]),[[[402,874],3],[[874,402],3],[[375,667],2],[[320,568],2]]);
+  assert.deepEqual(iphone.filter(c=>c.theme==='dark').map(c=>[c.viewport,c.dpr]),[[[402,874],3],[[874,402],3],[[375,667],2],[[320,568],2]]);
+  assert.ok(iphone.every(c=>c.text_pt===11&&c.text_scale===1));
+  assert.equal(new Set(phoneAuditMatrix.map(phoneAuditCase)).size,18);
+});
+
+test('DPR-qualified cases and filenames cannot select or overwrite legacy captures',()=>{
+  const legacy=selectPhoneAuditCases(auditModes.audit,'320x568-light');
+  const iphone=selectPhoneAuditCases(auditModes.audit,'320x568-light@2');
+  assert.deepEqual(legacy.map(c=>c.dpr),[1]);
+  assert.deepEqual(iphone.map(c=>c.dpr),[2]);
+  assert.equal(phoneAuditStem(legacy[0],'rest'),'phone-320x568-light-11pt-rest');
+  assert.equal(phoneAuditStem(iphone[0],'rest'),'phone-320x568-light@2-11pt-rest');
+  assert.equal(phoneAuditStem(iphone[0],'rest','builtin:workspace:painter'),'phone-320x568-light@2-11pt-rest');
+  const presets=['builtin:workspace:illustrator','builtin:workspace:photographer'];
+  const paths=presets.flatMap(preset=>['frame-rest','frame-swapped'].map(state=>phoneAuditStem(iphone[0],state,preset)));
+  assert.deepEqual(paths,[
+    'phone-320x568-light@2-11pt-frame-rest-builtin%3Aworkspace%3Aillustrator',
+    'phone-320x568-light@2-11pt-frame-swapped-builtin%3Aworkspace%3Aillustrator',
+    'phone-320x568-light@2-11pt-frame-rest-builtin%3Aworkspace%3Aphotographer',
+    'phone-320x568-light@2-11pt-frame-swapped-builtin%3Aworkspace%3Aphotographer',
+  ]);
+  assert.equal(new Set([phoneAuditStem(iphone[0],'frame-rest'),phoneAuditStem(iphone[0],'frame-swapped'),...paths]).size,6);
+  assert.throws(()=>selectPhoneAuditCases(auditModes.audit,'320x568-light@3'),/Unknown phone audit case/);
+  assert.deepEqual(selectPhoneAuditCases(auditModes['dialogs-phone']).map(phoneAuditCase),['412x891-light','891x412-dark']);
+});
+
+test('iPhone reference cases supply native phone facts without changing GTK cases',()=>{
+  const legacy=selectPhoneAuditCases(auditModes.audit,'320x568-light')[0];
+  const iphone=selectPhoneAuditCases(auditModes.audit,'874x402-dark@3')[0];
+  assert.deepEqual(phoneAuditDeviceMetrics(auditModes.audit,legacy),{width:320,height:568,deviceScaleFactor:1,mobile:false});
+  assert.deepEqual(phoneAuditDeviceMetrics(auditModes.input,legacy),{width:320,height:568,deviceScaleFactor:1,mobile:true,screenWidth:412,screenHeight:891});
+  assert.deepEqual(phoneAuditDeviceMetrics(auditModes.audit,iphone),{width:874,height:402,deviceScaleFactor:3,mobile:true,screenWidth:874,screenHeight:402});
+  assert.deepEqual(selectPhoneAuditCases(auditModes.customize).map(phoneAuditCase),phoneAuditMatrix.filter(test=>test.dpr===1).map(phoneAuditCase));
+  assert.deepEqual(selectPhoneAuditCases(auditModes.customize,'320x568-light@2').map(test=>test.dpr),[2]);
+});
+
+test('every GTK-paired mode defaults to the same DPR-one cases and opts into iPhone cases explicitly',()=>{
+  const expected=phoneAuditMatrix.filter(entry=>entry.dpr===1).map(phoneAuditCase);
+  for(const mode of ['audit','frame','drawers','menus','input','customize']){
+    assert.deepEqual(selectPhoneAuditCases(auditModes[mode]).map(phoneAuditCase),expected,mode);
+    assert.deepEqual(selectPhoneAuditCases(auditModes[mode],'402x874-light@3').map(entry=>entry.dpr),[3],mode);
+  }
+  const input=selectPhoneAuditCases(auditModes.input)[0];
+  assert.deepEqual(phoneAuditDeviceMetrics(auditModes.input,input),{width:412,height:891,deviceScaleFactor:1,mobile:true,screenWidth:412,screenHeight:891});
+});
+
+test('one shared registry names published pages and rejects old visitor aliases',()=>{
+  assert.equal(phoneCaptureIDs.schema_version,1);
+  const keys=phoneCaptureIDs.states.map(entry=>JSON.stringify([entry.family,entry.state]));
+  assert.equal(new Set(keys).size,keys.length);
+  for(const row of dialogAuditRows)for(const id of [row.id,...(row.variants??[]).map(entry=>entry.id)]){
+    assert.deepEqual(phoneAuditCaptureID('dialogs-phone',id),phoneCaptureIDs.states.find(entry=>entry.family==='pages'&&entry.state===id));
+  }
+  for(const state of ['preferences','cannot-open','new-drawing-paper-color'])assert.throws(()=>phoneAuditCaptureID('dialogs-phone',state),/Unknown phone capture identity/);
+  assert.ok(phoneCaptureIDs.states.find(entry=>entry.state==='menu-touch-scrolled').native_only);
+  assert.throws(()=>phoneAuditCaptureID('menus','menu-touch-scrolled'),/Unknown phone capture identity/);
+});
+
+test('inventory identities use shared base controls and stable commands instead of labels or resolved tools',()=>{
+  const preset='builtin:workspace:painter';
+  assert.equal(phoneAuditInventoryID(preset,{command:'scale_rotate',kind:'command'}).state,'inventory-sketch-scalerotate');
+  assert.equal(phoneAuditInventoryID(preset,{kind:'command',command:'drawing_brush'},'bottom').state,'inventory-sketch-drawingbrush-bottom');
+  assert.equal(phoneAuditInventoryID('builtin:workspace:illustrator',{kind:'tool_slot',slot:'gradient'}).state,'inventory-paint-gradient');
+  assert.equal(phoneAuditInventoryID(null,{kind:'command',command:'drawing_brush'},'settings').state,'inventory-settings-drawing_brush');
+  assert.throws(()=>phoneAuditInventoryID(preset,{kind:'command',command:'pencil'}),/Unknown phone inventory identity/);
+});
+
+test('menu routes and their expected titles come from the shared capture registry',async()=>{
+  const row=phoneAuditMenuID({page:{kind:'application',menu:'image'},path:[[3,0]]},true);
+  assert.equal(row.state,'menu-application-image-3-0-swapped');
+  assert.equal(row.menu.title,'Color Management');
+  assert.equal(phoneAuditMenuID({path:[]}).state,'menu-main');
+  const messages=(await Promise.all(['commands','common','workspace','resources','toolbar'].map(name=>
+    readFile(new URL(`../../assets/locales/en/${name}.ftl`,import.meta.url),'utf8')))).join('\n');
+  for(const {menu} of phoneCaptureIDs.states.filter(entry=>entry.menu)){
+    const line=messages.split('\n').find(line=>line.startsWith(menu.title_message+' = '));
+    assert.equal(line?.slice(menu.title_message.length+3),menu.title,menu.title_message);
+  }
+});
+
+test('Web index exposes native pairing keys and matching-DPR reference paths',async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'capy-phone-index-'));
+  t.after(()=>rm(directory,{recursive:true,force:true}));
+  const testCase=selectPhoneAuditCases(auditModes.audit,'402x874-light@3')[0];
+  const identity=phoneAuditIdentity('audit',testCase,'rest','builtin:workspace:painter');
+  assert.deepEqual(identity,{family:'frame',state:'rest',case:'402x874-light@3',theme:'light',text_size:11,fixture:'builtin:workspace:painter'});
+  assert.equal(phoneAuditIdentity('drawers',testCase,'inventory-sketch-drawingbrush','Sketch').family,'inventory');
+  assert.equal(phoneAuditIdentity('dialogs-phone',testCase,'new-drawing','Sketch').family,'pages');
+  assert.equal(phoneAuditIdentity('menus',testCase,'menu-main','Sketch').family,'menu');
+  const entry={...identity,...testCase,status:'captured',png:'rest.png'};
+  await writePhoneAuditIndex(directory,{cases:[entry,{...entry,state:'unavailable',status:'missing'}]});
+  const report=JSON.parse(await readFile(join(directory,'index.json'),'utf8'));
+  assert.equal(report.cases.length,2);
+  assert.deepEqual(report.references,[{...identity,viewport:[402,874],dpr:3,png:join(directory,'rest.png')}]);
 });
 
 test('focused drawer capture selects existing state names without changing the full journey',()=>{
@@ -100,9 +210,9 @@ test('tool drawer opener clicks a second time when a noncheckable command only c
   assert.deepEqual(events,['click','drawer']);
 });
 
-test('one audit mode table keeps ten phone cases and two case dialog captures separate',()=>{
+test('one audit mode table keeps phone cases and default dialog captures separate',()=>{
   assert.deepEqual(Object.keys(auditModes),['audit','frame','drawers','menus','input','customize','dialogs-phone','dialogs-desktop']);
-  for(const mode of ['audit','frame','drawers','menus','input','customize'])assert.equal(auditModes[mode].matrix.length,10);
+  for(const mode of ['audit','frame','drawers','menus','input','customize'])assert.equal(auditModes[mode].matrix.length,18);
   assert.deepEqual(auditModes['dialogs-phone'].defaultCases,['412x891-light','891x412-dark']);
   assert.equal(auditModes['dialogs-desktop'].matrix.length,8);
   assert.equal(selectDialogAuditRows({mode:'phone',batch:'all'}).length,dialogAuditRows.length);
@@ -292,6 +402,14 @@ test('picker comparison uses paired GTK allocations and rejects metadata, missin
     preset:'builtin:workspace:painter',status:'captured',phone_active:true,elements,missing:[]});
   await writeFile(gtk,JSON.stringify(record('gtk')));await writeFile(web,JSON.stringify(record('web')));
   assert.equal((await verifyPickerAllocations(gtk,web)).metadata_mismatches.length,0);
+  const references=join(directory,'references');await mkdir(references);
+  await writeFile(join(references,'one.allocations.json'),JSON.stringify(record('gtk')));
+  await writeFile(join(references,'two.allocations.json'),JSON.stringify({...record('gtk'),dpr:2}));
+  await writeFile(web,JSON.stringify({...record('web'),dpr:2}));
+  assert.equal((await verifyPickerAllocations(references,web)).metadata_mismatches.length,0);
+  await writeFile(web,JSON.stringify({...record('web'),dpr:3}));
+  await assert.rejects(()=>verifyPickerAllocations(references,web),/No matching GTK picker capture metadata/);
+
   await writeFile(web,JSON.stringify(record('web',parts,'dark')));await assert.rejects(()=>verifyPickerAllocations(gtk,web),/GTK picker allocations/);
   await writeFile(web,JSON.stringify(record('web',parts.filter(part=>part.id!=='picker.choices'))));await assert.rejects(()=>verifyPickerAllocations(gtk,web),/picker.choices/);
   await writeFile(web,JSON.stringify(record('web',parts.filter(part=>part.id!=='picker.row.0.title'))));await assert.rejects(()=>verifyPickerAllocations(gtk,web),/picker.row.0.title/);

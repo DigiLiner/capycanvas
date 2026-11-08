@@ -88,12 +88,16 @@ def compare_pair(gtk, web, output):
     return report
 
 
+def allocation_key(value):
+    return json.dumps([value["state"], value["viewport"], float(value["dpr"]), value["theme"],
+        float(value["text_scale"]), value["preset"]], separators=(",", ":"))
+
+
 def index(directory):
     records = {}
     for path in sorted(directory.rglob("*.allocations.json")):
         value, _ = load(path)
-        key = json.dumps([value["state"], value["viewport"], float(value["dpr"]), value["theme"],
-            float(value["text_scale"]), value["preset"]], separators=(",", ":"))
+        key = allocation_key(value)
         if key in records:
             raise ValueError(f"Duplicate capture state: {records[key]} and {path}")
         records[key] = path
@@ -122,37 +126,96 @@ def compare_matrix(gtk, web, output):
     return report
 
 
+CAPTURE_FIELDS = ("family", "state", "case", "theme", "text_size", "fixture")
+
+
 def capture_key(value):
-    return (value["family"], value["state"], value["case"], value["theme"], float(value["text_size"]), value["fixture"])
+    return tuple(float(value[key]) if key == "text_size" else value[key] for key in CAPTURE_FIELDS)
 
 
-def compare_manifest(manifest, candidates, output):
+def manifest_captures(manifest, candidates, coverage=None):
+    source = json.loads(manifest.read_text())
     references = {}
-    for entry in sorted(json.loads(manifest.read_text())["references"], key=lambda entry: entry.get("duplicate_of") is not None):
+    for entry in sorted(source["references"], key=lambda entry: entry.get("duplicate_of") is not None):
         references.setdefault(capture_key(entry), entry)
-    states = []
+    index_path = candidates / "index.json"
+    metadata = json.loads(index_path.read_text()) if index_path.exists() else {}
+    coverage = coverage if coverage is not None else metadata.get("coverage")
+    if coverage is None:
+        coverage = {"families": sorted({key[0] for key in references}), "cases": sorted({key[2] for key in references})}
+    if not isinstance(coverage, dict) or set(coverage) != {"families", "cases"} or any(
+        not isinstance(coverage[key], list) or not coverage[key] or any(not isinstance(value, str) or not value for value in coverage[key])
+        for key in ("families", "cases")):
+        raise ValueError("Declare nonempty coverage families and cases; state subsets are not supported")
+    if set(coverage["families"]) - {key[0] for key in references} or set(coverage["cases"]) - {key[2] for key in references}:
+        raise ValueError("Declared coverage is absent from the reference manifest")
+    included = lambda key: key[0] in coverage["families"] and key[2] in coverage["cases"]
+    references = {key: entry for key, entry in references.items() if included(key)}
+    if not references:
+        raise ValueError("Declared coverage contains no reference captures")
+    failures = []
+    for key in ("required_unverified", "failed_cases", "fixture_skips", "skipped_tests", "unreachable"):
+        if metadata.get(key):
+            failures.append({"field": key, "value": metadata[key]})
+    results = metadata.get("fixture_results")
+    if results is not None and (not results.get("passedTests") or results.get("skippedTests") or results.get("failedTests")):
+        failures.append({"field": "fixture_results", "value": results})
+    records = {}
     for path in sorted(candidates.rglob("*.json")):
         value = json.loads(path.read_text())
-        if not isinstance(value, dict) or value.get("host") != "android" or value.get("schema_version") != 1:
+        if not isinstance(value, dict) or value.get("schema_version") != 1 or "family" not in value:
             continue
-        state = {key: value[key] for key in ("family", "case", "state", "theme", "text_size", "fixture")}
-        state["candidate"] = str(path.with_suffix(".png"))
-        entry = references.get(capture_key(value))
+        if not all(field in value for field in CAPTURE_FIELDS):
+            raise ValueError(f"Incomplete capture identity: {path}")
+        key = capture_key(value)
+        if key in records:
+            raise ValueError(f"Duplicate candidate capture key: {records[key][0]} and {path}")
+        records[key] = (path, value)
+        if value.get("required_unverified"):
+            failures.append({"field": "required_unverified", "candidate": str(path), "value": value["required_unverified"]})
+        if not included(key):
+            failures.append({"field": "outside_coverage", "candidate": str(path)})
+        if not image_path(path).is_file():
+            failures.append({"field": "missing_image", "candidate": str(path)})
+    if "captures" in metadata and {str(path.resolve()) for path, _ in records.values()} != {
+        str((Path(path) if Path(path).is_absolute() else candidates / path).resolve()) for path in metadata["captures"]
+    }:
+        failures.append({"field": "captures", "value": "Capture index does not match capture metadata files"})
+    missing = sorted(references.keys() - records.keys())
+    if missing:
+        failures.append({"field": "missing_candidates", "keys": [list(key) for key in missing]})
+    if records.keys() - references.keys():
+        failures.append({"field": "missing_references", "keys": [list(key) for key in sorted(records.keys() - references.keys())]})
+    return references, records, dict(coverage, passed=bool(records) and not failures, failures=failures)
+
+
+def compare_manifest(manifest, candidates, output, coverage=None):
+    references, records, coverage = manifest_captures(manifest, candidates, coverage)
+    states = []
+    for key, (path, value) in records.items():
+        state = {field: value[field] for field in CAPTURE_FIELDS}
+        state["candidate"] = str(image_path(path))
+        entry = references.get(key)
         if entry is None:
             state["status"] = "missing"
         else:
-            directory = output / value["family"] / value["case"] / value["state"]
+            identity = json.dumps(key, separators=(",", ":"))
+            directory = output / value["family"] / value["case"] / (value["state"] + "-" + hashlib.sha256(identity.encode()).hexdigest()[:8])
             state["reference"] = entry["png"]
             try:
-                pixels = compare_pixels(Path(entry["png"]), path.with_suffix(".png"), directory)
+                pixels = compare_pixels(Path(entry["png"]), image_path(path), directory)
                 state.update(status="compared", sheet=str((directory / "sheet.png").relative_to(output)),
                              different_fraction=pixels["exact_different_fraction"], passed=pixels["passed"])
             except ValueError as error:
                 state.update(status="error", error=str(error))
         states.append(state)
+    for key in sorted(references.keys() - records.keys()):
+        states.append(dict(zip(CAPTURE_FIELDS, key), reference=references[key]["png"], status="missing_candidate"))
     output.mkdir(parents=True, exist_ok=True)
-    report = {"manifest": str(manifest), "candidates": str(candidates), "states": states,
-              "passed": bool(states) and all(state.get("passed") is True for state in states)}
+    pixels_passed = bool(states) and all(state.get("passed") is True for state in states)
+    report = {"manifest": str(manifest), "candidates": str(candidates), "coverage": coverage, "states": states,
+              "pairing_passed": coverage["passed"], "pixels_passed": pixels_passed,
+              "passed": coverage["passed"] and pixels_passed}
     (output / "index.json").write_text(json.dumps(report, indent=2) + "\n")
     rows = ["| Family | Case | State | Status | Different pixels | Sheet |", "| --- | --- | --- | --- | --- | --- |"]
     for state in states:
@@ -169,13 +232,20 @@ def main():
     parser.add_argument("web", nargs="?", type=Path, help="Web allocation JSON or capture directory")
     parser.add_argument("--reference", type=Path, help="Reference manifest JSON")
     parser.add_argument("--candidate", type=Path, help="Candidate capture directory")
+    parser.add_argument("--scope-family", action="append")
+    parser.add_argument("--scope-case", action="append")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     try:
+        if (args.scope_family or args.scope_case) and not args.reference:
+            raise ValueError("Coverage scope requires --reference and --candidate")
         if args.reference or args.candidate:
             if not (args.reference and args.candidate) or args.gtk or args.web:
                 raise ValueError("Use --reference with --candidate and no GTK/Web captures")
-            report = compare_manifest(args.reference, args.candidate, args.output)
+            if bool(args.scope_family) != bool(args.scope_case):
+                raise ValueError("Declare both --scope-family and --scope-case")
+            coverage = {"families": args.scope_family, "cases": args.scope_case} if args.scope_family else None
+            report = compare_manifest(args.reference, args.candidate, args.output, coverage)
         elif not (args.gtk and args.web):
             raise ValueError("Provide GTK and Web captures, or --reference with --candidate")
         elif args.gtk.is_dir() != args.web.is_dir():

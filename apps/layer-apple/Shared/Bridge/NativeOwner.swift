@@ -324,7 +324,11 @@ final class NativeOwner: @unchecked Sendable {
             if !snapshot["canvas_ready"].isNull { canvasReady = snapshot["canvas_ready"].bool }
             if !snapshot["shaders_ready"].isNull { shadersReady = snapshot["shaders_ready"].bool }
             try persist(snapshot)
+            #if DEBUG
+            receive(snapshot.replacing("initial_actions_ready", with: JSON(initialActions.isEmpty && pendingInitialWorkspaceID == nil)), nil)
+            #else
             receive(snapshot, nil)
+            #endif
             takeScopes()
         }
         try prepareLanguage()
@@ -975,10 +979,8 @@ final class NativeOwner: @unchecked Sendable {
             _ = try request(0, action)
             if action["type"].string == "workspace_manager", action["command"]["type"].string == "switch" {
                 initialActions = Array(actions.dropFirst(index + 1))
-                if !initialActions.isEmpty {
-                    pendingInitialWorkspaceID = action["command"]["id"].string
-                    try publish()
-                }
+                pendingInitialWorkspaceID = action["command"]["id"].string
+                try publish()
                 return
             }
         }
@@ -1163,9 +1165,9 @@ final class NativeOwner: @unchecked Sendable {
                     try publish(); lastSnapshotTime = now
                 }
                 #if DEBUG
-                if !initialActions.isEmpty {
+                if !initialActions.isEmpty || pendingInitialWorkspaceID != nil {
                     try applyInitialActions()
-                    if initialActions.isEmpty { try publish() }
+                    if initialActions.isEmpty && pendingInitialWorkspaceID == nil { try publish() }
                 }
                 #endif
                 if canvasReady && !shadersReady { try check(capy_apple_finish_startup_catalog(nativeValue(handle))) }

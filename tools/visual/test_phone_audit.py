@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from PIL import Image
 
-from phone_audit import compare, compare_matrix, index
+from phone_audit import compare, compare_manifest, compare_matrix, index
 
 
 class PhoneAuditTests(unittest.TestCase):
@@ -159,17 +159,112 @@ class PhoneAuditTests(unittest.TestCase):
         states = json.loads(result.stdout)["states"]
         self.assertEqual([(state["case"], state["status"]) for state in states], [("3x2-dark", "missing"), ("3x2-light", "compared")])
         self.assertEqual(states[1]["reference"], str(reference))
-        with Image.open(self.root / "sheets/frame/3x2-light/rest/sheet.png") as sheet:
+        sheet_path = self.root / "sheets" / states[1]["sheet"]
+        with Image.open(sheet_path) as sheet:
             self.assertEqual(sheet.size, (9, 2))
-        comparison = json.loads((self.root / "sheets/frame/3x2-light/rest/comparison.json").read_text())
+        comparison = json.loads((sheet_path.parent / "comparison.json").read_text())
         self.assertIn("gamma22-on-srgb", comparison["input_profiles"][0])
         self.assertIn("| frame | 3x2-dark | rest | missing |", (self.root / "sheets/index.md").read_text())
+
+    def test_manifest_pairs_any_host_by_capture_key(self):
+        key = {"family": "frame", "state": "rest", "case": "3x2-light@2", "theme": "light", "text_size": 11, "fixture": "Sketch"}
+        reference = self.root / "reference.png"
+        Image.new("RGB", (6, 4), (20, 40, 60)).save(reference)
+        manifest = self.root / "references.json"
+        manifest.write_text(json.dumps({"references": [dict(key, png=str(reference))]}))
+        for host, suffix in (("ios", ".json"), ("other-native", ".json"), ("web", ".allocations.json")):
+            with self.subTest(host=host):
+                candidate = self.root / host
+                candidate.mkdir()
+                (candidate / ("rest" + suffix)).write_text(json.dumps(dict(key, schema_version=1, host=host, text_size=11.0)))
+                (candidate / "rest.png").write_bytes(reference.read_bytes())
+                (candidate / "run.json").write_text(json.dumps({"schema_version": 1, "host": host, "case": key["case"]}))
+                result = compare_manifest(manifest, candidate, self.root / (host + "-result"))
+                self.assertTrue(result["passed"])
+                self.assertEqual(len(result["states"]), 1)
+                self.assertEqual(result["states"][0]["candidate"], str(candidate / "rest.png"))
+
+    def test_manifest_keeps_distinct_text_and_fixture_comparisons(self):
+        key = {"family": "frame", "state": "rest", "case": "3x2-light", "theme": "light", "text_size": 11, "fixture": "Sketch"}
+        candidate = self.root / "android"
+        candidate.mkdir()
+        entries = []
+        for index, changes in enumerate(({}, {"text_size": 16}, {"fixture": "Photo"})):
+            identity = dict(key, **changes)
+            reference = self.root / f"reference-{index}.png"
+            Image.new("RGB", (3, 2), (20 + index, 40, 60)).save(reference)
+            entries.append(dict(identity, png=str(reference)))
+            (candidate / f"rest-{index}.json").write_text(json.dumps(dict(identity, schema_version=1, host="android")))
+            (candidate / f"rest-{index}.png").write_bytes(reference.read_bytes())
+        manifest = self.root / "references.json"
+        manifest.write_text(json.dumps({"references": entries}))
+        result = compare_manifest(manifest, candidate, self.root / "result")
+        self.assertTrue(result["passed"])
+        self.assertEqual(len({state["sheet"] for state in result["states"]}), 3)
+        for state in result["states"]:
+            self.assertTrue((self.root / "result" / state["sheet"]).exists())
 
     def test_duplicate_capture_states_are_rejected(self):
         for name in ("one", "two"):
             (self.root / f"{name}.allocations.json").write_text(json.dumps(self.gtk))
         with self.assertRaisesRegex(ValueError, "Duplicate capture state"):
             index(self.root)
+
+
+    def test_manifest_requires_complete_declared_scope_and_separates_pixels(self):
+        key = {"family": "frame", "state": "rest", "case": "phone", "theme": "light", "text_size": 11, "fixture": "Sketch"}
+        reference = self.root / "reference.png"
+        Image.new("RGB", (3, 2), "blue").save(reference)
+        manifest = self.root / "references.json"
+        entries = [dict(key, png=str(reference)), dict(key, family="pages", state="dialog", png=str(reference))]
+        manifest.write_text(json.dumps({"references": entries}))
+        candidate = self.root / "candidate"
+        candidate.mkdir()
+        value = dict(key, schema_version=1, host="apple")
+        metadata = candidate / "rest.json"
+        metadata.write_text(json.dumps(value))
+        (candidate / "rest.png").write_bytes(reference.read_bytes())
+        scope = {"families": ["frame"], "cases": ["phone"]}
+        def run():
+            return compare_manifest(manifest, candidate, self.root / "result", scope)
+        self.assertFalse(compare_manifest(manifest, candidate, self.root / "full")["pairing_passed"])
+        self.assertTrue(run()["passed"])
+        Image.new("RGB", (3, 2), "red").save(candidate / "rest.png")
+        result = run()
+        self.assertTrue(result["pairing_passed"])
+        self.assertFalse(result["pixels_passed"])
+        self.assertFalse(result["passed"])
+        entries.append(dict(key, state="expanded", png=str(reference)))
+        manifest.write_text(json.dumps({"references": entries}))
+        result = run()
+        self.assertFalse(result["pairing_passed"])
+        self.assertEqual(result["states"][-1]["status"], "missing_candidate")
+
+    def test_manifest_rejects_duplicate_keys_and_unverified_or_skipped_fixtures(self):
+        key = {"family": "frame", "state": "rest", "case": "phone", "theme": "light", "text_size": 11, "fixture": "Sketch"}
+        reference = self.root / "reference.png"
+        Image.new("RGB", (3, 2), "blue").save(reference)
+        manifest = self.root / "references.json"
+        manifest.write_text(json.dumps({"references": [dict(key, png=str(reference))]}))
+        candidate = self.root / "candidate"
+        candidate.mkdir()
+        value = dict(key, schema_version=1, host="apple")
+        metadata = candidate / "rest.json"
+        metadata.write_text(json.dumps(value))
+        (candidate / "rest.png").write_bytes(reference.read_bytes())
+        duplicate = candidate / "different-name.json"
+        duplicate.write_text(json.dumps(value))
+        with self.assertRaisesRegex(ValueError, "Duplicate candidate capture key"):
+            compare_manifest(manifest, candidate, self.root / "result")
+        duplicate.unlink()
+        for index in ({"required_unverified": ["rest"]}, {"fixture_results": {"passedTests": 1, "skippedTests": 1}},
+                      {"fixture_skips": ["dialog"]}, {"captures": []}):
+            with self.subTest(index=index):
+                (candidate / "index.json").write_text(json.dumps(index))
+                self.assertFalse(compare_manifest(manifest, candidate, self.root / "result")["pairing_passed"])
+        (candidate / "index.json").unlink()
+        metadata.write_text(json.dumps(dict(value, required_unverified=["rest"])))
+        self.assertFalse(compare_manifest(manifest, candidate, self.root / "result")["pairing_passed"])
 
 
 if __name__ == "__main__":

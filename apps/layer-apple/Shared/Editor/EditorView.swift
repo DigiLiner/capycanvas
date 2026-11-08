@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct EditorView<Canvas: View>: View {
     @ObservedObject var store: EditorStore
@@ -335,7 +338,28 @@ private struct PersistenceProbe: View {
 private struct ManagedPersistenceProbe: View {
     @ObservedObject var store: EditorStore
     @ObservedObject var workspaces: WorkspaceController
-    var body: some View { PersistenceProbe.label(store, saving: workspaces.hasUnsavedChanges, failed: workspaces.error != nil) }
+    @Environment(\.sizeCategory) private var sizeCategory
+    var body: some View {
+        HStack(spacing: 0) {
+            PersistenceProbe.label(store, saving: workspaces.hasUnsavedChanges, failed: workspaces.error != nil)
+            Text("Workspace").foregroundStyle(.clear).frame(width: 1, height: 1)
+                .accessibilityIdentifier("persistence-workspace").accessibilityValue(workspaces.view["id"].string)
+            Text("Startup").foregroundStyle(.clear).frame(width: 1, height: 1)
+                .accessibilityIdentifier("persistence-startup-ready").accessibilityValue(String(store.snapshot["shaders_ready"].bool && store.snapshot["initial_actions_ready"].bool))
+            #if os(iOS)
+            let controls = Dictionary(uniqueKeysWithValues: store.state["workspace"]["layout"]["phone"].array.map { ($0["id"].uint, $0["control"]) })
+            let tools = store.snapshot["phone_tools"].array.map {
+                ["id": $0["id"].raw, "control": controls[$0["id"].uint]?.raw ?? NSNull(),
+                    "resolved_control": $0["resolved_control"].raw, "selected": $0["selected"].raw]
+            }
+            Text("Phone tools").foregroundStyle(.clear).frame(width: 1, height: 1)
+                .accessibilityIdentifier("persistence-phone-tools").accessibilityValue(JSON(tools).stableKey)
+            Text(String(describing: sizeCategory)).foregroundStyle(.clear).frame(width: 1, height: 1)
+                .accessibilityIdentifier("persistence-content-size-category")
+                .accessibilityValue(UIApplication.shared.preferredContentSizeCategory.rawValue)
+            #endif
+        }.allowsHitTesting(false)
+    }
 }
 #endif
 

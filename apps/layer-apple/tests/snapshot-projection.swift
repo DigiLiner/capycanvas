@@ -15,6 +15,7 @@ private final class Changes: @unchecked Sendable {
         return changes
     }
     @MainActor static func main() throws {
+        checkInitialActionsPublication()
         checkCanvasBarPublication()
         checkWorkspaceMotion()
         checkWorkspaceReflow()
@@ -309,6 +310,27 @@ private final class Changes: @unchecked Sendable {
         precondition(phoneFields.keys.allSatisfy { editor.snapshot.json.object[$0] == nil })
         print("Workspace reflow checks passed: retained content, atomic geometry/camera/phone fields, incomplete/stale packet rejection and full completion")
     }
+    @MainActor private static func checkInitialActionsPublication() {
+        let editor = EditorSnapshotState()
+        precondition(editor.receive(JSON(["state": ["revision": 4, "camera": ["zoom": 1]],
+            "shaders_ready": true, "initial_actions_ready": false])) == .full)
+        let retained = editor.snapshot.json
+        let content = watch { _ = editor.state["revision"]; _ = editor.snapshot["shaders_ready"] }
+        let camera = watch { _ = editor.state["camera"] }
+        let ready = watch { _ = editor.snapshot["initial_actions_ready"] }
+        precondition(editor.receive(JSON(["initial_actions_ready": true])) == .ignored)
+        precondition(ready.value == 1 && editor.snapshot["initial_actions_ready"].bool)
+        precondition(content.value == 0 && camera.value == 0 && !retained["initial_actions_ready"].bool)
+        let unchanged = watch { _ = editor.snapshot.json }
+        precondition(editor.receive(JSON(["initial_actions_ready": true])) == .ignored)
+        precondition(unchanged.value == 0)
+        let reset = watch { _ = editor.snapshot["initial_actions_ready"] }
+        precondition(editor.receive(JSON(["revision": 4, "camera": ["zoom": 2], "initial_actions_ready": false])) == .camera)
+        precondition(reset.value == 1 && !editor.snapshot["initial_actions_ready"].bool && camera.value == 1 && content.value == 0)
+        precondition(editor.receive(JSON(["revision": 4, "camera": ["zoom": 3]])) == .camera)
+        precondition(!editor.snapshot["initial_actions_ready"].bool && editor.state["revision"].uint == 4)
+    }
+
     @MainActor private static func checkCanvasBarPublication() {
         let editor = EditorSnapshotState()
         let context: [String: Any] = ["kind": "selection", "generation": 1]

@@ -13,12 +13,22 @@ extension XCTestCase {
     @MainActor func chooseNewDrawingOption(_ id: String, _ index: Int, in app: XCUIApplication) {
         #if os(iOS)
         dismissEditorKeyboard(in: app)
+        revealNewDrawingControl(id, in: app)
         #endif
         workspaceActivate(app.buttons[id].firstMatch)
         workspaceActivate(app.buttons["\(id)-option-\(index)"].firstMatch)
     }
     @MainActor func enterNewDrawingNumber(_ name: String, _ value: String, in app: XCUIApplication) {
+        #if os(iOS)
+        revealNewDrawingControl("number-entry-new-drawing-" + name, in: app)
+        #endif
         let field = newDrawingNumber(name, in: app)
+        #if os(iOS)
+        expectation(for: NSPredicate { _, _ in
+            field.exists && field.isHittable && self.workspaceViewport(in: app).frame.contains(field.frame)
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        #endif
         replaceEditorText(field, with: value, in: app)
         #if os(macOS)
         field.typeKey(XCUIKeyboardKey.tab.rawValue, modifierFlags: [])
@@ -59,11 +69,18 @@ extension XCTestCase {
         open: (() -> Void)? = nil) {
         if let open { open() } else { editorMenu(in: app, menu: "File", id: "new_document", label: "New…") }
         XCTAssertTrue(app.buttons["new-drawing-create"].waitForExistence(timeout: 60))
+        #if os(iOS)
+        revealNewDrawingControl("new-drawing-texture", in: app)
+        #endif
         workspaceActivate(app.buttons["new-drawing-texture"])
         enterNewDrawingNumber("paper-relief", "0", in: app)
+        XCTAssertEqual(newDrawingNumber("paper-relief", in: app).value as? String, "0")
         let usePaper = app.buttons["new-drawing-paper-use"]
         workspaceActivate(usePaper)
         XCTAssertTrue(usePaper.waitForNonExistence(timeout: 10))
+        #if os(iOS)
+        revealNewDrawingControl("new-drawing-paper-color", in: app)
+        #endif
         workspaceActivate(app.buttons["new-drawing-paper-color"])
         let white = app.buttons["new-drawing-paper-color-0"]
         #if os(iOS)

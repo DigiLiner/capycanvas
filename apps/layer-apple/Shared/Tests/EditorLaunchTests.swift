@@ -1,10 +1,27 @@
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 final class EditorLaunchTests: XCTestCase {
+    #if os(iOS)
+    var requestedPhoneOrientation: UIDeviceOrientation?
+    #endif
     override func setUp() async throws {
         continueAfterFailure = false
         #if os(iOS)
-        await MainActor.run { XCUIDevice.shared.orientation = .landscapeLeft }
+        let orientation: UIDeviceOrientation
+        switch ProcessInfo.processInfo.environment["CAPY_PHONE_CAPTURE_ORIENTATION"] {
+        case nil, "landscape-left": orientation = .landscapeLeft
+        case "portrait": orientation = .portrait
+        case "landscape-right": orientation = .landscapeRight
+        case let value: throw NSError(domain: "PhoneCapture", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Unsupported phone capture orientation: \(value ?? "")"])
+        }
+        await MainActor.run {
+            if ProcessInfo.processInfo.environment["CAPY_PHONE_CAPTURE_ORIENTATION"] == nil { XCUIDevice.shared.orientation = orientation }
+            else { requestedPhoneOrientation = orientation }
+        }
         #endif
     }
 

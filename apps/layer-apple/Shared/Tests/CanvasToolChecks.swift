@@ -7,6 +7,57 @@ extension XCTestCase {
         element.label.isEmpty ? element.value as? String ?? "" : element.label
     }
 
+    func editorFreeRegion(viewport: CGRect, excluding obstacles: [CGRect]) -> CGRect? {
+        var exposed = viewport.width > 0 && viewport.height > 0 ? [viewport] : []
+        for obstacle in obstacles {
+            exposed = exposed.flatMap { rect -> [CGRect] in
+                let covered = rect.intersection(obstacle)
+                guard covered.width > 0 && covered.height > 0 else { return [rect] }
+                return [CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: covered.minY - rect.minY),
+                    CGRect(x: rect.minX, y: covered.maxY, width: rect.width, height: rect.maxY - covered.maxY),
+                    CGRect(x: rect.minX, y: covered.minY, width: covered.minX - rect.minX, height: covered.height),
+                    CGRect(x: covered.maxX, y: covered.minY, width: rect.maxX - covered.maxX, height: covered.height)]
+                    .filter { $0.width > 0 && $0.height > 0 }
+            }
+        }
+        return exposed.max { $0.width * $0.height < $1.width * $1.height }
+    }
+
+    #if !os(macOS)
+    @MainActor func dragEditorScroll(_ scroll: XCUIElement, snapshot: XCUIElementSnapshot, towardEnd: Bool, endingAt destination: XCUICoordinate? = nil) -> Bool {
+        let window = XCUIApplication().windows.firstMatch, windowBounds = window.frame
+        let viewport = snapshot.frame.intersection(windowBounds)
+        let interactive: [XCUIElement.ElementType] = [.button, .textField, .secureTextField, .textView, .slider, .switch, .picker, .pickerWheel, .segmentedControl, .stepper]
+        func obstacles(_ node: XCUIElementSnapshot) -> [CGRect] {
+            interactive.contains(node.elementType) || node.elementType == .other && node.value != nil
+                ? [node.frame.intersection(viewport)] : node.children.flatMap(obstacles)
+        }
+        func text(_ node: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            if node.elementType != .button && interactive.contains(node.elementType) { return [] }
+            return node.elementType == .staticText ? [node] : node.children.flatMap(text)
+        }
+        let visibleText: [CGRect] = text(snapshot).map { $0.frame.intersection(viewport) }.filter {
+            $0.width > 0 && $0.height > 0 && $0.midX.isFinite && $0.midY.isFinite
+        }
+        let startArea = CGRect(x: viewport.minX, y: towardEnd ? viewport.midY : viewport.minY,
+            width: viewport.width, height: viewport.height / 2)
+        guard let bounds = editorFreeRegion(viewport: startArea, excluding: obstacles(snapshot))
+            ?? visibleText.max(by: { towardEnd ? $0.midY < $1.midY : $0.midY > $1.midY }) else {
+            let tree = XCTAttachment(string: XCUIApplication().debugDescription)
+            tree.name = "editor-scroll-no-visible-text"; tree.lifetime = .keepAlways; add(tree)
+            XCTFail("The native scroll needs visible noninteractive text inside its editor window: \(scroll.identifier)")
+            return false
+        }
+        let edge = towardEnd ? viewport.minY : viewport.maxY
+        let start = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: bounds.midX - windowBounds.minX, dy: bounds.midY - windowBounds.minY))
+        let end = destination ?? window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: bounds.midX - windowBounds.minX, dy: (bounds.midY + edge) / 2 - windowBounds.minY))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+        return true
+    }
+    #endif
+
     @MainActor func revealEditorControl(_ element: XCUIElement, in scroll: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
         guard let requested = try? element.snapshot(), let original = try? scroll.snapshot() else {
@@ -78,9 +129,7 @@ extension XCTestCase {
             }, evaluatedWith: scroll)
             waitForExpectations(timeout: 10)
             #else
-            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: upward ? 0.8 : 0.2))
-            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: upward ? 0.2 : 0.8))
-            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+            guard dragEditorScroll(scroll, snapshot: current, towardEnd: upward) else { return }
             #endif
         }
         XCTFail("Editor control did not become fully visible: \(identifier)")
@@ -137,12 +186,7 @@ extension XCTestCase {
             point.hover()
             point.scroll(byDeltaX: 0, deltaY: towardEnd ? -80 : 80)
             #else
-            let x = viewport.minX - windowBounds.minX + viewport.width * 0.05
-            let start = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x,
-                dy: viewport.minY - windowBounds.minY + viewport.height * (towardEnd ? 0.8 : 0.2)))
-            let end = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x,
-                dy: viewport.minY - windowBounds.minY + viewport.height * (towardEnd ? 0.2 : 0.8)))
-            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+            guard dragEditorScroll(scroll, snapshot: current, towardEnd: towardEnd) else { return }
             #endif
             var moved: [String] = []
             let progress = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -158,7 +202,10 @@ extension XCTestCase {
             let changed = XCTWaiter.wait(for: [progress], timeout: 2) == .completed
             attach("Step \(step): toward end \(towardEnd), viewport \(viewport), measured progress \(changed)\n" + moved.joined(separator: "\n"))
             if !changed {
-                guard !reversed else { return XCTFail("The lazy control was not found across both measured scroll boundaries: \(identity)") }
+                guard !reversed else {
+                    attach(XCUIApplication().debugDescription)
+                    return XCTFail("The lazy control was not found across both measured scroll boundaries: \(identity)")
+                }
                 towardEnd.toggle(); reversed = true
             }
         }
@@ -189,13 +236,17 @@ extension XCTestCase {
         workspaceActivate(button)
     }
 
-    @MainActor func editorPaper(in app: XCUIApplication) -> EditorPaper {
-        let source = CGImageSourceCreateWithData(editorScreenshot(in: app).pngRepresentation as CFData, nil)!
+    @MainActor func editorImage(from screenshot: XCUIScreenshot) -> CGImage {
+        let source = CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)!
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
         let extent = max(properties[kCGImagePropertyPixelWidth] as! Int, properties[kCGImagePropertyPixelHeight] as! Int)
-        let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: extent] as CFDictionary)!
+    }
+
+    @MainActor func editorPaper(in app: XCUIApplication) -> EditorPaper {
+        let image = editorImage(from: editorScreenshot(in: app))
         let width = image.width, height = image.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         bytes.withUnsafeMutableBytes { buffer in
@@ -262,14 +313,7 @@ extension XCTestCase {
     }
 
     @MainActor func editorPixelSamples(from screenshot: XCUIScreenshot, at points: [CGPoint], size: Int) -> [Data] {
-        // Normalize PNG orientation at full resolution before locating samples.
-        // A landscape simulator capture can store portrait pixels plus EXIF.
-        let source = CGImageSourceCreateWithData(screenshot.pngRepresentation as CFData, nil)!
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
-        let extent = max(properties[kCGImagePropertyPixelWidth] as! Int, properties[kCGImagePropertyPixelHeight] as! Int)
-        let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-            kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: extent] as CFDictionary)!
+        let image = editorImage(from: screenshot)
         return points.map { point in
             let crop = image.cropping(to: CGRect(x: CGFloat(image.width) * point.x, y: CGFloat(image.height) * point.y,
                 width: CGFloat(size), height: CGFloat(size)))!

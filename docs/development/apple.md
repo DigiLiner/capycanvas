@@ -367,8 +367,17 @@ Other runners:
 | `scripts/test-persistence.sh` | Atomic settings files, backup exclusion and the settings owner |
 | `scripts/test-native-rows.py` | UIKit row scrolling and contacts on one booted iPad simulator; `--fixture scenes` for per-scene cancellation, `--fixture scroll` for scroll observation, `--fixture sheets` for stable fitted sheet sizing |
 | `scripts/test-workspace-scrolling.py` | Long workspace list on an iPad simulator |
+| `scripts/export-phone-captures.py <result.xcresult> <output> --reference <manifest.json>` | Export the iPhone `testPhone*` visitors' paired PNG/JSON attachments for `tools/visual/phone_audit.py --candidate`; declare a complete family/case subset with paired `--scope-family` and `--scope-case` (otherwise all references are required); exporter checks run with `python3 -m unittest discover -s apps/layer-apple/tests -p test_phone_captures.py` |
+
+Set `CAPY_REPORTS` to an isolated output directory when running `scripts/test-without-gpu.sh` alongside another checkout.
 
 ### UI tests
+
+Use an iOS 26.5 simulator runtime and one `-only-testing` case per `xcodebuild`
+invocation. Long sessions on iOS 26.5 and 27 can incur 60-second animation-idle
+waits after numeric Return even when the app is ready.
+
+Select phone visitors with their published `-enumerate-tests` identifier and one `-only-testing` filter; zero executed tests is a failure.
 
 Shared journeys are `check…` functions in `Shared/Tests`, run by `test…` methods
 on `EditorLaunchTests` in both UI targets; platform-only journeys extend it in
