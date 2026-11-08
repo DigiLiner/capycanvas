@@ -16,6 +16,7 @@
 #include "TextureDialog.h"
 #include "HeaderView.h"
 #include "HeaderInput.h"
+#include "ColorStrip.h"
 #include <future>
 #include <msctf.h>
 #pragma comment(lib,"uuid.lib")
@@ -157,6 +158,65 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
     bool visiblePopup(){for(auto const& popup:VisualTreeHelper::GetOpenPopupsForXamlRoot(root.XamlRoot()))if(popup.IsOpen())return true;return false;}
     void pending(){require(owner.Pending()&&!owner.Open()&&data->transients.size()==1,L"Pending popup lacks immediate unique cancellation registration");}
     void empty(){require(!owner.Active()&&!owner.Pending()&&!owner.Open()&&data->transients.empty()&&data->popupCount==0,L"Popup cancellation left retained state or registrations");}
+    winrt::Windows::Foundation::IAsyncAction colorStripPresentation(){
+        phase=L"color-strip-setup";
+        try{
+        auto source=std::make_shared<WorkspaceData>();context.apply(source);
+        auto opened=colorUi(source->localization.get(),O({{L"type",S(L"editor_open")},{L"slot",S(L"foreground")}})).GetObject();
+        require(object(opened,L"editor").Size()&&object(opened,L"view").Size()&&opened.GetNamedValue(L"error",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Null,L"Color strip editor_open setup failed");
+        auto edited=colorUi(source->localization.get(),O({{L"type",S(L"editor")},{L"editor",object(opened,L"editor")},{L"action",O({{L"op",S(L"text")},{L"text",S(L"#000000")}})}})).GetObject();
+        require(object(edited,L"editor").Size()&&object(edited,L"view").Size()&&edited.GetNamedValue(L"error",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Null,L"Color strip edited draft setup failed");
+        auto editor=object(edited,L"editor"),original=object(object(edited,L"view"),L"value");
+        require(array(original,L"rgba").Size()==4&&array(original,L"rgba").GetNumberAt(0)==0&&array(original,L"rgba").GetNumberAt(1)==0&&array(original,L"rgba").GetNumberAt(2)==0&&array(original,L"rgba").GetNumberAt(3)==1,L"Color strip setup did not produce the black editor draft");
+        auto sample=J::Parse(LR"({"space":"Srgb","rgba":[0.95686274766922,0.9450980424880981,0.9098039865493774,1]})");
+        auto shown=colorUi(source->localization.get(),O({{L"type",S(L"editor_strip")},{L"editor",editor},{L"sample",sample}})).GetObject();
+        require(shown.GetNamedValue(L"hex").ValueType()==JsonValueType::String&&shown.GetNamedValue(L"label").ValueType()==JsonValueType::String&&array(shown,L"values").Size()==3,L"Color strip shared presentation setup failed");
+        A colors;colors.Append(original);colors.Append(sample);
+        auto previews=colorUi(source->localization.get(),O({{L"type",S(L"preview")},{L"colors",colors}})).GetArray();
+        require(previews.Size()==2&&array(previews.GetObjectAt(0),L"rgba").Size()==4&&array(previews.GetObjectAt(1),L"rgba").Size()==4,L"Color strip display preview setup failed");
+        std::wstring values;for(auto value:array(shown,L"values")){if(!values.empty())values+=L"  ";values+=value.GetString().c_str();}
+        auto intensity=shown.GetNamedValue(L"intensity",JsonValue::CreateNullValue());
+        auto content=O({{L"original",array(previews.GetObjectAt(0),L"rgba")},{L"sample",array(previews.GetObjectAt(1),L"rgba")},{L"hex",S(str(shown,L"hex"))},{L"intensity",S(intensity.ValueType()==JsonValueType::String?intensity.GetString():hstring{})},{L"label",S(str(shown,L"label"))},{L"values",S(hstring(values))}});
+        auto paint=J::Parse(object(object(opened,L"editor"),L"picker").Stringify());paint.Insert(L"temporary",original);
+        require(paint.Size()&&paint.HasKey(L"foreground")&&paint.HasKey(L"background"),L"Color strip paint state setup failed");
+        source->state=O({{L"theme",S(root.RequestedTheme()==ElementTheme::Light?L"light":L"dark")},{L"colors",paint}});
+        auto picker=J::Parse(LR"({"calibrating":false,"style":"glass","layer":false,"sample_width":1,"can_sample_layer":true,"sample_sizes":[1,5,15,51,101],"editor":true,"picked":null,"sample_point":[400,200],"loupe_point":[400,200]})");picker.Insert(L"preview",sample);
+        source->colorPreview=O({{L"picker",picker}});
+        unsigned dispatches=0;source->send=[&](std::string){++dispatches;};
+        auto savedColors=object(source->state,L"colors").Stringify(),savedPicker=source->colorPreview.Stringify();
+        Canvas surface;surface.Width(380);surface.Height(160);root.Children().InsertAt(0,surface);
+        auto strip=std::make_shared<ColorStrip>();strip->data=source;strip->init(surface);
+        auto cleanup=[&]{uint32_t at;if(root.Children().IndexOf(surface,at))root.Children().RemoveAt(at);};
+        auto camera=[&]{auto scale=surface.XamlRoot().RasterizationScale();double width=surface.ActualWidth()*scale,height=surface.ActualHeight()*scale;A viewport,area;viewport.Append(N(width));viewport.Append(N(height));for(double value:{0.,0.,width,height})area.Append(N(value));source->state.Insert(L"camera",O({{L"viewport",viewport},{L"work_area",area}}));};
+        auto equivalent=[](Geometry const& first,Geometry const& second){
+            auto a=first.as<PathGeometry>(),b=second.as<PathGeometry>();if(a==b||a.Figures().Size()!=1||b.Figures().Size()!=1)return false;
+            auto x=a.Figures().GetAt(0),y=b.Figures().GetAt(0);if(x.StartPoint().X!=y.StartPoint().X||x.StartPoint().Y!=y.StartPoint().Y||x.IsClosed()!=y.IsClosed()||x.IsFilled()!=y.IsFilled()||x.Segments().Size()!=1||y.Segments().Size()!=1)return false;
+            auto p=x.Segments().GetAt(0).as<PolyLineSegment>().Points(),q=y.Segments().GetAt(0).as<PolyLineSegment>().Points();if(p.Size()!=q.Size()||!p.Size())return false;
+            for(uint32_t i=0;i<p.Size();++i)if(p.GetAt(i).X!=q.GetAt(i).X||p.GetAt(i).Y!=q.GetAt(i).Y)return false;return true;
+        };
+        auto verify=[&]{
+            require(strip->root.IsLoaded()&&strip->root.IsEnabled()&&strip->root.IsHitTestVisible()&&strip->root.Opacity()==1&&strip->root.ActualWidth()>0&&strip->root.ActualHeight()>0,L"Color picker strip did not remain enabled and arranged");
+            require(equivalent(strip->surface.Data(),strip->feedbackSurface.Data()),L"Color picker strip paths did not retain equivalent separately owned geometry");
+            require(strip->hex.Text()==str(content,L"hex")&&strip->intensity.Text()==str(content,L"intensity")&&strip->space.Text()==str(content,L"label")&&strip->values.Text()==str(content,L"values"),L"Color picker strip changed its shared presentation text");
+            require(strip->original.Background().as<SolidColorBrush>().Color()==Windows::UI::Color{255,0,0,0}&&strip->sample.Background().as<SolidColorBrush>().Color()==Windows::UI::Color{255,244,241,232},L"Color picker strip changed its original or sampled paint");
+            require(object(source->state,L"colors").Stringify()==savedColors&&source->colorPreview.Stringify()==savedPicker&&!dispatches,L"Color picker strip presentation changed paint or picker policy");
+        };
+        std::exception_ptr failure;
+        try{
+            co_await wait([&]{return surface.IsLoaded()&&surface.ActualWidth()==380&&surface.ActualHeight()==160;},L"Color picker strip host did not arrange");camera();
+            phase=L"color-strip-presentation";strip->Show(content);
+            co_await wait([&]{return strip->root.IsLoaded()&&strip->root.ActualWidth()>0&&strip->root.ActualHeight()>0;},L"Color picker strip did not arrange after Show");verify();
+            strip->present();verify();strip->present();verify();
+            strip->hover=Point{float(Canvas::GetLeft(strip->root)+20),float(Canvas::GetTop(strip->root)+strip->root.ActualHeight()/2)};strip->present();verify();
+            surface.Width(360);surface.Height(170);co_await wait([&]{return surface.ActualWidth()==360&&surface.ActualHeight()==170;},L"Color picker strip host did not acknowledge resize");camera();strip->present();verify();
+            strip->hover.reset();strip->present();verify();++checks;
+        }catch(...){failure=std::current_exception();}
+        cleanup();if(failure)std::rethrow_exception(failure);
+        }catch(hresult_error const& error){
+            wchar_t code[16]{};swprintf_s(code,L" [0x%08X]",uint32_t(error.code().value));
+            throw hresult_error(error.code(),hstring(std::wstring(L"Color strip component: ")+error.message().c_str()+code));
+        }
+    }
     winrt::Windows::Foundation::IAsyncAction headerContextOrdering(){
         auto source=std::make_shared<WorkspaceData>();context.apply(source);
         A choices,section;section.Append(O({{L"label",S(L"Fixture workspace")},{L"action",O({{L"type",S(L"workspace_manager")},{L"command",O({{L"type",S(L"show_in_switcher")},{L"id",S(L"fixture-header")}})}})}}));choices.Append(section);
@@ -953,6 +1013,7 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         auto self=shared_from_this();hstring error;
         try {
             co_await wait([this]{return anchor.IsLoaded()&&untagged.ActualWidth()>0&&GetForegroundWindow()==hwnd;},L"Fixture did not become arranged and foreground");privacy();
+            phase=L"color-strip-presentation";co_await colorStripPresentation();
             phase=L"bubble-press-timestamps";co_await bubblePressTimestamps();
             phase=L"tooltip-help";
             Border semantic,owned;TranslateTransform metadata;

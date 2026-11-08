@@ -92,7 +92,7 @@ struct ColorStrip:std::enable_shared_from_this<ColorStrip>{
         double left=std::round(origin.GetNumberAt(0)/scale),top=std::round(origin.GetNumberAt(1)/scale);
         Canvas::SetLeft(root,left);Canvas::SetTop(root,top);root.Height(height);
         std::array<float,4> radii{SurfaceRadius,SurfaceRadius,SurfaceRadius,SurfaceRadius};
-        surface.Data(squircleRectangle(width,height,radii));feedbackSurface.Data(surface.Data());
+        surface.Data(squircleRectangle(width,height,radii));feedbackSurface.Data(squircleRectangle(width,height,radii));
         shadow.Shape(squircleRectangle(width,height,radii),width,height,8,2,.27f);shadow.Cut(radii);
         shadow.Layout({float(left),float(top),width,height},949,true);
         root.Opacity(1);root.IsHitTestVisible(true);root.IsEnabled(true);
