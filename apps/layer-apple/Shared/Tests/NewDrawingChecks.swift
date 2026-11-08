@@ -142,15 +142,7 @@ extension XCTestCase {
         checkDialogKeyboardHeight(dialog, in: app) { workspaceActivate(app.textFields["new-drawing-name"]) }
         #endif
         if keyboardOnly {
-            #if os(iOS)
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                let title = dialog.staticTexts["New drawing"]
-                XCTAssertTrue(title.isHittable)
-                title.swipeDown(velocity: .fast)
-            } else { workspaceActivate(app.buttons["new-drawing-cancel"]) }
-            #else
             workspaceActivate(app.buttons["new-drawing-cancel"])
-            #endif
             XCTAssertTrue(create.waitForNonExistence(timeout: 10))
             return
         }

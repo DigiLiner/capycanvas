@@ -105,6 +105,7 @@ extension XCTestCase {
             editorMenu(in: app, menu: "Edit", id: "settings", label: "Settings…")
             #endif
             XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 10))
+            workspaceActivate(app.buttons["settings-page-appearance"])
         }
         for (id, label) in [("dark_base", "Dark theme base color"), ("light_base", "Light theme base color")] {
             let custom = app.buttons["preference-\(id)-4"]
@@ -295,7 +296,8 @@ extension XCTestCase {
         assertEditorSettingsRoot(in: app, phone: false)
         workspaceActivate(app.buttons["settings-page-appearance"])
         let themePicker = app.descendants(matching: .any)["preference-theme"].firstMatch
-        if !themePicker.waitForExistence(timeout: 3) { workspaceActivate(app.staticTexts["Appearance"].firstMatch) }
+        expectation(for: NSPredicate(format: "hittable == YES"), evaluatedWith: themePicker)
+        waitForExpectations(timeout: 10)
         workspaceActivate(themePicker)
         #if os(macOS)
         workspaceActivate(app.menuItems[theme.capitalized].firstMatch)
@@ -547,8 +549,7 @@ extension XCTestCase {
             workspaceViewport(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).click()
         }
         workspaceActivate(app.buttons["settings-button"])
-        XCTAssertTrue(app.staticTexts["settings-page-about"].waitForExistence(timeout: 10))
-        workspaceActivate(app.staticTexts["settings-page-about"])
+        workspaceActivate(app.buttons["settings-page-about"])
         #endif
 
         let done = app.buttons["settings-done"]
@@ -581,11 +582,14 @@ extension XCTestCase {
         capture.name = "about-application-information"; capture.lifetime = .keepAlways; add(capture)
 
         // The ordinary settings search must still locate the source-code row.
+        if app.buttons["settings-back"].exists { workspaceActivate(app.buttons["settings-back"]) }
         let search = app.textFields["settings-search"]
         workspaceActivate(search); search.typeText("github")
         let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Source code")).firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5)); workspaceActivate(result)
-        XCTAssertTrue(app.descendants(matching: .any)["preference-source_code"].firstMatch.waitForExistence(timeout: 5))
+        let source = app.descendants(matching: .any)["preference-source_code"].firstMatch
+        expectation(for: NSPredicate(format: "hittable == YES"), evaluatedWith: source)
+        waitForExpectations(timeout: 5)
         workspaceActivate(done)
         XCTAssertTrue(done.waitForNonExistence(timeout: 5))
         #if os(macOS)
