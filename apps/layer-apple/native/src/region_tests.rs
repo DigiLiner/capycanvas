@@ -257,11 +257,25 @@ fn apple_region_gap_closing_and_cancelled_requests_preserve_artwork() {
                     _ => unreachable!(),
                 }
                 app.draw_until_idle();
-                assert_eq!(
-                    app.pixels(),
-                    baseline,
-                    "The stale {tool}/{cancel} result must not paint"
-                );
+                let completed = app.pixels();
+                if tool == "fill" && matches!(cancel, "tool" | "setting") {
+                    assert_ne!(completed, baseline);
+                    if cancel == "tool" {
+                        assert!(app.borrow().host.session.command(layer_ui::CommandId::Hand).selected);
+                    } else {
+                        let tolerance = app.borrow().host.session.state().tool_settings.iter()
+                            .find(|setting| setting.id == "tolerance").unwrap().value;
+                        assert!((tolerance - 0.2).abs() < f32::EPSILON);
+                    }
+                    app.invoke("undo"); app.draw_until_idle();
+                    assert_eq!(app.pixels(), baseline);
+                    app.invoke("redo"); app.draw_until_idle();
+                    assert_eq!(app.pixels(), completed);
+                    app.invoke("undo"); app.draw_until_idle();
+                    assert_eq!(app.pixels(), baseline);
+                } else {
+                    assert_eq!(completed, baseline, "The stale {tool}/{cancel} result must not paint");
+                }
                 let session = &app.borrow().host.session;
                 assert!(session.engine().document().working.selection.is_none());
                 assert!(session.engine().can_redo());

@@ -223,8 +223,10 @@ import QuartzCore
                         let trackPoint = CGPoint(x: track.minX + track.width * 0.8, y: track.midY)
                         let trackLift = CGPoint(x: trackPoint.x + 4, y: trackPoint.y + 4)
                         let beforeMouse = value()
-                        try event(.leftMouseDown, at: trackPoint, marker: host, number: 1018, tablet: false); try await drain(0.02)
-                        try require(abs(value() - beforeMouse) > 0.0001, "Platform \(platform) brush-size slider must change on mouse down")
+                        try event(.leftMouseDown, at: trackPoint, marker: host, number: 1018, tablet: false)
+                        try await wait("Platform \(platform) brush-size slider must change on mouse down", seconds: 0.25, failure: { store.failure }) {
+                            abs(value() - beforeMouse) > 0.0001
+                        }
                         try event(.leftMouseUp, at: trackPoint, marker: host, number: 1019, tablet: false); try await drain()
                         try await action(["type": "set_brush_size", "value": 32])
                         let beforePen = value()

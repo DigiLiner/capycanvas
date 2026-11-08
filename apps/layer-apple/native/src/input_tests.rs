@@ -297,18 +297,29 @@ fn packed_pointer_malformed_samples_preserve_valid_siblings_and_exact_history() 
 }
 
 #[test]
-fn packed_pointer_damaged_real_terminals_cancel_once_and_allow_fresh_contacts() {
+fn packed_pointer_damaged_real_terminals_finish_prefix_once_and_allow_fresh_contacts() {
     use layer_engine::{PenPhase,recording::Record};
     for platform in [0,1] {
         let app=packed_admission_app(platform);let baseline=app.pixels();
+        let revision=unsafe {capy_apple_camera_revision(app.0)};
+        let down=packed_admission_sample(&app,16.,3_000_000_000.,1.);
+        let moved=packed_admission_sample(&app,32.,3_010_000_000.,2.);
+        let prefix:Vec<_>=[down,moved].into_iter().flatten().collect();
+        assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,prefix.as_ptr(),prefix.len(),0,revision,0)},0);
+        fixtures::until(&app,"Oracle contact did not start",||app.borrow().host.session.engine().has_active_stroke());
+        let up=packed_admission_sample(&app,32.,3_020_000_000.,3.);
+        assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,up.as_ptr(),up.len(),0,revision,0)},0);
+        app.draw_until_idle();let expected=app.pixels();assert_ne!(expected,baseline);
+        app.invoke("undo");app.draw_until_idle();assert_eq!(app.pixels(),baseline);
         for updates in [false,true] {
             for phase in [3.,4.] {
                 let document=app.document();let checkpoint=app.borrow().host.session.engine().checkpoint();
                 let revision=unsafe {capy_apple_camera_revision(app.0)};
-                app.borrow().host.session.engine().recording.lock().unwrap().start("apple-malformed-terminal").unwrap();
                 let down=packed_admission_sample(&app,16.,3_000_000_000.,1.);
                 let moved=packed_admission_sample(&app,32.,3_010_000_000.,2.);
                 let prefix:Vec<_>=[down,moved].into_iter().flatten().collect();
+                let committed=app.borrow().host.session.engine().metrics().committed_strokes;
+                app.borrow().host.session.engine().recording.lock().unwrap().start("apple-malformed-terminal").unwrap();
                 assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,prefix.as_ptr(),prefix.len(),0,revision,0)},0);
                 fixtures::until(&app,"Real contact did not start",||app.borrow().host.session.engine().has_active_stroke());
                 let mut damaged=packed_admission_sample(&app,48.,3_020_000_000.,phase);damaged[0]=f64::NAN;
@@ -316,19 +327,29 @@ fn packed_pointer_damaged_real_terminals_cancel_once_and_allow_fresh_contacts() 
                     unsafe {capy_apple_pointer_updates(app.0,9,0,0,damaged.as_ptr(),damaged.len(),[3,0].as_ptr(),0,revision,0)}
                 } else {unsafe {capy_apple_pointer(app.0,9,0,0,damaged.as_ptr(),damaged.len(),0,revision,0)}};
                 assert_eq!(result,0,"platform={platform} updates={updates} phase={phase}");
-                app.draw_until_idle();assert_eq!(app.pixels(),baseline);assert_project_document(&app.document(),&document);assert_eq!(app.document().working,document.working);
-                assert_eq!(app.borrow().host.session.engine().checkpoint(),checkpoint);
-                assert!(app.borrow().host.session.engine().can_redo());
+                app.draw_until_idle();assert_eq!(app.pixels(),expected);
+                let finished=app.document();let finished_checkpoint=app.borrow().host.session.engine().checkpoint();
+                assert_ne!(finished_checkpoint,checkpoint);
+                assert_eq!(app.borrow().host.session.engine().metrics().committed_strokes,committed+1);
+                assert!(!app.borrow().host.session.engine().can_redo());
                 let late:Vec<_>=[packed_admission_sample(&app,52.,3_030_000_000.,2.),
                     packed_admission_sample(&app,56.,3_040_000_000.,3.)].into_iter().flatten().collect();
                 assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,late.as_ptr(),late.len(),0,revision,0)},0);
-                app.draw_until_idle();assert_eq!(app.pixels(),baseline);assert_project_document(&app.document(),&document);assert_eq!(app.document().working,document.working);
+                app.draw_until_idle();assert_eq!(app.pixels(),expected);assert_project_document(&app.document(),&finished);assert_eq!(app.document().working,finished.working);
+                assert_eq!(app.borrow().host.session.engine().checkpoint(),finished_checkpoint);
                 let recorded=packed_admission_records(&app);
                 let raw:Vec<_>=recorded.iter().filter_map(|r|if let Record::Raw{event,..}=r {Some(*event)}else{None}).collect();
-                assert_eq!(raw.iter().map(|e|e.phase).collect::<Vec<_>>(),[PenPhase::Down,PenPhase::Move,PenPhase::Cancel]);
-                let cancelled=raw.last().unwrap();assert!(cancelled.is_finite());assert_eq!(cancelled.device_id,9);
-                assert_eq!([cancelled.surface_position.x,cancelled.surface_position.y],[moved[0] as f32,moved[1] as f32]);
-                assert_eq!(recorded.iter().filter(|r|matches!(r,Record::End{cancelled:true,..})).count(),1);
+                assert_eq!(raw.iter().map(|e|e.phase).collect::<Vec<_>>(),[PenPhase::Down,PenPhase::Move,PenPhase::Up]);
+                let terminal=raw.last().unwrap();assert!(terminal.is_finite());assert_eq!(terminal.device_id,9);
+                assert_eq!([terminal.surface_position.x,terminal.surface_position.y],[moved[0] as f32,moved[1] as f32]);
+                assert_eq!(recorded.iter().filter(|r|matches!(r,Record::End{cancelled:false,..})).count(),1);
+                assert!(!recorded.iter().any(|r|matches!(r,Record::End{cancelled:true,..})));
+                app.invoke("undo");app.draw_until_idle();assert_eq!(app.pixels(),baseline);
+                assert_project_document(&app.document(),&document);assert_eq!(app.document().working,document.working);
+                assert_eq!(app.borrow().host.session.engine().checkpoint(),checkpoint);
+                app.invoke("redo");app.draw_until_idle();assert_eq!(app.pixels(),expected);
+                assert_eq!(app.borrow().host.session.engine().checkpoint(),finished_checkpoint);
+                app.invoke("undo");app.draw_until_idle();assert_eq!(app.pixels(),baseline);
                 fixtures::drag(&app,10,0,[16.,32.],[48.,32.]);let ink=app.pixels();assert_ne!(ink,baseline);
                 app.invoke("undo");app.draw_until_idle();assert_eq!(app.pixels(),baseline);
                 app.invoke("redo");app.draw_until_idle();assert_eq!(app.pixels(),ink);
@@ -339,12 +360,20 @@ fn packed_pointer_damaged_real_terminals_cancel_once_and_allow_fresh_contacts() 
 }
 
 #[test]
-fn packed_pointer_structural_failures_cancel_only_matching_real_current_owners() {
+fn packed_pointer_structural_failures_finish_only_matching_real_current_owners() {
     use layer_engine::{PenPhase,recording::Record};
     for platform in [0,1] {
         eprintln!("packed structure platform={platform}: initialize fixture and baseline");
         let app=packed_admission_app(platform);let baseline=app.pixels();
         let revision=unsafe {capy_apple_camera_revision(app.0)};
+        let prefix:Vec<_>=[packed_admission_sample(&app,16.,3_000_000_000.,1.),
+            packed_admission_sample(&app,32.,3_010_000_000.,2.)].into_iter().flatten().collect();
+        assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,prefix.as_ptr(),prefix.len(),0,revision,0)},0);
+        fixtures::until(&app,"Oracle contact did not start",||app.borrow().host.session.engine().has_active_stroke());
+        let up=packed_admission_sample(&app,32.,3_010_000_000.,3.);
+        assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,up.as_ptr(),up.len(),0,revision,0)},0);
+        app.draw_until_idle();let expected_prefix=app.pixels();assert_ne!(expected_prefix,baseline);
+        app.invoke("undo");app.draw_until_idle();assert_eq!(app.pixels(),baseline);
         assert!(!app.borrow().host.accepts_pointer_input(0));
         for case in ["short","null-records","metadata","null-updates","foreign-id","foreign-kind",
             "predicted","correction","stale-sample","stale-short","stale-metadata","stale-null-updates"] {
@@ -362,9 +391,11 @@ fn packed_pointer_structural_failures_cancel_only_matching_real_current_owners()
                 });
             };
             let document=app.document();let checkpoint=app.borrow().host.session.engine().checkpoint();
-            app.borrow().host.session.engine().recording.lock().unwrap().start("apple-malformed-structure").unwrap();
+            let revision=unsafe {capy_apple_camera_revision(app.0)};
             let prefix:Vec<_>=[packed_admission_sample(&app,16.,3_000_000_000.,1.),
                 packed_admission_sample(&app,32.,3_010_000_000.,2.)].into_iter().flatten().collect();
+            let committed=app.borrow().host.session.engine().metrics().committed_strokes;
+            app.borrow().host.session.engine().recording.lock().unwrap().start("apple-malformed-structure").unwrap();
             assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,prefix.as_ptr(),prefix.len(),0,revision,0)},0);
             let started=format!("packed structure platform={platform} case={case}: real contact must start");
             eprintln!("{started}");
@@ -382,12 +413,15 @@ fn packed_pointer_structural_failures_cancel_only_matching_real_current_owners()
                 _=>unsafe {capy_apple_pointer(app.0,id,tool,0,terminal.as_ptr(),terminal.len()-1,u32::from(case=="predicted"),delivered_revision,0)},
             };
             assert_eq!(result,if stale {0}else{-1},"platform={platform} case={case}");
-            let cancels=matches!(case,"short"|"null-records"|"metadata"|"null-updates");
-            if cancels {
-                retired("rejected matching real batch");settle("settle cancelled contact");
-                assert_eq!(app.pixels(),baseline);assert_project_document(&app.document(),&document);assert_eq!(app.document().working,document.working);
-                assert_eq!(app.borrow().host.session.engine().checkpoint(),checkpoint);
-                assert!(app.borrow().host.session.engine().can_redo());
+            let finishes=matches!(case,"short"|"null-records"|"metadata"|"null-updates");
+            if finishes {
+                retired("rejected matching real batch");settle("settle finished contact");
+                assert_eq!(app.pixels(),expected_prefix);
+                let finished=app.document();let finished_checkpoint=app.borrow().host.session.engine().checkpoint();
+                assert_eq!(unsafe {capy_apple_pointer(app.0,9,0,0,terminal.as_ptr(),terminal.len(),0,revision,0)},0);
+                settle("late terminal after finished prefix");
+                assert_eq!(app.pixels(),expected_prefix);assert_project_document(&app.document(),&finished);assert_eq!(app.document().working,finished.working);
+                assert_eq!(app.borrow().host.session.engine().checkpoint(),finished_checkpoint);
             } else {
                 assert!(app.borrow().host.session.engine().has_active_stroke(),"platform={platform} case={case}");
                 let up=packed_admission_sample(&app,48.,3_030_000_000.,3.);
@@ -395,13 +429,21 @@ fn packed_pointer_structural_failures_cancel_only_matching_real_current_owners()
                 retired("valid real Up after isolated rejection");settle("settle committed contact");
                 assert_ne!(app.pixels(),baseline);
             }
+            assert_eq!(app.borrow().host.session.engine().metrics().committed_strokes,committed+1);
+            assert_ne!(app.borrow().host.session.engine().checkpoint(),checkpoint);
+            assert!(!app.borrow().host.session.engine().can_redo());
+            let ink=app.pixels();
             let recorded=packed_admission_records(&app);
             let raw:Vec<_>=recorded.iter().filter_map(|r|if let Record::Raw{event,..}=r {Some(*event)}else{None}).collect();
             assert_eq!(raw.iter().map(|e|e.phase).collect::<Vec<_>>(),
-                [PenPhase::Down,PenPhase::Move,if cancels {PenPhase::Cancel}else{PenPhase::Up}],"platform={platform} case={case}");
+                [PenPhase::Down,PenPhase::Move,PenPhase::Up],"platform={platform} case={case}");
             assert!(raw.iter().all(|e|e.is_finite() && e.device_id==9 && e.tool==layer_engine::ToolKind::Pen));
-            assert_eq!(recorded.iter().filter(|r|matches!(r,Record::End{cancelled:true,..})).count(),usize::from(cancels));
-            if !cancels {app.invoke("undo");settle("undo committed contact");assert_eq!(app.pixels(),baseline);assert_project_document(&app.document(),&document);assert_eq!(app.document().working,document.working);}
+            assert_eq!(recorded.iter().filter(|r|matches!(r,Record::End{cancelled:false,..})).count(),1);
+            assert!(!recorded.iter().any(|r|matches!(r,Record::End{cancelled:true,..})));
+            app.invoke("undo");settle("undo committed contact");assert_eq!(app.pixels(),baseline);assert_project_document(&app.document(),&document);assert_eq!(app.document().working,document.working);
+            assert_eq!(app.borrow().host.session.engine().checkpoint(),checkpoint);
+            app.invoke("redo");settle("redo committed contact");assert_eq!(app.pixels(),ink);
+            app.invoke("undo");settle("restore baseline after committed contact");assert_eq!(app.pixels(),baseline);
             eprintln!("packed structure platform={platform} case={case}: fresh native contact and idle");
             fixtures::drag(&app,10,0,[16.,32.],[48.,32.]);let ink=app.pixels();assert_ne!(ink,baseline);
             app.invoke("undo");settle("undo fresh contact");assert_eq!(app.pixels(),baseline);

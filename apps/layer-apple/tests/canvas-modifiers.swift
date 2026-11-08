@@ -714,7 +714,14 @@ private final class NativeRotation: UIRotationGestureRecognizer {
             try require(try await pixels() == gesturePainted, "UIKit recall must preserve every artwork pixel in \(theme)")
         }
         for device: UITouch.TouchType in [.indirectPointer, .pencil, .direct] {
-            let touch = Contact(), event = ContactEvent(); touch.device = device
+            let oracle = Contact(), event = ContactEvent(); oracle.device = device
+            oracle.point = try position(CGPoint(x: 64, y: 96), camera: store.state["camera"])
+            canvas.touchesBegan([oracle], with: event); try await flush()
+            oracle.time += 0.01; canvas.touchesEnded([oracle], with: event); try await flush()
+            let expected = try await pixels()
+            if expected != gesturePainted { try await history(gesturePainted, expected) }
+            let touch = Contact(); touch.device = device
+            touch.point = try position(CGPoint(x: 64, y: 96), camera: store.state["camera"])
             canvas.touchesBegan([touch], with: event); try await flush()
             try require(canvas.gestureRecognizer(scroll, shouldReceive: scrollEvent), "Scroll admission must let shared Rust decide primary contact exclusion")
             let before = store.state["camera"]
@@ -727,6 +734,8 @@ private final class NativeRotation: UIRotationGestureRecognizer {
             try await rotated(.began); try await rotated(.changed, angle: .pi / 6); try await rotated(.ended)
             try require(sameCamera(before), "Indirect transforms must preserve the camera during a primary \(device) contact")
             touch.time += 0.01; canvas.touchesCancelled([touch], with: event); try await flush()
+            try require(try await pixels() == expected, "Captured \(device) cancellation must match the ordinary-Up finite prefix exactly")
+            if expected != gesturePainted { try await history(gesturePainted, expected) }
         }
         let resumed = store.state["camera"]
         try await pinched(.began)
