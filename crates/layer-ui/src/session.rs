@@ -4975,12 +4975,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             event.surface_position.y *= new_scale / old_scale;
         }
         let (bounds_changed, followed) = self.sync_work_area();
-        let fit = self.initial_fit;
-        if fit {
-            self.initial_fit = false;
-            let doc = self.engine.document();
-            self.state.camera.fit([doc.composition().size[0], doc.composition().size[1]]);
-        }
+        let fit = self.fit_initial_view();
         if resized || fit {
             self.sync_camera();
         }
@@ -4990,6 +4985,14 @@ impl<R: CanvasRenderer> UiSession<R> {
                 | if transition { regions::LAYOUT | regions::CUSTOMIZATION | regions::COMMANDS | regions::BUBBLES | regions::BRUSH } else { 0 },
             resized || fit || followed,
         ))
+    }
+
+    fn fit_initial_view(&mut self) -> bool {
+        if !self.initial_fit || self.logical_viewport.is_none()
+            || self.workspace_read_only && !self.state.workspace_ready { return false; }
+        self.initial_fit = false;
+        self.state.camera.fit(self.engine.document().composition().size);
+        true
     }
 
     fn sync_work_area(&mut self) -> (bool, bool) {
@@ -12668,6 +12671,32 @@ mod tests {
         assert_eq!(s.engine.metrics().committed_strokes, 2);
         assert!(!s.engine.has_pending_input());
     }
+    #[test]
+    fn startup_viewport_fit_waits_for_the_managed_workspace_layout() {
+        for platform in [Platform::Ios, Platform::Android] {
+            for navigate in [false, true] {
+                let mut s = UiSession::blank_on_screen(Recorder::default(), [1, 1], platform,
+                    Localizer::shared(UiLanguage::English), Some(crate::ScreenInfo { extent: [1206, 2622], ppi: None })).unwrap();
+                s.set_workspace_read_only(true);
+                let stamp = s.session_stamp();
+                s.set_viewport([402., 874.], [1206, 2622]).unwrap();
+                assert!(s.initial_fit);
+                let layout = WorkspacePreset::Painter.layout(platform);
+                s.adopt_workspace(crate::PreparedWorkspace::new(crate::WorkspaceCapture::from_template(&layout).unwrap()).unwrap()).unwrap();
+                if navigate { s.gesture([100.; 2], [120.; 2], 1.2, 0.).unwrap(); }
+                let mut expected = s.state.camera.clone();
+                if !navigate { expected.fit(s.engine.document().composition().size); }
+                let change = s.finish_workspace_startup();
+                assert!(!s.initial_fit);
+                assert_eq!(s.state.camera.zoom, expected.zoom);
+                assert_eq!(s.state.camera.translation, expected.translation);
+                assert_eq!(change.canvas_wake, !navigate);
+                assert_eq!(s.can_replace_startup_session(&stamp), !navigate);
+                if !navigate { assert!(s.state.camera.zoom > crate::camera::MIN_ZOOM); }
+            }
+        }
+    }
+
     #[test]
     fn viewport_owns_initial_fit_and_layout_bounds_without_refitting_edits() {
         let mut s = session(Platform::Gtk);

@@ -117,8 +117,14 @@ impl PreparedWorkspace {
 }
 impl<R: CanvasRenderer> UiSession<R> {
     pub fn finish_workspace_startup(&mut self) -> UiChange {
+        let navigation = self.camera_navigation_revision();
         self.state.workspace_ready = true;
-        self.changed(regions::LAYOUT, false)
+        let (_, followed) = self.sync_work_area();
+        let fit = self.fit_initial_view();
+        if fit { self.sync_camera(); }
+        self.automatic_camera_revision = self.state.camera.revision.checked_sub(navigation)
+            .expect("Camera revision moved backwards");
+        self.changed(regions::LAYOUT | if fit || followed { regions::CAMERA } else { 0 }, fit || followed)
     }
     /// An `exact_name` is a typed name and must not collide; library copies
     /// otherwise receive an unused name.
