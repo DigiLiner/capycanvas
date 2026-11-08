@@ -2505,3 +2505,33 @@ namespace CapyNumericHoverTest {
  }
  'Actual retained numeric tooltip journey acknowledges the title before hovering the invalid field; original field assertion retained.'
 }
+
+& {
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-lifecycle.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $function=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-ceq'Check-Caption'},$true)
+ $wait=$function.Find({param($n)$n-is[Management.Automation.Language.CommandAst]-and$n.GetCommandName()-ceq'Wait-Until'},$true)
+ if(!$wait){throw 'Missing actual lifecycle caption settle wait'}
+ $root=[pscustomobject]@{}
+ $root|Add-Member ScriptMethod FindFirst {param($Scope,$Condition)[pscustomobject]@{Current=[pscustomobject]@{IsOffscreen=$false;Name=('Preparing brush'+[char]0x2026)}}}
+ function Model{
+  $state=$script:lifecycleReadiness
+  if($state.blocker-eq'missing'){return}
+  $waiting=$state.ready-lt0-or$state.poll-lt$state.ready
+  [pscustomobject]@{canvas_ready=(!$waiting-or$state.blocker-ne'canvas');brush_ready=(!$waiting-or$state.blocker-ne'brush');canvas_notice=$(if($waiting-and$state.blocker-eq'notice'){'brush'}else{$null});windows_filter_load=[pscustomobject]@{pending=($waiting-and$state.blocker-eq'filters')}}
+ }
+ function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Timeout){
+  if($Message-cne'Startup status did not settle before caption validation'-or$Timeout-ne45){throw 'Lifecycle changed its original settle failure or bound'}
+  for($i=1;$i-le8;$i++){$script:lifecycleReadiness.poll=$i;if(& $Condition){return}};throw $Message
+ }
+ foreach($case in @(@{blocker='brush';ready=4},@{blocker='notice';ready=4},@{blocker='filters';ready=4},@{blocker='canvas';ready=4},@{blocker='brush';ready=1},@{blocker='brush';ready=-1},@{blocker='missing';ready=-1})){
+  $script:lifecycleReadiness=@{blocker=$case.blocker;ready=$case.ready;poll=0}
+  $failure=$null;try{. ([scriptblock]::Create($wait.Extent.Text))}catch{$failure=$_}
+  if($case.ready-lt0){if(!$failure-or$failure.Exception.Message-cne'Startup status did not settle before caption validation'-or$script:lifecycleReadiness.poll-ne8){throw 'Lifecycle accepted missing/stalled readiness'}}else{
+   if($failure){throw $failure}
+   if($script:lifecycleReadiness.poll-ne$case.ready){throw 'Lifecycle caption settled before shared readiness despite current Preparing brush copy'}
+  }
+ }
+ 'Actual lifecycle caption wait uses shared canvas/brush/notice/filter readiness and retains its original bound and native error check.'
+}

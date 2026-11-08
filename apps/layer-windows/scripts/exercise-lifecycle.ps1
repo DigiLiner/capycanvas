@@ -19,13 +19,9 @@ function Button([string]$Name) {
     Control $Name -Name -Type ([System.Windows.Automation.ControlType]::Button) -Arranged
 }
 function Check-Caption {
-    # Caption validation must observe a settled UI; filter discovery can still
-    # be running after the brush and document become ready.
     Wait-Until {
-        $captionStatus = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'canvas-status'))
-        !$captionStatus -or $captionStatus.Current.IsOffscreen -or
-            $captionStatus.Current.Name -notin @('Preparing canvas…','Preparing brushes…','Loading filters…')
+        $model=Model
+        $model -and $model.canvas_ready -and $model.brush_ready -and $null -eq $model.canvas_notice -and !$model.windows_filter_load.pending
     } 'Startup status did not settle before caption validation' 45
     $insets = @((Model).titlebar_insets)
     if ($insets.Count -ne 3 -or $insets[1] -le 0 -or $insets[2] -le 0 -or
