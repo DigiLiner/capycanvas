@@ -60,7 +60,8 @@ fn apple_tonal_presets_refine_in_one_history_step_through_metal() {
         app.invoke("redo");
         app.draw_until_idle();
         assert_eq!(selection_bounds(&app), Some(refined));
-        assert!(app.try_request(0, &json!({"type":"tonal","action":{"kind":"preset","index":6}})).is_err(), "Bright HDR needs a float document");
+        assert_eq!(app.document().composition().color.depth, layer_core::color::SampleDepth::U8);
+        assert!(app.try_request(3, &json!({"type":"tonal","action":{"kind":"preset","index":6}})).is_err(), "Bright HDR needs a float document");
     }
 }
 

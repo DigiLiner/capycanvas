@@ -54,7 +54,12 @@ fn canvas_bar_places_edits_and_hides_during_contacts_through_the_apple_abi() {
         let transform = app.state()["canvas_bar"].clone();
         assert_eq!(transform["context"]["kind"], "transform", "{platform}: {transform}");
         assert_eq!(transform["placement"], "near_object");
-        assert!(edit(&app, &selection, "invert_selection").unwrap_err().contains("previous"), "stale bar edits are refused");
+        let before = app.document();
+        let checkpoint = app.borrow().host.session.engine().checkpoint();
+        edit(&app, &selection, "invert_selection").unwrap();
+        assert!(app.state()["notice"]["text"].as_str().unwrap().contains("previous"), "stale bar edits are refused");
+        assert_eq!(app.document(), before);
+        assert_eq!(app.borrow().host.session.engine().checkpoint(), checkpoint);
         assert!(!layout(&app, &transform).is_null());
 
         let hold = || unsafe { capy_apple_canvas_bar_hold(app.0) };

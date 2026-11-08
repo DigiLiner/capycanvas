@@ -1073,8 +1073,12 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
         app.new_drawing(json!({"op": "unit", "unit": "px"}));
         app.new_drawing(json!({"op": "width", "value": 1_000_000}));
         assert_eq!(app.state()["new_drawing"]["can_create"], false);
-        assert!(app.try_request(0, &json!({"type": "new_drawing", "action": {"op": "create"}})).is_err());
-        assert!(!app.state()["new_drawing"].is_null(), "A refused Create keeps the dialog open");
+        let refused = app.state()["new_drawing"].clone();
+        let checkpoint = app.borrow().host.session.engine().checkpoint();
+        app.new_drawing(json!({"op": "create"}));
+        assert_eq!(app.state()["notice"]["text"], refused["page"]["size"]);
+        assert_eq!(app.state()["new_drawing"], refused, "A refused Create keeps the dialog unchanged");
+        assert_eq!(app.borrow().host.session.engine().checkpoint(), checkpoint);
         assert_eq!(app.document().composition().size, initial);
         let new = ProjectJob::create(&app, [63, 47]);
         assert_eq!(
@@ -1936,7 +1940,7 @@ fn apple_transform_settings_and_actions_preserve_pixel_transactions() {
         app.action(json!({"type":"set_tool_setting","id":"transform_x","value":48}));
         let before = app.state()["tool_settings"].clone();
         assert!(
-            app.try_request(0, &json!({"type":"set_tool_setting","id":"transform_width","value":0}))
+            app.try_request(3, &json!({"type":"set_tool_setting","id":"transform_width","value":0}))
                 .is_err(),
             "Semantic rejection must return field feedback"
         );

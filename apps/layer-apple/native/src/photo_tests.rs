@@ -11,7 +11,7 @@ impl App {
         encoder.write_header().unwrap().write_image_data(rgba).unwrap();
         let job = place_job(self);
         read_bytes(&job, name, &bytes);
-        adopt(self, &job, false);
+        adopt_images(self, &job);
         self.invoke("apply_transform"); self.draw_until_idle();
     }
 }
@@ -65,7 +65,7 @@ fn photo_drop_captures_document_point_and_reuses_shared_row_validation() {
         // Provider delivery is asynchronous; later navigation must not move
         // the captured document target or cause insertion at the canvas center.
         app.invoke("zoom_out"); app.invoke("rotate_left");
-        read_bytes(&job, "Drop.tiff", &bytes); adopt(&app, &job, false);
+        read_bytes(&job, "Drop.tiff", &bytes); adopt_images(&app, &job);
         let doc = &app.document();
         let placed = placed_objects(doc).next().unwrap();
         let center = doc.object_document_affine(placed).unwrap().map([6.5, 4.5]);
@@ -87,7 +87,7 @@ fn photo_drop_captures_document_point_and_reuses_shared_row_validation() {
         for (fraction, position, index) in [(0.1, "above", 0), (0.5, "into", 1), (0.9, "below", 2)] {
             assert_eq!(app.request(2, json!({"type":"image_layer_drop","target":group_token,"fraction":fraction})).unwrap()["position"], position);
             let job = place_at(&app, Some(json!({"layer":{"target":group_token,"fraction":fraction}})));
-            read_bytes(&job, "Row drop.tiff", &bytes); adopt(&app, &job, false);
+            read_bytes(&job, "Row drop.tiff", &bytes); adopt_images(&app, &job);
             let doc = &app.document();
             let inserted = doc.scene().order()[index];
             assert!(doc.scene().object_layer(inserted).is_some(), "{position} insertion order");
@@ -114,8 +114,11 @@ fn read_bytes(job: &ProjectJob, name: &str, bytes: &[u8]) {
     let name = CString::new(name).unwrap();
     assert_eq!(unsafe { capy_project_read_bytes(job.0, bytes.as_ptr(), bytes.len(), name.as_ptr()) }, 0, "{:?}", job.error());
 }
+fn adopt_images(app: &App, job: &ProjectJob) {
+    assert_eq!(unsafe {capy_project_finish_images(job.0)},0,"{:?}",job.error());
+    adopt(app, job, false);
+}
 fn adopt(app: &App, job: &ProjectJob, opened: bool) {
-    if !opened {assert_eq!(unsafe {capy_project_finish_images(job.0)},0,"{:?}",job.error());}
     for request in app.state()["requests"].as_array().unwrap().clone() {
         if request["kind"]["type"] == "save_settings" {
             app.action(json!({"type":"complete_request","id":request["id"],"error":null}));
@@ -282,7 +285,7 @@ fn photo_open_and_place_retain_source_depth_profile_samples_and_save_safety() {
             let job = ProjectJob::create(&app, [67, 43]); adopt(&app, &job, false);
             let target_color = app.document().composition().color;
             let blank = app.pixels();
-            let job = place_job(&app); read_bytes(&job, "Retained.tiff", &bytes); adopt(&app, &job, false);
+            let job = place_job(&app); read_bytes(&job, "Retained.tiff", &bytes); adopt_images(&app, &job);
             app.invoke("apply_transform"); app.draw_until_idle();
             let document = &app.document();
             assert_eq!(document.composition().color, target_color, "Place must preserve the receiving document's space/depth");
@@ -383,7 +386,7 @@ fn photo_batch_placement_is_provisional_atomic_and_keeps_original_samples() {
                 read_bytes(&job, &format!("Photo-{}.tiff", index + 1), bytes);
                 assert_project_document(&app.document(), &before);
             }
-            adopt(&app, &job, false);
+            adopt_images(&app, &job);
             app.with(|native| {
             let session = &native.host.session;
             assert!(!session.engine().can_undo(), "Provisional placement has no artwork history");
