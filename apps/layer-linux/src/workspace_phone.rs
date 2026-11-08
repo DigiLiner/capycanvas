@@ -198,14 +198,14 @@ impl Phone {
         }
     }
     pub fn main_menu(&self, w: &Rc<Workspace>, popup: &gtk::PopoverMenu) {
-        let Some((extras, label)) = w.gpu.borrow().as_ref().map(|g| (g.session.main_menu_extras(),
-            DocumentTabLabel::new(w.documents.selected(), &g.session.state().document_file, &w.localization()).menu_label(w.documents.len()))) else { return; };
+        let Some((extras, row)) = w.gpu.borrow().as_ref().map(|g| (g.session.main_menu_extras(),
+            DocumentTabLabel::new(w.documents.selected(), &g.session.state().document_file, &w.localization()).menu_item(w.documents.len()))) else { return; };
         let body = gtk::Box::new(gtk::Orientation::Vertical, 4);
         body.set_widget_name("capy-main-extra");
         if extras[0] {
-            let drawing = gtk::Button::with_label(&label);
+            let drawing = gtk::Button::with_label(&row.label);
             drawing.add_css_class("flat");
-            drawing.set_sensitive(w.documents.len() > 1);
+            drawing.set_sensitive(row.enabled);
             drawing.connect_clicked(glib::clone!(#[weak] w, move |_| w.documents.show_selector(&w)));
             body.append(&drawing);
         }

@@ -43,6 +43,9 @@ fn apple_request_seven_extends_the_shared_layout_update() {
         let extension = published.as_object_mut().unwrap();
         assert!(extension.remove("display_status").is_some());
         assert!(extension.remove("document_tabs").is_some());
+        let main_menu = extension.remove("main_menu").unwrap();
+        assert_eq!(main_menu["extras"], json!(app.borrow().host.session.main_menu_extras()));
+        assert_eq!(main_menu["drawing"]["action"]["command"], "drawings");
         assert_eq!(extension.remove("language_generation"), Some(json!(0)));
         assert_eq!(extension.remove("bootstrap"), Some(app.request(2, json!({"type":"bootstrap"})).unwrap()));
         assert_eq!(extension.remove("catalog"), Some(app.request(2, json!({"type":"catalog"})).unwrap()));

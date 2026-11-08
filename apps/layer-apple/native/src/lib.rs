@@ -527,6 +527,11 @@ pub unsafe extern "C" fn capy_apple_request(
             let mut extension = serde_json::json!({
                 "display_status": a.metal.display_status(&a.host),
                 "document_tabs": a.window.view(&a.host, a.host.logical[0]),
+                "main_menu": {
+                    "extras": a.host.session.main_menu_extras(),
+                    "drawing": layer_ui::DocumentTabLabel::new(a.window.documents.selected(),
+                        &a.host.session.state().document_file, a.host.session.localization()).menu_item(a.window.documents.order().len()),
+                },
             });
             let generation = a.host.localization_generation();
             if a.published_language != Some(generation) {

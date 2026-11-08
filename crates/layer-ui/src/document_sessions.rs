@@ -474,6 +474,11 @@ impl DocumentTabLabel {
     pub fn menu_label(&self, count: usize) -> String {
         format!("{}{}{}", if self.modified { "• " } else { "" }, self.title, if count > 1 { format!(" ({count})") } else { String::new() })
     }
+    pub fn menu_item(&self, count: usize) -> crate::ContextMenuItem {
+        let mut item = crate::ContextMenuItem::command(self.menu_label(count), crate::UiAction::Invoke { command: crate::CommandId::Drawings });
+        item.enabled = count > 1;
+        item
+    }
     pub fn new(id: u64, file: &DocumentFileState, localization: &Localizer) -> Self {
         let title = if file.location.is_none() && file.unsaved_name.is_none() {
             Self::untitled(id, localization)
@@ -737,6 +742,22 @@ mod tests {
             assert_eq!(DocumentTabLabel::new(7, &file, &japanese).title, name);
             assert_eq!(file.title(), name);
             file.location = None;
+        }
+    }
+
+    #[test]
+    fn main_menu_drawing_row_tracks_count_and_unsaved_state() {
+        let mut label = DocumentTabLabel::new(1, &DocumentFileState::localized(&english()), &english());
+        for modified in [false, true] {
+            label.modified = modified;
+            for count in [1, 2] {
+                let item = label.menu_item(count);
+                assert_eq!(item.label, label.menu_label(count));
+                assert_eq!(item.enabled, count > 1);
+                assert_eq!(item.action, Some(crate::UiAction::Invoke { command: crate::CommandId::Drawings }));
+                assert_eq!(item.label.starts_with("• "), modified);
+                assert_eq!(item.label.ends_with(" (2)"), count == 2);
+            }
         }
     }
 

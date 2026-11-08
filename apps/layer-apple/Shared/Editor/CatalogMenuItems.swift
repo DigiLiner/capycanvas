@@ -104,11 +104,22 @@ struct ApplicationMenuButton<Label: View>: View {
     if let id { return catalog(id) }
     let primary = store.snapshot["header"]["primary_menu"]
     let fileLabel = store.snapshot["application_menus"].array.first { $0["id"].string == "file" }?["label"].string
-    return primary.replacing("sections", with: JSON(primary["sections"].array.map { section in
+    var sections = primary["sections"].array.map { section in
         section.array.map { row in
             (row["label"].string == fileLabel ? row.replacing("sections", with: catalog("file")["sections"]) : row).raw
         }
-    }))
+    }
+    let main = store.snapshot["main_menu"]
+    var contextual: [Any] = []
+    if main["extras"][0].bool {
+        contextual.append(main["drawing"].raw)
+    }
+    if main["extras"][1].bool, let workspaces = store.workspaces {
+        let menu = workspaces.view["switcher_menu"]
+        contextual.append(["label": menu["title"].string, "enabled": true, "sections": menu["sections"].raw])
+    }
+    if !contextual.isEmpty { sections.insert(contextual, at: 0) }
+    return primary.replacing("sections", with: JSON(sections))
 }
 
 /// The in-app iPad menus and the Mac OS menu bar consume the same catalog/state.

@@ -71,6 +71,7 @@ import Foundation
         } else { return .ignored }
         // All reads, including those in synchronous observation callbacks, now
         // see coherent retained models and their matching presentation.
+        if !full, !next["main_menu"].isNull { changes += snapshotFields.stagePatch(["main_menu": next["main_menu"]]) }
         changes.forEach { $0.publish() }
         return kind
     }

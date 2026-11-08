@@ -41,6 +41,35 @@ import Foundation
             $0["kind"]["type"].string == "workspace"
         }
     }
+    @MainActor static func contextualRows(_ store: EditorStore) async throws {
+        func rows() -> [JSON] { editorApplicationMenu(store)["sections"].array.flatMap(\.array) }
+        func drawing(_ row: JSON) -> Bool { row["action"]["command"].string == "drawings" }
+        func switcher(_ row: JSON) -> Bool { row["label"].string == store.workspaces!.view["switcher_menu"]["title"].string }
+        func header(_ action: [String: Any]) async throws {
+            try await store.apply(["type": "customize", "action": ["type": "header", "action": action]])
+        }
+        let original = rows().map(\.stableKey)
+        let file = editorApplicationMenu(store, id: "file").stableKey
+        let entries = store.snapshot["header"]["model"]["zones"].array.flatMap(\.array)
+        let title = entries.first { $0["item"]["kind"].string == "document_title" }!
+        let workspaces = entries.first { $0["item"]["kind"].string == "workspaces" }!
+        precondition(!rows().contains(where: drawing) && !rows().contains(where: switcher))
+        try await header(["type": "edit", "editing": true])
+        try await header(["type": "remove", "id": title["id"].raw])
+        let drawings = rows().filter(drawing)
+        precondition(drawings.count == 1 && !drawings[0]["enabled"].bool,
+            "Main Menu must expose the single drawing when its title is removed")
+        precondition(drawings[0].stableKey == store.snapshot["main_menu"]["drawing"].stableKey)
+        precondition(!rows().contains(where: switcher))
+        try await header(["type": "remove", "id": workspaces["id"].raw])
+        let choices = rows().filter(switcher)
+        precondition(choices.count == 1 && choices[0]["sections"].stableKey == store.workspaces!.view["switcher_menu"]["sections"].stableKey,
+            "Main Menu must expose the shared workspace switcher when its header is removed")
+        precondition(editorApplicationMenu(store, id: "file").stableKey == file,
+            "Contextual Main Menu rows must not change the File menu")
+        try await header(["type": "cancel"])
+        precondition(rows().map(\.stableKey) == original, "Restoring the header must remove its contextual rows")
+    }
     @MainActor static func main() async throws {
         let promptTitles = ["new": "New Workspace", "reset_brushes": "Reset All Brushes?",
             "reset_layout": "Restore Starting Layout", "save_toolbar": "Save to Toolbar Library", "new_toolbar": "New Toolbar"]
@@ -53,6 +82,7 @@ import Foundation
             let workspaces = editor.workspaces!
             try await workspaces.started()
             try await workspaces.perform(["type": "switch", "id": "builtin:workspace:illustrator"])
+            try await contextualRows(editor)
             // Give reset/history something to operate on and retain across
             // cancellation. This changes the workspace, not the document.
             try await editor.apply(["type": "set_brush_size", "value": 31])
