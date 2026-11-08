@@ -1,4 +1,4 @@
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import base64
 import importlib.util
 import fcntl
@@ -83,16 +83,182 @@ class CredentialTests(unittest.TestCase):
 
 
 class CheckTests(unittest.TestCase):
+    def run_check(self, options=(), progress=None, status_error=None, fetch_error=None, cleanup_error=None):
+        if progress is None:
+            progress = [{"state": "Ready", "task_result": 0, "started": True, "result": {"exit_code": 0}}]
+        progress = list(progress)
+        clock = [0.0]
+        stdout, stderr = Mock(buffer=io.BytesIO()), Mock(buffer=io.BytesIO())
+        output_bytes = "native input passed\n日本語\n".encode()
+        error_bytes = b"\x1b[31mcomplete native stderr\x1b[0m\n"
+        polls, events = [], []
+        held = [False]
+
+        @contextmanager
+        def claim(machine):
+            held[0] = True
+            try:
+                yield
+            finally:
+                held[0] = False
+
+        def guest(machine, command, **kwargs):
+            if "Get-ScheduledTaskInfo" in command and "Unregister-ScheduledTask" not in command:
+                polls.append(command)
+                if status_error:
+                    raise status_error
+                if not progress:
+                    raise AssertionError("The check did not terminate at its recorded task boundary")
+                return subprocess.CompletedProcess([], 0, stdout=json.dumps(progress.pop(0)))
+            self.assertIn("Unregister-ScheduledTask", command, "SSH must not directly execute the UI-consuming suite")
+            self.assertIn("capycanvas-check-owned-run", command)
+            self.assertIn("$task.State -notin 'Running','Queued'", command)
+            self.assertIn("$info.LastTaskResult -notin 267009,267011", command)
+            self.assertNotIn("Stop-ScheduledTask", command)
+            self.assertNotIn(vm.DESKTOP_TASK, command)
+            self.assertEqual(events, ["retrieve"])
+            events.append("cleanup")
+            if cleanup_error:
+                raise cleanup_error
+            return subprocess.CompletedProcess([], 0)
+
+        with TemporaryDirectory() as directory:
+            local = Path(directory)
+
+            def retrieve(machine, root, name):
+                self.assertTrue(held[0], "The VM claim ended before evidence retrieval")
+                events.append("retrieve")
+                if not status_error:
+                    self.assertFalse(progress, "Evidence retrieval began before the owned task completed")
+                if fetch_error:
+                    raise fetch_error
+                target = local / name
+                target.mkdir()
+                (target / "stdout.log").write_bytes(output_bytes)
+                (target / "stderr.log").write_bytes(error_bytes)
+                return target
+
+            with patch.object(sys, "argv", ["windows-vm.py", "check", *options]), \
+                    patch.object(vm, "selected", return_value="owned"), patch.object(vm, "boot"), \
+                    patch.object(vm, "claim", side_effect=claim), patch.object(vm, "sync_machine"), \
+                    patch.object(vm, "prepare_rust"), patch.object(vm.secrets, "token_hex", return_value="owned-run"), \
+                    patch.object(vm, "guest_script") as upload, patch.object(vm, "desktop") as launch, \
+                    patch.object(vm, "guest", side_effect=guest), patch.object(vm, "retrieve", side_effect=retrieve) as fetch, \
+                    patch.object(vm.time, "monotonic", side_effect=lambda: clock[0]), \
+                    patch.object(vm.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+                    patch.object(vm.sys, "stdout", stdout), patch.object(vm.sys, "stderr", stderr):
+                error = None
+                try:
+                    vm.main()
+                except SystemExit as failure:
+                    error = failure.code
+            self.assertEqual(stdout.buffer.getvalue(), b"" if fetch_error else output_bytes)
+            self.assertEqual(stderr.buffer.getvalue(), b"" if fetch_error else error_bytes)
+            self.diagnostics = "".join(call.args[0] for call in stderr.write.call_args_list)
+            fetch.assert_called_once()
+            self.assertEqual(events, ["retrieve", "cleanup"])
+            self.assertFalse(held[0])
+        launch.assert_called_once_with("owned", f'-File "{vm.GUEST_REPO}\\artifacts\\windows\\vm-check\\check-owned-run\\check.ps1"', task="capycanvas-check-owned-run")
+        upload.assert_called_once()
+        script = upload.call_args.args[1]
+        self.assertEqual(script.count("test-without-gpu.ps1' -Configuration "), 1)
+        self.assertNotIn("-Skip", script)
+        self.assertIn("[IO.File]::Move", script)
+        self.assertIn("result.tmp','", script)
+        self.assertIn("$code=$LASTEXITCODE", script)
+        self.assertIn("exit $code", script)
+        return error, script, polls, clock[0]
+
     def test_cli_defaults_to_release_and_debug_is_explicit(self):
         for options, configuration in (([], "Release"), (["--debug"], "Debug")):
-            with self.subTest(configuration=configuration), \
-                    patch.object(sys, "argv", ["windows-vm.py", "check", *options]), \
-                    patch.object(vm, "selected", return_value=None), patch.object(vm, "boot"), \
-                    patch.object(vm, "claim"), patch.object(vm, "sync_machine"), \
-                    patch.object(vm, "prepare_rust"), \
-                    patch.object(vm, "guest") as guest:
-                vm.main()
-            self.assertTrue(guest.call_args.args[1].endswith(f"-Configuration {configuration}"))
+            with self.subTest(configuration=configuration):
+                error, script, _, _ = self.run_check(options)
+                self.assertIsNone(error)
+                self.assertIn(f"test-without-gpu.ps1' -Configuration {configuration} 1>", script)
+
+    def test_normal_suite_nonzero_exit_is_preserved(self):
+        error, _, polls, _ = self.run_check(progress=[
+            {"state": "Running", "task_result": 267009, "started": True, "result": {"exit_code": 37}},
+            {"state": "Ready", "task_result": 1, "started": True, "result": {"exit_code": 37}},
+        ])
+        self.assertEqual(error, 37)
+        self.assertEqual(len(polls), 2)
+
+    def test_stopped_task_without_terminal_receipt_fails(self):
+        for started in (False, True):
+            with self.subTest(started=started):
+                error, _, polls, _ = self.run_check(progress=[{"state": "Ready", "task_result": 1, "started": started, "result": None}])
+                self.assertEqual(error, "The Windows check task stopped without a terminal receipt (task result 1).")
+                self.assertEqual(len(polls), 1)
+
+    def test_ready_running_result_does_not_claim_completion(self):
+        error, _, polls, _ = self.run_check(progress=[
+            {"state": "Ready", "task_result": 267011, "started": False, "result": None},
+            {"state": "Ready", "task_result": 267009, "started": False, "result": None},
+            {"state": "Running", "task_result": 267009, "started": True, "result": None},
+            {"state": "Ready", "task_result": 267009, "started": True, "result": None},
+            {"state": "Ready", "task_result": 0, "started": True, "result": {"exit_code": 0}},
+        ])
+        self.assertIsNone(error)
+        self.assertEqual(len(polls), 5)
+
+    def test_terminal_receipt_waits_for_the_owned_task_to_finish(self):
+        progress = [{"state": state, "task_result": result, "started": True, "result": {"exit_code": 0}}
+                    for state, result in (("Running", 267009), ("Ready", 267009), ("Ready", 267011), ("Ready", 0))]
+        error, _, polls, _ = self.run_check(progress=progress)
+        self.assertIsNone(error)
+        self.assertEqual(len(polls), 4)
+
+    def test_terminal_receipt_does_not_renew_the_task_state_deadline(self):
+        progress = [{"state": "Running", "task_result": 267009, "started": True, "result": {"exit_code": 0}}] * 37
+        error, _, polls, elapsed = self.run_check(progress=progress)
+        self.assertEqual(error, "The interactive Windows check task did not publish its startup or terminal receipt within three minutes.")
+        self.assertEqual(len(polls), 37)
+        self.assertEqual(elapsed, 180)
+
+    def test_missing_startup_and_stale_stopped_state_are_bounded(self):
+        for state, result, started in (("Ready", 267011, False), ("Running", 267009, False), ("Ready", 267009, True)):
+            with self.subTest(state=state, result=result, started=started):
+                progress = [{"state": state, "task_result": result, "started": started, "result": None}] * 37
+                error, _, polls, elapsed = self.run_check(progress=progress)
+                self.assertEqual(error, "The interactive Windows check task did not publish its startup or terminal receipt within three minutes.")
+                self.assertEqual(len(polls), 37)
+                self.assertEqual(elapsed, 180)
+
+    def test_running_full_suite_has_no_added_deadline(self):
+        progress = [{"state": "Running", "task_result": 267009, "started": True, "result": None}] * 40
+        progress += [{"state": "Ready", "task_result": 267009, "started": True, "result": None},
+                     {"state": "Ready", "task_result": 0, "started": True, "result": {"exit_code": 0}}]
+        error, _, _, elapsed = self.run_check(progress=progress)
+        self.assertIsNone(error)
+        self.assertGreater(elapsed, 180)
+
+    def test_status_transport_failure_preserves_evidence_and_error(self):
+        error, _, _, _ = self.run_check(status_error=subprocess.CalledProcessError(15, ["ssh", "owned-status"], stderr="Lost connection"))
+        self.assertEqual(error, "Exit status 15: ssh owned-status")
+
+    def test_status_failure_survives_retrieval_and_cleanup_failures(self):
+        error, _, _, _ = self.run_check(
+            status_error=subprocess.CalledProcessError(15, ["ssh", "owned-status"]),
+            fetch_error=SystemExit("Could not retrieve the VM test evidence."),
+            cleanup_error=subprocess.CalledProcessError(19, ["ssh", "owned-cleanup"]))
+        self.assertEqual(error, "Exit status 15: ssh owned-status")
+        self.assertIn("Could not retrieve Windows check evidence: Could not retrieve the VM test evidence.", self.diagnostics)
+        self.assertIn("Could not unregister the completed Windows check task:", self.diagnostics)
+
+    def test_native_failure_survives_retrieval_failure(self):
+        error, _, _, _ = self.run_check(
+            progress=[{"state": "Ready", "task_result": 37, "started": True, "result": {"exit_code": 37}}],
+            fetch_error=SystemExit("Could not retrieve the VM test evidence."))
+        self.assertEqual(error, 37)
+        self.assertIn("Could not retrieve Windows check evidence:", self.diagnostics)
+
+    def test_retrieval_and_cleanup_errors_cannot_turn_success_green(self):
+        for failures, expected in (({"fetch_error": SystemExit("Missing evidence")}, "Missing evidence"),
+                                   ({"cleanup_error": subprocess.CalledProcessError(19, ["ssh", "owned-cleanup"])}, "Exit status 19: ssh owned-cleanup")):
+            with self.subTest(expected=expected):
+                error, _, _, _ = self.run_check(**failures)
+                self.assertEqual(error, expected)
 
 
 class GuestConnectionTests(unittest.TestCase):

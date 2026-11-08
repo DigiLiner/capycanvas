@@ -919,12 +919,88 @@ def sync(args):
 def check(args):
     machine = selected(args)
     boot(machine, gui=False)
-    lock = claim(machine)
-    sync_machine(machine)
-    prepare_rust(machine)
-    configuration = "Debug" if args.debug else "Release"
-    guest(machine, f"& '{GUEST_PWSH}' -NoProfile -File '{GUEST_REPO}\\apps\\layer-windows\\scripts\\test-without-gpu.ps1' "
-                   f"-Configuration {configuration}")
+    with claim(machine):
+        sync_machine(machine)
+        prepare_rust(machine)
+        configuration = "Debug" if args.debug else "Release"
+        name = "check-" + secrets.token_hex(16)
+        root = f"{GUEST_REPO}\\artifacts\\windows\\vm-check"
+        output = root + "\\" + name
+        task = "capycanvas-" + name
+        guest_script(machine, f"""$ErrorActionPreference='Stop'
+[IO.Directory]::CreateDirectory('{output}')|Out-Null
+@'
+$ErrorActionPreference='Stop'
+$identity=@{{process_id=$PID;process_start_utc=(Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')}}
+[IO.File]::WriteAllText('{output}\\started.tmp',($identity|ConvertTo-Json))
+[IO.File]::Move('{output}\\started.tmp','{output}\\started.json')
+$ErrorActionPreference='Continue'
+& '{GUEST_PWSH}' -NoProfile -File '{GUEST_REPO}\\apps\\layer-windows\\scripts\\test-without-gpu.ps1' -Configuration {configuration} 1> '{output}\\stdout.log' 2> '{output}\\stderr.log'
+$code=$LASTEXITCODE
+$ErrorActionPreference='Stop'
+if($null -eq $code){{throw 'The Windows check process has no exit status.'}}
+$identity.exit_code=$code
+[IO.File]::WriteAllText('{output}\\result.tmp',($identity|ConvertTo-Json))
+[IO.File]::Move('{output}\\result.tmp','{output}\\result.json')
+exit $code
+'@|Set-Content -LiteralPath '{output}\\check.ps1' -Encoding UTF8
+""")
+        failure = None
+        try:
+            desktop(machine, f'-File "{output}\\check.ps1"', task=task)
+            startup_deadline = state_deadline = time.monotonic() + 180
+            while True:
+                status = guest(machine, f"""$ErrorActionPreference='Stop'
+$task=Get-ScheduledTask -TaskName '{task}'
+$info=Get-ScheduledTaskInfo -TaskName '{task}'
+$result=if(Test-Path -LiteralPath '{output}\\result.json'){{[IO.File]::ReadAllText('{output}\\result.json')|ConvertFrom-Json}}else{{$null}}
+@{{state=[string]$task.State;task_result=[long]$info.LastTaskResult;started=(Test-Path -LiteralPath '{output}\\started.json');result=$result}}|ConvertTo-Json -Depth 4 -Compress
+""", capture_output=True, text=True, timeout=60)
+                progress = json.loads(status.stdout)
+                if progress["state"] not in ("Running", "Queued") and progress["task_result"] not in (267009, 267011):
+                    if progress["result"] is None:
+                        raise RuntimeError(f"The Windows check task stopped without a terminal receipt (task result {progress['task_result']}).")
+                    code = progress["result"]["exit_code"]
+                    if code:
+                        sys.exit(code)
+                    break
+                now = time.monotonic()
+                if progress["result"] is None and progress["state"] in ("Running", "Queued"):
+                    state_deadline = now + 180
+                if (not progress["started"] and now >= startup_deadline) or now >= state_deadline:
+                    raise TimeoutError("The interactive Windows check task did not publish its startup or terminal receipt within three minutes.")
+                time.sleep(5)
+        except BaseException as error:
+            failure = error
+        finally:
+            try:
+                local = retrieve(machine, root, name)
+                for filename, stream in (("stdout.log", sys.stdout), ("stderr.log", sys.stderr)):
+                    path = local / filename
+                    if path.exists():
+                        with path.open("rb") as source:
+                            shutil.copyfileobj(source, stream.buffer)
+                        stream.flush()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                else:
+                    print(f"Could not retrieve Windows check evidence: {error}", file=sys.stderr)
+            try:
+                guest(machine, f"""$ErrorActionPreference='Stop'
+$task=Get-ScheduledTask -TaskName '{task}' -ErrorAction SilentlyContinue
+if($task){{
+    $info=Get-ScheduledTaskInfo -TaskName '{task}'
+    if($task.State -notin 'Running','Queued' -and $info.LastTaskResult -notin 267009,267011){{Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false}}
+}}
+""", timeout=60)
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                else:
+                    print(f"Could not unregister the completed Windows check task: {error}", file=sys.stderr)
+        if failure is not None:
+            raise failure
 
 
 def desktop(machine, arguments, user=USER, task=DESKTOP_TASK, directory=GUEST_REPO):

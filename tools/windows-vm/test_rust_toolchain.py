@@ -16,12 +16,21 @@ spec.loader.exec_module(vm)
 class RustToolchainTests(unittest.TestCase):
     def test_check_prepares_compiler_before_first_cargo_consumer(self):
         events = []
-        with patch.object(vm, "selected", return_value=None), patch.object(vm, "boot"), \
+
+        def begin_check(*args, **kwargs):
+            events.append("check")
+            raise InterruptedError
+
+        with TemporaryDirectory() as directory, \
+                patch.object(vm, "selected", return_value=None), patch.object(vm, "boot"), \
                 patch.object(vm, "claim", return_value=nullcontext()), patch.object(vm, "sync_machine"), \
                 patch.object(vm, "prepare_rust", create=True, side_effect=lambda machine: events.append("rust")), \
-                patch.object(vm, "guest", side_effect=lambda *args: events.append("check")):
-            vm.check(SimpleNamespace(debug=False))
-        self.assertEqual(events, ["rust", "check"], "Windows check used Cargo before validating the guest compiler")
+                patch.object(vm, "guest_script", side_effect=lambda *args, **kwargs: events.append("upload")), \
+                patch.object(vm, "desktop", side_effect=begin_check), patch.object(vm, "guest"), \
+                patch.object(vm, "retrieve", return_value=Path(directory)):
+            with self.assertRaises(InterruptedError):
+                vm.check(SimpleNamespace(debug=False))
+        self.assertEqual(events, ["rust", "upload", "check"], "Windows check used Cargo before validating the guest compiler")
 
     def test_fixture_build_and_reuse_prepare_compiler(self):
         for no_build in (False, True):
