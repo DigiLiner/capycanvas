@@ -1468,7 +1468,13 @@ public static class CapyEdgeReleaseTest {
  $numeric=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Preference-Numeric'},$true)
  $surface=$numeric.Body.Find({param($n)$n-is[Management.Automation.Language.CommandAst]-and$n.GetCommandName()-eq'Surface-Languages'},$true)
  $body=@($surface.CommandElements|Where-Object {$_-is[Management.Automation.Language.ScriptBlockExpressionAst]})[0].ScriptBlock
- $statements=@($body.EndBlock.Statements);$sequence=($statements[-5..-1]|ForEach-Object {$_.Extent.Text})-join"`n"
+ $statements=@($body.EndBlock.Statements)
+ $anchor=@($statements|Where-Object {$_-is[Management.Automation.Language.AssignmentStatementAst]-and$_.Left.Extent.Text-eq'$title'-and$_.Extent.Text-like"*number-caption-setting-number-pan_speed*"})
+ if($anchor.Count-ne1){throw 'Missing actual numeric title tooltip sequence'}
+ $first=[array]::IndexOf($statements,$anchor[0]);$nodes=@()
+ for($index=$first;$index-lt$statements.Count;$index++){$nodes+=,$statements[$index];if($statements[$index]-is[Management.Automation.Language.TryStatementAst]){break}}
+ if($nodes.Count-ne7-or$nodes[-1]-isnot[Management.Automation.Language.TryStatementAst]){throw 'Incomplete actual title and field tooltip sequence'}
+ $sequence=($nodes|ForEach-Object {$_.Extent.Text})-join"`n"
  if($sequence-notlike"*'Retained native error tooltip did not use the current canonical copy' 10*"){throw 'Missing actual retained numeric tooltip hover and assertion sequence'}
  $assertTooltip=[scriptblock]::Create($sequence.Replace('System.Windows.Automation.','CapyTooltipContextTest.').Replace('[CapyRowPointer]','[CapyTooltipContextTest.Driver]').Replace('[CapyRowPointer+Point]','[CapyTooltipContextTest.Driver+Point]'))
  Add-Type -TypeDefinition @'
@@ -1486,16 +1492,16 @@ namespace CapyTooltipContextTest {
   }
  }
  public static class Driver {
-  public struct Point {public int x,y;}public static int CursorReads;public static bool MissingCursor,FailCursor;public static Point Position;public static List<string> Hovers=new List<string>(),ReadOrder=new List<string>();
-  public static void Hover(int x,int y){Hovers.Add(x+","+y);}
+  public struct Point {public int x,y;}public static int CursorReads;public static bool MissingCursor,FailCursor,TitleAcknowledged;public static Point Position;public static List<string> Hovers=new List<string>(),ReadOrder=new List<string>();
+  public static void Hover(int x,int y){if(Hovers.Count==1&&!TitleAcknowledged)throw new InvalidOperationException("Field hover preceded title acknowledgement");Hovers.Add(x+","+y);}
   public static bool GetCursorPos(out Point point){ReadOrder.Add("cursor");CursorReads++;point=Position;if(FailCursor)throw new InvalidOperationException("cursor provider unavailable");return !MissingCursor;}
  }
 }
 '@
  $choice=@{tag='it'};$review=@{Id=33}
  function Catalog-Text($Tag,$Id,$Domain){[CapyTooltipContextTest.Driver]::ReadOrder.Add('catalog');$state.catalogReads++;if($Tag-cne'it'-or$Id-cne'numeric-invalid-expression'-or$Domain-cne'common'){throw 'Unexpected tooltip catalog lookup'};'Espressione non valida'}
- function Control($Id){if($Id-cne'preferences-heading'){throw 'Unexpected tooltip hover owner'};$heading}
- function Numeric-Tooltip{if($case-eq'success'){@{Current=@{Name='Espressione non valida'}}}else{@{Current=@{Name='stale copy'}}}}
+ function Control($Id){if($Id-cne'number-caption-setting-number-pan_speed'){throw 'Unexpected tooltip hover owner'};$heading}
+ function Numeric-Tooltip{if([CapyTooltipContextTest.Driver]::Hovers.Count-eq1){return @{Current=@{Name=$heading.Name}}};if($case-eq'success'){@{Current=@{Name='Espressione non valida'}}}else{@{Current=@{Name='stale copy'}}}}
  function Capy-Tooltips($ProcessId){
   $state.inventoryReads++;[CapyTooltipContextTest.Driver]::ReadOrder.Add('inventory');if($ProcessId-ne33){throw 'Wrong tooltip owner'}
   if($case-eq'provider'){throw 'tooltip provider unavailable'}
@@ -1503,6 +1509,7 @@ namespace CapyTooltipContextTest {
  }
  function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Seconds){
   if($Seconds-ne10){throw 'Tooltip assertion changed its deadline'}
+  if($Message-eq'Native numeric title tooltip did not acknowledge hover'){if(!(& $Condition)){throw $Message};[CapyTooltipContextTest.Driver]::TitleAcknowledged=$true;return}
   if($case-ne'unrelated'-and(& $Condition)){return}
   try{if($case-eq'unrelated'){throw 'unrelated predicate failure'};throw $Message}catch{
    [CapyTooltipContextTest.Driver]::ReadOrder.Clear();$state.original=$_;$state.stack=$_.ScriptStackTrace
@@ -1512,13 +1519,13 @@ namespace CapyTooltipContextTest {
   }
  }
  foreach($case in 'empty','unchanged','wrong','provider','field','geometry','cursor','missing','empty-bounds','success','unrelated'){
-  $heading=[CapyTooltipContextTest.Field]::new();$heading.HoverBounds=[CapyTooltipContextTest.Rect]::new(100.25,200.5,240.75,32.25)
+  $heading=[CapyTooltipContextTest.Field]::new();$heading.Name='Pan speed';$heading.HoverBounds=[CapyTooltipContextTest.Rect]::new(100.25,200.5,240.75,32.25)
   $control=[CapyTooltipContextTest.Field]::new();$control.HoverBounds=[CapyTooltipContextTest.Rect]::new(910.25,440.5,60.75,34.25);$control.FailureBounds=[CapyTooltipContextTest.Rect]::new(920.75,447.25,62.5,36.75)
   if($case-eq'unchanged'){$control.FailureBounds=$control.HoverBounds}
   if($case-eq'missing'){$control.FailureBounds=$null}
   if($case-eq'empty-bounds'){$control.FailureBounds=[CapyTooltipContextTest.Rect]::new(0,0,0,0);$control.FailureBounds.IsEmpty=$true}
   $control.FailHelp=$case-eq'field';$control.FailBounds=$case-eq'geometry'
-  [CapyTooltipContextTest.Driver]::Hovers.Clear();[CapyTooltipContextTest.Driver]::ReadOrder.Clear();[CapyTooltipContextTest.Driver]::CursorReads=0;[CapyTooltipContextTest.Driver]::MissingCursor=$case-eq'missing';[CapyTooltipContextTest.Driver]::FailCursor=$case-eq'cursor'
+  [CapyTooltipContextTest.Driver]::Hovers.Clear();[CapyTooltipContextTest.Driver]::TitleAcknowledged=$false;[CapyTooltipContextTest.Driver]::ReadOrder.Clear();[CapyTooltipContextTest.Driver]::CursorReads=0;[CapyTooltipContextTest.Driver]::MissingCursor=$case-eq'missing';[CapyTooltipContextTest.Driver]::FailCursor=$case-eq'cursor'
   $position=[CapyTooltipContextTest.Driver+Point]::new();$position.x=941;$position.y=458;[CapyTooltipContextTest.Driver]::Position=$position
   $state=@{inventoryReads=0;catalogReads=0;original=$null;stack=$null};$failure=$null
   try{& $assertTooltip}catch{$failure=$_}
@@ -2454,4 +2461,47 @@ namespace CapyRowRenameTest {
  $Device='mouse';. ([scriptblock]::Create($mouse[0].Extent.Text))
  if(($orders-join'|')-cne'pin/False|pin/True|apply/False|apply/True|row/False'){throw 'Native acknowledgement matrix changed its valid order coverage'}
  'Actual row Rename preserves held draft, preview, claims and native identity; only release admits gated Rename, while pin and Apply retain both acknowledgement orders.'
+}
+
+& {
+ Add-Type -TypeDefinition @'
+namespace CapyNumericHoverTest {
+ public static class Pointer {
+  public static bool TitleAcknowledged,Field;public static int Hovers;
+  public static void Hover(int x,int y){++Hovers;if(x==15){if(!TitleAcknowledged)throw new System.InvalidOperationException("Field hover preceded the title tooltip acknowledgement");Field=true;}}
+ }
+}
+'@
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/LocalizationProperties.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $function=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-ceq'Preference-Numeric'},$true)
+ $anchor=$function.Find({param($n)$n-is[Management.Automation.Language.IfStatementAst]-and$n.Extent.Text-like"*Retained typed numeric error accessibility help stayed in an earlier language*"},$true)
+ $statements=@($anchor.Parent.Statements);$index=[array]::IndexOf($statements,$anchor)
+ if($index-lt0){throw 'Missing actual numeric tooltip journey anchor'}
+ $nodes=@();for($i=$index+1;$i-lt$statements.Count;$i++){$nodes+=,$statements[$i];if($statements[$i]-is[Management.Automation.Language.TryStatementAst]){break}}
+ $sequence=(($nodes|ForEach-Object {$_.Extent.Text})-join"`n").Replace('[CapyRowPointer]','[CapyNumericHoverTest.Pointer]')
+ $control=[pscustomobject]@{Current=[pscustomobject]@{BoundingRectangle=[pscustomobject]@{Left=10;Top=0;Width=10;Height=10}}}
+ function Control($Id,[switch]$Arranged){
+  if($Id-notin@('number-caption-setting-number-pan_speed','preferences-heading')){throw 'Unexpected numeric hover target'}
+  [pscustomobject]@{Current=[pscustomobject]@{Name='Pan speed';BoundingRectangle=[pscustomobject]@{Left=0;Top=0;Width=10;Height=10}}}
+ }
+ function Numeric-Tooltip{
+  if($script:numericTitleMissing-and![CapyNumericHoverTest.Pointer]::Field){return}
+  [pscustomobject]@{Current=[pscustomobject]@{Name=$(if([CapyNumericHoverTest.Pointer]::Field){'Invalid expression'}else{'Pan speed'})}}
+ }
+ function Catalog-Text($Tag,$Id,$Catalog){if($Id-cne'numeric-invalid-expression'){throw 'Unexpected numeric copy'};'Invalid expression'}
+ function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Timeout){
+  if($Timeout-ne10){throw 'Numeric tooltip changed its ten-second bound'}
+  for($i=0;$i-lt4;$i++){if(& $Condition){if($Message-ceq'Native numeric title tooltip did not acknowledge hover'){[CapyNumericHoverTest.Pointer]::TitleAcknowledged=$true};return}};throw $Message
+ }
+ foreach($missing in @($false,$true)){
+  $script:numericTitleMissing=$missing;[CapyNumericHoverTest.Pointer]::TitleAcknowledged=$false;[CapyNumericHoverTest.Pointer]::Field=$false;[CapyNumericHoverTest.Pointer]::Hovers=0
+  $failure=$null;try{. ([scriptblock]::Create($sequence))}catch{$failure=$_}
+  if($missing){if(!$failure-or$failure.Exception.Message-cne'Native numeric title tooltip did not acknowledge hover'-or[CapyNumericHoverTest.Pointer]::Field){throw 'Missing title tooltip did not prevent the next hover'}}else{
+   if($failure){throw $failure}
+   if(![CapyNumericHoverTest.Pointer]::Field-or[CapyNumericHoverTest.Pointer]::Hovers-ne2){throw 'Numeric tooltip journey changed its pointer sequence'}
+  }
+ }
+ 'Actual retained numeric tooltip journey acknowledges the title before hovering the invalid field; original field assertion retained.'
 }

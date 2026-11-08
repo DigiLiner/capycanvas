@@ -330,7 +330,9 @@ function Preference-Numeric{
   $view=Fresh-Model $first $choice.tag;$control=Control 'setting-number-pan_speed' -Arranged
   if(($control.GetRuntimeId() -join ':') -ne $identity -or !$control.Current.HasKeyboardFocus -or (Value $control) -ne $numericDraft -or (Selection $control) -ne $numericDraft -or ($view.state.document_file|ConvertTo-Json -Depth 20 -Compress) -ne $document -or $view.windows_gpu_generation -ne $gpu -or (Read-Snapshot (Settings-File)).pan_speed -ne $pan){throw 'Native invalid numeric draft changed its editor, selected literal, focus, setting or document/GPU ownership'}
   if($control.Current.HelpText -ne (Catalog-Text $choice.tag 'numeric-invalid-expression' 'common')){throw 'Retained typed numeric error accessibility help stayed in an earlier language'}
-  $away=(Control 'preferences-heading').Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($away.Left+$away.Width/2),[int]($away.Top+$away.Height/2))
+  $title=Control 'number-caption-setting-number-pan_speed' -Arranged
+  $away=$title.Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($away.Left+$away.Width/2),[int]($away.Top+$away.Height/2))
+  Wait-Until {$tip=Numeric-Tooltip;$tip -and $tip.Current.Name -eq $title.Current.Name} 'Native numeric title tooltip did not acknowledge hover' 10
   $bounds=$control.Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($bounds.Left+$bounds.Width/2),[int]($bounds.Top+$bounds.Height/2))
   try{
    Wait-Until {$tip=Numeric-Tooltip;$tip -and $tip.Current.Name -eq (Catalog-Text $choice.tag 'numeric-invalid-expression' 'common')} 'Retained native error tooltip did not use the current canonical copy' 10
