@@ -283,6 +283,15 @@ function Save-Screen([string]$Path) {
 
 function Reviews([string]$ContextPath,[Collections.Generic.List[object]]$Failures) {
     $sessionId=[Diagnostics.Process]::GetCurrentProcess().SessionId
+    $sameIdentity={
+        param($row,$owner,$start)
+        if(!$row){return $false}
+        if(($row.SessionId -isnot [uint32] -and $row.SessionId -isnot [int]) -or $row.SessionId -lt 0){throw "Fixture review $($owner.process_id) snapshot session is unavailable"}
+        if($row.SessionId -ne $sessionId){return $false}
+        if(!$owner.process_start_utc){throw "Fixture review $($owner.process_id) has no recorded start time"}
+        if($row.CreationDate -isnot [DateTime] -or $row.CreationDate.Ticks%10L){throw "Fixture review $($owner.process_id) snapshot creation time is unavailable"}
+        $row.CreationDate.ToUniversalTime().Ticks -eq ($start.Ticks-($start.Ticks%10L))
+    }
     $files=if($ContextPath){Get-Item -LiteralPath $ContextPath}else{Get-ChildItem -LiteralPath $Output -Filter '*-context.json' -File}
     $contexts=@(foreach($file in $files){
         try{Get-Content -LiteralPath $file.FullName -Raw|ConvertFrom-Json}
@@ -291,31 +300,36 @@ function Reviews([string]$ContextPath,[Collections.Generic.List[object]]$Failure
     $closed=@($contexts|ForEach-Object {$_.closes}|Where-Object {$_.result -ceq 'pass' -and $_.window_only -is [bool] -and !$_.window_only -and $_.process_start_utc})
     $owners=@($contexts|ForEach-Object {@($_)+@($_.windows)})|Where-Object {$_.process_id}|Group-Object process_id,process_start_utc|ForEach-Object {$_.Group[0]}
     if($ContextPath -and !$owners){throw 'Timed-out fixture context has no recorded review identity'}
+    $snapshot=@{}
+    foreach($row in @(if($owners){Get-CimInstance Win32_Process -Property ProcessId,SessionId,CreationDate -ErrorAction Stop})){
+        if(($row.ProcessId -isnot [uint32] -and $row.ProcessId -isnot [int]) -or $row.ProcessId -lt 0 -or $snapshot.ContainsKey([int]$row.ProcessId)){throw 'Fixture review snapshot process identity is invalid'}
+        $snapshot[[int]$row.ProcessId]=$row
+    }
     $matched=[Collections.Generic.List[object]]::new()
     try{foreach($owner in $owners){
       try{
+        $id=[int]$owner.process_id;if($id -le 0){throw 'Fixture review process identity is invalid'}
         if($owner.process_start_utc){
             $start=([DateTime]$owner.process_start_utc).ToUniversalTime()
             if(@($closed|Where-Object {$_.process_id -eq $owner.process_id -and ([DateTime]$_.process_start_utc).ToUniversalTime() -eq $start}).Count){continue}
         }
-        try{$process=Get-Process -Id $owner.process_id -ErrorAction Stop}
-        catch{if($_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId*'){continue};throw}
-        $retained=$false
+        if(!(& $sameIdentity $snapshot[$id] $owner $start)){continue}
+        $process=$null;$retained=$false
         try{
-            $processSessionId=$process.SessionId
-            if($processSessionId -isnot [int] -or $processSessionId -lt 0){throw "Fixture review $($owner.process_id) session identity is unavailable"}
-            if($processSessionId -ne $sessionId){continue}
-            if(!$owner.process_start_utc){throw "Fixture review $($owner.process_id) has no recorded start time"}
-            $handle=$process.Handle
-            if($null -eq $handle -or [IntPtr]$handle -eq [IntPtr]::Zero){throw "Fixture review $($owner.process_id) process handle is unavailable"}
-            $exited=$process.HasExited
-            if($null -eq $exited){throw "Fixture review $($owner.process_id) exit state is unavailable"}
-            if(!$exited){
+            try{
+                $process=Get-Process -Id $id -ErrorAction Stop
+                $handle=$process.Handle
+                if($null -eq $handle -or [IntPtr]$handle -eq [IntPtr]::Zero){throw "Fixture review $id process handle is unavailable"}
                 $actualStart=$process.StartTime
-                if($null -eq $actualStart){throw "Fixture review $($owner.process_id) creation time is unavailable"}
-                if($actualStart.ToUniversalTime() -eq $start){$retained=$true;$matched.Add($process)}
+                if($actualStart -isnot [DateTime]){throw "Fixture review $id creation time is unavailable"}
+                if($actualStart.ToUniversalTime().Ticks -ne $start.Ticks){throw "Fixture review $id creation time does not match"}
+                $retained=$true;$matched.Add($process)
+            }catch{
+                $failure=$_
+                $fresh=Get-CimInstance Win32_Process -Filter "ProcessId=$id" -Property ProcessId,SessionId,CreationDate -ErrorAction Stop
+                if(& $sameIdentity $fresh $owner $start){throw $failure}
             }
-        }finally{if(!$retained){$process.Dispose()}}
+        }finally{if($null -ne $process -and !$retained){$process.Dispose()}}
       }catch{if($null -eq $Failures){throw};$Failures.Add($_)}
     }}catch{foreach($process in $matched){$process.Dispose()};throw}
     $matched.ToArray()
