@@ -331,12 +331,21 @@ function Wait-FixtureReviews([string]$Log) {
 }
 function Save-Evidence([string]$Log,[bool]$Renders=$true) {
     $rendered = $Renders -and $HardwareGpu -and !$controlFixture
+    $evidence = "$Log-evidence"
+    $desktopRuns=@(if(Test-Path -LiteralPath "$Log.log"){Get-Content -LiteralPath "$Log.log"|ForEach-Object {if($_ -cmatch '^Private desktop artifacts: (.+)$'){$Matches[1]}}})|Select-Object -Unique
+    foreach($recorded in $desktopRuns){
+        $desktopRun=[IO.Path]::GetFullPath($recorded)
+        $desktopRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../artifacts/windows/test-desktop'))
+        $id=[IO.Path]::GetFileName($desktopRun)
+        if([IO.Path]::GetDirectoryName($desktopRun) -ine $desktopRoot -or $id -notmatch '^[a-f0-9]{32}$'){throw "Invalid private desktop evidence path: $recorded"}
+        & robocopy.exe $desktopRun (Join-Path $evidence ('test-desktop/'+$id)) /E /R:0 /W:0 /NFL /NDL /NJH /NJS|Out-Null
+        if($LASTEXITCODE -ge 8){throw "Could not preserve private desktop evidence: $desktopRun"}
+    }
     if (!(Test-Path "$Log-context.json")) {
         if ($rendered) { throw "Missing fixture context: $Log-context.json" }
         return
     }
     $context = Get-Content "$Log-context.json" -Raw | ConvertFrom-Json
-    $evidence = "$Log-evidence"
     New-Item -ItemType Directory -Force $evidence | Out-Null
     $owners = @($context.process_id) + @($context.windows | ForEach-Object { $_.process_id }) + @(Reviews | ForEach-Object {try{$_.Id}finally{$_.Dispose()}})
     $folders = @($context.trace_directory, $context.run, (Split-Path $Executable)) + @($context.windows | ForEach-Object { $_.trace_directory }) | Where-Object { $_ } | Select-Object -Unique

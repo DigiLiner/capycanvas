@@ -714,6 +714,65 @@ namespace CapyLocalDumpsTest {
 }
 
 & {
+    $directory=Join-Path ([IO.Path]::GetTempPath()) ('capy-desktop-evidence-'+[guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($directory)|Out-Null
+    $desktopRoot=Join-Path $directory 'test-desktop';$trace=Join-Path $directory 'trace'
+    [IO.Directory]::CreateDirectory($trace)|Out-Null
+    $HardwareGpu=$false;$controlFixture=$null;$Executable=Join-Path $trace 'CapyCanvas.exe'
+    $nativeExit=$global:LASTEXITCODE;$robocopy=Join-Path $env:WINDIR 'System32/robocopy.exe'
+    function Reviews{}
+    function Stop-Review{}
+    function Join-Path($Path,$ChildPath){
+        if($ChildPath -eq '../../artifacts/windows/test-desktop'){if($Path -and $Path -ne $PSScriptRoot){throw 'Desktop evidence root escaped the fixture runner'};return $desktopRoot}
+        Microsoft.PowerShell.Management\Join-Path $Path $ChildPath
+    }
+    function robocopy.exe {
+        $script:copies.Add([string]$args[0])
+        if($script:desktopCase -eq 'copy-error'){$global:LASTEXITCODE=8;return}
+        & $robocopy @args|Out-Null
+    }
+    try{
+        $recorded=Join-Path $desktopRoot ([guid]::NewGuid().ToString('N'))
+        $unrecorded=Join-Path $desktopRoot ([guid]::NewGuid().ToString('N'))
+        foreach($folder in @($recorded,$unrecorded)){
+            [IO.Directory]::CreateDirectory($folder)|Out-Null
+            foreach($name in 'failure.txt','transcript.log','invocation.clixml','result.json'){[IO.File]::WriteAllText((Join-Path $folder $name),($folder+':'+$name))}
+        }
+        foreach($case in 'recorded','without-context','rendered-without-context','unrecorded','foreign','traversal','malformed-id','copy-error'){
+            $HardwareGpu=$case -eq 'rendered-without-context'
+            $script:desktopCase=$case;$script:copies=[Collections.Generic.List[string]]::new()
+            $log=Join-Path $directory $case;$evidence=$log+'-evidence'
+            $path=switch($case){
+                'foreign'{Join-Path $directory ([guid]::NewGuid().ToString('N'))}
+                'traversal'{Join-Path $desktopRoot ('../'+[guid]::NewGuid().ToString('N'))}
+                'malformed-id'{Join-Path $desktopRoot 'not-a-run'}
+                default{$recorded}
+            }
+            if($case -notin @('without-context','rendered-without-context')){@{process_id=41;trace_directory=$trace}|ConvertTo-Json|Set-Content -LiteralPath ($log+'-context.json')}
+            if($case -eq 'unrecorded'){"Unrelated path: $unrecorded"|Set-Content -LiteralPath ($log+'.log')}
+            else{@("Private desktop artifacts: $path","Private desktop artifacts: $path","Unrelated path: $unrecorded")|Set-Content -LiteralPath ($log+'.log')}
+            $failure=$null;try{Save-Evidence $log}catch{$failure=$_.Exception.Message}
+            if($case -in @('foreign','traversal','malformed-id')){
+                if($failure -notlike 'Invalid private desktop evidence path:*' -or $script:copies.Count){throw 'An unowned private desktop path reached evidence copying'}
+            }elseif($case -eq 'copy-error'){
+                if($failure -notlike 'Could not preserve private desktop evidence:*' -or $script:copies.Count -ne 1){throw 'Private desktop evidence copy failure was lost or retried'}
+            }elseif($case -eq 'unrecorded'){
+                if($failure -or $script:copies.Count -or (Test-Path (Join-Path $evidence 'test-desktop'))){throw 'Evidence searched for an unrecorded private desktop run'}
+            }else{
+                $saved=Join-Path $evidence ('test-desktop/'+(Split-Path -Leaf $recorded))
+                if(($case -eq 'rendered-without-context' -and $failure -notlike 'Missing fixture context:*') -or ($case -ne 'rendered-without-context' -and $failure) -or !(Test-Path -LiteralPath (Join-Path $saved 'failure.txt'))){throw "The recorded private desktop failure and transcript were not retrieved: $case ($failure)"}
+                if($script:copies.Count -ne 1 -or $script:copies[0] -cne $recorded){throw 'Desktop evidence copied more than the exact recorded run once'}
+                foreach($name in 'failure.txt','transcript.log','invocation.clixml','result.json'){
+                    if([IO.File]::ReadAllText((Join-Path $saved $name)) -cne [IO.File]::ReadAllText((Join-Path $recorded $name))){throw 'Private desktop evidence changed or omitted an owned artifact'}
+                }
+                if(@(Get-ChildItem -LiteralPath (Join-Path $evidence 'test-desktop') -Directory).Count -ne 1){throw 'Private desktop evidence included another run'}
+            }
+        }
+    }finally{$global:LASTEXITCODE=$nativeExit;Remove-Item -LiteralPath $directory -Recurse -Force}
+    'Evidence retrieves only the exact recorded private desktop run, including failures without an app context'
+}
+
+& {
     foreach($name in 'Reviews','Stop-Review','Wait-FixtureReviews'){
         $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
         . ([scriptblock]::Create($node.Extent.Text))
