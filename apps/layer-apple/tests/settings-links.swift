@@ -36,11 +36,14 @@ import Vision
             defer { window.contentView = nil; window.close() }
             var accepted = false
             var urls: [URL] = []
-            let host = NSHostingView(rootView: SettingsView(store: store)
-                .environment(\.openURL, OpenURLAction { url in
-                    urls.append(url)
-                    return accepted ? .handled : .discarded
-                }))
+            let browser = OpenURLAction { url in
+                urls.append(url)
+                return accepted ? .handled : .discarded
+            }
+            func settings(page: Bool) -> some View {
+                SettingsView(store: store).environment(\.openURL, browser).environment(\.editorDialogPage, page)
+            }
+            let host = NSHostingView(rootView: settings(page: false))
             window.contentView = host; window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             try await drain(0.5)
@@ -79,6 +82,7 @@ import Vision
                 }
             }
             window.setContentSize(CGSize(width: 320, height: 568))
+            host.rootView = settings(page: true)
             try await store.apply(["type": "preferences", "action": ["type": "page_list"]])
             try await drain()
             let rootText = try text(in: host)
