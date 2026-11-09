@@ -2,25 +2,37 @@
 use crate::{GpuRasterError, Uploads};
 use layer_render::ColorPickerOverlay;
 
-#[derive(Default)]
 pub(super) struct Picker {
-    pub(super) pipeline: Option<crate::Deferred<wgpu::RenderPipeline>>,
-    buffer: Option<wgpu::Buffer>,
+    pub(super) pipeline: crate::Deferred<wgpu::RenderPipeline>,
+    buffer: wgpu::Buffer,
     data: Option<[f32; 16]>,
     dirty: bool,
 }
 impl Picker {
-    pub fn changed(&self) -> bool { self.dirty }
+    pub fn changed(&self) -> bool { self.dirty && (self.data.is_none() || self.ready()) }
 
-    pub fn set(
-        &mut self,
-        overlay: Option<ColorPickerOverlay>,
+    fn ready(&self) -> bool { self.pipeline.ready() }
+
+    pub fn new(
         device: &crate::PipelineDevice,
         shader: &wgpu::ShaderModule,
         layout: &wgpu::PipelineLayout,
         format: wgpu::TextureFormat,
         shared: &std::sync::OnceLock<crate::Deferred<wgpu::RenderPipeline>>,
-    ) {
+    ) -> Self {
+        let instance = wgpu::VertexBufferLayout { array_stride: 64, step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4] };
+        let pipeline = shared.get_or_init(|| super::present::surface_pipeline(device, "color picker glass", layout, shader, ["picker_vertex", "picker_fragment"],
+            Some(instance), format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING))).clone();
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("color picker geometry"),
+            size: 64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Self {pipeline, buffer, data: None, dirty: false}
+    }
+    pub fn set(&mut self, overlay: Option<ColorPickerOverlay>) {
         let data = overlay.map(|o| {
             [
                 o.center[0],
@@ -46,22 +58,9 @@ impl Picker {
         }
         self.data = data;
         self.dirty = true;
-        if data.is_none() || self.pipeline.is_some() {
-            return;
-        }
-        let instance = wgpu::VertexBufferLayout { array_stride: 64, step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4] };
-        self.pipeline = Some(shared.get_or_init(|| super::present::surface_pipeline(device, "color picker glass", layout, shader, ["picker_vertex", "picker_fragment"],
-            Some(instance), format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING))).clone());
-        self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("color picker geometry"),
-            size: 64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
     }
     pub fn bounds(&self) -> Option<[f32; 4]> {
-        self.data.map(|d| {
+        self.data.filter(|_| self.ready()).map(|d| {
             let radius = 48. * d[2];
             [d[0] - radius, d[1] - radius, radius * 2., radius * 2.]
         })
@@ -71,6 +70,7 @@ impl Picker {
         uploads: &mut Uploads,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), GpuRasterError> {
+        if self.data.is_some() && !self.ready() { return Ok(()); }
         if self.dirty
             && let Some(data) = self.data
         {
@@ -80,7 +80,7 @@ impl Picker {
             }
             uploads.write(
                 encoder,
-                self.buffer.as_ref().unwrap(),
+                &self.buffer,
                 &bytes,
             )?;
         }
@@ -88,11 +88,11 @@ impl Picker {
         Ok(())
     }
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
-        if self.data.is_none() {
+        if self.data.is_none() || !self.ready() {
             return;
         }
-        pass.set_pipeline(self.pipeline.as_ref().unwrap());
-        pass.set_vertex_buffer(0, self.buffer.as_ref().unwrap().slice(..));
+        pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, self.buffer.slice(..));
         pass.draw(0..6, 0..1);
     }
 }

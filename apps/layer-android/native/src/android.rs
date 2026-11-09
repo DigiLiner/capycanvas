@@ -452,7 +452,7 @@ impl App {
         }
         .map_err(error)?;
         let [width, height] = self.host.session.state().camera.viewport;
-        if self.host.session.engine().backend().0.is_none() {
+        let renderer = if self.host.session.engine().backend().0.is_none() {
             // Readiness belongs to this GPU initialization, including hosts
             // whose shared state otherwise defaults to eager rendering.
             self.host.startup = Default::default();
@@ -471,9 +471,9 @@ impl App {
                 &self.host.renderer_options(),
                 false,
             )?;
-            self.host.replace_renderer(layer_host::Renderer(Some(renderer)))?;
-        }
-        let gpu = self.host.session.renderer_mut().0.as_ref().unwrap();
+            Some(renderer)
+        } else { None };
+        let gpu = renderer.as_ref().or(self.host.session.engine().backend().0.as_ref()).unwrap();
         let mut config = surface
             .get_default_config(gpu.adapter(), width, height)
             .ok_or("The Vulkan device cannot present to this surface")?;
@@ -498,8 +498,19 @@ impl App {
         // Start with sRGB; the first document frame selects P3 or PQ for the screen and artwork.
         let color=SdrSurfaceColor::Srgb;
         config.color_space=color.surface_color_space();
-        let presenter = ViewportPresenter::for_surface(gpu, config.format, color).map_err(error)?;
         let navigation_latency = navigation_frame_latency(&surface, gpu.adapter());
+        let display = SceneDisplay {scale: width as f32 / self.host.logical[0], headroom: 1.,
+            blank_presented: self.blank_presented, compositor_hdr: false};
+        let prepare = |host: &mut layer_host::NativeHost| -> Result<ViewportPresenter, String> {
+            let gpu = host.session.engine().backend().0.as_ref().unwrap();
+            let mut presenter = ViewportPresenter::for_surface(gpu, config.format, color).map_err(error)?;
+            host.compose_scene(&mut presenter, &mut self.cursor, &self.navigators, &self.glass, None, display)?;
+            Ok(presenter)
+        };
+        let presenter = if let Some(renderer) = renderer {
+            self.host.replace_renderer_with(layer_host::Renderer(Some(renderer)), prepare)?.1
+        } else { prepare(&mut self.host)? };
+        let gpu = self.host.session.engine().backend().0.as_ref().unwrap();
         let mut surface = Surface {
             pending_target: None,
             surface,
@@ -657,9 +668,9 @@ impl App {
             surface.configure(gpu, extent)?;
         }
         let display = SceneDisplay { scale, headroom: 1., blank_presented: self.blank_presented, compositor_hdr: hdr_output };
-        self.host.compose_scene(&mut surface.presenter, &mut self.cursor, &self.navigators, &self.glass, tone, display)?;
+        let composition = self.host.compose_scene(&mut surface.presenter, &mut self.cursor, &self.navigators, &self.glass, tone, display)?;
         surface.presenter.set_surface_rotation(surface.quarter_turns);
-        if !self.host.prepare_canvas_presentation(&surface.presenter) {return Ok(true);}
+        if !composition.ready {return Ok(true);}
         let gpu = self.host.session.renderer_mut().0.as_ref().unwrap();
         surface.presenter.set_screen_check(gpu, screen_check);
         let trace_timings = unsafe { ndk_sys::ATrace_isEnabled() };

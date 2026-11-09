@@ -2433,7 +2433,7 @@ impl Worker {
         self.cursor = cursor;
         self.picker = picker;
         self.cursor_scale = geometry.scale as f32;
-        self.presenter.set_color_picker(&self.renderer, self.picker);
+        self.presenter.set_color_picker(self.picker);
         self.presenter.set_cursor(self.renderer.device(), &self.cursor, self.cursor_scale);
         Ok(())
     }
@@ -2656,7 +2656,7 @@ impl Worker {
         presenter.inherit_backdrop(&self.renderer, &self.presenter);
         presenter.set_screen_check(&self.renderer, self.screen_check);
         presenter.set_hdr_view(&self.renderer, self.hdr_rendition, 1.).map_err(error)?;
-        presenter.set_color_picker(&self.renderer, self.picker);
+        presenter.set_color_picker(self.picker);
         presenter.set_cursor(self.renderer.device(), &self.cursor, self.cursor_scale);
         presenter.set_overviews(&self.renderer, &self.overviews);
         presenter.readback_rgba8(&self.renderer, view, self.surround).map_err(error)

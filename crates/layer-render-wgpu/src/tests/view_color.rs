@@ -186,14 +186,14 @@ fn presentation_wakes_for_visible_changes_and_skips_unchanged_frames() {
         center: [100., 100.], scale: 1., classic: false, sample: [120., 120.],
         layer: false, original: [0.2, 0.2, 0.2, 1.], candidate: [0.5, 0.5, 0.5, 1.],
     };
-    p.set_color_picker(&r, Some(picker));
+    p.set_color_picker(Some(picker));
     draw(&mut p, &r, v);
-    p.set_color_picker(&r, Some(picker));
+    p.set_color_picker(Some(picker));
     assert!(!p.needs_present(&r, v, surround));
     picker.candidate = [0.8, 0.8, 0.8, 1.];
-    p.set_color_picker(&r, Some(picker));
+    p.set_color_picker(Some(picker));
     draw(&mut p, &r, v);
-    p.set_color_picker(&r, None);
+    p.set_color_picker(None);
     draw(&mut p, &r, v);
     v.document_to_surface[4] += 3.;
     draw(&mut p, &r, v);

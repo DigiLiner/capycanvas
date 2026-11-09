@@ -226,14 +226,18 @@ impl NativeHost {
     }
     pub fn document_close_prepared(&self) -> bool { self.document_close_prepared }
     pub fn replace_renderer(&mut self, renderer: Renderer) -> Result<Renderer, String> {
+        self.replace_renderer_with(renderer, |_| Ok(())).map(|(retired, ())| retired)
+    }
+    pub fn replace_renderer_with<T>(&mut self, renderer: Renderer, prepare: impl FnOnce(&mut Self) -> Result<T, String>) -> Result<(Renderer, T), String> {
         self.require_document_owner()?;
         let previous = self.session.state().revision;
         let (retired, change) = self.session.replace_renderer(renderer)?;
         self.preparation.retire();
         self.install_preparation_wake();
         self.apply_change(previous, change);
+        let prepared = prepare(self)?;
         if self.session.engine().backend().0.is_some() {self.prepare_canvas_startup()?;}
-        Ok(retired)
+        Ok((retired, prepared))
     }
 
     pub fn set_wake(&mut self,wake:std::sync::Arc<dyn Fn()+Send+Sync>) {
@@ -1588,7 +1592,7 @@ mod tests {
             assert_eq!(navigators.count(), 1);
             assert!(navigators.placements(&host, 2.).is_empty());
             assert!(host.compose_scene(&mut presenter, &mut Default::default(), &navigators, &[], None,
-                SceneDisplay { scale: 2., headroom: 1., blank_presented: true, compositor_hdr: false }).unwrap());
+                SceneDisplay { scale: 2., headroom: 1., blank_presented: true, compositor_hdr: false }).unwrap().staged);
         }
     }
 
@@ -1641,6 +1645,35 @@ mod tests {
             assert!(!gpu.startup_needs_update(engine.document(),engine.brush(),false),"{platform:?}: installation declares startup without a surface frame");
             assert!(!gpu.has_presentable_frame());
         }
+    }
+
+    #[test]
+    fn surface_requirements_are_declared_before_installation_admits_the_brush() {
+        use crate::scene::{Navigators, SceneDisplay, SlotUnits};
+        let reference=layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let mut host=NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let color=host.session.engine().document().composition().color;
+        let renderer=GpuContext::of(&reference).rasterizer(color,&RendererOptions::default(),false).unwrap();
+        let (_, (presenter, before))=host.replace_renderer_with(Renderer(Some(renderer)), |host| {
+            let engine=host.session.engine();
+            let gpu=engine.backend().0.as_ref().unwrap();
+            let before=gpu.startup_needs_update(engine.document(),engine.brush(),false);
+            let mut presenter=layer_render_wgpu::ViewportPresenter::for_surface(gpu,wgpu::TextureFormat::Rgba8UnormSrgb,
+                layer_render_wgpu::SdrSurfaceColor::Srgb).map_err(|e|e.to_string())?;
+            host.compose_scene(&mut presenter,&mut Default::default(),&Navigators::new(SlotUnits::Physical),
+                &[layer_render_wgpu::BackdropRegion {bounds:[0.,0.,32.,32.],radii:[4.;4],shape:layer_render_wgpu::BackdropRegion::SQUIRCLE}],None,
+                SceneDisplay {scale:1.,headroom:1.,blank_presented:false,compositor_hdr:false})?;
+            Ok((presenter,before))
+        }).unwrap();
+        let engine=host.session.engine();
+        let gpu=engine.backend().0.as_ref().unwrap();
+        let prepared=!gpu.startup_needs_update(engine.document(),engine.brush(),false);
+        drop(presenter);
+        drop(host);
+        drop(reference);
+        layer_render_wgpu::finish_shader_compiler_shutdown();
+        assert!(before,"surface and chrome declarations precede brush admission");
+        assert!(prepared,"installation still prepares the selected brush");
     }
 
     #[test]

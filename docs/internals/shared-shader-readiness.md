@@ -17,7 +17,8 @@ pipelines requested by a later transform frame.
 
 ## Order
 
-Renderer installation starts preparation with the selected brush's stroke
+Android declares its viewport and configured chrome during renderer installation,
+before startup admits the selected brush. Startup declares the selected brush's stroke
 kernels, then physical eraser kernels, helpers and document work. Required
 recipes share declaration order. Native document dependencies include the display
 hierarchy's reduction kernels. Transform, warp, region tools and other brushes
@@ -120,6 +121,10 @@ Dry documents omit watercolor composition until a wet backing or selected
 watercolor brush requires it. Native publication omits gray color variants until
 the document contains a gray paint source. Presentation prepares backdrop blur
 only when backdrop regions are configured.
+Surface creation declares viewport, surround, cursor and held-canvas recipes.
+Shared native composition declares configured chrome before presentation. A visible
+Navigator joins that gate; hidden overview and picker recipes remain optional.
+Optional drawing skips cold recipes and repaints when they become ready.
 Unresolved raster backings retain conservative watercolor preparation until their
 material state is available.
 

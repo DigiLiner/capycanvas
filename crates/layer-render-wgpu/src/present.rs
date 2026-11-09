@@ -592,7 +592,7 @@ impl ViewportPresenter {
     }
 
     pub async fn prepare(&mut self, renderer: &WgpuRasterizer) -> Result<(), GpuRasterError> {
-        renderer.compilation.prepare_all(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline, &self.recipes.transition.pipeline]).chain(self.overview_pipeline.iter()).chain(self.recipes.overviews[1].get()).chain(self.picker.pipeline.iter()).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
+        renderer.compilation.prepare_all(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline, &self.recipes.transition.pipeline]).chain(self.overview_pipeline.iter()).chain(self.recipes.overviews[1].get()).chain([&self.picker.pipeline]).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
             .await.map_err(GpuRasterError::Effect)?;
         if let Some(panels) = &self.panels {
             renderer.compilation.prepare_all([&panels.pipeline,&panels.mask_pipeline]).await.map_err(GpuRasterError::Effect)?;
@@ -650,10 +650,17 @@ impl ViewportPresenter {
     }
 
     pub fn pipelines_ready(&self, renderer: &WgpuRasterizer) -> bool {
-        renderer.compilation.require(self.pipeline.iter().chain([&self.surround_pipeline,&self.cursor_pipeline,&self.recipes.transition.pipeline])
-            .chain(self.overview_pipeline.iter()).chain(self.picker.pipeline.iter())
+        let overview = self.standalone_overview || !self.overviews.is_empty();
+        let ready = renderer.compilation.require(self.pipeline.iter().chain([&self.surround_pipeline,&self.cursor_pipeline,&self.recipes.transition.pipeline])
+            .chain(self.overview_pipeline.iter().filter(|_| overview))
             .chain(self.backdrop.iter().flat_map(|backdrop|backdrop.pipelines()))
-            .chain(self.panels.iter().flat_map(|panels|[&panels.pipeline,&panels.mask_pipeline])),crate::startup::DOCUMENT)
+            .chain(self.panels.iter().flat_map(|panels|[&panels.pipeline,&panels.mask_pipeline])),crate::startup::DOCUMENT);
+        for pipeline in self.overview_pipeline.iter().filter(|_| !overview)
+            .chain(self.recipes.overviews[1].get().filter(|_| !self.standalone_overview))
+            .chain([&self.picker.pipeline]) {
+            renderer.compilation.warm(pipeline, crate::startup::OTHER, renderer.compilation.generation());
+        }
+        ready
     }
 
     /// The host configures its surface with the matching, advertised color space.
@@ -683,7 +690,11 @@ impl ViewportPresenter {
         format: wgpu::TextureFormat,
         color: SdrSurfaceColor,
     ) -> Result<Self, GpuRasterError> {
-        Ok(Self { standalone_overview: true, ..Self::for_surface(renderer, format, color)? })
+        let mut presenter = Self::for_surface(renderer, format, color)?;
+        presenter.standalone_overview = true;
+        presenter.overview_pipeline = presenter.recipes.overviews[1].get().cloned();
+        presenter.pipelines_ready(renderer);
+        Ok(presenter)
     }
 
     fn with_device(renderer: &WgpuRasterizer, format: wgpu::TextureFormat, color: SdrSurfaceColor) -> Self {
@@ -715,7 +726,8 @@ impl ViewportPresenter {
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
-        Self {
+        let picker = crate::present_picker::Picker::new(device, &shader, &pipeline_layout, format, &recipes.picker);
+        let mut presenter = Self {
             recipes,
             pipeline,
             paper_pipeline: None,
@@ -773,7 +785,7 @@ impl ViewportPresenter {
                 .shader_encoding(format)
                 .expect("view encoding was validated"),
             corner_radius: 0.0,
-            picker: Default::default(),
+            picker,
             cursor_pipeline,
             shade,
             cursor_icons,
@@ -812,11 +824,12 @@ impl ViewportPresenter {
             overviews: Vec::new(),
             overviews_changed: false,
             standalone_overview: false,
-        }
+        };
+        presenter.prepare_overviews(renderer);
+        presenter.pipelines_ready(renderer);
+        presenter
     }
 
-    /// Opt-in startup preparation. Hosts without overviews do not
-    /// compile this pipeline or allocate overview buffers.
     pub fn prepare_overviews(&mut self, renderer: &WgpuRasterizer) {
         if self.overview_pipeline.is_some() {
             return;
@@ -837,10 +850,6 @@ impl ViewportPresenter {
                 surface_pipeline(device, "in-surface document overviews", &self.pipeline_layout, &self.shader,
                     ["overview_vertex", "overview_fragment"], Some(instance.clone()), self.format, Some(blend)));
             if standalone==self.standalone_overview {self.overview_pipeline=Some(pipeline.clone());}
-        }
-        if !self.standalone_overview && let Some(startup)=&renderer.startup
-            && let Some(pipeline)=self.recipes.overviews[1].get().filter(|pipeline|!pipeline.ready()) {
-            startup.compiler.warm(pipeline,crate::startup::OTHER,startup.compiler.generation());
         }
     }
 
@@ -872,6 +881,7 @@ impl ViewportPresenter {
                 mapped_at_creation: false,
             }));
         }
+        self.pipelines_ready(renderer);
     }
 
     /// Native child surfaces do not inherit the parent window's rounded clip.
@@ -893,6 +903,7 @@ impl ViewportPresenter {
         backdrop.set_style(style);
         backdrop.set_regions(regions);
         backdrop.set_hold(hold);
+        self.pipelines_ready(renderer);
     }
 
     pub fn inherit_backdrop(&mut self, renderer: &WgpuRasterizer, other: &Self) {
@@ -906,6 +917,7 @@ impl ViewportPresenter {
         if surfaces.is_empty() && self.panels.is_none() { return; }
         let panels=self.panels.get_or_insert_with(||crate::panel_surface::PanelSurfaces::from_recipes(&renderer.device,&self.uniform,self.recipes.panels.get_or_init(|| crate::panel_surface::Recipes::new(&renderer.device,&self.shader,self.format))));
         self.panel_surfaces_changed |= panels.set(surfaces);
+        self.pipelines_ready(renderer);
     }
 
     pub fn prepare_chrome(&mut self, renderer: &WgpuRasterizer) -> bool {
@@ -942,8 +954,8 @@ impl ViewportPresenter {
         self.history = Default::default();
     }
 
-    pub fn set_color_picker(&mut self, renderer: &WgpuRasterizer, overlay: Option<layer_render::ColorPickerOverlay>) {
-        self.picker.set(overlay, &renderer.device, &self.shader, &self.pipeline_layout, self.format, &self.recipes.picker);
+    pub fn set_color_picker(&mut self, overlay: Option<layer_render::ColorPickerOverlay>) {
+        self.picker.set(overlay);
     }
 
     pub fn set_cursor(&mut self, device: &wgpu::Device, segments: &[CursorSegment], scale: f32) {
@@ -1686,7 +1698,7 @@ impl ViewportPresenter {
                     pass.set_bind_group(0,self.bind_group.as_ref().unwrap(),&[0]);
                 }
             }
-            if renderer.presentation.navigator && !self.overviews.is_empty() {
+            if renderer.presentation.navigator && !self.overviews.is_empty() && self.overview_pipeline.as_ref().is_some_and(crate::Deferred::ready) {
                 pass.set_pipeline(self.overview_pipeline.as_ref().unwrap());
                 pass.set_vertex_buffer(0, self.overview_buffer.as_ref().unwrap().slice(..));
                 pass.draw(0..6, 0..self.overviews.len() as u32);
@@ -1763,6 +1775,9 @@ pub(crate) fn surface_pipeline(
 #[cfg(test)]
 #[path = "present_fill_tests.rs"]
 mod fill_tests;
+
+#[cfg(test)]
+mod readiness_tests;
 
 #[cfg(test)]
 mod tests {

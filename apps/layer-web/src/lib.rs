@@ -1222,7 +1222,7 @@ impl WebApp {
         };
         surface.presenter
             .set_cursor(gpu.device(), &self.cursor.segments, scale);
-        surface.presenter.set_color_picker(gpu, picker);
+        surface.presenter.set_color_picker(picker);
         surface.presenter.set_backdrop(
             gpu,
             if glass.transparency.enabled() { &self.glass } else { &[] },

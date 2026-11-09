@@ -335,13 +335,9 @@ impl MetalHost {
             surface.working_color = gpu.document_color();
         }
         surface.presenter.set_panel_surfaces(gpu, self.glass.panels(scale));
-        if !surface.presenter.prepare_chrome(gpu) {
-            host.dirty = true;
-            return Ok((true, costs));
-        }
         let display = SceneDisplay { scale, headroom: self.headroom, blank_presented: self.blank_presented, compositor_hdr: false };
-        host.compose_scene(&mut surface.presenter, &mut self.cursor, &self.navigators,
-            self.glass.regions(scale), tone_guide, display)?;
+        if !host.compose_scene(&mut surface.presenter, &mut self.cursor, &self.navigators,
+            self.glass.regions(scale), tone_guide, display)?.ready { return Ok((true, costs)); }
         let hdr_output = surface.working_color.depth.is_float() && self.headroom > 1. && host.session.hdr_presentation_allowed();
         let screen = &host.session.state().screen;
         let screen_check = layer_render_wgpu::ScreenCheck::for_view(&screen.assessment,

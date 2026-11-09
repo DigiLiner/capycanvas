@@ -278,6 +278,10 @@ pub struct SceneDisplay {
     /// The platform compositor tone maps the HDR surface itself.
     pub compositor_hdr: bool,
 }
+pub struct SceneComposition {
+    pub staged: bool,
+    pub ready: bool,
+}
 
 impl NativeHost {
     pub fn prepare_canvas_presentation(&mut self, presenter: &ViewportPresenter) -> bool {
@@ -307,8 +311,7 @@ impl NativeHost {
     }
 
     /// Applies this frame's cursor, color picker, proof, HDR view, tone guide,
-    /// navigators and glass. Optional overview and backdrop pipelines wait for
-    /// the first paper frame and a ready canvas.
+    /// navigators and glass.
     pub fn compose_scene(
         &mut self,
         presenter: &mut ViewportPresenter,
@@ -317,21 +320,17 @@ impl NativeHost {
         glass: &[BackdropRegion],
         tone: Option<Arc<GpuToneGuide>>,
         display: SceneDisplay,
-    ) -> Result<bool, String> {
+    ) -> Result<SceneComposition, String> {
         let error = |e: layer_render_wgpu::GpuRasterError| e.to_string();
         self.session.update_canvas_cursor(cursor);
         self.session.append_layer_overlay(&mut cursor.segments);
         let proof = self.proof.lut(&self.session);
         let staged = display.blank_presented && self.startup.canvas_ready;
-        let overviews = if staged {
-            navigators.placements(self, display.scale)
-        } else {
-            Vec::new()
-        };
+        let overviews = navigators.placements(self, display.scale);
         let session = &self.session;
         let state = session.state();
         let style = state.palette.glass;
-        let backdrop = if staged && style.transparency.enabled() {
+        let backdrop = if style.transparency.enabled() {
             glass
         } else {
             &[]
@@ -371,7 +370,7 @@ impl NativeHost {
             .set_proof(gpu, proof, state.soft_proof, state.gamut_warning)
             .map_err(error)?;
         presenter.set_cursor(gpu.device(), &cursor.segments, display.scale);
-        presenter.set_color_picker(gpu, session.color_picker_overlay());
+        presenter.set_color_picker(session.color_picker_overlay());
         presenter.set_overviews(gpu, &overviews);
         presenter.set_backdrop(
             gpu,
@@ -382,7 +381,8 @@ impl NativeHost {
             },
             session.hold_canvas_backdrop(),
         );
-        Ok(staged)
+        let ready = self.prepare_canvas_presentation(presenter);
+        Ok(SceneComposition {staged, ready})
     }
 }
 

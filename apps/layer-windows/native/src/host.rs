@@ -147,8 +147,8 @@ fn pointer_button(sample: &CapyPointer) -> PointerButton {
         _ => PointerButton::Other,
     }
 }
-fn take_prepared_target<T>(presenter: &ViewportPresenter, renderer: &layer_render_wgpu::WgpuRasterizer, target: &mut Option<T>) -> Option<T> {
-    (renderer.has_presentable_frame()&&presenter.pipelines_ready(renderer)).then(|| target.take()).flatten()
+fn take_prepared_target<T>(ready: bool, renderer: &layer_render_wgpu::WgpuRasterizer, target: &mut Option<T>) -> Option<T> {
+    (renderer.has_presentable_frame()&&ready).then(|| target.take()).flatten()
 }
 fn surface_extent(allocated: [u32; 2], viewport: [u32; 2], limit: u32) -> Result<[u32; 2], String> {
     if viewport.contains(&0) || viewport.into_iter().chain(allocated).any(|v| v > limit) {
@@ -545,7 +545,7 @@ impl CapyHost {
             blank_presented: self.blank_presented,
             compositor_hdr: false,
         };
-        let chrome_staged = self.native.compose_scene(
+        let composition = self.native.compose_scene(
             presenter,
             &mut self.cursor,
             &self.chrome.navigators,
@@ -554,13 +554,13 @@ impl CapyHost {
             display,
         )?;
         if let Some(timing) = &mut self.frame_timing { timing.composed_ns = crate::frame_timing::now(); }
-        if !self.chrome.can_present(chrome_staged) {
+        if !self.chrome.can_present(composition.staged) {
             self.native.dirty = true;
             self.poll_services()?;
             return Ok(1);
         }
         let gpu = self.native.session.engine().backend().0.as_ref().unwrap();
-        let Some(target) = take_prepared_target(presenter, gpu, &mut self.target) else {
+        let Some(target) = take_prepared_target(composition.ready, gpu, &mut self.target) else {
             if !self.surface_ready.queued && let Some(target)=self.target.take() {
                 let view=target.texture.create_view(&Default::default());
                 let mut encoder=gpu.device().create_command_encoder(&wgpu::CommandEncoderDescriptor{label:Some("startup surround")});
@@ -592,7 +592,7 @@ impl CapyHost {
         self.native.canvas_frame_rate.submitted();
         self.pacing.submitted(submission);
         let document=self.native.session.engine().document().composition().size;
-        self.surface_ready.submitted(gpu.queue(), &self.chrome, (chrome_staged&&presenter.chrome_ready()).then_some(document));
+        self.surface_ready.submitted(gpu.queue(), &self.chrome, (composition.staged&&presenter.chrome_ready()).then_some(document));
         self.blank_presented = true;
         gpu.device().poll(wgpu::PollType::Poll).map_err(err)?;
         self.native.session.renderer_mut().0.as_mut().unwrap().after_present();
@@ -1914,7 +1914,7 @@ mod presentation_readiness_tests {
             let mut renderer = crate::test_support::d3d12_renderer();
             let mut presenter = ViewportPresenter::for_surface(&renderer, format, color).unwrap();
             let mut target = Some(format);
-            assert_eq!(take_prepared_target(&presenter, &renderer, &mut target), None);
+            assert_eq!(take_prepared_target(presenter.pipelines_ready(&renderer), &renderer, &mut target), None);
             assert_eq!(target, Some(format));
             let deadline = Instant::now() + Duration::from_secs(30);
             while !presenter.pipelines_ready(&renderer) {
@@ -1923,7 +1923,7 @@ mod presentation_readiness_tests {
                 assert!(Instant::now() < deadline, "presenter pipelines did not finish");
                 std::thread::yield_now();
             }
-            assert_eq!(take_prepared_target(&presenter,&renderer,&mut target),None);
+            assert_eq!(take_prepared_target(presenter.pipelines_ready(&renderer),&renderer,&mut target),None);
             assert_eq!(target,Some(format));
             let mut native=NativeHost::new(layer_ui::Platform::Windows).unwrap();
             let document=layer_core::Document::new(layer_core::authored::PortableId::random(),96,96,
@@ -1936,7 +1936,7 @@ mod presentation_readiness_tests {
             loop {
                 native.prepare_canvas_frame(0,0,false).unwrap();
                 let gpu=native.session.engine().backend().0.as_ref().unwrap();
-                if let Some(acquired)=take_prepared_target(&presenter,gpu,&mut target){assert_eq!(acquired,format);break;}
+                if let Some(acquired)=take_prepared_target(presenter.pipelines_ready(gpu),gpu,&mut target){assert_eq!(acquired,format);break;}
                 assert_eq!(target,Some(format));
                 assert!(Instant::now()<deadline,"first constant background did not become drawable");
                 std::thread::yield_now();
@@ -1992,7 +1992,7 @@ mod presentation_readiness_tests {
             }
             drop(pixels);buffer.unmap();
             assert_eq!(target, None);
-            assert_eq!(take_prepared_target(&presenter,native.session.engine().backend().0.as_ref().unwrap(),&mut target),None);
+            assert_eq!(take_prepared_target(presenter.pipelines_ready(native.session.engine().backend().0.as_ref().unwrap()),native.session.engine().backend().0.as_ref().unwrap(),&mut target),None);
         }
     }
 }

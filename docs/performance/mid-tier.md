@@ -318,7 +318,7 @@ camera, brush and input witnesses are retained alongside exact APK/source proof
 in `/mnt/localssd/capycanvas9-stability-android-artifacts/ad5-reference/`.
 Genuine late sensor correction and whole-stroke replay remain unmeasured.
 
-Required-only shader startup and first-use tool preparation are unmeasured on
+Startup on the tier photo and first-use tool preparation are unmeasured on
 this reference device. Earlier idle-catalog measurements describe their named
 builds, not the current startup policy. See [startup preparation](responsiveness.md#demand-driven-startup)
 for the Apple diagnostic and its limits.
@@ -359,6 +359,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Operation | Target | Measured | Source |
 | --- | --- | --- | --- |
 | Startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup and optional paper-lighting admission on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
+| Default Android launch callbacks | Latency diagnostic | Cold surface 5.183→4.927 s, ready-to-paint 6.565→6.236 s; warm surface 2.968→2.991 s (no-later gate missed), ready-to-paint 3.559→3.506 s | 2026-11-09, `969f4d3d8`→this change, five/arm/cache; before am-start→callbacks; per-run max(brush,surface), no scanout claim; `artifacts/compile-speed/surface-gap-early-mp11/` |
 | Tool cursor hover, with and without brush size | 90 | Unmeasured on the reference tablet | [Top-tier rendering measurements](top-tier.md#tool-cursors) do not qualify this tier |
 | Pan: Hand tool, one or two fingers | 90 | **Not met.** Two-finger pan 77.95 fps median, worst p99 22.345 ms, 24 MP photo, Navigator open | [Navigation presentation](#navigation-presentation), 2026-10-25 |
 | Pinch zoom | 90 | **Touch gesture revision unqualified (2026-10-25).** 60 Hz diagnostic: 42.36–44.44 presents/s closed, 48.21–49.87 open. Earlier: **Not met.** 73.63 fps median, 24 MP photo, Navigator open; default paper 77.76 fps | [Touch gesture pinch diagnostic](#touch-gesture-pinch-diagnostic); [earlier navigation presentation](#navigation-presentation), 2026-10-25 |
