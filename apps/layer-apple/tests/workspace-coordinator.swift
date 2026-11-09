@@ -146,6 +146,7 @@ import SQLite3
         precondition(recovered != original && !workspaces.readOnly && workspaces.error == nil
             && editor.state["brush"]["diameter"].number == 95)
         try await successor.workspaces!.closed()
+        try await workspaces.perform(["type": "focus"])
         precondition(editor.state["brush"]["diameter"].number == 96, "The peer's durable brush preference must be adopted before switching")
         let currentBrush = editor.state["brush"].stableKey
         try await workspaces.perform(["type": "switch", "id": original])
