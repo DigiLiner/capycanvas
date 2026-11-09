@@ -650,6 +650,7 @@
     {
       "category": "blur",
       "icon": "blur",
+      "preview": {"sigma":{"kind":"number","value":3}},
       "program": {
         "abi": 5,
         "alpha": "filter",
