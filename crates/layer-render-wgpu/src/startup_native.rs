@@ -39,14 +39,24 @@ struct Shared {
 }
 static RETIRED: Mutex<Vec<std::thread::JoinHandle<()>>> = Mutex::new(Vec::new());
 
-/// Wait for canceled native shader workers after closing all renderers at process
-/// shutdown. Ordinary surface teardown stays asynchronous; final shutdown must
-/// not unload the graphics driver while an in-flight compilation is using it.
+/// Wait for canceled native shader, snapshot and analysis workers after closing
+/// all renderers at process shutdown. Ordinary surface teardown stays asynchronous;
+/// final shutdown must not unload the graphics driver while an in-flight compilation is using it.
 pub fn finish_shader_compiler_shutdown() {
-    let workers = std::mem::take(&mut *RETIRED.lock().unwrap());
-    for worker in workers {
-        let _ = worker.join();
+    static FINISHING: Mutex<()> = Mutex::new(());
+    let _finishing = FINISHING.lock().unwrap();
+    loop {
+        let workers = std::mem::take(&mut *RETIRED.lock().unwrap());
+        if workers.is_empty() { return; }
+        for worker in workers {
+            let _ = worker.join();
+        }
     }
+}
+pub(crate) fn retire(workers: impl IntoIterator<Item = std::thread::JoinHandle<()>>) {
+    let mut retired = RETIRED.lock().unwrap();
+    retired.retain(|worker| !worker.is_finished());
+    retired.extend(workers);
 }
 
 pub(crate) struct Compiler(Arc<Shared>, Vec<std::thread::JoinHandle<()>>);
@@ -205,9 +215,7 @@ impl Drop for Compiler {
         drop(queue);
         // An in-flight driver compilation finishes using its own GPU handles.
         // Surface teardown never joins the compiler or waits for it.
-        let mut retired = RETIRED.lock().unwrap();
-        retired.retain(|worker| !worker.is_finished());
-        retired.append(&mut self.1);
+        retire(self.1.drain(..));
     }
 }
 
@@ -438,6 +446,34 @@ mod tests {
         finish_shader_compiler_shutdown();
         wait_finished.try_recv().unwrap();
         assert_eq!(canceled.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn final_shutdown_waits_for_canceled_snapshot_workers_to_release_their_gpu() {
+        let gpu = Arc::new(());
+        let (entered, started) = mpsc::channel();
+        let (release, held) = mpsc::channel::<()>();
+        let job = crate::snapshot::SnapshotJob::spawn("capy-snapshot", {
+            let gpu = gpu.clone();
+            move |_| {
+                let _gpu = gpu;
+                entered.send(()).unwrap();
+                held.recv_timeout(Duration::from_secs(10)).unwrap();
+                Err("canceled".into())
+            }
+        }).unwrap();
+        started.recv_timeout(Duration::from_secs(10)).unwrap();
+        drop(job);
+        let (returned, shutdown) = mpsc::channel();
+        let finishing = std::thread::spawn(move || {
+            finish_shader_compiler_shutdown();
+            returned.send(()).unwrap();
+        });
+        let early = shutdown.recv_timeout(Duration::from_millis(250)).is_ok();
+        release.send(()).unwrap();
+        finishing.join().unwrap();
+        assert!(!early, "final shutdown returned while a canceled snapshot worker was still inside the GPU");
+        assert_eq!(Arc::strong_count(&gpu), 1, "the canceled snapshot worker released its GPU before final shutdown returned");
     }
 
     #[test]

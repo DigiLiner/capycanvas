@@ -49,40 +49,25 @@ pub struct Candidate {
     pub(crate) entries: Vec<Arc<Prepared>>,
     pub(crate) masks: Option<Arc<layer_masks::SnapshotMasks>>,
 }
-pub struct Job {
-    control: snapshot::CaptureControl,
-    receiver: std::sync::mpsc::Receiver<Result<Candidate, String>>,
-}
-impl Drop for Job { fn drop(&mut self) { self.control.cancel(); } }
+pub type Job = snapshot::Job<Candidate>;
 impl Job {
     pub fn start(gpu: snapshot::SnapshotGpu, query: ArtworkQuery) -> Result<Self, String> {
-        Self::spawn(gpu, Request::Artwork(query))
+        Self::analyze(gpu, Request::Artwork(query))
     }
-    pub(crate) fn frame(gpu: snapshot::SnapshotGpu, input: BakeInput) -> Result<Self, String> { Self::spawn(gpu, Request::Bake(input)) }
-    fn spawn(gpu: snapshot::SnapshotGpu, request: Request) -> Result<Self, String> {
-        let control = snapshot::CaptureControl::default();
-        let capture = control.clone();
-        let (sender, receiver) = std::sync::mpsc::channel();
-        #[cfg(not(target_arch = "wasm32"))]
-        std::thread::Builder::new().name("capy-effect-analysis".into()).stack_size(8 * 1024 * 1024).spawn(move || {
-            let _ = sender.send(pollster::block_on(Self::run(gpu, request, capture)));
-        }).map_err(|e| e.to_string())?;
-        #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local(async move { let _ = sender.send(Self::run(gpu, request, capture).await); });
-        Ok(Self { control, receiver })
+    pub(crate) fn frame(gpu: snapshot::SnapshotGpu, input: BakeInput) -> Result<Self, String> { Self::analyze(gpu, Request::Bake(input)) }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn analyze(gpu: snapshot::SnapshotGpu, request: Request) -> Result<Self, String> {
+        Self::spawn("capy-effect-analysis", move |control| pollster::block_on(run(gpu, request, control)))
     }
-    async fn run(gpu: snapshot::SnapshotGpu, request: Request, control: snapshot::CaptureControl) -> Result<Candidate, String> {
-        match request {
-            Request::Artwork(query) => gpu.effect_analysis(query, control).await,
-            Request::Bake(input) => gpu.bake_analysis(input, control).await,
-        }
+    #[cfg(target_arch = "wasm32")]
+    fn analyze(gpu: snapshot::SnapshotGpu, request: Request) -> Result<Self, String> {
+        Ok(Self::spawn_local(move |control| run(gpu, request, control)))
     }
-    pub fn take(&mut self) -> Option<Result<Candidate, String>> {
-        match self.receiver.try_recv() {
-            Ok(result) => Some(result),
-            Err(std::sync::mpsc::TryRecvError::Empty) => None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err("Effect analysis stopped".into())),
-        }
+}
+async fn run(gpu: snapshot::SnapshotGpu, request: Request, control: snapshot::CaptureControl) -> Result<Candidate, String> {
+    match request {
+        Request::Artwork(query) => gpu.effect_analysis(query, control).await,
+        Request::Bake(input) => gpu.bake_analysis(input, control).await,
     }
 }
 #[cfg(target_arch = "wasm32")]
@@ -130,7 +115,7 @@ impl WgpuRasterizer {
                     else { return false; }
                 }
             } else {
-                let result = Job::spawn(self.snapshot_gpu(), Request::Bake(input.clone()));
+                let result = Job::frame(self.snapshot_gpu(), input.clone());
                 let (job, result) = match result { Ok(job) => (Some(job), None), Err(error) => (None, Some(Err(error))) };
                 let pending = job.is_some();
                 self.bake_analyses.push(BakeTask {input, job, result});

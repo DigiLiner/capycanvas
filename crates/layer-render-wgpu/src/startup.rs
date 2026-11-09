@@ -24,6 +24,8 @@ pub(super) use platform::Compiler;
 #[cfg(not(target_arch = "wasm32"))]
 pub use platform::finish_shader_compiler_shutdown;
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) use platform::retire;
+#[cfg(not(target_arch = "wasm32"))]
 pub use platform::Activity as ShaderActivity;
 
 #[cfg(all(feature = "test-support", not(target_arch = "wasm32")))]

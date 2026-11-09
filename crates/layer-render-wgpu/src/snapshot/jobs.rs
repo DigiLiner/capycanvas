@@ -19,44 +19,62 @@ impl SnapshotGpu {
     }
 }
 
-pub struct SnapshotJob {
+pub struct Job<T> {
     control: CaptureControl,
-    receiver: mpsc::Receiver<Result<layer_render::SnapshotResult, String>>,
+    receiver: mpsc::Receiver<Result<T, String>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    worker: Option<std::thread::JoinHandle<()>>,
 }
-impl Drop for SnapshotJob {
-    fn drop(&mut self) { self.control.cancel(); }
+pub type SnapshotJob = Job<layer_render::SnapshotResult>;
+impl<T> Drop for Job<T> {
+    fn drop(&mut self) {
+        self.control.cancel();
+        #[cfg(not(target_arch = "wasm32"))]
+        startup::retire(self.worker.take());
+    }
 }
 #[cfg(target_arch = "wasm32")]
 pub type BrowserSnapshot = std::rc::Rc<dyn Fn(layer_render::SnapshotRequest, CaptureControl)
     -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<layer_render::SnapshotResult, String>>>>>;
 
-impl SnapshotJob {
+impl<T> Job<T> {
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn start(gpu: SnapshotGpu, request: layer_render::SnapshotRequest) -> Result<Self, String> {
+    pub(crate) fn spawn(name: &str, work: impl FnOnce(CaptureControl) -> Result<T, String> + Send + 'static) -> Result<Self, String>
+    where T: Send + 'static {
         let control = CaptureControl::default();
         let capture = control.clone();
         let (sender, receiver) = mpsc::channel();
-        std::thread::Builder::new().name("capy-snapshot".into()).stack_size(8 * 1024 * 1024).spawn(move || {
-            let result = pollster::block_on(gpu.run_snapshot(request, capture));
-            let _ = sender.send(result);
+        let worker = std::thread::Builder::new().name(name.into()).stack_size(8 * 1024 * 1024).spawn(move || {
+            let _ = sender.send(work(capture));
         }).map_err(|e| e.to_string())?;
-        Ok(Self { control, receiver })
+        Ok(Self { control, receiver, worker: Some(worker) })
     }
     #[cfg(target_arch = "wasm32")]
-    pub fn start(worker: BrowserSnapshot, request: layer_render::SnapshotRequest) -> Result<Self, String> {
+    pub(crate) fn spawn_local<F: std::future::Future<Output = Result<T, String>> + 'static>(work: impl FnOnce(CaptureControl) -> F + 'static) -> Self
+    where T: 'static {
         let control = CaptureControl::default();
         let capture = control.clone();
         let (sender, receiver) = mpsc::channel();
         wasm_bindgen_futures::spawn_local(async move {
-            let _ = sender.send(worker(request, capture).await);
+            let _ = sender.send(work(capture).await);
         });
-        Ok(Self { control, receiver })
+        Self { control, receiver }
     }
-    pub fn take(&mut self) -> Option<Result<layer_render::SnapshotResult, String>> {
+    pub fn take(&mut self) -> Option<Result<T, String>> {
         match self.receiver.try_recv() {
             Ok(result) => Some(result),
             Err(mpsc::TryRecvError::Empty) => None,
             Err(mpsc::TryRecvError::Disconnected) => Some(Err("The operation stopped".into())),
         }
+    }
+}
+impl SnapshotJob {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn start(gpu: SnapshotGpu, request: layer_render::SnapshotRequest) -> Result<Self, String> {
+        Self::spawn("capy-snapshot", move |control| pollster::block_on(gpu.run_snapshot(request, control)))
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub fn start(worker: BrowserSnapshot, request: layer_render::SnapshotRequest) -> Result<Self, String> {
+        Ok(Self::spawn_local(move |control| worker(request, control)))
     }
 }

@@ -1114,6 +1114,6 @@ mod jobs;
 #[cfg(test)]
 #[path="query_capture_tests.rs"]
 mod query_capture_tests;
-pub use jobs::SnapshotJob;
+pub use jobs::{Job, SnapshotJob};
 #[cfg(target_arch = "wasm32")]
 pub use jobs::BrowserSnapshot;
