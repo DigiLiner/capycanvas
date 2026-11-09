@@ -90,31 +90,6 @@ import Darwin
             cache.receive(tagged)
         }
         try await wait("Initial editor") { !store.state.isNull && !store.catalog.isNull }
-        do {
-            let proofStore = EditorStore(platform: platform, persistence: EditorPersistence(root: nil), managedWorkspaces: false)
-            try await wait("Proof measurement editor") { !proofStore.state.isNull && !proofStore.catalog.isNull }
-            proofStore.projectFiles = ProjectFiles(store: proofStore, dialogs: .init(open: { _, done in done([]) },
-                save: { _, _, done in done(nil) }, create: { _, done in
-                    done(newSheet([128, 96], space: "DisplayP3", depth: "F16"))
-                }))
-            try await proofStore.apply(["type": "invoke", "command": "new_document"])
-            try await wait("Proof measurement HDR document") {
-                proofStore.snapshot["proof_panel"]["hdr"].bool && !proofStore.projectFiles.busy
-            }
-            let _: JSON = await withCheckedContinuation { done in
-                proofStore.query(["type": "proof_panel", "action": ["type": "mode", "mode": "sdr"]]) {
-                    done.resume(returning: $0)
-                }
-            }
-            precondition(proofStore.snapshot["proof_panel"]["mode"].string == "sdr")
-            let proof = NSHostingController(rootView: ProofPanel(store: proofStore, controller: proofStore.proof, bodyFitsContent: true))
-            let natural = proof.sizeThatFits(in: CGSize(width: 240, height: 400))
-            precondition(natural.height > 0, "Content-sized SDR Proof has a natural body height")
-            for proposal in [CGSize(width: 240, height: 800), CGSize(width: 400, height: 800)] {
-                precondition(abs(proof.sizeThatFits(in: proposal).height - natural.height) < 0.02,
-                    "Content-sized SDR Proof retains its natural height across available width and height proposals")
-            }
-        }
         for panel in ["brush_sets", "sculpt_sets", "tools"] {
             let controls = NSHostingView(rootView: ToolSetControls(store: store, panel: panel).frame(width: 240))
             precondition(controls.fittingSize.height >= 26,

@@ -4,10 +4,13 @@ import SwiftUI
 /// Owned windows and temporary storage; native events exercise actual hit testing.
 @main final class HDRControlChecks: NativeWorkspaceInputFixture {
     @MainActor static func run() async throws {
+        for platform: UInt32 in [0, 1] { try await check(platform) }
+    }
+    @MainActor static func check(_ platform: UInt32) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("capy-hdr-controls-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = EditorStore(platform: 0, persistence: EditorPersistence(root: root), managedWorkspaces: false)
+        let store = EditorStore(platform: platform, persistence: EditorPersistence(root: root), managedWorkspaces: false)
         let native = store.native!, surface = attachSurface(store, CGSize(width: 256, height: 192))
         defer { native.detach(); withExtendedLifetime(surface) {} }
         func wait(_ label: String, _ ready: () -> Bool) async throws {
@@ -56,6 +59,14 @@ import SwiftUI
             }
         } }
         try require((shades.max() ?? 0) - (shades.min() ?? 0) > 0.25, "First-mounted proof dial redraws the loaded glass texture")
+        precondition(store.snapshot["proof_panel"]["mode"].string == "sdr")
+        let panel = NSHostingController(rootView: ProofPanel(store: store, controller: proof, bodyFitsContent: true))
+        let natural = panel.sizeThatFits(in: CGSize(width: 240, height: 400))
+        precondition(natural.height > 0, "Content-sized SDR Proof has a natural body height")
+        for proposal in [CGSize(width: 240, height: 800), CGSize(width: 400, height: 800)] {
+            precondition(abs(panel.sizeThatFits(in: proposal).height - natural.height) < 0.02,
+                "Content-sized SDR Proof retains its natural height across available width and height proposals")
+        }
         let center = CGPoint(x: size / 2, y: size / 2)
         let baseline = store.snapshot["proof_panel"]["recipe"].stableKey
         try event(.leftMouseDown, at: center, marker: input, number: 1)
@@ -97,7 +108,7 @@ import SwiftUI
                 try await drain(0.12); capture.layoutSubtreeIfNeeded(); capture.displayIfNeeded()
                 if let directory = ProcessInfo.processInfo.environment["CAPY_HDR_CAPTURE"], let bitmap = capture.bitmapImageRepForCachingDisplay(in: capture.bounds) {
                     capture.cacheDisplay(in: capture.bounds, to: bitmap)
-                    try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent("proof-\(theme)-\(Int(width)).png"))
+                    try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: directory).appendingPathComponent("proof-\(platform)-\(theme)-\(Int(width)).png"))
                 }
             }
         }
@@ -105,7 +116,7 @@ import SwiftUI
         guard let first = field.image(side: 226, hue: 237, shape: .circle, rgbSpace: "DisplayP3", hdr: viewing) else { throw HostFailure(message: "No HDR field") }
         try require(first.bitsPerComponent == 32 && first.colorSpace?.name == CGColorSpace.extendedLinearSRGB, "Picker retains Float32 and native EDR color space")
         try require(first === field.image(side: 226, hue: 237, shape: .circle, rgbSpace: "DisplayP3", hdr: viewing), "Unchanged picker reuses exact image")
-        let asyncField = HDRColorFieldImageCache()
+        let asyncField = AsyncColorFieldImageCache()
         let request = JSON(["side": 96, "hue": 237, "shape": "circle", "space": "DisplayP3", "viewing": viewing.raw])
         for i in 0..<60 { asyncField.request(request.replacing("viewing", with: viewing.replacing("stops", with: JSON(Double(i) / 30)))) }
         let last = viewing.replacing("stops", with: JSON(59.0 / 30))

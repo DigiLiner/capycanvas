@@ -327,6 +327,7 @@ deletes afterwards. Both Apple policies run on the Mac with that storage.
 Fixtures that open windows take focus: run them one at a time and never
 alongside a UI test batch. Choose fixtures by name from `tests/`;
 `test-without-gpu.sh` runs those that attach no Metal surface.
+`hdr-controls.swift` checks content-sized SDR Proof panels for HDR drawings with a real Metal owner on both Apple policies.
 
 Fixtures for one or two Swift sources compile directly; the fixture list in
 `scripts/test-without-gpu.sh` names each one's sources. For example:
