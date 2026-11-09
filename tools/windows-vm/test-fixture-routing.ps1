@@ -421,6 +421,7 @@ try{
         if($script:claims -eq 1){'fixture'}
     }
     function Stop-Review{}
+    function Wait-FixtureReviews{}
     function Control-Fixture{}
     function Get-FixtureCompanionArguments{}
     function Get-Process{[pscustomobject]@{Path='powershell.exe'}}
@@ -453,6 +454,36 @@ try{
     function Write-FixtureResult($Path,$Json){$script:events.Add('result');$script:result=$Json|ConvertFrom-Json}
     $Output='C:\owned';$scripts='C:\owned';$editorExecutable='C:\owned\CapyCanvas.exe'
     $runs=@{fixture=@{arguments=@();hardware_gpu=$false}};$queue=$null;$DebuggerPath=$null;$TimeoutMinutes=20
+    & {
+        $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-FixtureReviews'},$false)
+        if($definition){. ([scriptblock]::Create($definition.Extent.Text))}
+        function Get-NextFixture($Planned,$Queue,$Claimed){
+            $script:events.Add('claim');$script:claims++
+            if($script:claims -eq 1){'fixture'}elseif($script:claims -eq 2){$script:mode='unchanged';'fixture'}
+        }
+        function Reviews($ContextPath){
+            if($ContextPath -cne (Join-Path $Output 'fixture-context.json')){throw 'Timeout cleanup read another row context'}
+            $script:review
+        }
+        function Write-FixtureResult($Path,$Json){$script:events.Add('result');$script:rowResults.Add(($Json|ConvertFrom-Json))}
+        foreach($lingers in @($true,$false)){
+            $script:scale=[pscustomobject]@{exists=$false;kind=$null;value=$null};$script:runtimeScale=1.0
+            $script:mode='timeout';$script:restoreFails=$false;$script:readFails=$false;$script:pendingReads=0
+            $script:events=[Collections.Generic.List[string]]::new();$script:claims=0;$script:reads=0
+            $script:rowResults=[Collections.Generic.List[object]]::new();$script:lingers=$lingers
+            $script:review=[pscustomobject]@{Id=41}
+            $script:review|Add-Member ScriptMethod WaitForExit {param($milliseconds)if($milliseconds -lt 0 -or $milliseconds -gt 30000){throw 'Unbounded review exit wait'};$script:events.Add('review-wait');!$script:lingers}
+            $script:review|Add-Member ScriptMethod Dispose {$script:events.Add('review-dispose')}
+            $failure=$null;try{& $execute}catch{$failure=$_.Exception.Message}
+            if($lingers -and ($script:claims -ne 1 -or @($script:events|Where-Object {$_ -eq 'child'}).Count -ne 1)){throw 'A timed-out row lingering review allowed the next selector to start'}
+            if(!$script:rowResults.Count -or $script:rowResults[0].exit -cne 'timeout'){throw 'Review exit cleanup lost the first-attempt timeout'}
+            if(!$script:events.Contains('review-dispose') -or $script:events.IndexOf('review-wait') -lt $script:events.IndexOf('kill')){throw 'Review exit wait did not follow the timeout kill and release its handle'}
+            if($lingers){
+                if($failure -notlike 'Session retired after timeout:*' -or $script:rowResults.Count -ne 1 -or $script:rowResults[0].message -notlike '*Session retired after timeout:*'){throw 'Lingering review did not write its timeout result and retirement reason before stopping'}
+                if($script:events[-1] -ne 'result'){throw 'Retired session touched the queue after writing its result'}
+            }elseif($failure -or $script:claims -ne 3 -or $script:rowResults.Count -ne 2 -or $script:rowResults[1].exit -ne 0){throw 'An exited review did not let the next selector run once'}
+        }
+    }
     foreach($leaked in 150,130){
         $script:scale=[pscustomobject]@{exists=$true;kind='DWord';value=$leaked};$script:runtimeScale=$leaked/100.0
         $script:mode='unchanged';$script:restoreFails=$false;$script:readFails=$false;$script:pendingReads=0
@@ -469,8 +500,8 @@ try{
             $script:events=[Collections.Generic.List[string]]::new();$script:claims=0;$script:result=$null
             $notifications=[CapyVm.Native]::Notifications;$failure=$null;$script:reads=0;$script:readFails=$false
             try{& $execute}catch{$failure=$_.Exception.Message}
-            $childExit=switch($mode){'timeout'{'timeout'} 'failure'{7} {$_ -in @('error','screen-error')}{'runner'} default{0}}
-            $expectedExit=if($restoreFails){'cleanup'}else{$childExit}
+            $childExit=switch($mode){{$_ -in @('timeout','screen-error')}{'timeout'} 'failure'{7} 'error'{'runner'} default{0}}
+            $expectedExit=if($restoreFails -and $childExit -cne 'timeout'){'cleanup'}else{$childExit}
             if(!$script:result -or $script:result.exit -cne $expectedExit){throw 'Text-scale cleanup replaced the original fixture exit'}
             $expectedMessage=switch($mode){'failure'{'Fixture failed'} 'error'{'Child launch failed'} 'screen-error'{'Capture failed'} default{''}}
             if($restoreFails){$expectedMessage=(@($expectedMessage,"Text-scale cleanup failed (fixture exit ${childExit}): Registry restore refused")|Where-Object {$_}) -join ' '}

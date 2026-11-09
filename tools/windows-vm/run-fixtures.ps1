@@ -433,7 +433,7 @@ while($null -ne ($name=Get-NextFixture $planned $queue $claimed)){
     $log = Join-Path $Output ($run.Key -replace ':', '-')
     $env:CAPY_FIXTURE_CONTEXT = "$log-context.json"
     $started = Get-Date
-    $cleanupError=$null
+    $cleanupError=$null;$retirementError=$null;$timedOut=$false
     try {
       try {
         Wait-FixtureTextScale $textScale 'setup'
@@ -452,6 +452,7 @@ while($null -ne ($name=Get-NextFixture $planned $queue $claimed)){
         $process.PriorityClass='High'
         $finished = $process.WaitForExit($TimeoutMinutes * 60000)
         if (!$finished) {
+            $timedOut=$true
             try{Save-Screen "$log.png"}finally{& taskkill.exe /T /F /PID $process.Id | Out-Null}
         }
         $exit = if ($finished) { $process.ExitCode } else { 'timeout' }
@@ -459,22 +460,25 @@ while($null -ne ($name=Get-NextFixture $planned $queue $claimed)){
         $marker = [array]::FindLastIndex([string[]]$errors, [Predicate[string]]{ param($line) $line -match '^\s*\|\s*~' })
         $message = (@($errors | Select-Object -Skip ($marker + 1)) -match '\S' -replace '^\s*\|\s*', '') -join ' '
       } catch {
-        $exit = 'runner'
+        $exit = if($timedOut){'timeout'}else{'runner'}
         $message = $_.Exception.Message
       }
       try {
         if ($exit -ne 0 -and !(Test-Path "$log.png")) { Save-Screen "$log.png" }
         Save-Evidence $log ($runs[$run.Key].renders -ne $false)
-      } catch { $exit = 'evidence'; $message += " $($_.Exception.Message)" }
+      } catch { if(!$timedOut){$exit = 'evidence'}; $message += " $($_.Exception.Message)" }
     } finally {
+        if($timedOut){try{Wait-FixtureReviews $log}catch{$retirementError=$_.Exception.Message}}
         if($textScale){try{Restore-FixtureTextScale $textScale}catch{$cleanupError=$_.Exception.Message}}
     }
     if($cleanupError){
         $message=(@($message,"Text-scale cleanup failed (fixture exit ${exit}): $cleanupError")|Where-Object {$_}) -join ' '
-        $exit='cleanup'
+        if(!$timedOut){$exit='cleanup'}
     }
+    if($retirementError){$message=(@($message,"Session retired after timeout: $retirementError")|Where-Object {$_}) -join ' '}
     $result = [ordered]@{ name = $run.Key; exit = $exit; seconds = [math]::Round(((Get-Date) - $started).TotalSeconds); message = $message }
     Write-FixtureResult $results ($result|ConvertTo-Json -Compress)
+    if($retirementError){throw "Session retired after timeout: $retirementError"}
     if($cleanupError){throw "Fixture text-scale cleanup failed: $cleanupError"}
 }
 Stop-Review

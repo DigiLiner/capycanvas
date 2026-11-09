@@ -217,6 +217,32 @@ class SharedRunTests(unittest.TestCase):
         self.assertEqual(run.broken, {"shared-gpu-1-capy01"})
         self.assertEqual(len(run.sessions), 2)
 
+    def test_a_retired_session_keeps_its_timeout_and_only_unclaimed_work_moves(self):
+        self.demand_rows = {"run-a": {"demand": 2}}
+        run = self.build(["a", "b"], workers=1)
+        accounts = vm.shared_accounts()
+        with run.queue:
+            fake = FakeGuest(run)
+
+            def status(machine, command, **options):
+                if not fake.stopped and run.sessions:
+                    session = run.sessions[0]
+                    selector = run.queue.remaining.popleft()
+                    run.queue.assignments[session.id].append(selector)
+                    fake.logs[session.id] = [json.dumps({"name": selector, "exit": "timeout", "seconds": 1230,
+                                                        "message": "Session retired after timeout: review did not exit"})]
+                    fake.stopped.add(session.id)
+                return fake.status(machine, command, **options)
+
+            with self.scheduled(run, SimpleNamespace(status=status), {"shared-gpu-1": accounts}):
+                run.schedule(run.executor)
+        rows, errors = vm.fixture_shards.merge(["a", "b"], run.shards())
+        self.assertEqual([(row["name"], row["exit"]) for row in rows], [("a", "timeout"), ("b", 0)])
+        self.assertIn("Session retired after timeout", rows[0]["message"])
+        self.assertIn("worker stopped", " ".join(errors))
+        self.assertEqual(run.broken, {"shared-gpu-1-capy01"})
+        self.assertEqual([run.queue.assignments[session.id] for session in run.sessions], [["a"], ["b"]])
+
     def test_a_run_stops_instead_of_waiting_when_every_session_failed(self):
         self.demand_rows = {"run-a": {"demand": 1}}
         run = self.build(["a"])
