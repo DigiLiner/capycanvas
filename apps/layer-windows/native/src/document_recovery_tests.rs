@@ -55,7 +55,7 @@ impl Fixture {
     }
     fn wait(&self) {
         let deadline = std::time::Instant::now() + Duration::from_secs(60);
-        while self.service.worker.shared.mailbox.lock().unwrap().completed.is_none() {
+        while self.service.activation_worker.shared.mailbox.lock().unwrap().completed.is_none() {
             let remaining = deadline.checked_duration_since(std::time::Instant::now()).expect("Document worker timed out");
             self.done.recv_timeout(remaining).unwrap();
         }
