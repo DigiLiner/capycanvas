@@ -237,42 +237,38 @@ fn branch_end(at:vec2<i32>,previous:vec2<i32>,limit:u32,stop_at_junction:bool)->
 fn skeleton_prune(@builtin(global_invocation_id) id:vec3<u32>,@builtin(num_workgroups) groups:vec3<u32>) {
     if line.job.y!=0u && atomicLoad(&cached[line.offsets.y+3u])==0u{return;}
     let index=id.x+id.y*groups.x*64u+line.job.x;let p=local_point(index);if p.y>=line.window.w{return;}
-    if !initial_skeleton(vec2<i32>(line.window.xy+p)){return;}
-    var value=input(index);if value==0u{output(index,0u);return;}
-    let at=vec2<i32>(p);let crossings=crossing_number(at);
-    if crossings<=2u {
-        var endpoint=crossings==1u;var junction=vec4<u32>(0);var length=0u;
-        for(var i=0u;i<8u;i++) {
-            if !connected(at,AROUND[i]){continue;}
-            let end=branch_end(at+AROUND[i],at,32u,true);length+=end.z;
-            endpoint=endpoint || end.w==1u;if end.w>2u{junction=end;}
-        }
-        if endpoint && junction.w>2u {
-            let q=vec2<i32>(coord(junction.x));let previous=vec2<i32>(coord(junction.y));
-            let width=max(1u,distance(vec2<i32>(line.window.xy)+q));var longer=0u;
-            if length<2u*width {
-                for(var i=0u;i<8u;i++) {
-                    let next=q+AROUND[i];if all(next==previous) || !connected(q,AROUND[i]){continue;}
-                    let end=branch_end(next,q,length,false);longer+=u32(end.z>=length);
-                }
-                if longer>=2u{value=0u;}
-            }
-        }
+    if line.options.x==0u {output(index,input(index));return;}
+    let at=vec2<i32>(p);if input(index)==0u || crossing_number(at)!=1u {return;}
+    let end=branch_end(next_pixel(at,vec2<i32>(-1)),at,64u,true);if end.w<=2u {return;}
+    let length=end.z;let q=vec2<i32>(coord(end.x));let previous=vec2<i32>(coord(end.y));
+    let width=max(1u,distance(vec2<i32>(line.window.xy)+q));if length>=2u*width {return;}
+    var longer=0u;
+    for(var i=0u;i<8u;i++) {
+        let next=q+AROUND[i];if all(next==previous) || !connected(q,AROUND[i]) {continue;}
+        longer+=u32(branch_end(next,q,length,false).z>=length);
     }
-    output(index,value);
+    if longer<2u {return;}
+    var current=at;var prior=vec2<i32>(-1);
+    for(var d=0u;d<=min(32u,length-1u);d++) {
+        if d>=length-min(length,32u) {output(local_index(vec2<u32>(current)),0u);}
+        let next=next_pixel(current,prior);prior=current;current=next;
+    }
 }
 @compute @workgroup_size(64)
 fn line_ends(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups:vec3<u32>) {
     if line.job.y!=0u && atomicLoad(&cached[line.offsets.y+3u])==0u{return;}
     let index=id.x+id.y*groups.x*64u+line.job.x;
-    let p=local_point(index);if p.y>=line.window.w{return;}
-    let q=line.window.xy+p;
-    if all(q>=line.core.xy) && all(q<line.core.xy+line.core.zw) {
-        let word=line.offsets.z+line.offsets.w*END_WORDS+q.y*line.extent.z+q.x/32u;let bit=1u<<(q.x%32u);
-        if skeleton(vec2<i32>(p))!=0u {atomicOr(&cached[word],bit);atomicOr(&cached[word+line.offsets.x],bit);}
-        else{atomicAnd(&cached[word],~bit);atomicAnd(&cached[word+line.offsets.x],~bit);}
-    }
-    if any(q<line.core.xy) || any(q>=line.core.xy+line.core.zw) || skeleton(vec2<i32>(p))==0u || crossing_number(vec2<i32>(p))!=1u {return;}
+    let columns=(line.core.x+line.core.z+31u)/32u-line.core.x/32u;let row=index/columns;if row>=line.core.w {return;}
+    let start=vec2((line.core.x/32u+index%columns)*32u,line.core.y+row);let count=min(32u,line.core.x+line.core.z-start.x);let left=line.core.x-min(line.core.x,start.x);
+    var bits=0u;
+    for(var bit=left;bit<count;bit++){bits|=u32(skeleton(vec2<i32>(start+vec2(bit,0u)-line.window.xy))!=0u)<<bit;}
+    let word=line.offsets.z+line.offsets.w*END_WORDS+start.y*line.extent.z+start.x/32u;let mask=(0xffffffffu>>(32u-count))&(0xffffffffu<<left);
+    atomicStore(&cached[word],(atomicLoad(&cached[word])&~mask)|bits);
+    atomicStore(&cached[word+line.offsets.x],(atomicLoad(&cached[word+line.offsets.x])&~mask)|bits);
+    loop {
+    if bits==0u {break;}let bit=countTrailingZeros(bits);bits&=bits-1u;
+    let q=start+vec2(bit,0u);let p=q-line.window.xy;
+    if crossing_number(vec2<i32>(p))!=1u {continue;}
     var path:array<vec2<i32>,33>;path[0]=vec2<i32>(p);
     var at=vec2<i32>(p);var previous=vec2<i32>(-1);var length=0u;var used=0u;
     var width=max(1u,distance(vec2<i32>(q))-1u);
@@ -282,12 +278,12 @@ fn line_ends(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgrou
         width=max(width,distance(vec2<i32>(line.window.xy)+at)-1u);
         if crossing_number(at)>2u {break;}
     }
-    if used<1u {return;}
+    if used<1u {continue;}
     width=min(width,line.options.y);
     let axis=end_axis(&path,used+1u);let position=vec2<i32>(q)+axis[0];let delta=axis[1];
-    if !valid(position) || all(delta==vec2<i32>(0)) {return;}
+    if !valid(position) || all(delta==vec2<i32>(0)) {continue;}
     let slot=atomicAdd(&cached[line.offsets.y],1u);
-    if slot>=line.offsets.w {atomicStore(&cached[line.offsets.y+1u],1u);return;}
+    if slot>=line.offsets.w {atomicStore(&cached[line.offsets.y+1u],1u);continue;}
     let base=line.offsets.z+slot*END_WORDS;
     atomicStore(&cached[base],point(vec2<u32>(position)));
     atomicStore(&cached[base+1u],(u32(delta.x)&65535u)|(u32(delta.y)<<16u));
@@ -295,6 +291,7 @@ fn line_ends(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgrou
     atomicStore(&cached[base+11u],1u);atomicStore(&cached[base+15u],point(q));
     let page=(q.y/128u)*((line.extent.x+127u)/128u)+q.x/128u;
     atomicStore(&cached[base+3u],atomicExchange(&cached[line.offsets.y+HEADER_WORDS+page],slot+1u));
+    }
 }
 fn tangent(value:u32)->vec2<i32>{return vec2<i32>(i32(value<<16u)>>16,i32(value)>>16);}
 fn middle(p:vec2<i32>)->vec2<i32>{

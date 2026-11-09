@@ -227,8 +227,8 @@ impl Lines {
         for distance in (2..=16).step_by(2) {for phase in 0..4 {
             steps.push(("skeleton_ridges",sparse_count,self.params(core,window,[distance,0,phase,input],grain)));input^=1;
         }}
-        for _ in 0..2 {steps.push(("skeleton_prune",count,self.params(core,window,[0,0,0,input],grain)));input^=1;}
-        steps.push(("line_ends",count,self.params(core,window,[0,MAX_LINE_WIDTH,0,input],grain)));
+        for _ in 0..2 {for mode in 0..2 {steps.push(("skeleton_prune",count,self.params(core,window,[mode,0,0,input],grain)));}input^=1;}
+        steps.push(("line_ends",word_count(core),self.params(core,window,[0,MAX_LINE_WIDTH,0,input],grain)));
     }
     pub fn building(&self)->bool {self.building.is_some()}
     #[cfg(test)]
@@ -272,7 +272,7 @@ impl Lines {
         let mut steps=Vec::new();let mut spent=0.;
         while spent<budget {
             let Some((entry,remaining,mut params))=work.steps.pop_front() else {break;};
-            let weight=match entry {"grain_bits"=>f64::from(radius*16+32),"jump_distance"=>9.,"store_distance"=>16.,"skeleton_ridges"=>32.,"skeleton_prune"=>128.,"line_ends"=>128.,"refine_ends"=>1024.,"seal_candidates"=>4096.,_=>1.};
+            let weight=match entry {"grain_bits"=>f64::from(radius*16+32),"jump_distance"=>9.,"store_distance"=>16.,"skeleton_ridges"=>32.,"skeleton_prune"=>if params[16]==0 {1.}else{8.},"line_ends"=>32.,"refine_ends"=>1024.,"seal_candidates"=>4096.,_=>1.};
             let sparse=entry=="skeleton_ridges" || entry=="jump_distance" && matches!(params[17],0|4);
             let weight=weight*if sparse {32.}else{1.};
             let count=((((budget-spent)/weight) as u64).max(64)/64*64).min(remaining);
