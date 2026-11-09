@@ -774,3 +774,90 @@ fn a_tablet_budget_below_the_photo_keeps_publishing_strokes_and_their_ink() {
     frame(&mut engine, &mut presenter, &view, clock);
     assert!(shown == crate::layer_tests::page_bytes(engine.backend(), &texture), "a full redraw changed the settled canvas, so deferred frames lost damage");
 }
+
+#[test]
+fn changed_resident_color_restores_lazily_under_a_tight_cache_without_losing_history() {
+    use layer_core::{Affine, Point, RasterOperation, RasterOperationKind, Selection};
+    use layer_engine::{CanvasEngine, ViewTransform, input_queue};
+    use crate::test_support::{add_paint, flush_engine, submit_settled};
+    const EXTENT: [u32; 2] = [2752, 2064];
+    const SIZE: [u32; 2] = [1376, 1032];
+    let mut document = layer_core::Document::new(layer_core::PortableId::random(), EXTENT[0], EXTENT[1],
+        layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+    let original = document.active_target().unwrap();
+    let (owner, temporary) = add_paint(&mut document.artwork, "Temporary paint", EXTENT);
+    let stack = document.artwork.compositions.get(document.artwork.root).unwrap().result;
+    let entries = &mut document.artwork.stacks.get_mut(stack).unwrap().entries;
+    entries.retain(|id| *id != owner);
+    entries.insert(0, owner);
+    let mut document = layer_core::Document::from_artwork(document.artwork).unwrap();
+    document.working.target = Some(temporary);
+    document.working.occurrence = Some(owner);
+    let selection = Selection::polygon(vec![Point { x: 0., y: 0. }, Point { x: EXTENT[0] as f32, y: 0. },
+        Point { x: EXTENT[0] as f32, y: EXTENT[1] as f32 }, Point { x: 0., y: EXTENT[1] as f32 }]).unwrap();
+    document.working.selection = Some(selection.clone());
+    let mut gpu = renderer(document.composition().color,
+        layer_core::DeviceMemoryFacts { usage_bytes: Some(0), ..Default::default() }).unwrap();
+    gpu.finish_startup_catalog();
+    gpu.prepare_startup(&document, &layer_core::default_brush(layer_core::DefaultBrushPreset::GPen), true).unwrap();
+    crate::test_support::wait_startup(&mut gpu, std::time::Instant::now() + std::time::Duration::from_secs(60),
+        |progress| progress.complete, format_args!("selected paint transform startup"));
+    let scale = 0.49;
+    let [tx, ty] = [0, 1].map(|axis| (SIZE[axis] as f32 - EXTENT[axis] as f32 * scale) * 0.5);
+    let view = layer_render::ViewState { width_px: SIZE[0], height_px: SIZE[1],
+        document_to_surface: [scale, 0., 0., scale, tx, ty] };
+    let mut engine = CanvasEngine::new(gpu, document, input_queue(8).1, view,
+        ViewTransform { revision: 0, surface_to_document: [1. / scale, 0., 0., 1. / scale, -tx / scale, -ty / scale] }).unwrap();
+    let publish = |engine: &mut CanvasEngine<WgpuRasterizer>| {
+        flush_engine(engine);
+        let snapshot = engine.document().clone();
+        submit_settled(engine.backend_mut(), FramePacket { view, ..packet(snapshot.scene(), EXTENT) });
+        assert!(engine.backend().has_presentable_frame());
+    };
+    for target in [original, temporary] {
+        let mut coverage = layer_core::CoverageSnapshot::reveal_all(engine.allocate_coverage_handle(), EXTENT, [0; 2]);
+        coverage.source.default_coverage = 0.;
+        coverage.selection = Some(selection.clone());
+        engine.append_raster_operation(target, RasterOperation { placement: Affine::IDENTITY, coverage,
+            kind: RasterOperationKind::Fill { color: [0., 0., 1., 1.], texture: Default::default(),
+                alpha_locked: false, edges: None, underfill: None } }).unwrap();
+        publish(&mut engine);
+    }
+    let before = engine.document().clone();
+    let mut presenter = ViewportPresenter::for_renderer(engine.backend(), wgpu::TextureFormat::Rgba8UnormSrgb);
+    pollster::block_on(presenter.prepare(engine.backend())).unwrap();
+    let (texture, surface) = crate::create_target(engine.backend().device(), SIZE,
+        wgpu::TextureFormat::Rgba8UnormSrgb, "selected paint transform viewport");
+    let capture = |presenter: &mut ViewportPresenter, engine: &CanvasEngine<WgpuRasterizer>| {
+        presenter.present(engine.backend(), &surface, view, [1.; 4]).unwrap();
+        crate::layer_tests::page_bytes(engine.backend(), &texture)
+    };
+    let baseline = capture(&mut presenter, &engine);
+    for x in [SIZE[0] / 8, SIZE[0] / 2, SIZE[0] * 7 / 8] {
+        let offset = ((SIZE[1] / 2 * SIZE[0] + x) * 4) as usize;
+        assert_eq!(&baseline[offset..offset + 4], &[0, 0, 255, 255]);
+    }
+    engine.set_transform_preview(Some(layer_render::TransformPreview { transaction: 1, target: temporary,
+        moving: false, selection: Some(selection), transform: layer_core::ImageTransform::affine(Affine([
+            0.5, 0., 0., 1., EXTENT[0] as f32 * 0.25, 0.,
+        ])) })).unwrap();
+    publish(&mut engine);
+    assert_eq!(engine.document().artwork, before.artwork);
+    assert_eq!(capture(&mut presenter, &engine), baseline);
+    assert!(engine.commit_transform(None).unwrap());
+    publish(&mut engine);
+    assert_ne!(engine.document().artwork.paint, before.artwork.paint);
+    assert_eq!(capture(&mut presenter, &engine), baseline);
+    assert!(engine.undo().unwrap());
+    publish(&mut engine);
+    assert_eq!(engine.document().artwork.coverage.iter().collect::<Vec<_>>(), before.artwork.coverage.iter().collect::<Vec<_>>());
+    let mut restored = engine.document().artwork.clone();
+    restored.coverage = before.artwork.coverage.clone();
+    assert_eq!(restored, before.artwork);
+    assert_eq!(engine.document().working.selection, before.working.selection);
+    assert_eq!(capture(&mut presenter, &engine), baseline);
+    let original_owner = engine.document().scene().source_owner(original).unwrap();
+    engine.set_layer_opacity(original_owner, 0.).unwrap();
+    publish(&mut engine);
+    assert_eq!(capture(&mut presenter, &engine), baseline);
+}

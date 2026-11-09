@@ -148,10 +148,12 @@ impl WgpuRasterizer {
                 tiles: data
                     .tiles
                     .iter()
-                    .filter(|(key, _)| {
+                    .filter(|(key, tile)| {
                         key.plane != RasterPlane::Color
                             || eager
+                            || required.contains(&key.coordinate)
                             || resident.contains(&key.coordinate)
+                                && previous.tiles.get(key).is_some_and(|old|old.same_capture(tile))
                     })
                     .map(|(key, tile)| (*key, tile.clone()))
                     .collect(),

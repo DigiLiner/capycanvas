@@ -274,6 +274,7 @@ pub(crate) fn color_sample(r: &mut WgpuRasterizer, request: layer_render::ColorS
 pub(crate) fn flush_engine(engine: &mut layer_engine::CanvasEngine<WgpuRasterizer>) {
     let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
     loop {
+        engine.backend().device().poll(wgpu::PollType::Poll).unwrap();
         engine.render_frame().unwrap();
         if !engine.has_pending_input() && !engine.has_pending_document_edits() {
             break;
