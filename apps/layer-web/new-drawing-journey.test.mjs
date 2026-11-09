@@ -384,6 +384,7 @@ export async function checkNewDrawing({call,evaluate,settle}) {
   for(;;)try{await wait(`performance.timeOrigin!==${reloadedFrom}&&window.layerApp?.startupTimes.complete!=null`,60000);break;}
     catch(error){if(!/navigated|context|Cannot find/i.test(String(error)))throw error;}
   await wait('JSON.parse(layerApp.app.workspace_view())?.ready&&!JSON.parse(layerApp.app.workspace_view()).busy&&!layerApp.documents.busy()',60000);
+  await evaluate('layerApp.documents.startRecovery().then(()=>true)');await settle();
   await open();
   await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
   await wait(`layerApp.state().new_drawing.drawer.tiles.some(t=>t.label==='Linen scan')`);

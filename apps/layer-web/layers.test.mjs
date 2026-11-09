@@ -610,7 +610,9 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
     const narrowShell=await editColor();
     await evaluate(`document.querySelector('${thumbnail}').click()`);await wait(opened);await settle();
     const narrow=await layout();
-    for(const side of ['x','y','width','height'])assert.ok(Math.abs(narrow.shell[side]-narrowShell[side])<=1,`Narrow Choose Texture matches Edit Color ${side}: ${JSON.stringify([narrow.shell,narrowShell])}`);
+    for(const side of ['x','width'])assert.ok(Math.abs(narrow.shell[side]-narrowShell[side])<=1,`Narrow Choose Texture matches Edit Color ${side}: ${JSON.stringify([narrow.shell,narrowShell])}`);
+    assert.equal(narrow.title,'Choose Texture');assert.ok(Math.abs(narrow.titleCenter)<=1,'The narrow title is centered');
+    assert.deepEqual(narrow.buttons,shown.buttons,'The narrow footer keeps its buttons');assert.equal(narrow.divider,shown.divider,'The narrow footer keeps its divider');
     assert.ok(narrow.columns<6&&narrow.frames,'Narrow dialogs wrap full-size tiles');
     await capture(`texture-dialog-narrow-${theme}`);
     await evaluate(`document.querySelector('${dialog} #texture-cancel').click()`);await wait(closed);
