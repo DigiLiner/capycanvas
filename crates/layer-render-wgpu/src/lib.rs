@@ -3851,6 +3851,9 @@ impl WgpuRasterizer {
             result => result,
         }
     }
+    pub(crate) fn navigator_pending(&self) -> bool {
+        self.navigator.pending(self.scale_display.as_ref().is_some_and(|cache|cache.has_pending_work(self)))
+    }
     fn hold_background(&mut self, refinement: bool) {
         self.background_refinement = refinement;
         self.background_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -3995,7 +3998,7 @@ impl CanvasRenderer for WgpuRasterizer {
         self.papers.images_ready() || self.papers.image_waiting() && !self.preparation_can_wake()
             || self.fill_preview.is_some() && self.fill_preview_ready().is_none()
             || self.held_result_ready() || self.fill_edges_preflight.as_ref().is_some_and(|state|state.pending() && !self.decode_wait_blocks_frame()) || self.bake_preflight.as_ref().is_some_and(|state|state.pending() && (!self.preparation_can_wake() || !state.waiting())) || self.restore_preparation_pending() && !self.decode_wait_blocks_frame() || self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() && !waiting_objects || self.settling.is_some() || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && !self.decode_wait_blocks_frame())
-            || self.navigator.pending() && !waiting_objects
+            || self.navigator_pending() && !waiting_objects
             || self.transform_sources_pending && self.transform_preview.is_some() && !self.decode_wait_blocks_frame()
             || self.moving_images_pending()
             || self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())
@@ -4387,7 +4390,7 @@ impl WgpuRasterizer {
             return Err(GpuRasterError::ExtentUnsupported);
         }
         if settled_commit.is_none() && (retained_transition
-            || !self.background_ready.load(std::sync::atomic::Ordering::Acquire) && !self.navigator.pending()
+            || !self.background_ready.load(std::sync::atomic::Ordering::Acquire) && !self.navigator_pending()
             && !self.moving_images_pending()
             && !self.object_deferred && !self.scene.as_ref().is_some_and(|scene| scene.objects_pending())
             && !self.scale_display.as_ref().is_some_and(scene::scale::Cache::approximating)

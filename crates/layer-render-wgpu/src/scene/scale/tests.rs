@@ -2165,7 +2165,7 @@ fn fitted_projective_preview_reuses_coarse_pixels_and_bounds_fine_source_ownersh
         assert!(bounded_owned(&r)<=CACHE_BYTES,"pending composition/fine owners stay within608MiB: {}",bounded_owned(&r));
         r.wait_idle().unwrap();
         preparation_trace.push((r.scale_display.as_ref().and_then(|cache|cache.evaluation.fine_capacity()),r.object_deferred,
-            r.transforms.as_ref().unwrap().fine_progress_bytes(),r.navigator.pending()));
+            r.transforms.as_ref().unwrap().fine_progress_bytes(),r.navigator_pending()));
         if !r.has_pending_work() {break;}
     }
     assert!(!r.has_pending_work(),"immutable fine inputs finish without canceling current-pose progress: {preparation_trace:?}");
