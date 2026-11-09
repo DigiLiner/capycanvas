@@ -1127,8 +1127,8 @@ public static class CapyReviewOwnershipTest {
             @{name='wrong';layout=@{cache=@{context=@{scale=1.0}}};scale=1.0},
             @{name='null';layout=@{cache=@{context=@{scale=$null}}};scale=$null},
             @{name='missing-scale';layout=@{cache=@{context=@{}}};scale=$null},
-            @{name='missing-context';layout=@{cache=@{}};scale=$null},
-            @{name='missing-cache';layout=@{};scale=$null},
+            @{name='missing-context';layout=@{cache=@{}};scale=$null;unmeasured=$true},
+            @{name='missing-cache';layout=@{};scale=$null;unmeasured=$true},
             @{name='malformed-scale';layout=@{cache=@{context=@{scale='not-a-scale'}}};scale='not-a-scale'},
             @{name='malformed-context';layout=@{cache=@{context='not-a-context'}};scale=$null}
         )
@@ -1141,8 +1141,17 @@ public static class CapyReviewOwnershipTest {
                 if($failure){throw "A helper snapshot without layout_input rejected the editor scale: $failure"}
             }elseif($failure -ne 'Hardware fixture runtime scale differs from the round display'){throw "An editor with incorrect or absent scale passed: $($case.name)"}
             $display=Get-Content -LiteralPath ($log+'-display.json') -Raw|ConvertFrom-Json
-            if(@($display.context_scales).Count -ne 1 -or $display.context_scales[0].process_id -ne 7 -or $display.context_scales[0].window_id -ne 1 -or $display.context_scales[0].scale -ne $scale){throw 'Editor scale evidence included a helper or lost editor identity or scale'}
+            $expectedCount=if($case.unmeasured){0}else{1}
+            if(@($display.context_scales).Count -ne $expectedCount -or ($expectedCount -and ($display.context_scales[0].process_id -ne 7 -or $display.context_scales[0].window_id -ne 1 -or $display.context_scales[0].scale -ne $scale))){throw 'Editor scale evidence included a helper or lost editor identity or scale'}
         }
+        @{process_id=7;window_id=1;model=@{layout_input=@{cache=@{context=@{scale=1.5}}}}}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath (Join-Path $directory 'ui-state-7-1.json')
+        @{process_id=9;window_id=1;model=@{layout_input=@{cache=@{context=$null}}}}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath (Join-Path $directory 'ui-state-9-1.json')
+        @{process_id=7;trace_directory=$directory;windows=@(@{process_id=8;trace_directory=$directory},@{process_id=9;trace_directory=$directory})}|ConvertTo-Json -Depth 4|Set-Content -LiteralPath ($log+'-context.json')
+        $failure=$null
+        try{Save-Evidence $log}catch{$failure=$_.Exception.Message}
+        if($failure){throw "A valid laid-out editor plus a never-laid-out window rejected the editor scale: $failure"}
+        $display=Get-Content -LiteralPath ($log+'-display.json') -Raw|ConvertFrom-Json
+        if(@($display.context_scales).Count -ne 1 -or $display.context_scales[0].process_id -ne 7 -or $display.context_scales[0].scale -ne 1.5){throw 'Scale evidence included a null-context window or lost the laid-out editor'}
         Remove-Item -LiteralPath (Join-Path $directory 'ui-state-7-1.json'),(Join-Path $directory 'row-evidence/ui-state-7-1.json')
         $failure=$null
         try{Save-Evidence $log}catch{$failure=$_.Exception.Message}

@@ -393,7 +393,7 @@ function Save-Evidence([string]$Log,[bool]$Renders=$true) {
     if($rendered){
         $scales=@(Get-ChildItem -LiteralPath $evidence -Filter 'ui-state-*.json'|ForEach-Object {
             $snapshot=Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json
-            if($snapshot.model.layout_input){@{file=$_.Name;process_id=$snapshot.process_id;window_id=$snapshot.window_id;scale=$snapshot.model.layout_input.cache.context.scale}}
+            if($null -ne $snapshot.model.layout_input.cache.context){@{file=$_.Name;process_id=$snapshot.process_id;window_id=$snapshot.window_id;scale=$snapshot.model.layout_input.cache.context.scale}}
         })
         @{context_scales=$scales;expected_scale=$buildManifest.fixture_scale}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$Log-display.json"
         if($buildManifest.fixture_scale -and (!$scales.Count -or @($scales|Where-Object {$_.scale -ne $buildManifest.fixture_scale}).Count)){throw 'Hardware fixture runtime scale differs from the round display'}
