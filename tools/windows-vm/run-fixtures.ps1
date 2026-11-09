@@ -281,14 +281,19 @@ function Save-Screen([string]$Path) {
     }
 }
 
-function Reviews([string]$ContextPath) {
+function Reviews([string]$ContextPath,[Collections.Generic.List[object]]$Failures) {
+    $sessionId=[Diagnostics.Process]::GetCurrentProcess().SessionId
     $files=if($ContextPath){Get-Item -LiteralPath $ContextPath}else{Get-ChildItem -LiteralPath $Output -Filter '*-context.json' -File}
-    $contexts=@($files|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
+    $contexts=@(foreach($file in $files){
+        try{Get-Content -LiteralPath $file.FullName -Raw|ConvertFrom-Json}
+        catch{if($null -eq $Failures){throw};$Failures.Add($_)}
+    })
     $closed=@($contexts|ForEach-Object {$_.closes}|Where-Object {$_.result -ceq 'pass' -and $_.window_only -is [bool] -and !$_.window_only -and $_.process_start_utc})
     $owners=@($contexts|ForEach-Object {@($_)+@($_.windows)})|Where-Object {$_.process_id}|Group-Object process_id,process_start_utc|ForEach-Object {$_.Group[0]}
     if($ContextPath -and !$owners){throw 'Timed-out fixture context has no recorded review identity'}
     $matched=[Collections.Generic.List[object]]::new()
     try{foreach($owner in $owners){
+      try{
         if($owner.process_start_utc){
             $start=([DateTime]$owner.process_start_utc).ToUniversalTime()
             if(@($closed|Where-Object {$_.process_id -eq $owner.process_id -and ([DateTime]$_.process_start_utc).ToUniversalTime() -eq $start}).Count){continue}
@@ -297,6 +302,9 @@ function Reviews([string]$ContextPath) {
         catch{if($_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId*'){continue};throw}
         $retained=$false
         try{
+            $processSessionId=$process.SessionId
+            if($processSessionId -isnot [int] -or $processSessionId -lt 0){throw "Fixture review $($owner.process_id) session identity is unavailable"}
+            if($processSessionId -ne $sessionId){continue}
             if(!$owner.process_start_utc){throw "Fixture review $($owner.process_id) has no recorded start time"}
             $handle=$process.Handle
             if($null -eq $handle -or [IntPtr]$handle -eq [IntPtr]::Zero){throw "Fixture review $($owner.process_id) process handle is unavailable"}
@@ -308,16 +316,23 @@ function Reviews([string]$ContextPath) {
                 if($actualStart.ToUniversalTime() -eq $start){$retained=$true;$matched.Add($process)}
             }
         }finally{if(!$retained){$process.Dispose()}}
+      }catch{if($null -eq $Failures){throw};$Failures.Add($_)}
     }}catch{foreach($process in $matched){$process.Dispose()};throw}
     $matched.ToArray()
 }
 function Stop-Review {
     $watch=[Diagnostics.Stopwatch]::StartNew()
-    $owned = @(Reviews)
+    $failures=[Collections.Generic.List[object]]::new()
+    $owned = @(Reviews -Failures $failures)
     try{
-        $owned | Stop-Process -Force
-        foreach($process in $owned){$null=$process.WaitForExit([int][Math]::Max(0,30000-$watch.Elapsed.TotalMilliseconds))}
-    }finally{foreach($process in $owned){$process.Dispose()}}
+        foreach($process in $owned){
+            try{Stop-Process -InputObject $process -Force}catch{$failures.Add($_)}
+        }
+        foreach($process in $owned){
+            try{if(!$process.WaitForExit([int][Math]::Max(0,30000-$watch.Elapsed.TotalMilliseconds))){throw "Fixture review $($process.Id) did not exit within 30 seconds"}}catch{$failures.Add($_)}
+        }
+    }finally{foreach($process in $owned){try{$process.Dispose()}catch{$failures.Add($_)}}}
+    if($failures.Count){throw (($failures|ForEach-Object {$_.Exception.Message}) -join '; ')}
 }
 function Wait-FixtureReviews([string]$Log) {
     $watch=[Diagnostics.Stopwatch]::StartNew()

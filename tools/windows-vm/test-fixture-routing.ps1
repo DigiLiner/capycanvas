@@ -287,7 +287,7 @@ $runnerStarted=Get-Date;$editorExecutable='C:\owned\CapyCanvas.exe';$controlBuil
 $script:queried=[Collections.Generic.List[int]]::new()
 function Get-Process([int]$Id,[string]$ErrorAction){
     $script:queried.Add($Id)
-    $process=[pscustomobject]@{Id=$Id;Handle=1;HasExited=$false;StartTime=$runnerStarted.AddSeconds($(if($Id -eq 41){1}else{2}))}
+    $process=[pscustomobject]@{Id=$Id;SessionId=[Diagnostics.Process]::GetCurrentProcess().SessionId;Handle=1;HasExited=$false;StartTime=$runnerStarted.AddSeconds($(if($Id -eq 41){1}else{2}))}
     $process|Add-Member NoteProperty Path $(if($Id -eq 41){$editorExecutable}else{'C:\other\CapyCanvas.exe'})
     $process|Add-Member ScriptMethod Dispose {}
     $process
@@ -773,6 +773,124 @@ namespace CapyLocalDumpsTest {
 }
 
 & {
+    foreach($name in 'Reviews','Stop-Review'){
+        $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    $Output='all-earlier-contexts';$script:drainSession=[Diagnostics.Process]::GetCurrentProcess().SessionId
+    $script:drainStart=[DateTime]::SpecifyKind([datetime]'2026-11-07 01:00:00',[DateTimeKind]::Utc)
+    function Get-Item{throw 'Stop pass considered only the current context'}
+    function Get-ChildItem($LiteralPath,$Filter,[switch]$File){
+        if($LiteralPath -cne $Output -or $Filter -cne '*-context.json' -or !$File){throw 'Stop pass lost the earlier-context census'}
+        $names=switch($script:drainCase){
+            'identity-last'{@('current-context.json','earlier-last-context.json')}
+            'identity-both'{@('earlier-context.json','current-context.json','earlier-last-context.json')}
+            {$_ -in 'stop-error','natural-exit'}{@('current-context.json')}
+            default{@('earlier-context.json','current-context.json')}
+        }
+        $names|ForEach-Object {[pscustomobject]@{FullName=$_}}
+    }
+    function Get-Content($LiteralPath,[switch]$Raw){
+        if($LiteralPath -ceq 'current-context.json'){
+            return (@{process_id=42;process_start_utc=$script:drainStart.ToString('o');windows=@(@{process_id=43;process_start_utc=$script:drainStart.ToString('o')})}|ConvertTo-Json -Depth 4)
+        }
+        if($script:drainCase -eq 'malformed-context'){return '{'}
+        $id=if($LiteralPath -ceq 'earlier-last-context.json'){44}else{41}
+        @{process_id=$id;process_start_utc=$(if($script:drainCase -eq 'malformed-birth'){'not-a-date'}else{$script:drainStart.ToString('o')})}|ConvertTo-Json
+    }
+    function Get-Process{
+        [CmdletBinding()]param([int]$Id)
+        if($Id -notin 41,42,43,44){throw 'Stop pass queried an unrecorded PID'}
+        if($script:drainCase -eq 'query-error' -and $Id -eq 41){throw 'Recorded owner query denied'}
+        $process=[pscustomobject]@{Id=$Id;SessionId=$(if($Id -eq 41 -and $script:drainCase -eq 'foreign'){$script:drainSession+1}else{$script:drainSession})}
+        $process|Add-Member ScriptProperty Handle {if($this.Id -in 41,44){return $null};[IntPtr]1}
+        $process|Add-Member ScriptProperty HasExited {if($this.Id -in 41,44){throw 'Stop pass inspected an unchecked owner'};!$script:drainLive[[int]$this.Id]}
+        $process|Add-Member ScriptProperty StartTime {if($this.Id -in 41,44){throw 'Stop pass read an unchecked birth'};if($script:drainCase -eq 'natural-exit' -and $this.Id -eq 42){$script:drainLive[42]=$false};$script:drainStart}
+        $process|Add-Member ScriptMethod WaitForExit {
+            param($milliseconds)
+            if(($script:drainStops -join ',') -cne '42,43'){throw 'Stop pass waited before attempting every matched owner'}
+            if($milliseconds -lt 0 -or $milliseconds -gt 30000){throw 'Stop pass changed its shared deadline'}
+            $script:drainWaits.Add([int]$this.Id);!$script:drainLive[[int]$this.Id]
+        }
+        $process|Add-Member ScriptMethod Dispose {$script:drainDisposed.Add([int]$this.Id)}
+        $script:drainProcesses[$Id]=$process;$process
+    }
+    function Stop-Process{
+        [CmdletBinding()]param([Parameter(ValueFromPipeline)]$InputObject,[switch]$Force)
+        process{
+            if(!$Force -or !$InputObject -or $InputObject.Id -notin 42,43 -or ![object]::ReferenceEquals($InputObject,$script:drainProcesses[[int]$InputObject.Id])){throw 'Stop pass signalled a PID without its verified retained process'}
+            $script:drainStops.Add([int]$InputObject.Id)
+            if($script:drainCase -eq 'stop-error' -and $InputObject.Id -eq 42){throw 'Verified owner 42 stop denied'}
+            if($script:drainLive[[int]$InputObject.Id]){$script:drainSignals.Add([int]$InputObject.Id);$script:drainLive[[int]$InputObject.Id]=$false}
+        }
+    }
+    foreach($case in 'foreign','identity-first','identity-last','identity-both','query-error','malformed-birth','malformed-context','stop-error','natural-exit'){
+        $script:drainCase=$case;$script:drainProcesses=@{};$script:drainLive=@{42=$true;43=$true}
+        $script:drainStops=[Collections.Generic.List[int]]::new();$script:drainWaits=[Collections.Generic.List[int]]::new();$script:drainSignals=[Collections.Generic.List[int]]::new();$script:drainDisposed=[Collections.Generic.List[int]]::new()
+        $failure=$null;try{Stop-Review}catch{$failure=$_.Exception.Message}
+        $required=if($case -eq 'stop-error'){@(43)}else{@(42,43)}
+        if(@($required|Where-Object {$script:drainLive[$_]}).Count){throw "Verified owners remained live after the stop pass: $case ($failure)"}
+        if(($drainStops -join ',') -cne '42,43' -or ($drainWaits -join ',') -cne '42,43'){throw "An earlier-context failure aborted later stops or bounded waits: $case"}
+        if((($drainDisposed|Sort-Object) -join ',') -cne (($drainProcesses.Keys|Sort-Object) -join ',')){throw "Stop pass leaked a matched or rejected process: $case"}
+        if($case -in 'foreign','natural-exit'){
+            if($failure){throw "Safe cleanup reported a foreign or naturally exited owner: $case ($failure)"}
+        }elseif(!$failure){throw "Stop pass hid its collected failure: $case"}
+        if($case -eq 'identity-both'){foreach($id in 41,44){if(!$failure.Contains("Fixture review $id process handle is unavailable")){throw 'Stop pass discarded one of its identity errors'}}}
+        if($case -eq 'stop-error' -and (!$failure.Contains('Verified owner 42 stop denied') -or !$failure.Contains('did not exit within 30 seconds'))){throw 'Stop pass lost a stop or bounded-exit failure'}
+        if($case -eq 'natural-exit' -and ($drainSignals -join ',') -cne '43'){throw 'Natural exit became an unsafe PID signal'}
+    }
+    'Every earlier-context stop pass attempts all verified owners before bounded waits and reports all identity and stop failures afterwards'
+}
+
+& {
+    foreach($name in 'Reviews','Stop-Review','Wait-FixtureReviews'){
+        $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    $script:reviewSessionId=[Diagnostics.Process]::GetCurrentProcess().SessionId
+    $script:reviewSessionStart=[DateTime]::SpecifyKind([datetime]'2026-11-07 01:00:00',[DateTimeKind]::Utc)
+    function Get-Item($LiteralPath){if($LiteralPath -cne 'row-context.json'){throw 'Review session cleanup escaped its context'};[pscustomobject]@{FullName=$LiteralPath}}
+    function Get-ChildItem{[pscustomobject]@{FullName='row-context.json'}}
+    function Get-Content{
+        $context=@{process_id=41;windows=@(@{process_id=42;process_start_utc=$script:reviewSessionStart.ToString('o')})}
+        if(!$script:foreignMissingBirth){$context.process_start_utc=$script:reviewSessionStart.ToString('o')}
+        $context|ConvertTo-Json -Depth 4
+    }
+    function Get-Process{
+        [CmdletBinding()]param([int]$Id)
+        if($Id -notin 41,42){throw 'Review cleanup queried an unrecorded PID'}
+        $process=[pscustomobject]@{Id=$Id}
+        $process|Add-Member ScriptProperty SessionId {$script:sessionReads.Add([int]$this.Id);if($this.Id -eq 41){$script:reviewSessionId+1}else{$script:reviewSessionId}}
+        $process|Add-Member ScriptProperty Handle {
+            $script:handleReads.Add([int]$this.Id)
+            if($this.Id -eq 41){return $null}
+            if(!$script:sessionReads.Contains([int]$this.Id)){throw 'Review handle opened before its session snapshot'}
+            [IntPtr]1
+        }
+        $process|Add-Member ScriptProperty HasExited {if($this.Id -eq 41){throw 'Foreign process exit state was read'};$false}
+        $process|Add-Member ScriptProperty StartTime {if($this.Id -eq 41){throw 'Foreign process creation time was read'};$script:reviewSessionStart}
+        $process|Add-Member ScriptMethod WaitForExit {param($milliseconds);if($milliseconds -lt 0 -or $milliseconds -gt 30000){throw 'Review session wait escaped its bound'};$script:sessionWaits.Add([int]$this.Id);$true}
+        $process|Add-Member ScriptMethod Dispose {$script:sessionDisposed.Add([int]$this.Id)}
+        $process
+    }
+    function Stop-Process{
+        [CmdletBinding()]param([Parameter(ValueFromPipeline)]$InputObject,[switch]$Force)
+        process{if(!$Force){throw 'Review cleanup changed its stop contract'};$script:sessionStops.Add([int]$InputObject.Id)}
+    }
+    foreach($missingBirth in $false,$true){
+      $script:foreignMissingBirth=$missingBirth
+      foreach($action in 'stop','timeout'){
+        $script:sessionReads=[Collections.Generic.List[int]]::new();$script:handleReads=[Collections.Generic.List[int]]::new()
+        $script:sessionWaits=[Collections.Generic.List[int]]::new();$script:sessionStops=[Collections.Generic.List[int]]::new();$script:sessionDisposed=[Collections.Generic.List[int]]::new()
+        if($action -eq 'stop'){Stop-Review}else{Wait-FixtureReviews 'row'}
+        if(($sessionReads -join ',') -cne '41,42' -or ($handleReads -join ',') -cne '42' -or ($sessionWaits -join ',') -cne '42' -or (($sessionDisposed|Sort-Object) -join ',') -cne '41,42'){throw 'Foreign snapshot cleanup opened a handle, lost the same-session owner or leaked a process object'}
+        if(($sessionStops -join ',') -cne $(if($action -eq 'stop'){'42'}else{''})){throw 'Review cleanup stopped a foreign session or changed timeout-only waiting'}
+      }
+    }
+    'Review cleanup skips only foreign snapshot sessions before any process handle and retains exact same-session cleanup'
+}
+
+& {
     foreach($name in 'Reviews','Stop-Review','Wait-FixtureReviews'){
         $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
         . ([scriptblock]::Create($node.Extent.Text))
@@ -837,6 +955,8 @@ public static class CapyReviewOwnershipTest {
             $token=[CapyReviewOwnershipTest]::WithoutDebug();$failure=$null
             try{
                 try{
+                    $snapshot=Microsoft.PowerShell.Management\Get-Process -Id $entry.id -ErrorAction Stop
+                    try{if($snapshot.SessionId -ne [Diagnostics.Process]::GetCurrentProcess().SessionId){throw 'Restricted process snapshot lost the child session without opening a handle'}}finally{$snapshot.Dispose()}
                     if($case -eq 'closed'){
                         if(@(Reviews ($log+'-context.json')).Count){throw 'A terminal closed identity remained owned'}
                         Wait-FixtureReviews $log
@@ -856,6 +976,23 @@ public static class CapyReviewOwnershipTest {
         Record-CapyFixtureClose $entry.id 7 $false -ProcessStartUtc $entry.start
         $close=(Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json).closes[0]
         if($close.process_id -ne $entry.id -or ([DateTime]$close.process_start_utc).ToUniversalTime() -ne $entry.start -or $close.window_only -ne $false -or $close.result -cne 'pass'){throw 'Terminal close receipt lost the original process creation identity'}
+        & {
+            $Output=Join-Path $directory 'natural-exit';[IO.Directory]::CreateDirectory($Output)|Out-Null
+            $entry=New-OwnershipChild
+            @{process_id=$entry.id;process_start_utc=$entry.start.ToString('o')}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $Output 'row-context.json')
+            $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reviews'},$false)
+            . ([scriptblock]::Create($node.Extent.Text.Replace('function Reviews(','function Find-NaturalReview(')))
+            $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Stop-Review'},$false)
+            . ([scriptblock]::Create($node.Extent.Text))
+            function Reviews([string]$ContextPath,[Collections.Generic.List[object]]$Failures){
+                $matched=@(Find-NaturalReview -ContextPath $ContextPath -Failures $Failures)
+                if($matched.Count -ne 1 -or $matched[0].Id -ne $entry.id){throw 'Natural exit control lost its exact matched child'}
+                Finish-OwnershipChild $entry
+                $matched
+            }
+            Stop-Review
+            if(!$entry.process.HasExited -or $entry.process.ExitCode -ne 0){throw 'Natural exit of a retained owner became a stop fault'}
+        }
         foreach($file in 'exercise-window.ps1','exercise-image-rows.ps1'){
             $caller=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot ('../../apps/layer-windows/scripts/'+$file)),[ref]$tokens,[ref]$errors)
             if($errors.Count){throw 'Close identity caller did not parse'}
@@ -895,8 +1032,14 @@ public static class CapyReviewOwnershipTest {
         $script:queries++
         if($script:case -eq 'absent'){$PSCmdlet.ThrowTerminatingError([Management.Automation.ErrorRecord]::new([ArgumentException]::new(),'NoProcessFoundForGivenId',[Management.Automation.ErrorCategory]::ObjectNotFound,$Id))}
         if($script:case -eq 'query-error'){throw 'Process query denied'}
-        $process=[pscustomobject]@{Id=$Id;HasExited=($script:case -eq 'exited')}
+        $process=[pscustomobject]@{Id=$Id;SessionId=[Diagnostics.Process]::GetCurrentProcess().SessionId;HasExited=($script:case -eq 'exited')}
         if($script:case -eq 'exit-unavailable'){$process.HasExited=$null}
+        if($script:case -eq 'missing-session'){$process.PSObject.Properties.Remove('SessionId')}
+        if($script:case -eq 'null-session'){$process.SessionId=$null}
+        if($script:case -eq 'negative-session'){$process.SessionId=-1}
+        if($script:case -eq 'text-session'){$process.SessionId='not-a-session'}
+        if($script:case -eq 'wide-session'){$process.SessionId=[long]$process.SessionId}
+        if($script:case -eq 'session-error'){$process|Add-Member ScriptProperty SessionId {throw 'Session snapshot denied'} -Force}
         $process|Add-Member ScriptProperty Handle {if($script:case -eq 'handle-unavailable'){return $null};$script:retained=$true;[IntPtr]1}
         $process|Add-Member ScriptProperty Path {throw 'A dying review path is unreadable'}
         $process|Add-Member ScriptProperty StartTime {if(!$script:retained){throw 'Process identity checked before handle retention'};if($script:case -eq 'start-error'){throw 'Process start time denied'};if($script:case -eq 'creation-unavailable'){return $null};if($script:case -eq 'reused'){$start.AddTicks(1)}else{$start}}
@@ -905,14 +1048,15 @@ public static class CapyReviewOwnershipTest {
         $process
     }
     function Stop-Process{throw 'Timeout cleanup must not kill a recorded or reused PID'}
-    foreach($case in 'lingering','exited','absent','reused','window','missing-start','query-error','start-error','handle-unavailable','exit-unavailable','creation-unavailable','malformed','empty'){
+    foreach($case in 'lingering','exited','absent','reused','window','missing-start','query-error','start-error','handle-unavailable','exit-unavailable','creation-unavailable','malformed','empty','missing-session','null-session','negative-session','text-session','wide-session','session-error'){
         $script:case=$case;$script:queries=0;$script:waits=0;$script:disposed=0;$script:retained=$false
         $failure=$null;try{Wait-FixtureReviews 'row'}catch{$failure=$_.Exception.Message}
-        $shouldFail=$case -in @('lingering','missing-start','query-error','start-error','handle-unavailable','exit-unavailable','creation-unavailable','malformed','empty')
+        $shouldFail=$case -in @('lingering','missing-start','query-error','start-error','handle-unavailable','exit-unavailable','creation-unavailable','malformed','empty','missing-session','null-session','negative-session','text-session','wide-session','session-error')
         if([bool]$failure -ne $shouldFail){throw "Review exit cleanup accepted an unsafe identity or rejected an exited owner: $case ($failure)"}
         if($script:waits -ne $(if($case -in @('lingering','window')){1}else{0})){throw "Review exit cleanup waited for the wrong process identity: $case"}
-        if($script:disposed -ne $(if($case -in @('lingering','exited','reused','window','start-error','missing-start','handle-unavailable','exit-unavailable','creation-unavailable')){1}else{0})){throw "Review exit cleanup leaked a retained process: $case"}
+        if($script:disposed -ne $(if($case -in @('lingering','exited','reused','window','start-error','missing-start','handle-unavailable','exit-unavailable','creation-unavailable','missing-session','null-session','negative-session','text-session','wide-session','session-error')){1}else{0})){throw "Review exit cleanup leaked a retained process: $case"}
         if($case -eq 'missing-start' -and ($script:waits -or $script:retained)){throw 'Missing start time was recovered from a potentially reused PID'}
+        if($case -in @('missing-session','null-session','negative-session','text-session','wide-session','session-error') -and ($script:waits -or $script:retained)){throw "Invalid session data reached a process handle or wait: $case"}
     }
     'Timed-out row cleanup uses only its recorded process identities and a bounded exit wait'
 }
