@@ -1,11 +1,9 @@
 use super::*;
-use web_time::{Duration, Instant};
 
 #[cfg(test)]
 #[path = "held_contact_tests.rs"]
 mod tests;
 
-const HOLD: Duration = Duration::from_secs(5);
 const HELD_SAMPLES: usize = 4096;
 
 enum EditInput {
@@ -14,7 +12,6 @@ enum EditInput {
 }
 pub(super) struct DeferredEdit {
     drawing: (u64, u64),
-    held_since: Option<Instant>,
     input: EditInput,
 }
 
@@ -54,16 +51,12 @@ fn mode_command(action: &UiAction) -> Option<CommandId> {
 
 impl<R: CanvasRenderer> UiSession<R> {
     fn defer_edit(&mut self, input: EditInput) {
-        self.queue_edit(input, None);
-    }
-    fn queue_edit(&mut self, input: EditInput, held_since: Option<Instant>) {
         self.deferred_edits.push_back(DeferredEdit {
             drawing: (self.engine.document().owner, self.state.document_file.epoch),
-            held_since,
             input,
         });
     }
-    fn defer_pen(&mut self, event: PenEvent, held: bool) {
+    fn defer_pen(&mut self, event: PenEvent) {
         if event.flags.contains(layer_engine::SampleFlags::PREDICTED) { return; }
         if event.phase == PenPhase::Cancel && real(&event)
             && let Some(index) = self.held_contact(event.device_id) {
@@ -72,15 +65,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let holding = self.holding_input();
         let contact = self.held_contact(event.device_id).filter(|_| !starts_contact(&event));
-        if real(&event) && event.phase == PenPhase::Up && let Some(start) = contact {
-            self.deferred_edits[start].held_since = None;
-        }
         let contact_end = contact.map(|start| {
             start + 1 + self.deferred_edits.iter().skip(start + 1)
                 .rposition(|edit| matches!(&edit.input, EditInput::Pen { event: queued, .. } if queued.device_id == event.device_id))
                 .map_or(0, |last| last + 1)
         });
-        self.queue_edit(EditInput::Pen { event, camera: self.state.camera.clone(), pressure:self.engine.configured_pressure_curve().clone(), tilt:self.engine.configured_tilt_curve().clone() }, (held && starts_contact(&event)).then(Instant::now));
+        self.defer_edit(EditInput::Pen { event, camera: self.state.camera.clone(), pressure:self.engine.configured_pressure_curve().clone(), tilt:self.engine.configured_tilt_curve().clone() });
         if let Some(position) = contact_end.filter(|position| *position + 1 < self.deferred_edits.len()) {
             let edit = self.deferred_edits.pop_back().unwrap();
             self.deferred_edits.insert(position, edit);
@@ -101,10 +91,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let held = starts_contact(&event) && !self.paint_ready();
         if self.deferred_edits.is_empty() && !held {
-            if let Err(event) = self.pen_ready(event) { self.defer_pen(event, false); }
+            if let Err(event) = self.pen_ready(event) { self.defer_pen(event); }
             return;
         }
-        self.defer_pen(event, held);
+        self.defer_pen(event);
     }
     pub(super) fn contact_waits_for_raster_backing(&self, event: &PenEvent) -> bool {
         matches!(event.phase, PenPhase::Down | PenPhase::Up) && self.engine.raster_backing_pending()
@@ -151,11 +141,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         let EditInput::Pen { event, .. } = &self.deferred_edits[index].input else { return };
         let id = event.device_id;
         if !self.discard_held(index) { self.discarded_contacts.push(id); }
-    }
-    fn expire_held(&mut self) {
-        while let Some(index) = self.deferred_edits.iter().position(|edit| edit.held_since.is_some_and(|since| since.elapsed() > HOLD)) {
-            self.discard_held_contact(index);
-        }
     }
     pub(super) fn deferred_contact(&self) -> Option<bool> {
         self.deferred_edits.iter().rev().find_map(|edit| match edit.input {
@@ -224,7 +209,6 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(super) fn poll_deferred_edits(&mut self) -> u32 {
         let mut changed = 0;
-        self.expire_held();
         let mut deferred = std::mem::take(&mut self.deferred_edits);
         while let Some(edit) = deferred.front() {
             if self.state.document_file.close_ready || self.rendering_suspended
@@ -262,7 +246,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     let camera = std::mem::replace(&mut self.state.camera, current);
                     self.sync_camera();
                     if let Err(event) = result {
-                        deferred.push_front(DeferredEdit { input: EditInput::Pen { event, camera, pressure, tilt }, held_since: None, ..edit });
+                        deferred.push_front(DeferredEdit { input: EditInput::Pen { event, camera, pressure, tilt }, ..edit });
                         break;
                     }
                 }

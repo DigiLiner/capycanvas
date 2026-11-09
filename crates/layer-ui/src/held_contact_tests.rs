@@ -60,9 +60,6 @@ fn a_completed_contact_waits_for_painting_before_the_edits_that_follow_it() {
     let committed = s.engine.metrics().committed_strokes;
     let diameter = s.state.brush.diameter;
     for (sequence, phase) in [(1, PenPhase::Down), (2, PenPhase::Move), (3, PenPhase::Up)] {
-        if phase == PenPhase::Up {
-            s.deferred_edits[0].held_since = Some(Instant::now() - HOLD - Duration::from_millis(1));
-        }
         s.pen(event(&s, sequence, phase, 0.5));
     }
     s.pen(predicted(&s, 4));
@@ -82,6 +79,45 @@ fn a_completed_contact_waits_for_painting_before_the_edits_that_follow_it() {
     assert_eq!(s.state.brush.diameter, diameter * 4.);
     let radius = s.renderer_mut().recorded_dabs.iter().map(|dab| dab.radii[0]).fold(0., f32::max);
     assert!(radius > 0. && radius <= diameter * 0.5 + 0.01, "the stroke used the brush of its contact: {radius}");
+}
+
+#[test]
+fn a_contact_waiting_eight_seconds_after_undo_keeps_every_sample() {
+    let mut s=session(Platform::Gtk);
+    s.frame(1,1).unwrap();
+    s.engine.set_instant_feedback(layer_engine::InstantFeedbackConfig {enabled:false,..Default::default()}).unwrap();
+    for (sequence,phase) in [(1,PenPhase::Down),(2,PenPhase::Move),(3,PenPhase::Up)] {s.pen(event(&s,sequence,phase,0.5));}
+    settle(&mut s);
+    assert_eq!(s.engine.metrics().committed_strokes,1);
+    s.dispatch(UiAction::Invoke {command:CommandId::Undo}).unwrap();
+    settle(&mut s);
+    let before=s.engine.metrics();
+    let original=s.renderer_mut().recorded_dabs.len();
+    s.renderer_mut().painting_unready=true;
+    for (sequence,phase) in [(4,PenPhase::Down),(5,PenPhase::Move)] {s.pen(event(&s,sequence,phase,0.5));}
+    let start=std::time::Instant::now();
+    while start.elapsed()<std::time::Duration::from_secs(8) {
+        let now=1_000_000_000+start.elapsed().as_nanos() as u64;
+        s.frame(now,now).unwrap();
+        assert!(s.holding_input(),"an unresolved selected destination must retain the whole contact");
+        assert_eq!(s.engine.metrics().input_events,before.input_events);
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    s.pen(event(&s,6,PenPhase::Up,0.5));
+    s.renderer_mut().painting_unready=false;
+    settle(&mut s);
+    assert!(!s.holding_input());
+    assert_eq!(s.engine.metrics().input_events-before.input_events,3);
+    assert_eq!(s.engine.metrics().committed_strokes-before.committed_strokes,1);
+    let actual=s.renderer_mut().recorded_dabs[original..].to_vec();
+    let mut replay=session(Platform::Gtk);
+    replay.frame(1,1).unwrap();
+    replay.engine.set_instant_feedback(layer_engine::InstantFeedbackConfig {enabled:false,..Default::default()}).unwrap();
+    assert_eq!(replay.engine.allocate_stroke_id(),layer_core::StrokeId(1));
+    for (sequence,phase) in [(4,PenPhase::Down),(5,PenPhase::Move),(6,PenPhase::Up)] {replay.pen(event(&replay,sequence,phase,0.5));}
+    settle(&mut replay);
+    assert!(!actual.is_empty());
+    assert_eq!(actual,replay.renderer_mut().recorded_dabs,"every retained sample must produce the same stroke as immediate replay");
 }
 
 #[test]
@@ -165,7 +201,7 @@ fn queued_transparent_selection_rejects_an_older_hdr_contact_and_its_rollback() 
 }
 
 #[test]
-fn interrupted_held_ink_commits_while_expired_and_oversized_contacts_are_discarded() {
+fn interrupted_held_ink_commits_while_oversized_contacts_are_discarded() {
     let mut s = held_session();
     let committed = s.engine.metrics().committed_strokes;
     s.pen(event(&s, 1, PenPhase::Down, 0.5));
@@ -176,14 +212,6 @@ fn interrupted_held_ink_commits_while_expired_and_oversized_contacts_are_discard
     assert_eq!(s.engine.metrics().committed_strokes,committed+1);
     let committed=s.engine.metrics().committed_strokes;
     s.renderer_mut().painting_unready=true;
-
-    s.pen(event(&s, 3, PenPhase::Down, 0.5));
-    s.deferred_edits[0].held_since = Some(Instant::now() - HOLD - Duration::from_millis(1));
-    s.frame(2, 2).unwrap();
-    assert!(!s.holding_input(), "a contact never ready in time is dropped");
-    s.pen(event(&s, 4, PenPhase::Move, 0.5));
-    s.pen(event(&s, 5, PenPhase::Up, 0.5));
-    assert!(!s.holding_input(), "the rest of it is ignored");
 
     s.pen(event(&s, 6, PenPhase::Down, 0.5));
     for sequence in 7..8 + HELD_SAMPLES as u64 {
