@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
-import {createRasterWorker,postTransferred,releaseTransferred,backingOffer} from './raster-worker-client.js';
+import {createRasterWorker} from './raster-worker-client.js';
+import {postTransferred,releaseTransferred,backingOffer} from './raster-transfer.js';
 import {observeColorWorkers,waitForColorCapture} from '../../tools/visual/color-panel.mjs';
 
 function fixture(module) {

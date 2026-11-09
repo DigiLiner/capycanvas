@@ -1,7 +1,7 @@
 import init, * as wasm from "./pkg/layer_web.js";
 import {createPortTransport} from './store-worker-client.js';
 import {panelVectorPaths} from './panel-vector-paths.js';
-import {postTransferred,releaseTransferred,backingOffer} from './raster-worker-client.js';
+import {postTransferred,releaseTransferred,backingOffer} from './raster-transfer.js';
 let ready,module,panelVectors,storage,parentOffer,storagePort;
 let pending = Promise.resolve();
 self.onmessage = ({data}) => { if(data.module)module=data.module;pending = pending.then(() => execute(data)); };
