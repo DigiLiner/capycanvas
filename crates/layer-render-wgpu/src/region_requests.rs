@@ -206,7 +206,8 @@ impl RegionRequests {
                 && !self.flood.prepare_cache(&startup.compiler,if demand {startup::BRUSH}else{startup::OTHER}) {return Err(GpuRasterError::DeferredObjectWork);}
             let classified=self.raw.mask().ok_or(GpuRasterError::InvalidExtent)?;
             let (paper,grain,radius)=Self::paper(r,request)?;
-            let budget=self.refiner(r).chunk();
+            const DEMAND_CHUNKS:f64=3.;
+            let budget=self.refiner(r).chunk()*if demand {DEMAND_CHUNKS}else{1.};
             self.chunk_timing=self.refiner(r).begin_timing(encoder);
             let dirty=self.cache.as_ref().unwrap().dirty.values().flatten().copied().collect::<std::collections::BTreeSet<_>>();
             let (ready,taps)=self.flood.build_lines(&flood::Input {device:&r.device,mask:&classified,paper:&paper},encoder,r.document_extent,(grain,radius,request.paper.is_some()),(budget,demand),&dirty)?;
@@ -968,6 +969,29 @@ pub(crate) mod tests {
         RegionRequest { fill_areas: None, colour_mode: Default::default(), fill: None, source, reference_count: None, paper: None, enclosure: None,
             contiguous: true, selection: None, request_id: 91, position: [32, 32], tolerance: 0.,
             refinement: RegionRefinement { close_gaps: false, edges: layer_render::RegionEdges::Exact, smooth_edges: false }, limit: None }
+    }
+
+    #[test]
+    fn region_cache_demand_build_uses_three_prewarm_chunks_per_call() {
+        let mut counts=[0usize;2];
+        for (demand,count) in [false,true].into_iter().zip(&mut counts) {
+            let (mut r,source)=prepared_reference();
+            r.set_refine_chunk(Some(65_536.));
+            let request=reference_query(source);
+            let mut regions=r.regions.take().unwrap();
+            assert!(regions.cache.as_ref().unwrap().ready);
+            regions.cache.as_mut().unwrap().ready=false;regions.flood.cancel_lines();
+            for call in 1..=1024 {
+                let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+                let result=regions.build_cache(&mut r,&request,false,&mut encoder,demand,false);
+                assert!(matches!(result,Ok(())|Err(GpuRasterError::DeferredObjectWork)),"{result:?}");
+                r.uploads.finish(&encoder);encoder.submit(&r.queue);test_support::complete(&r);
+                if regions.cache.as_ref().unwrap().ready {*count=call;break;}
+            }
+            assert!(*count>0,"cache build did not finish");
+            r.regions=Some(regions);
+        }
+        assert!(counts[1]<=counts[0].div_ceil(3)+2,"prewarm {}, demand {}",counts[0],counts[1]);
     }
 
     #[test]
