@@ -191,7 +191,7 @@ fn pointwise_conversions_separate_linear_and_encoded_chains() {
                     else {[exposure,effect(2,name,image),effect(1,"invert",image)]};
                 let document=effect_document(&[chain[0].clone(),chain[1].clone(),chain[2].clone(),source([0.13,0.29,0.71],0.375)],[256;2],r.document_color);
                 let mut frame=packet(document.scene(),document.composition().size);frame.blend_space=blend;
-                r.submit(frame).unwrap();
+                crate::test_support::submit_published(r,frame);
                 let bytes=crate::layer_tests::page_bytes(r,crate::test_support::document_texture(r));
                 std::array::from_fn::<_,4,_>(|c|f32::from_le_bytes(bytes[c*4..c*4+4].try_into().unwrap()))
             };

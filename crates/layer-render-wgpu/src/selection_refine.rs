@@ -329,7 +329,7 @@ impl SelectionRefiner {
             timer: device
                 .features()
                 .contains(wgpu::Features::TIMESTAMP_QUERY)
-                .then(|| (GpuFrameTimer::new(device, queue), Default::default(), 0)),
+                .then(|| (GpuFrameTimer::with_device(device, queue), Default::default(), 0)),
             #[cfg(test)]
             budget: None,
         }
@@ -395,11 +395,11 @@ impl SelectionRefiner {
             }
         }
     }
-    pub fn prepare_bounds(&self, compiler: &startup::Compiler) -> bool {
-        compiler.pipeline(&self.pipelines[BOUNDS], startup::BRUSH);
+    pub fn prepare_bounds(&self, compiler: &compile::Scope) -> bool {
+        compiler.require([&self.pipelines[BOUNDS]], startup::BRUSH);
         self.pipelines[BOUNDS].ready()
     }
-    pub fn prepare<'a>(&self, compiler: &startup::Compiler, stages: impl IntoIterator<Item = &'a Stage>, downsample: bool) -> bool {
+    pub fn prepare<'a>(&self, compiler: &compile::Scope, stages: impl IntoIterator<Item = &'a Stage>, downsample: bool) -> bool {
         let mut needed = [false, true, false, true, downsample];
         for stage in stages {
             needed[FEATHER] |= stage.feather > 0.;

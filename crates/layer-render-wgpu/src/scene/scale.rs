@@ -1259,7 +1259,11 @@ impl Cache {
     ) -> Result<bool, GpuRasterError> {
         if self.coverage_complete() { return Ok(false); }
         let result = self.render_graph(scene, r, packet, dirty, encoding, Destination::Preview, tiles);
-        match result { Ok(_) | Err(GpuRasterError::DeferredObjectWork) => Ok(self.coverage_complete() && !self.approximate.is_empty()), Err(error) => Err(error) }
+        match result {
+            Err(GpuRasterError::DeferredObjectWork) if !scene.pending_pipelines.ready()=>Err(GpuRasterError::DeferredObjectWork),
+            Ok(_) | Err(GpuRasterError::DeferredObjectWork)=>Ok(self.coverage_complete() && !self.approximate.is_empty()),
+            Err(error)=>Err(error),
+        }
     }
     pub(super) fn render(
         &mut self, scene: &mut Scene, r: &mut WgpuRasterizer, packet: FramePacket<'_>,
@@ -1306,7 +1310,7 @@ impl Cache {
         let root = self.graph.root.clone().expect("prepared composition graph");
         let reduced = root.source_domains(packet.scene)[0].clone();
         let input = input_plan(self.plan, packet.scene,Some(self.graph.objects()));
-        let resume = self.resume.take().filter(|_| self.unchanged && r.object_deferred);
+        let resume = self.resume.as_ref().filter(|_| self.unchanged && r.object_deferred);
         let invalid = if resume.is_some() { Damage::EMPTY } else {
             tiles.map_or_else(|| Damage::from(dirty), |_| Damage::from_regions(r.document_damage.iter().copied()
                 .chain(r.transform_damage.iter().map(|&(target, region)|
@@ -1321,7 +1325,7 @@ impl Cache {
             Some(remaining) => {
                 let mut initialized = self.valid.clone();
                 initialized.extend(remaining.iter().flat_map(|region| page_coordinates(*region)));
-                Damage::from_regions(remaining).union(invalid).update_regions(self.plan, &initialized)
+                Damage::from_regions(remaining.iter().copied()).union(invalid).update_regions(self.plan, &initialized)
             }
             None => invalid.update_regions(self.plan, &self.valid),
         };
@@ -1387,6 +1391,7 @@ impl Cache {
         };
         let (regions, prepared) = (pages(regions), pages(prepared));
         self.prepare_native_branches(scene, r, packet, &regions, input, &mut Encoding { encoder, commands })?;
+        self.resume = None;
         let mut root_compositions = Vec::new();
         let resumable = !matches!(destination, Destination::Navigator);
         let split = |region: PixelRect| page_coordinates(region).map(move |page| page_rect(page).intersect(region));
@@ -1942,7 +1947,7 @@ impl Evaluator<'_> {
         request.live=true;request.display=true;
         if request.keys.is_empty() {self.release(target.slot);return self.materialize(Value::Color([0.;4]),output);}
         let moving = moving || self.r.moving_layer.is_some() || self.preview;
-        let preview = if moving {Scene::collection_preview(self.r,&request)?} else {None};
+        let preview = if moving {self.scene.collection_preview(self.r,&request)?} else {None};
         if (!moving || preview.is_none()) && let Some(pieces)=self.scene.canonical_cover(self.r,self.packet,content,&request)? {
             let window=request.bounds();
             self.r.encode_clear(self.encoder,&target.view,"canonical object pieces");

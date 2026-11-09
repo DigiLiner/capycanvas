@@ -314,12 +314,12 @@ fn transform_zoom_release_and_commit_preserve_native_pixels() {
     exact.test.reference = true;
     let mut frame = packet(doc.scene(), extent);
     frame.composite_all = false;
-    crate::test_support::submit_ready(&mut r, frame).unwrap(); crate::test_support::submit_ready(&mut exact, frame).unwrap();
+    crate::test_support::submit_published(&mut r, frame); crate::test_support::submit_published(&mut exact, frame);
     for (scale, moving) in [(0.125,true),(0.5,true),(1.,true),(0.25,true),(0.25,false)] {
         preview.moving = moving;
         frame.view.document_to_surface = [scale,0.,0.,scale,0.,0.];
         for renderer in [&mut r, &mut exact] {
-            renderer.set_transform_preview(Some(&preview)).unwrap(); crate::test_support::submit_ready(renderer, frame).unwrap();
+            renderer.set_transform_preview(Some(&preview)).unwrap(); crate::test_support::submit_published(renderer, frame);
         }
         assert!(r.scale_display.is_some());
         if moving { assert!(!r.scale_display.as_ref().unwrap().has_pending_work(&r)); }
@@ -340,7 +340,7 @@ fn transform_zoom_release_and_commit_preserve_native_pixels() {
     let mut frame = packet(doc.scene(), extent);
     frame.composite_all = false; frame.view.document_to_surface = [0.25,0.,0.,0.25,0.,0.];
     frame.dab_batches = std::slice::from_ref(&batch);
-    r.set_transform_preview(None).unwrap(); crate::test_support::submit_ready(&mut r, frame).unwrap();
+    r.set_transform_preview(None).unwrap(); crate::test_support::submit_published(&mut r, frame);
     assert_eq!(r.readback_srgb_rgba8().unwrap(), expected);
     assert!(!r.transforms.as_ref().unwrap().has_preview());
 }
@@ -483,6 +483,49 @@ fn moved_copies_reconstruct_original_coverage_for_every_map() {
 }
 
 #[test]
+fn optional_transform_inputs_park_until_the_compiler_wakes_the_owner() {
+    let doc=document_at([769,513]);
+    let extent=doc.composition().size;
+    let id=source_at(&doc,0);
+    let selection=Selection::polygon([[64.,64.],[640.,64.],[640.,448.],[64.,448.]]
+        .map(|[x,y]|Point {x,y}).to_vec()).unwrap();
+    let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let (woken,wake)=std::sync::mpsc::channel();
+    r.set_preparation_wake(Arc::new(move||{let _=woken.send(());}));
+    let mut frame=packet(doc.scene(),extent);
+    frame.composite_all=false;frame.view.document_to_surface=[0.25,0.,0.,0.25,0.,0.];
+    crate::test_support::submit_settled(&mut r,frame);
+    while wake.try_recv().is_ok() {}
+    r.shader_idle(false,false);
+    r.prepare_moving_pixels(Some((id,selection)));
+    frame.time_seconds+=0.1;
+    crate::test_support::submit_published(&mut r,frame);
+    let ready=std::time::Instant::now()+READBACK_TIMEOUT;
+    while r.navigator_pending() || r.object_deferred || r.scale_display.as_ref().is_some_and(|cache|cache.has_pending_work(&r)) {
+        assert!(std::time::Instant::now()<ready,"selection display must finish before optional warming");
+        r.wait_idle().unwrap();
+        frame.time_seconds+=0.1;
+        crate::test_support::submit_ready(&mut r,frame).unwrap();
+    }
+    let work=r.metrics.composited_pixels;
+    let captures=r.test.source_captures.get();
+    for _ in 0..3 {
+        crate::test_support::submit_ready(&mut r,frame).unwrap();
+        assert!(!r.has_pending_work(),"unadmitted optional compilation parks the owner");
+        assert_eq!(r.metrics.composited_pixels,work);
+        assert_eq!(r.test.source_captures.get(),captures);
+    }
+    r.shader_idle(true,true);
+    let deadline=std::time::Instant::now()+READBACK_TIMEOUT;
+    while r.test.source_captures.get()==captures {
+        wake.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).unwrap();
+        crate::test_support::submit_ready(&mut r,frame).unwrap();
+    }
+    crate::test_support::submit_settled(&mut r,frame);
+    assert_eq!(r.test.source_captures.get(),captures+1);
+}
+
+#[test]
 fn move_transactions_adopt_prepared_inputs_and_invalidate_them_on_restore() {
     let mut doc = document_at([769,513]);
     let extent = doc.composition().size; let id = source_at(&doc,0);
@@ -497,8 +540,15 @@ fn move_transactions_adopt_prepared_inputs_and_invalidate_them_on_restore() {
     let original = r.readback_srgb_rgba8().unwrap();
     r.background_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
     r.prepare_moving_pixels(Some((id,part.clone())));
-    r.submit(frame).unwrap();
+    let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
+    while !r.raster_dependencies_ready(frame, None) {
+        assert!(std::time::Instant::now() < deadline);
+        r.poll_pending(frame.view).unwrap();
+        std::thread::yield_now();
+    }
+    assert!(!r.can_submit());
     r.background_ready.store(true, std::sync::atomic::Ordering::Release);
+    crate::test_support::submit_settled(&mut r, frame);
     let captures=r.test.source_captures.get(); let reduced=r.test.reduced_pages.get();
     assert_eq!(captures,1); assert!(reduced>0);
     for _ in 0..2 {crate::test_support::submit_ready(&mut r, frame).unwrap();}

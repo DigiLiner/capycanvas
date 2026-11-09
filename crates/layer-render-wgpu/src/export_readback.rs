@@ -82,7 +82,7 @@ impl WgpuRasterizer {
     }
 
     pub fn readback_srgb_rgba8(&mut self) -> Result<Vec<u8>, GpuRasterError> {
-        self.pipelines.export.compile();
+        self.compilation.blocking(||self.pipelines.export.compile());
         let [width, height] = self.document_extent;
         if width == 0 || height == 0 {
             return Err(GpuRasterError::InvalidExtent);

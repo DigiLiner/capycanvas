@@ -30,7 +30,7 @@ impl<T> Drop for Job<T> {
     fn drop(&mut self) {
         self.control.cancel();
         #[cfg(not(target_arch = "wasm32"))]
-        startup::retire(self.worker.take());
+        crate::compile::retire(self.worker.take());
     }
 }
 #[cfg(target_arch = "wasm32")]

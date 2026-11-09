@@ -908,10 +908,9 @@ impl WgpuRasterizer {
             retouch.pool.push(Page::new(self, "retouch stroke-start page"));
             retouch.free.push(retouch.pool.len() - 1);
         }
-        if let Some(startup) = &mut self.startup {
-            let (render, compute) = retouch.pipelines();
-            startup.require_brush(&render, &compute);
-        }
+        let (render, compute) = retouch.pipelines();
+        if let Some(startup) = &mut self.startup { startup.require_brush(&render, &compute); }
+        else { self.compilation.require(&render,startup::BRUSH);self.compilation.require(&compute,startup::BRUSH); }
         self.retouch = Some(retouch);
     }
 

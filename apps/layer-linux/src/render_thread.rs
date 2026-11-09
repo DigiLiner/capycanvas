@@ -465,7 +465,7 @@ enum Command {
         Box<(layer_core::Document, layer_core::BrushSnapshot, bool)>,
     ),
     FinishStartupCatalog,
-    PrepareSelectionBrush(Box<(layer_core::Document, layer_core::BrushSnapshot)>),
+    PrepareContext(Box<(layer_core::Document, layer_core::BrushSnapshot, layer_render::PreparationContext)>),
     SelectionPaint(u64, layer_render::SelectionPaint),
     CancelSelectionPaint(u64),
     QuickMaskThumbnail(Option<layer_core::Selection>),
@@ -1147,8 +1147,8 @@ impl Drop for RenderWorker {
 impl CanvasRenderer for RenderWorker {
     fn shader_input(&mut self) { if let Some(activity) = &self.shader_activity { activity.input(); } }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { if let Some(activity) = &self.shader_activity { activity.idle(idle, speculative_idle); } }
-    fn prepare_selection_brush(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot) {
-        let _ = self.send(Command::PrepareSelectionBrush(Box::new((document.clone(), brush.clone()))));
+    fn prepare_context(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, context: layer_render::PreparationContext) {
+        let _ = self.send(Command::PrepareContext(Box::new((document.clone(), brush.clone(), context))));
     }
     fn shaders_need_update(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
         self.startup_needs_update(document, brush, transform)
@@ -2040,9 +2040,9 @@ impl Worker {
                     startup_progress = Default::default();
                 }
                 Command::FinishStartupCatalog => self.renderer.finish_startup_catalog(),
-                Command::PrepareSelectionBrush(inputs) => {
-                    let (document, brush) = *inputs;
-                    self.renderer.prepare_selection_brush(&document, &brush);
+                Command::PrepareContext(inputs) => {
+                    let (document, brush, context) = *inputs;
+                    self.renderer.prepare_context(&document, &brush, context);
                 }
                 Command::SelectionPaint(generation, update) => {
                     if generation != selection_generation { continue; }
@@ -2684,26 +2684,7 @@ impl Worker {
     }
     fn capture(&mut self, color: crate::display_color::ViewColor) -> Result<ReadbackImage, String> {
         let view = self.last_view.ok_or("Canvas has not rendered")?;
-        let surround = self.surround;
-        // Explicit screenshot only. No host pixels or texture imports in ink.
-        let texture = self
-            .renderer
-            .device()
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("explicit viewport capture"),
-                size: wgpu::Extent3d {
-                    width: view.width_px,
-                    height: view.height_px,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-        let mut presenter = ViewportPresenter::for_surface(&self.renderer, texture.format(), color.surface()).map_err(error)?;
+        let mut presenter = ViewportPresenter::for_surface(&self.renderer, wgpu::TextureFormat::Rgba8UnormSrgb, color.surface()).map_err(error)?;
         presenter.inherit_proof(&self.renderer, &self.presenter);
         presenter.inherit_backdrop(&self.renderer, &self.presenter);
         presenter.set_screen_check(&self.renderer, self.screen_check);
@@ -2711,61 +2692,6 @@ impl Worker {
         presenter.set_color_picker(&self.renderer, self.picker);
         presenter.set_cursor(self.renderer.device(), &self.cursor, self.cursor_scale);
         presenter.set_overviews(&self.renderer, &self.overviews);
-        let mut encoder = self
-            .renderer
-            .device()
-            .create_command_encoder(&Default::default());
-        presenter
-            .encode(
-                &self.renderer,
-                &mut encoder,
-                &texture.create_view(&Default::default()),
-                view,
-                surround,
-            )
-            .map_err(error)?;
-        let stride = (view.width_px * 4).div_ceil(256) * 256;
-        let buffer = self
-            .renderer
-            .device()
-            .create_buffer(&wgpu::BufferDescriptor {
-                label: Some("explicit capture readback"),
-                size: u64::from(stride) * u64::from(view.height_px),
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(stride),
-                    rows_per_image: None,
-                },
-            },
-            texture.size(),
-        );
-        self.renderer.queue().submit([encoder.finish()]);
-        let (tx, rx) = mpsc::channel();
-        buffer.map_async(wgpu::MapMode::Read, .., move |r| {
-            let _ = tx.send(r);
-        });
-        self.renderer
-            .device()
-            .poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: Some(Duration::from_secs(30)),
-            })
-            .map_err(error)?;
-        rx.recv().map_err(error)?.map_err(error)?;
-        let pixels = buffer.get_mapped_range(..).map_err(error)?.to_vec();
-        Ok(ReadbackImage {
-            request_id: 0,
-            width: view.width_px,
-            height: view.height_px,
-            stride,
-            bytes: pixels,
-        })
+        presenter.readback_rgba8(&self.renderer, view, self.surround).map_err(error)
     }
 }

@@ -49,6 +49,7 @@ fn equal_generated_rasters_reuse_gpu_pixels_without_another_sample_decode() {
     let first = Arc::new(TileBlob::encode(descriptor, &bytes).unwrap());
     let second = Arc::new(TileBlob::encode(descriptor, &bytes).unwrap());
     assert_ne!(first.owner_identity(), second.owner_identity());
+    pollster::block_on(r.compilation.prepare_all([&r.scene_pipelines.source.pipeline])).unwrap();
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     let original = scene.raster_tile_for_query(&mut r, &first, RgbSpace::Srgb, &mut encoder).unwrap();
     r.uploads.finish(&encoder); encoder.submit(&r.queue);
@@ -106,6 +107,7 @@ fn scan_source(tiles: usize, offset: u8) -> Arc<SourceImage> {
 fn lease_foreign_sources(r: &mut WgpuRasterizer, count: usize) -> (Option<Arc<SourceImage>>, Vec<crate::scene::sources::Lease>) {
     if count == 0 { return (None, Vec::new()); }
     let source = scan_source(count, 173);
+    pollster::block_on(r.compilation.prepare_all(crate::startup::SourceKinds::for_source(&source).pipelines(&r.scene_pipelines.source))).unwrap();
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     let mut leases = Vec::with_capacity(count);
     for x in 0..count as u32 {
@@ -266,6 +268,7 @@ fn discarded_source_decodes_cannot_be_reused_as_valid_pixels() {
     let encoded_bytes = u64::from(PAGE_SIZE).pow(2) * u64::from(wgpu::TextureFormat::Rgba8Unorm.block_copy_size(None).unwrap());
     r.source_tiles.get_mut().limits.bytes = 2 * NORMALIZED_PAGE_BYTES + transfer::TABLE_BYTES + encoded_bytes;
     let source = scan_source(3, 32);
+    pollster::block_on(r.compilation.prepare_all([&r.scene_pipelines.source.pipeline])).unwrap();
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     let prepared = crate::prepare_image_tile(&source, [0, 0], r.document_color().space, &r.device.source_samples, None).unwrap();
     Scene::decode_prepared(&mut r, &mut encoder, &source, [0, 0], prepared).unwrap();
@@ -593,6 +596,7 @@ fn prepared_source_samples_upload_without_renderer_decompression_and_share_cache
     let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let source=layer_core::color::source::rgba8_source([PAGE_SIZE;2],|_,_|[64,128,192,128]);
     let bytes=Arc::new([64,128,192,128].repeat((PAGE_SIZE*PAGE_SIZE) as usize));
+    pollster::block_on(r.compilation.prepare_all([&r.scene_pipelines.source.pipeline])).unwrap();
     let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
     let tile=Scene::decode_prepared(&mut r,&mut encoder,&source,[0;2],PreparedSourcePixels::NativeSamples(bytes)).unwrap();
     r.uploads.finish(&encoder);encoder.submit(&r.queue);
@@ -644,6 +648,7 @@ fn prepared_gray_alpha_samples_are_expanded_by_shared_worker_before_upload() {
     r.uploads.finish(&encoder);encoder.submit(&r.queue);
     assert_eq!(tile.texture.format(),wgpu::TextureFormat::Rgba8Unorm);
     assert_eq!(crate::layer_tests::page_bytes(&r,&tile.texture).as_slice(),codes.as_slice());
+    pollster::block_on(r.compilation.prepare_all([&r.scene_pipelines.source.pipeline])).unwrap();
     let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
     let exact=Scene::promote_source(&mut r,&mut encoder,tile).unwrap();
     r.uploads.finish(&encoder);encoder.submit(&r.queue);
@@ -778,6 +783,7 @@ fn stored_code_source(depth: SampleDepth, tiles: u32) -> Arc<SourceImage> {
 
 fn stored_code_tile(r: &mut WgpuRasterizer, source: &Arc<SourceImage>, x: u32,
     encoder: &mut crate::submission::CommandEncoder) -> RawTile {
+    pollster::block_on(r.compilation.prepare_all(crate::startup::SourceKinds::for_source(source).pipelines(&r.scene_pipelines.source))).unwrap();
     let prepared = crate::prepare_image_tile(source, [x, 0], r.document_color().space, &r.device.source_samples, None).unwrap();
     Scene::decode_prepared(r, encoder, source, [x, 0], prepared).unwrap_or_else(|error| {
         let cache = r.source_tiles.borrow();
@@ -930,7 +936,8 @@ fn stored_source_display_decode_stays_within_its_profile_bound_of_exact_promotio
         let mut maximum=[0f64;3];
         for coordinate in [[0,0],[1,1]] {
             let pixels=crate::prepare_image_tile(&source,coordinate,r.device.working_space(),&r.device.source_samples,None).unwrap();
-            let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+            pollster::block_on(r.compilation.prepare_all([r.scene_pipelines.source.for_format(if depth==SampleDepth::U8 {wgpu::TextureFormat::Rgba8Unorm}else{wgpu::TextureFormat::Rg32Uint})])).unwrap();
+    let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
             let raw=Scene::decode_prepared(&mut r,&mut encoder,&source,coordinate,pixels.clone()).unwrap();
             assert_eq!(encoder.pass_count(),0,"upload performs no normalization");
             let expected=match pixels {PreparedSourcePixels::NativeSamples(bytes)=>bytes,_=>unreachable!()};

@@ -443,6 +443,10 @@ impl Scene {
             let output_grid = grid_for(*regions.last().unwrap());
             let input_bounds = input_grid.bounds;
             let output_bounds = output_grid.bounds;
+            let prepared = (0..effect.program.passes.len().max(1)).map(|pass|
+                self.effects.prepare(r, scene, &[handle], effects::Execution::Image(pass), packet.time_seconds,
+                    output_grid.level, packet.blend_space)).collect::<Result<Vec<_>,_>>()?;
+            if !self.effects.enqueue(&r.compilation,startup::DOCUMENT) { return Err(GpuRasterError::DeferredObjectWork); }
             let input=Convert::filter_input(packet,effect.program.space);
             let previous = if let Some(owner) = scene.effect_owner(handle) {
                 scene.attached_effects(owner).iter().copied().take_while(|h|*h!=handle).filter(|h|scene.visible(*h)).last()
@@ -648,15 +652,7 @@ impl Scene {
                         target: target.view.clone(),
                         sources: [previous.view.clone(), cached.input.view.clone(), r.empty_view.clone(), r.empty_paper_view.clone()],
                         data,
-                        prepared: self.effects.prepare(
-                            r,
-                            scene,
-                            &[handle],
-                            effects::Execution::Image(pass),
-                            packet.time_seconds,
-                            target.plan.level,
-                            packet.blend_space,
-                        )?,
+                        prepared: prepared[pass].clone(),
                         masks,source_target:None,changed_cells:None,
                     });
                     previous = target;

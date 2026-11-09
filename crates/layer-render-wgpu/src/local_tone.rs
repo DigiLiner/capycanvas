@@ -138,7 +138,7 @@ impl Builder {
         Ok(cells * 16 + 64 * 1024)
     }
     pub(crate) async fn prepare_pipelines(device: &PipelineDevice) -> Result<(), String> {
-        pipelines(device).prepare().await
+        pipelines(device).prepare(device).await
     }
     pub(crate) fn new(
         device: &PipelineDevice,
@@ -506,6 +506,7 @@ mod tests {
         pixels: &[[f32; 4]],
         tile: u32,
     ) -> Result<Arc<GpuToneGuide>, String> {
+        pollster::block_on(Builder::prepare_pipelines(&r.device))?;
         let builder = Builder::new(&r.device, extent, r.document_color.space)?;
         for y in (0..extent[1]).step_by(tile as usize) {
             for x in (0..extent[0]).step_by(tile as usize) {

@@ -205,6 +205,7 @@ fn portable_native_writes(storage_buffers: u32) {
     let pixels = vec![[0.3, 0.3, 0.3, 0.5]; 256 * 256];
     for in_place in [false, true] {
         let encoder = if in_place { NativeTileEncoder::new(&r.device, true) } else { NativeTileEncoder::with_device(&r.device) };
+        pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
         for mode in [LayerColorMode::FullColor, LayerColorMode::Grayscale, LayerColorMode::TwoTone] {
             for image in &working { upload(&r, image, &working_bytes(&pixels)); }
             let requests: Vec<_> = (0..2).map(|i| NativeTileRequest {
@@ -250,6 +251,7 @@ fn gray_alpha_packed_writes_preserve_unedited_half_words() {
     }).collect::<Vec<_>>();
     for in_place in [false, true] {
         let encoder = if in_place { NativeTileEncoder::new(&r.device, true) } else { NativeTileEncoder::with_device(&r.device) };
+        pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
         for mode in [LayerColorMode::Grayscale, LayerColorMode::TwoTone] {
             for region in [[0, 0, 256, 256], [1, 7, 253, 243], [3, 255, 1, 1], [255, 0, 1, 256], [17, 31, 0, 71]] {
                 upload(&r, &working, &working_bytes(&pixels));
@@ -282,6 +284,7 @@ fn reduced_color_writeback_stores_invalid_pixels_as_defined_coverage() {
     use layer_core::color::LayerColorMode;
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let encoder = NativeTileEncoder::with_device(&r.device);
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     let working = texture(&r, wgpu::TextureFormat::Rgba32Float);
     let candidate = texture(&r, wgpu::TextureFormat::Rgba32Float);
     let transfer = r.prepare_native_transfer(RgbSpace::Srgb).unwrap();
@@ -333,12 +336,14 @@ fn before_endpoint_encoder(r: &WgpuRasterizer, in_place: bool) -> NativeTileEnco
             }
         }
     }
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     encoder
 }
 
 fn writeback_corpus(in_place: bool) {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let encoder = if in_place { NativeTileEncoder::new(&r.device, true) } else { NativeTileEncoder::with_device(&r.device) };
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     let working = texture(&r, wgpu::TextureFormat::Rgba32Float);
     let canonical = if in_place { working.clone() } else { texture(&r, wgpu::TextureFormat::Rgba32Float) };
     let outputs = [
@@ -532,6 +537,7 @@ fn native_restore_writeback_capture_round_trip_preserves_committed_codes() {
     use layer_core::raster::RasterTile;
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let encoder = NativeTileEncoder::with_device(&r.device);
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     let working = texture(&r, wgpu::TextureFormat::Rgba32Float);
     let canonical = texture(&r, wgpu::TextureFormat::Rgba32Float);
     let encoded8 = texture(&r, wgpu::TextureFormat::Rgba8Uint);
@@ -643,6 +649,7 @@ fn half_gray_alpha_publication_saturates_and_matches_canonical_pixels() {
         upload(&r,&working,&working_bytes(&pixels));
         let canonical=if in_place {&working} else {&candidate};
         let encoder=NativeTileEncoder::new(&r.device, in_place);
+        pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
         let request=NativeTileRequest {working:&working,canonical,encoded:(&output).into(),mode:LayerColorMode::Grayscale,
             space:RgbSpace::Srgb,transfer:&transfer,depth:SampleDepth::F16,alpha:AlphaAssociation::Straight,region:[0,0,256,256]};
         let tile=RasterTile::pending(request.descriptor());
@@ -670,6 +677,7 @@ fn hdr_half_publication_preserves_finite_codes_subnormals_and_canonical_cache() 
     use layer_core::color::{DocumentColor, f16};
     let mut r = WgpuRasterizer::new_native_headless(DocumentColor { space: RgbSpace::Srgb, depth: SampleDepth::F16 }).unwrap();
     let encoder = NativeTileEncoder::with_device(&r.device);
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     let transfer = r.prepare_native_transfer(RgbSpace::Srgb).unwrap();
     let working = texture(&r, wgpu::TextureFormat::Rgba32Float);
     let canonical = texture(&r, wgpu::TextureFormat::Rgba32Float);
@@ -726,6 +734,7 @@ fn half_publication_saturates_finite_rgb_and_reconstructs_quantized_alpha() {
     }).collect();
     for in_place in [false,true] {
         let encoder=NativeTileEncoder::new(&r.device, in_place);
+        pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
         let canonical=if in_place {working.clone()} else {texture(&r,wgpu::TextureFormat::Rgba32Float)};
         upload(&r,&working,&working_bytes(&pixels));
         let batch=encoder.prepare(&r.device,&[NativeTileRequest {mode:Default::default(),space:RgbSpace::Srgb,
@@ -755,6 +764,7 @@ fn float32_publication_retains_precision_range_and_saturates_overflow() {
     use layer_core::color::DocumentColor;
     let mut r = WgpuRasterizer::new_native_headless(DocumentColor { space: RgbSpace::Srgb, depth: SampleDepth::F32 }).unwrap();
     let encoder = NativeTileEncoder::with_device(&r.device);
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     let transfer = r.prepare_native_transfer(RgbSpace::Srgb).unwrap();
     let working = texture(&r, wgpu::TextureFormat::Rgba32Float);
     let canonical = texture(&r, wgpu::TextureFormat::Rgba32Float);

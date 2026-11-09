@@ -129,8 +129,7 @@ fn native_stroke_publication_keeps_prepared_reference_pages_and_matches_fresh_ma
     let snapshot=live.document().snapshot();
     let preparation=prepare(live.document());
     let r=live.backend_mut();
-    r.startup=Some(crate::startup::Startup::new(&r.device).unwrap());
-    r.startup.as_ref().unwrap().compiler.start();
+    r.startup=Some(crate::startup::Startup::new(r.compilation.clone()).unwrap());
     r.shader_idle(true,true);
     r.prepare_regions(Some(&preparation));
     submit_settled(r,crate::test_support::packet(snapshot.view(),extent));
@@ -566,6 +565,7 @@ fn native_gpen_keeps_original_photo_pixels_in_touched_tiles() {
             let r = live.backend_mut();
             let transfer = r.prepare_native_transfer(RgbSpace::Srgb).unwrap();
             r.native_edit = Some(NativeEdit::with_mode(r, transfer, in_place));
+            pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
             let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
             brush.color_rgba_linear = [1., 0., 0.7, 1. / 3.];
             live.set_brush(brush).unwrap();
@@ -765,6 +765,7 @@ fn publication_matches_independent_native_encoding_at_every_depth() {
             upload_page(&r,&image,&pixels);
             let transfer=r.prepare_native_transfer(space).unwrap();
             let independent=NativeTileEncoder::with_device(&r.device);
+            pollster::block_on(r.compilation.prepare_all(&independent.pipelines)).unwrap();
             let batch=independent.prepare(&r.device,&[NativeTileRequest {working:&image,canonical:&canonical,
                 encoded:NativeEncoded::Texture(&output),mode:LayerColorMode::FullColor,space,transfer:&transfer,
                 depth,alpha:color.paint_descriptor().alpha,region:[0,0,256,256]}],&mut Default::default()).unwrap();
@@ -777,6 +778,7 @@ fn publication_matches_independent_native_encoding_at_every_depth() {
                 upload_page(&r,&image,&pixels);
                 let transfer=r.prepare_native_transfer(space).unwrap();
                 r.native_edit=Some(NativeEdit::with_mode(&r,transfer,in_place));
+                pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
                 let tile=RasterTile::pending(color.paint_descriptor());
                 let mut commands=submission::CommandEncoder::new(&r.device,&Default::default());
                 let capture=r.encode_private_tiles(vec![(image.clone(),tile.clone(),LayerColorMode::FullColor)],&mut commands).unwrap();
@@ -798,6 +800,9 @@ fn snapshot_capture_keeps_private_samples_and_allocates_only_its_batch() {
     r.snapshot_worker = true;
     let transfer = r.prepare_native_transfer(r.document_color().space).unwrap();
     r.native_edit = Some(NativeEdit::with_mode(&r, transfer, false));
+    let pipelines=r.native_edit.as_ref().unwrap().private_pipelines(r.document_color.depth,LayerColorMode::FullColor,
+        &[RasterPlane::Color,RasterPlane::WatercolorWetness,RasterPlane::Mask]);
+    pollster::block_on(r.compilation.prepare_all(&pipelines)).unwrap();
     let mut inputs = Vec::new();
     for plane in [RasterPlane::Color, RasterPlane::WatercolorWetness, RasterPlane::Mask] {
         let texture = page_texture(&r, if plane == RasterPlane::Color { wgpu::TextureFormat::Rgba32Float } else { wgpu::TextureFormat::R32Float });
@@ -828,6 +833,7 @@ fn late_invalid_color_or_scalar_publishes_defined_values_with_its_siblings() {
             let mut r=WgpuRasterizer::new_native_headless(color).unwrap();
             let transfer=r.prepare_native_transfer(color.space).unwrap();
             r.native_edit=Some(NativeEdit::with_mode(&r,transfer,in_place));
+            pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
             let mut inputs=(0..17).map(|_|(page_texture(&r,wgpu::TextureFormat::Rgba32Float),
                 RasterTile::pending(color.paint_descriptor()),LayerColorMode::FullColor)).collect::<Vec<_>>();
             set_pixel(&r,&inputs[0].0,&[0.01234567,0.2345678,0.7890123,1.]);
@@ -860,6 +866,7 @@ fn mixed_tracking_marks_only_actual_canonical_changes() {
         let mut r=WgpuRasterizer::new_native_headless(color).unwrap();
         let transfer=r.prepare_native_transfer(color.space).unwrap();
         r.native_edit=Some(NativeEdit::with_mode(&r,transfer,in_place));
+        pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
         let pages=(0..2).map(|_|page_texture(&r,wgpu::TextureFormat::Rgba32Float)).collect::<Vec<_>>();
         for page in &pages {set_pixel(&r,page,&[0.01234567,0.2345678,0.7890123,1.]);}
         let side=4u32;
@@ -929,6 +936,7 @@ fn native_capture_pass_budget_keeps_mixed_plane_jobs_in_one_encoder() {
         let mut layers = restored_fixture(&mut r);
         let transfer = r.prepare_native_transfer(color.space).unwrap();
         r.native_edit = Some(NativeEdit::with_mode(&r, transfer, in_place));
+        pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
         mark_changed(&mut r, &mut layers);
         while !r.raster_ready() { std::thread::yield_now(); }
         let mut job = r.prepare_native_rasters(layers.scene()).unwrap().unwrap();
@@ -947,7 +955,8 @@ fn native_capture_pass_budget_keeps_mixed_plane_jobs_in_one_encoder() {
         assert!(!insufficient.can_fit_passes(passes + markers));
         let before = encoder.pass_count();
         encoder.reserve_passes(markers);
-        let mut timers = [0,1].map(|_| crate::frame_timing::GpuFrameTimer::new(&r.device, &r.queue));
+        let mut timers = [0,1].map(|_| crate::frame_timing::GpuFrameTimer::new(&r));
+        for timer in &timers {pollster::block_on(timer.prepare()).unwrap();}
         assert!(timers[0].begin_encoded(&mut encoder, 42));
         assert!(timers[1].begin_encoded(&mut encoder, 42));
         while r.step_native_rasters(&mut job, &mut encoder).unwrap() {}
@@ -1217,6 +1226,7 @@ fn native_in_place_runtime_matches_candidate_fallback_for_mixed_planes() {
         for in_place in [false, true] {
             let transfer = r.prepare_native_transfer(color.space).unwrap();
             r.native_edit = Some(NativeEdit::with_mode(&r, transfer, in_place));
+            pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
             mark_changed(&mut r, &mut layers);
             while !r.raster_ready() { std::thread::yield_now(); }
             crate::test_support::submit_ready(&mut r, packet(&layers, false)).unwrap();
@@ -1233,6 +1243,7 @@ fn watercolor_prediction_canonicalizes_coverage_with_candidate_fallback() {
         let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
         let transfer = r.prepare_native_transfer(color.space).unwrap();
         r.native_edit = Some(NativeEdit::with_mode(&r, transfer, false));
+        pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
         assert!(r.native_edit.as_ref().unwrap().promoter.is_some());
         crate::layer_tests::placement::watercolor_prediction_and_commit_with_renderer(r, 256, false);
     }
@@ -1245,6 +1256,7 @@ fn reduced_color_scaled_previews_support_in_place_and_candidate_conversion() {
             let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
             let transfer = r.prepare_native_transfer(r.document_color().space).unwrap();
             r.native_edit = Some(NativeEdit::with_mode(&r, transfer, in_place));
+            pollster::block_on(r.compilation.prepare_all(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,true))).unwrap();
             crate::layer_tests::reduced_color_scaled_preview(r, mode);
         }
     }

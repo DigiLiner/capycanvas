@@ -15,7 +15,7 @@ pub(super) struct SelectionPainter {
 }
 pub(super) struct Pipelines {
     layout: wgpu::BindGroupLayout,
-    pipelines: [Deferred<wgpu::ComputePipeline>; 3],
+    pub(super) pipelines: [Deferred<wgpu::ComputePipeline>; 3],
 }
 impl std::ops::Deref for SelectionPainter {
     type Target = Pipelines;
@@ -162,9 +162,9 @@ impl SelectionPainter {
             }
             return Ok(true);
         }
-        if let Some(startup) = &r.startup {
-            startup.compiler.check()?;
-            if !startup.compiler.require(
+        {
+            r.compilation.check()?;
+            if !r.compilation.require(
                 self.pipelines.iter().chain(r.selection_clip.pipelines()),
                 startup::BRUSH,
             ) {
@@ -454,6 +454,7 @@ impl WgpuRasterizer {
             .unwrap_or_else(|| SelectionPainter::from_pipelines(self.recipes.selection_paint.clone()));
         let result = painter.update(self, update);
         if matches!(&result, Ok(true)) {
+            self.pending_display_selection = None;
             self.selection_paint_revision = self.selection_paint_revision.wrapping_add(1);
             let extent = self.document_extent;
             self.selection_paint_damage = if update.restart {

@@ -23,6 +23,7 @@ impl Drop for CompileTrace<'_> {
 }
 #[derive(Clone)]
 pub(crate) struct DeviceRecipes {
+    compilation: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<crate::compile::Coordinator>>>>,
     #[cfg(not(target_arch = "wasm32"))]
     saved_pipelines: Option<std::sync::Arc<crate::SavedPipelines>>,
     pub transient_display: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -37,6 +38,7 @@ pub(crate) struct DeviceRecipes {
 impl From<&PipelineDevice> for DeviceRecipes {
     fn from(device: &PipelineDevice) -> Self {
         Self {
+            compilation: device.compilation.clone(),
             #[cfg(not(target_arch = "wasm32"))]
             saved_pipelines: device.saved_pipelines.clone(),
             transient_display: device.transient_display.clone(),
@@ -52,6 +54,7 @@ impl From<&PipelineDevice> for DeviceRecipes {
 }
 #[derive(Clone)]
 pub(crate) struct PipelineDevice {
+    compilation: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<crate::compile::Coordinator>>>>,
     #[cfg(not(target_arch = "wasm32"))]
     saved_pipelines: Option<std::sync::Arc<crate::SavedPipelines>>,
     pub transient_display: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -78,6 +81,7 @@ pub(crate) struct PipelineDevice {
 impl From<wgpu::Device> for PipelineDevice {
     fn from(device: wgpu::Device) -> Self {
         Self {
+            compilation: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             saved_pipelines: None,
             device,
@@ -113,6 +117,7 @@ impl std::ops::Deref for PipelineDevice {
 }
 impl PipelineDevice {
     pub fn with_device_recipes(mut self, recipes: &DeviceRecipes) -> Self {
+        self.compilation = recipes.compilation.clone();
         #[cfg(not(target_arch = "wasm32"))]
         { self.saved_pipelines = recipes.saved_pipelines.clone(); }
         self.transient_display = recipes.transient_display.clone();
@@ -127,6 +132,7 @@ impl PipelineDevice {
     }
     pub fn with_recipes(&self, recipes: &Self) -> Self {
         Self {
+            compilation: recipes.compilation.clone(),
             #[cfg(not(target_arch = "wasm32"))]
             saved_pipelines: recipes.saved_pipelines.clone(),
             blend_pipelines: recipes.blend_pipelines.clone(),
@@ -141,6 +147,15 @@ impl PipelineDevice {
             saved_pipelines: self.saved_pipelines.clone(),
             ..Self::from(self.device.clone()) }
     }
+    pub(crate) fn compilation(&self) -> Result<crate::compile::Scope, crate::GpuRasterError> {
+        let mut shared = self.compilation.lock().unwrap();
+        if let Some(scope)=shared.as_ref().and_then(|coordinator|coordinator.scope()) {return Ok(scope);}
+        let coordinator=crate::compile::Coordinator::new(self)?;
+        let scope=coordinator.scope().expect("New compilation coordinator");
+        *shared=Some(coordinator);
+        Ok(scope)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn with_saved_pipelines(mut self, saved: Option<std::sync::Arc<crate::SavedPipelines>>) -> Self {
         self.saved_pipelines = saved;

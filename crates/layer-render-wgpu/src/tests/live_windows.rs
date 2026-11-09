@@ -85,12 +85,12 @@ fn native_live_windows_match_full_filters_masks_clips_and_reconfiguration() {
                         document.working.inspect_mask = Some(first);
                     }
                     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(u64::MAX);
-                    crate::test_support::submit_ready(&mut r, packet(&document, extent)).unwrap();
+                    crate::test_support::submit_published(&mut r, packet(&document, extent));
                     let expected = pixels(&r);
                     let full_cache = r.scene.as_ref().unwrap().image_cache_bytes();
                     let before = r.metrics().image_window_submissions;
                     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(CAP);
-                    crate::test_support::submit_ready(&mut r, packet(&document, extent)).unwrap();
+                    crate::test_support::submit_published(&mut r, packet(&document, extent));
                     close(&pixels(&r), &expected);
                     assert!(r.metrics().image_window_submissions > before + 1);
                     assert!(r.metrics().image_window_peak_bytes <= CAP + 96 * document.scene().order().len() as u64);
@@ -110,7 +110,7 @@ fn native_live_windows_match_full_filters_masks_clips_and_reconfiguration() {
                     close(&pixels(&r), &expected);
                     // Returning to the ordinary cache must repopulate all of it.
                     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(u64::MAX);
-                    crate::test_support::submit_ready(&mut r, packet(&document, extent)).unwrap();
+                    crate::test_support::submit_published(&mut r, packet(&document, extent));
                     close(&pixels(&r), &expected);
                 }
             }
@@ -130,7 +130,7 @@ fn native_live_global_limit_rejects_before_document_or_submission_changes() {
     let adjustment = effect(&mut document, false, true);
     let generator = effect(&mut document, true, false);
     set_entries(&mut document, vec![adjustment, generator]);
-    r.submit(packet(&document, extent)).unwrap();
+    crate::test_support::submit_published(&mut r, packet(&document, extent));
     let before = pixels(&r);
     let texture = r.scale_display.as_ref().map(|c| c.texture().clone());
     let metrics = r.metrics();
@@ -153,7 +153,7 @@ fn native_live_global_limit_rejects_before_document_or_submission_changes() {
     );
     // Removing the unsupported adjustment leaves the renderer usable.
     set_entries(&mut document, vec![generator]);
-    r.submit(packet(&document, extent)).unwrap();
+    crate::test_support::submit_published(&mut r, packet(&document, extent));
     assert!(pixels(&r).iter().any(|b| *b != 0));
 }
 
@@ -176,7 +176,7 @@ fn native_live_window_halos_follow_paint_undo_redo_and_recreated_renderer() {
     set_entries(&mut document, vec![first, second, paint_owner]);
     let SourceTarget::Paint(paint) = target else { unreachable!() };
     let original = document.artwork.paint.get(paint).unwrap().raster.clone();
-    r.submit(packet(&document, extent)).unwrap();
+    crate::test_support::submit_published(&mut r, packet(&document, extent));
     let before = pixels(&r);
     document.artwork.paint.get_mut(paint).unwrap().raster = RasterRevision::pending();
     let dabs = [test_dab([255., 256.], [0.13, 0.72, 0.41, 0.37], 0.5)];
@@ -185,35 +185,32 @@ fn native_live_window_halos_follow_paint_undo_redo_and_recreated_renderer() {
         test_style(BrushExecution::Dry),
         Rect { min: Point { x: 235., y: 236. }, max: Point { x: 275., y: 276. } },
     )];
-    crate::test_support::submit_ready(&mut r, FramePacket {
+    crate::test_support::submit_published(&mut r, FramePacket {
         dabs: &dabs,
         dab_batches: &batches,
         composite_all: false,
         ..packet(&document, extent)
-    })
-    .unwrap();
+    });
     let edited = document.artwork.paint.get(paint).unwrap().raster.clone();
     let backing = edited.wait_data().unwrap();
     assert!(!backing.tiles.is_empty());
     let incremental = pixels(&r);
     assert_ne!(incremental, before);
     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(u64::MAX);
-    crate::test_support::submit_ready(&mut r, packet(&document, extent)).unwrap();
+    crate::test_support::submit_published(&mut r, packet(&document, extent));
     close(&incremental, &pixels(&r));
     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(CAP);
     document.artwork.paint.get_mut(paint).unwrap().raster = original;
-    crate::test_support::submit_ready(&mut r, FramePacket {
+    crate::test_support::submit_published(&mut r, FramePacket {
         composite_all: false,
         ..packet(&document, extent)
-    })
-    .unwrap();
+    });
     assert_eq!(pixels(&r), before, "undo restores the exact empty artwork");
     document.artwork.paint.get_mut(paint).unwrap().raster = edited;
-    crate::test_support::submit_ready(&mut r, FramePacket {
+    crate::test_support::submit_published(&mut r, FramePacket {
         composite_all: false,
         ..packet(&document, extent)
-    })
-    .unwrap();
+    });
     close(&pixels(&r), &incremental);
     assert!(Arc::ptr_eq(
         &document.artwork.paint.get(paint).unwrap().raster.wait_data().unwrap(),
@@ -221,7 +218,7 @@ fn native_live_window_halos_follow_paint_undo_redo_and_recreated_renderer() {
     ));
     let mut replacement = WgpuRasterizer::new_native_headless(color).unwrap();
     replacement.native_edit.as_mut().unwrap().image_pixel_bytes = Some(CAP);
-    crate::test_support::submit_ready(&mut replacement, packet(&document, extent)).unwrap();
+    crate::test_support::submit_published(&mut replacement, packet(&document, extent));
     close(&pixels(&replacement), &incremental);
     assert!(Arc::ptr_eq(
         &document.artwork.paint.get(paint).unwrap().raster.wait_data().unwrap(),
@@ -233,7 +230,7 @@ fn native_live_window_halos_follow_paint_undo_redo_and_recreated_renderer() {
     compose_region(&mut r, &document, extent, PixelRect::new(259, 261, 263, 265));
     let changed = pixels(&r);
     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(u64::MAX);
-    r.submit(packet(&document, extent)).unwrap();
+    crate::test_support::submit_published(&mut r, packet(&document, extent));
     close(&changed, &pixels(&r));
 }
 
@@ -253,22 +250,20 @@ fn native_live_animated_windows_refresh_with_empty_paint_damage_and_keep_frozen_
     .unwrap();
     const CAP: u64 = 8 * 1024 * 1024;
     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(CAP);
-    r.submit(packet(&document, extent)).unwrap();
+    crate::test_support::submit_published(&mut r, packet(&document, extent));
     let before = pixels(&r);
-    r.submit(FramePacket {
+    crate::test_support::submit_published(&mut r, FramePacket {
         time_seconds: 3.,
         composite_all: false,
         ..packet(&document, extent)
-    })
-    .unwrap();
+    });
     let animated = pixels(&r);
     assert_ne!(animated, before);
     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(u64::MAX);
-    r.submit(FramePacket {
+    crate::test_support::submit_published(&mut r, FramePacket {
         time_seconds: 3.,
         ..packet(&document, extent)
-    })
-    .unwrap();
+    });
     close(&pixels(&r), &animated);
     let OccurrenceContent::Effect(application) = document.artwork.occurrences.get(generator).unwrap().content else { unreachable!() };
     for (key, value) in [("animate", layer_core::EffectValue::Toggle(false)), ("time", layer_core::EffectValue::Number(3.))] {
@@ -276,19 +271,17 @@ fn native_live_animated_windows_refresh_with_empty_paint_damage_and_keep_frozen_
         document.artwork.effects.get_mut(application).unwrap().values[index] = value;
     }
     r.native_edit.as_mut().unwrap().image_pixel_bytes = Some(CAP);
-    r.submit(FramePacket {
+    crate::test_support::submit_published(&mut r, FramePacket {
         time_seconds: 7.,
         ..packet(&document, extent)
-    })
-    .unwrap();
+    });
     close(&pixels(&r), &animated);
     let submissions = r.metrics().image_window_submissions;
-    r.submit(FramePacket {
+    crate::test_support::submit_published(&mut r, FramePacket {
         time_seconds: 8.,
         composite_all: false,
         ..packet(&document, extent)
-    })
-    .unwrap();
+    });
     assert_eq!(r.metrics().image_window_submissions, submissions);
     close(&pixels(&r), &animated);
 }

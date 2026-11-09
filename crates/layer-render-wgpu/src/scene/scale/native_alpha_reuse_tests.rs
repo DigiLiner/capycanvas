@@ -551,7 +551,7 @@ fn native_alpha_reuse_only_read_write_dry_kernels_bind_writable_cells() {
         let expected = if start == Start::Stored { vec![(Some("changed_cells".into()), Some((0, 3)))] } else { vec![] };
         assert_eq!(writable(&kernel), expected, "{start:?} dry kernel cell flags");
     }
-    let pipeline = r.pipelines.dry_material.kernels[0].compile();
+    let pipeline = r.compilation.blocking(||r.pipelines.dry_material.kernels[0].compile());
     r.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("material cell binding contract"), layout: &pipeline.get_bind_group_layout(0), entries: &[
         wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
             buffer: &r.style_buffer, offset: 0, size: NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
@@ -744,6 +744,7 @@ fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
         let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         let mut reference=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         for backend in [&mut r,&mut reference] {crate::test_support::submit_ready(backend, frame).unwrap();}
+        for backend in [&mut r,&mut reference] {crate::test_support::prepare_scene_effects(backend,frame);}
         let mut dab=crate::tests::test_dab([125.5,127.5],[0.,0.,0.,1.],0.8);dab.radii=[24.,21.];
         let mut style=crate::layer_tests::preset_style(preset);style.blend_space=blend;
         if let Some(dry)=style.contact.and_then(|c|c.dry) {

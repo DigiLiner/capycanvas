@@ -96,7 +96,7 @@ pub struct ViewportPresenter {
     recipes: std::sync::Arc<Recipes>,
     timing: Option<crate::frame_timing::GpuFrameTimer>,
     pipeline: [crate::Deferred<wgpu::RenderPipeline>; 3],
-    paper_pipeline: Option<[crate::Deferred<wgpu::RenderPipeline>; 3]>,
+    pub(super) paper_pipeline: Option<[crate::Deferred<wgpu::RenderPipeline>; 3]>,
     presented_paper: Option<bool>,
     fill_reveal: Option<layer_render::FillReveal>,
     fill_before: Option<(u64,wgpu::TextureView)>,
@@ -430,7 +430,7 @@ impl ViewportPresenter {
             return Vec::new();
         }
         let timer = self.timing.get_or_insert_with(|| {
-            crate::frame_timing::GpuFrameTimer::new(renderer.device(), renderer.queue())
+            crate::frame_timing::GpuFrameTimer::with_device(&renderer.device, renderer.queue())
         });
         timer.poll(renderer.device(), renderer.queue());
         let mut samples = vec![crate::frame_timing::GpuFrameSample::default(); 256];
@@ -592,14 +592,50 @@ impl ViewportPresenter {
     }
 
     pub async fn prepare(&mut self, renderer: &WgpuRasterizer) -> Result<(), GpuRasterError> {
-        crate::Deferred::prepare_all(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline, &self.recipes.transition.pipeline]).chain(self.overview_pipeline.iter()).chain(self.recipes.overviews[1].get()).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
+        renderer.compilation.prepare_all(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline, &self.recipes.transition.pipeline]).chain(self.overview_pipeline.iter()).chain(self.recipes.overviews[1].get()).chain(self.picker.pipeline.iter()).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
             .await.map_err(GpuRasterError::Effect)?;
         if let Some(panels) = &self.panels {
-            crate::Deferred::prepare_all([&panels.pipeline,&panels.mask_pipeline]).await.map_err(GpuRasterError::Effect)?;
+            renderer.compilation.prepare_all([&panels.pipeline,&panels.mask_pipeline]).await.map_err(GpuRasterError::Effect)?;
         }
-        crate::Deferred::prepare_all(renderer.scene_pipelines.scale_pipelines())
+        renderer.compilation.prepare_all(renderer.scene_pipelines.scale_pipelines())
             .await.map_err(GpuRasterError::Effect)?;
+        self.pipelines_ready(renderer);
         Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn readback_rgba8(
+        &mut self, renderer: &WgpuRasterizer, view: ViewState, surround: [f32;4],
+    ) -> Result<layer_render::ReadbackImage, GpuRasterError> {
+        if !matches!(self.format,wgpu::TextureFormat::Rgba8Unorm|wgpu::TextureFormat::Rgba8UnormSrgb) {
+            return Err(GpuRasterError::InvalidImage);
+        }
+        pollster::block_on(self.prepare(renderer))?;
+        let (texture,target)=crate::create_target(&renderer.device,[view.width_px,view.height_px],
+            self.format,"explicit viewport capture");
+        let mut encoder=renderer.device.create_command_encoder(&Default::default());
+        self.encode(renderer,&mut encoder,&target,view,surround)?;
+        let stride=(view.width_px*4).div_ceil(256)*256;
+        let buffer=renderer.device.create_buffer(&wgpu::BufferDescriptor {
+            label:Some("explicit capture readback"),
+            size:u64::from(stride)*u64::from(view.height_px),
+            usage:wgpu::BufferUsages::COPY_DST|wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation:false,
+        });
+        encoder.copy_texture_to_buffer(texture.as_image_copy(),wgpu::TexelCopyBufferInfo {
+            buffer:&buffer,
+            layout:wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(stride),rows_per_image:None},
+        },texture.size());
+        renderer.queue.submit([encoder.finish()]);
+        let (done,ready)=std::sync::mpsc::channel();
+        buffer.map_async(wgpu::MapMode::Read,..,move|result| {
+            let _=done.send(result.map_err(|error|error.to_string()));
+        });
+        crate::raster::wait_mapping(&renderer.device,&ready).map_err(GpuRasterError::MapFailed)?;
+        let bytes=buffer.get_mapped_range(..)
+            .map_err(|error|GpuRasterError::MapFailed(error.to_string()))?.to_vec();
+        buffer.unmap();
+        Ok(layer_render::ReadbackImage {request_id:0,width:view.width_px,height:view.height_px,stride,bytes})
     }
 
     pub fn prepare_paper_lighting(&mut self, renderer: &WgpuRasterizer) -> bool {
@@ -610,22 +646,14 @@ impl ViewportPresenter {
             let shader = viewport_shader(device, format, color, true);
             ["fs_main", "fs_placed", "fs_mapped"].map(|entry| surface_pipeline(device, "viewport presentation with paper lighting", layout, &shader, ["vs_main", entry], None, format, None))
         }).clone());
-        let Some(startup) = &renderer.startup else { return true };
-        let ready = startup.compiler.require(paper.iter(), crate::startup::OTHER);
-        startup.compiler.start();
-        ready
+        renderer.compilation.require(paper.iter(), crate::startup::OTHER)
     }
 
     pub fn pipelines_ready(&self, renderer: &WgpuRasterizer) -> bool {
-        let Some(startup) = &renderer.startup else { return true; };
-        let mut ready = startup.compiler.require(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline, &self.recipes.transition.pipeline]), crate::startup::DOCUMENT);
-        ready &= startup.compiler.require(self.overview_pipeline.iter().chain(self.picker.pipeline.iter()), crate::startup::BRUSH);
-        if let Some(backdrop) = &self.backdrop { ready &= startup.compiler.require(backdrop.pipelines(), crate::startup::DOCUMENT); }
-        if let Some(panels) = &self.panels {
-            ready &= startup.compiler.require([&panels.pipeline,&panels.mask_pipeline],crate::startup::DOCUMENT);
-        }
-        startup.compiler.start();
-        ready
+        renderer.compilation.require(self.pipeline.iter().chain([&self.surround_pipeline,&self.cursor_pipeline,&self.recipes.transition.pipeline])
+            .chain(self.overview_pipeline.iter()).chain(self.picker.pipeline.iter())
+            .chain(self.backdrop.iter().flat_map(|backdrop|backdrop.pipelines()))
+            .chain(self.panels.iter().flat_map(|panels|[&panels.pipeline,&panels.mask_pipeline])),crate::startup::DOCUMENT)
     }
 
     /// The host configures its surface with the matching, advertised color space.
@@ -812,8 +840,7 @@ impl ViewportPresenter {
         }
         if !self.standalone_overview && let Some(startup)=&renderer.startup
             && let Some(pipeline)=self.recipes.overviews[1].get().filter(|pipeline|!pipeline.ready()) {
-            startup.compiler.background(pipeline,crate::startup::OTHER,||true);
-            startup.compiler.start();
+            startup.compiler.warm(pipeline,crate::startup::OTHER,startup.compiler.generation());
         }
     }
 
@@ -1159,6 +1186,7 @@ impl ViewportPresenter {
         surround_linear: [f32; 4],
         overview_only: bool,
     ) -> Result<(), GpuRasterError> {
+        if !self.pipelines_ready(renderer) { return Ok(()); }
         let size = [target.texture().width(),target.texture().height()];
         if self.presented_drawing.is_some_and(|old|old.showing && old.document!=renderer.presentation.document) {
             let held=self.capture_into(encoder);
@@ -1755,6 +1783,7 @@ mod tests {
         let view = crate::test_support::view(extent);
         let pixels = |renderer: &WgpuRasterizer, presenter: &mut ViewportPresenter| {
             assert!(presenter.needs_present(renderer, view, surround));
+            pollster::block_on(presenter.prepare(renderer)).unwrap();
             presenter.present(renderer, &surface, view, surround).unwrap();
             assert!(!presenter.needs_present(renderer, view, surround));
             crate::layer_tests::page_bytes(renderer, &texture)
@@ -1772,6 +1801,7 @@ mod tests {
         renderer.analysis_changed();
         let other_surround = [1., 0., 0., 1.];
         assert!(!presenter.needs_present(&renderer, view, other_surround));
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer, &surface, view, other_surround).unwrap();
         assert_eq!(crate::layer_tests::page_bytes(&renderer, &texture), shown);
         let checker = |bytes: &[u8]| (48..80).flat_map(|y| (48..80).map(move |x| <[u8; 4]>::try_from(&bytes[(y * 96 + x) * 4..][..4]).unwrap())).collect::<Vec<_>>();
@@ -1793,6 +1823,50 @@ mod tests {
         assert_eq!(pixels(&renderer, &mut presenter), hidden);
     }
     #[test]
+    fn first_explicit_readback_prepares_the_surface_format_and_visible_overview() {
+        let extent=[64;2];
+        let document=layer_core::Document::new(layer_core::PortableId::random(),extent[0],extent[1],
+            layer_core::DocumentNames {paint:"Ink".into(),paper:"Paper".into()});
+        let mut renderer=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let overview=crate::OverviewPlacement {bounds:[2.,2.,20.,20.],clip:None,work_area:[[0.;2];4],
+            outline_linear:[0.;3],scale:1.,opacity:1.};
+        let mut live=ViewportPresenter::for_surface(&renderer,wgpu::TextureFormat::Rgba8Unorm,SdrSurfaceColor::Srgb).unwrap();
+        live.set_overviews(&renderer,std::slice::from_ref(&overview));
+        crate::test_support::submit_settled(&mut renderer,crate::test_support::packet(document.scene(),extent));
+        pollster::block_on(live.prepare(&renderer)).unwrap();
+        assert!(live.pipelines_ready(&renderer));
+        renderer.shader_idle(false,false);
+        let mut capture=ViewportPresenter::for_surface(&renderer,wgpu::TextureFormat::Rgba8UnormSrgb,SdrSurfaceColor::Srgb).unwrap();
+        capture.inherit_proof(&renderer,&live);
+        capture.set_overviews(&renderer,std::slice::from_ref(&overview));
+        assert!(capture.pipeline.iter().any(|pipeline|!pipeline.ready()));
+        assert!(!capture.overview_pipeline.as_ref().unwrap().ready());
+        let image=capture.readback_rgba8(&renderer,crate::test_support::view(extent),[0.;4]).unwrap();
+        let paper=image.bytes.chunks_exact(4).filter(|pixel|pixel.iter().all(|channel|*channel>240)).count();
+        assert!(paper>3000,"the first ready capture contains the paper, not an unencoded target: {paper}");
+        assert!(capture.pipelines_ready(&renderer));
+        assert!(!renderer.compilation.is_idle(),"capture preparation does not release input admission");
+    }
+
+    #[test]
+    fn cold_viewport_defers_before_consuming_presentation_history() {
+        let document=crate::layer_tests::placement::paint_document([8;2],"Viewport admission");
+        let mut renderer=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        crate::test_support::submit_settled(&mut renderer,crate::test_support::packet(document.scene(),[8;2]));
+        let batch=renderer.compilation.batch();
+        let mut presenter=ViewportPresenter::for_renderer(&renderer,wgpu::TextureFormat::Rgba8Unorm);
+        let (_,target)=crate::create_target(renderer.device(),[8;2],wgpu::TextureFormat::Rgba8Unorm,"viewport admission");
+        let mut encoder=renderer.device.create_command_encoder(&Default::default());
+        presenter.encode(&renderer,&mut encoder,&target,crate::test_support::view([8;2]),[1.;4]).unwrap();
+        assert!(!presenter.history.valid);
+        assert!(presenter.pipeline.iter().all(|pipeline|!pipeline.ready()));
+        assert!(renderer.compilation.pending()>0);
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
+        presenter.encode(&renderer,&mut encoder,&target,crate::test_support::view([8;2]),[1.;4]).unwrap();
+        assert!(presenter.history.valid);
+        drop(batch);
+    }
+    #[test]
     fn persistent_presenter_holds_the_previous_artwork_then_fades_below_chrome() {
         use crate::layer_tests::placement::{paint_document,set_source};
         let extent=[64;2];
@@ -1805,20 +1879,24 @@ mod tests {
         presenter.set_target_retention(true);
         let (texture,target)=crate::create_target(renderer.device(),extent,wgpu::TextureFormat::Rgba8Unorm,"transition target");
         let view=crate::test_support::view(extent);
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
         let red=crate::layer_tests::page_bytes(&renderer,&texture);
         renderer.set_canvas_transition(layer_render::CanvasFade::WAITING);
         let mut b=paint_document(extent,"blue");
         set_source(&mut b,layer_core::color::source::rgba8_source(extent,|_,_|[0,0,255,255]));
         renderer.prepare_startup(&b,&layer_core::default_brush(layer_core::DefaultBrushPreset::GPen),false).unwrap();
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
         assert_eq!(crate::layer_tests::page_bytes(&renderer,&texture),red);
         presenter.set_cursor(renderer.device(),&[CursorSegment {from:[16.,16.],to:[48.,48.],distance:0.,marker:2.,scale:1.}],1.);
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
         assert!(crate::layer_tests::page_bytes(&renderer,&texture)!=red,"The live cursor is drawn above the held artwork");
         presenter.set_cursor(renderer.device(),&[],1.);
         let c=layer_core::Document::from_artwork(b.artwork.clone()).unwrap();
         renderer.prepare_startup(&c,&layer_core::default_brush(layer_core::DefaultBrushPreset::GPen),false).unwrap();
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
         assert_eq!(crate::layer_tests::page_bytes(&renderer,&texture),red);
         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(30);
@@ -1829,6 +1907,7 @@ mod tests {
         }
         for (alpha,expected) in [(Some(1.),[255,0,0,255]),(Some(0.125),[32,0,223,255]),(None,[0,0,255,255])] {
             renderer.set_canvas_transition(layer_render::CanvasFade {drawing:alpha,navigator:None});
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
             let bytes=crate::layer_tests::page_bytes(&renderer,&texture);
             for (actual,expected) in bytes[..4].iter().zip(expected) {assert!(actual.abs_diff(expected)<=1);}
@@ -1850,6 +1929,7 @@ mod tests {
         presenter.set_target_retention(true);
         let (texture,target)=crate::create_target(renderer.device(),extent,wgpu::TextureFormat::Rgba8Unorm,"missing presentation views");
         let view=crate::test_support::view(extent);
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
         assert_eq!(&crate::layer_tests::page_bytes(&renderer,&texture)[..4],&[255,0,0,255]);
         let held=presenter.capture_held(renderer.device(),renderer.queue()).unwrap();
@@ -1859,6 +1939,7 @@ mod tests {
         assert!(renderer.presentation.showing && renderer.presentation_views().is_none());
         let presented=presenter.presented_drawing;
         let scope=renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
         renderer.wait_idle().unwrap();
         assert!(pollster::block_on(scope.pop()).is_none());
@@ -1868,6 +1949,7 @@ mod tests {
         renderer.set_canvas_transition(Default::default());
         set_source(&mut document,layer_core::color::source::rgba8_source(extent,|_,_|[0,0,255,255]));
         crate::test_support::submit_settled(&mut renderer,crate::test_support::packet(document.scene(),extent));
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer,&target,view,[0.,1.,0.,1.]).unwrap();
         assert!(crate::layer_tests::page_bytes(&renderer,&texture).as_chunks::<4>().0.iter().all(|pixel|*pixel==[0,0,255,255]));
         assert!(presenter.held.is_none());
@@ -1999,6 +2081,7 @@ mod tests {
             let restored = (renderer.scene_pipelines.source.pipeline.ready(), renderer.metrics.native_restore_submissions,
                 renderer.paint_layers.iter().map(|layer| layer.pages.len()).sum::<usize>());
             let (texture, surface) = crate::create_target(renderer.device(), extent, wgpu::TextureFormat::Rgba8UnormSrgb, "restored backdrop");
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer, &surface, packet.view, [0., 0., 0., 1.]).unwrap();
             assert!(crate::layer_tests::page_bytes(&renderer, &texture).as_chunks::<4>().0.iter().all(|pixel| *pixel == [0, 0, 0, 255]));
             assert_eq!(restored, (false, 0, 0), "backdrop-only frame must leave excluded native paint undecoded");
@@ -2016,6 +2099,7 @@ mod tests {
                 assert!(!document.target_raster(batch.target).unwrap().wait_data().unwrap().tiles.is_empty());
             }
             assert_eq!(renderer.readback_srgb_rgba8().unwrap(), expected, "the full document restores exact native paint");
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer, &surface, packet.view, [0., 0., 0., 1.]).unwrap();
             assert!(crate::layer_tests::page_bytes(&renderer, &texture).as_chunks::<4>().0.iter().all(|pixel| *pixel == [0, 0, 255, 255]));
         }
@@ -2052,6 +2136,7 @@ mod tests {
         let capture=|renderer:&WgpuRasterizer| {
             let (texture,target)=crate::create_target(renderer.device(),[1200,900],wgpu::TextureFormat::Rgba8UnormSrgb,"object-only viewport capture");
             let mut presenter=ViewportPresenter::for_surface(renderer,wgpu::TextureFormat::Rgba8UnormSrgb,SdrSurfaceColor::Srgb).unwrap();
+            pollster::block_on(presenter.prepare(renderer)).unwrap();
             presenter.present(renderer,&target,view,[1.;4]).unwrap();
             crate::layer_tests::page_bytes(renderer,&texture)
         };
@@ -2083,6 +2168,7 @@ mod tests {
         let overlay = SelectionOverlay { active: true, editing: None, color: [1., 0., 0., 0.5], protected: false, saved_protected: false };
         renderer.set_selection_overlay(Some(overlay));
         renderer.set_selection_outline(Some(&std::sync::Arc::new(layer_core::Selection::full()))).unwrap();
+        crate::test_support::submit_settled(&mut renderer, layer_render::FramePacket {reset_layers:false, composite_all:false, ..packet});
         let (texture, target) = crate::create_target(renderer.device(), [128; 2], wgpu::TextureFormat::Rgba8UnormSrgb, "selection overlay presentation");
         let mut presenter = ViewportPresenter::for_surface(&renderer, wgpu::TextureFormat::Rgba8UnormSrgb, SdrSurfaceColor::Srgb).unwrap();
         presenter.set_target_retention(true);
@@ -2096,6 +2182,7 @@ mod tests {
         ] {
             renderer.set_selection_overlay(Some(overlay));
             assert!(presenter.needs_present(&renderer, packet.view, [1.; 4]), "{overlay:?}");
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer, &target, packet.view, [1.; 4]).unwrap();
             assert!(!presenter.needs_present(&renderer, packet.view, [1.; 4]));
             let pixels = crate::layer_tests::page_bytes(&renderer, &texture);
@@ -2127,6 +2214,7 @@ mod tests {
             crate::test_support::submit_settled(&mut renderer, packet);
             let (texture, target) = crate::create_target(renderer.device(), extent, wgpu::TextureFormat::Rgba8UnormSrgb, "resized selection overlay");
             let mut presenter = ViewportPresenter::for_surface(&renderer, wgpu::TextureFormat::Rgba8UnormSrgb, SdrSurfaceColor::Srgb).unwrap();
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer, &target, packet.view, [1.; 4]).unwrap();
             let pixels = crate::layer_tests::page_bytes(&renderer, &texture);
             for (position, expected) in [([8, 8], [255; 4]), ([extent[0] - 24, extent[1] - 24], [208, 255, 208, 255])] {

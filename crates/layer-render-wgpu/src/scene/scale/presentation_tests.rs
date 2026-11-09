@@ -302,6 +302,7 @@ fn in_surface_navigator_keeps_clipped_geometry() {
                 opacity: 1.,
             }],
         );
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present_overviews(&r, &target, size).unwrap();
         let actual = crate::layer_tests::page_bytes(&r, &texture);
         if !clipped {
@@ -337,16 +338,15 @@ fn large_document_waits_for_mip_compilation_before_reporting_canvas_ready() {
     let mut doc = layer_core::Document::new(PortableId::random(), 4097, 1025, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
     composition_mut(&mut doc).color = color;
     let mut r = bounded_renderer(color).unwrap();
-    r.startup = Some(startup::Startup::new(&r.device).unwrap());
+    r.startup = Some(startup::Startup::new(r.compilation.clone()).unwrap());
     let (release, wait) = mpsc::channel();
     let (entered, blocked) = mpsc::channel();
     let compiler = &r.startup.as_ref().unwrap().compiler;
-    compiler.enqueue(0, move || {
+    compiler.enqueue(crate::startup::DOCUMENT, move || {
         entered.send(()).map_err(|e| e.to_string())?;
         wait.recv_timeout(Duration::from_secs(20))
             .map_err(|e| e.to_string())
     });
-    compiler.start();
     blocked.recv_timeout(Duration::from_secs(20)).unwrap();
     let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
     r.prepare_startup(&doc, &brush, false).unwrap();
@@ -539,6 +539,9 @@ fn pass_through_edits_and_mode_changes_match_full_recomposition() {
         }).collect();
         reference.scene = None;
         for (r, all) in [(&mut incremental, step == 0 || edited), (&mut reference, true)] {
+            if let Some((SourceTarget::Paint(paint),_))=target {
+                doc.artwork.paint.get_mut(paint).unwrap().raster=layer_core::raster::RasterRevision::pending();
+            }
             crate::test_support::submit_ready(r, FramePacket {
                 view: v,
                 dabs: &dabs,
@@ -547,6 +550,7 @@ fn pass_through_edits_and_mode_changes_match_full_recomposition() {
                 ..packet(doc.scene(), doc.composition().size)
             }).unwrap();
             submit(r, &doc, v, false, false);
+            if let Some((target,_))=target {doc.target_raster(target).unwrap().wait_data().unwrap();}
         }
         close(&present(&incremental, &mut a, v), &present(&reference, &mut b, v));
     }
@@ -557,9 +561,9 @@ fn pass_through_edits_and_mode_changes_match_full_recomposition() {
                 transform: layer_core::ImageTransform::affine(layer_core::Affine::translation(layer_core::Point { x: 23.5, y: -11.25 })),
             };
             reference.scene = None;
-            for (r, all) in [(&mut incremental, false), (&mut reference, true)] {
+            for (mut r, all) in [(&mut incremental, false), (&mut reference, true)] {
                 r.set_transform_preview(Some(&transform)).unwrap();
-                r.submit(FramePacket { view: v, composite_all: all, ..packet(doc.scene(), doc.composition().size) }).unwrap();
+                crate::test_support::submit_ready(&mut r, FramePacket { view: v, composite_all: all, ..packet(doc.scene(), doc.composition().size) }).unwrap();
                 submit(r, &doc, v, false, false);
             }
             assert!(!incremental.has_pending_work());
@@ -668,7 +672,8 @@ fn half_float_conversion_frames() {
         let doc = photo(extent);
         let mut r = WgpuRasterizer::native_headless_without(doc.composition().color, wgpu::Features::empty()).unwrap();
         submit(&mut r, &doc, fit_view(extent, viewport, zoom, 0.), true, false);
-        let mut timer = crate::frame_timing::GpuFrameTimer::new(r.device(), r.queue());
+        let mut timer = crate::frame_timing::GpuFrameTimer::new(&r);
+        pollster::block_on(timer.prepare()).unwrap();
         let mut gpu = Vec::new();
         for frame in 0..60u64 {
             let cache = r.scale_display.as_ref().unwrap();

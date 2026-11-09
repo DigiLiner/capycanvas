@@ -40,14 +40,10 @@ impl Thumbnails {
 }
 impl WgpuRasterizer {
     pub fn ui_readback_ready(&self) -> bool {
-        if let Some(startup) = &self.startup {
-            let pipeline = self.ui_preview_pipeline.as_ref().unwrap_or(&self.pipelines.export);
-            startup.compiler.pipeline(pipeline, startup::VALIDATION);
-            startup.compiler.start();
-            return pipeline.ready();
-        }
-        true
+        let pipeline = self.ui_preview_pipeline.as_ref().unwrap_or(&self.pipelines.export);
+        self.compilation.require([pipeline], startup::VALIDATION)
     }
+
     pub fn set_ui_rendition(&mut self, rendition: Option<layer_core::color::hdr::SdrRendition>) -> Result<(), GpuRasterError> {
         if let Some(recipe) = rendition { recipe.validate().map_err(|e| GpuRasterError::Color(e.into()))?; }
         if self.ui_rendition != rendition {
@@ -115,6 +111,7 @@ impl WgpuRasterizer {
     /// changed layer pages, before requesting readback.
     pub fn prepare_thumbnail_batch(&mut self, target: ThumbnailTarget) -> Result<bool, GpuRasterError> {
         self.validate_thumbnail(target)?;
+        if !self.ui_readback_ready() { return Ok(false); }
         let source_target = self.thumbnail_source(target);
         if let Some(source) = source_target && !self.prepare_selection_thumbnail(source)? { return Ok(false); }
         let mut encoder = crate::submission::CommandEncoder::new(
@@ -660,10 +657,9 @@ impl PreviewPipeline {
     fn prepare(&mut self, r: &mut WgpuRasterizer, target: ThumbnailTarget,
         encoder: &mut crate::submission::CommandEncoder, mut limit: usize, mut reductions: usize,
     ) -> Result<bool, GpuRasterError> {
-        if let Some(startup) = &r.startup {
-            let ready = startup.compiler.require([&self.draw], startup::VALIDATION)
-                & startup.compiler.require([&self.bounds.measure, &self.reduce], startup::VALIDATION);
-            startup.compiler.start();
+        {
+            let ready = r.compilation.require([&self.draw], startup::VALIDATION)
+                & r.compilation.require([&self.bounds.measure, &self.reduce], startup::VALIDATION);
             if !ready { return Ok(false); }
         }
         let revision = (r.artwork_revision, r.selection_paint_revision);
@@ -889,4 +885,17 @@ impl BoundsPipeline {
         pass.set_bind_group(1, &record, &[0]);
         pass.dispatch_workgroups(extent[0].saturating_sub(origin[0]).min(256).div_ceil(32), extent[1].saturating_sub(origin[1]).min(256).div_ceil(32), 1);
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn prepare_pipelines(r: &mut WgpuRasterizer) {
+    r.compilation.prepare_all([r.ui_preview_pipeline.as_ref().unwrap_or(&r.pipelines.export)]).await.unwrap();
+    r.compilation.prepare_all([&r.scene_pipelines.source.pipeline,&r.scene_pipelines.source.integer]).await.unwrap();
+    let gpu=r.thumbnails.gpu.take().unwrap_or_else(||PreviewPipeline::new(r));
+    r.compilation.prepare_all([&gpu.draw]).await.unwrap();
+    r.compilation.prepare_all([&gpu.bounds.measure,&gpu.reduce]).await.unwrap();
+    r.thumbnails.gpu=Some(gpu);
+    let sources=r.thumbnails.sources.take().unwrap_or_else(||crate::source_thumbnails::SourceThumbnails::new(r));
+    sources.prepare_pipelines(&r.compilation).await;
+    r.thumbnails.sources=Some(sources);
 }

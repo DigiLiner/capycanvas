@@ -25,17 +25,7 @@ fn same_records(actual: &layer_core::Artwork, expected: &layer_core::Artwork) {
     same!(compositions, stacks, occurrences, paint, objects, coverage, effects, selections, guides, outputs);
 }
 
-fn frames_until(owner: &mut NativeHost, ready: impl Fn(&layer_core::Document) -> bool) {
-    let started = std::time::Instant::now();
-    loop {
-        let now = started.elapsed().as_nanos() as u64;
-        owner.prepare_canvas_frame(now, now, true).unwrap();
-        if owner.startup.canvas_ready && owner.session.can_park_document() && !owner.session.engine().raster_backing_pending()
-            && ready(owner.session.engine().document()) { break; }
-        assert!(started.elapsed() < std::time::Duration::from_secs(30), "canvas startup timed out");
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-}
+use crate::test_support::frames_until;
 
 fn raw(owner: &mut NativeHost, target: SourceTarget) -> Arc<SourceImage> {
     frames_until(owner, |_| true);
@@ -145,6 +135,7 @@ fn selected_regions_apply_soft_and_inverted_coverage_to_each_layer() {
 }
 
 fn pending_copy(owner: &mut NativeHost, command: CommandId) -> (u32, ClipTask) {
+    frames_until(owner, |_| true);
     owner.dispatch(UiAction::Invoke { command }).unwrap();
     let id = owner.session.state().requests.iter().find(|r| matches!(r.kind,
         HostRequestKind::Document { request: DocumentRequest::Copy { .. } })).unwrap().id;

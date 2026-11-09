@@ -66,6 +66,7 @@ fn native_in_place_scalar_writeback_preserves_every_code_half_neighbors_and_part
 fn scalar_corpus(in_place: bool) {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let encoder = if in_place { NativeScalarEncoder::in_place(&r.device) } else { NativeScalarEncoder::with_device(&r.device) };
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     let working = texture(&r);
     let canonical = if in_place { working.clone() } else { texture(&r) };
     for depth in [SampleDepth::U8, SampleDepth::U16] {
@@ -148,6 +149,7 @@ fn scalar_corpus(in_place: bool) {
 fn invalid_coverage_stores_its_nearest_defined_value() {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let encoder = NativeScalarEncoder::with_device(&r.device);
+    pollster::block_on(r.compilation.prepare_all(&encoder.pipelines)).unwrap();
     let working = texture(&r);
     let canonical = texture(&r);
     let encoded = buffer(&r, SampleDepth::U8);

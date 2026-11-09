@@ -51,9 +51,9 @@ impl Pipelines {
         }
     }
 
-    pub(crate) async fn prepare(&self) -> Result<(), String> {
+    pub(crate) async fn prepare(&self, device: &PipelineDevice) -> Result<(), String> {
         for pipelines in self.pipelines.chunks(4) {
-            Deferred::prepare_all(pipelines).await?;
+            device.compilation().map_err(|e|e.to_string())?.prepare_all(pipelines).await?;
         }
         Ok(())
     }

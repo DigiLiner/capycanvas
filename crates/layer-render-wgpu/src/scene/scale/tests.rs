@@ -225,6 +225,7 @@ fn native_material_reduction_preserves_small_hdr_corrections() {
     crate::test_support::upload_page(&r, &source, &bytes(&appearance));
     let binding = Commands::binding(&r, &source.create_view(&Default::default()),
         &base.create_view(&Default::default()), &output.create_view(&Default::default()));
+    pollster::block_on(r.compilation.prepare_all([&r.scene_pipelines.scale.reduce])).unwrap();
     let mut commands = Commands::new(&r);
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     let mut values = [0; 20];
@@ -1150,8 +1151,8 @@ fn cached_branches_recompose_logarithmic_work_and_preserve_untouched_regions() {
         p.view.document_to_surface = [0.25, 0., 0., 0.25, 0., 0.];
         p
     }
-    crate::test_support::submit_ready(&mut r, frame(doc.scene(), extent)).unwrap();
-    crate::test_support::submit_ready(&mut exact, frame(doc.scene(), extent)).unwrap();
+    crate::test_support::submit_published(&mut r, frame(doc.scene(), extent));
+    crate::test_support::submit_published(&mut exact, frame(doc.scene(), extent));
     assert!(!r.scene.as_ref().unwrap().scale_sources.entries.contains_key(&source_at(&doc,15)));
     let record_bound = page_coordinates(PixelRect::full(extent)).count() as u32
         + doc.scene().order().len().next_power_of_two().ilog2() + 1;
@@ -1162,8 +1163,8 @@ fn cached_branches_recompose_logarithmic_work_and_preserve_untouched_regions() {
         for kind in [DabBatchKind::Preview, DabBatchKind::Persistent] {
             let batch = DabBatch { kind, ..batch.clone() };
             let p = FramePacket { dabs: &[dab], dab_batches: &[batch], ..frame(doc.scene(), extent) };
-            crate::test_support::submit_ready(&mut r, p).unwrap();
-            crate::test_support::submit_ready(&mut exact, p).unwrap();
+            crate::test_support::submit_published(&mut r, p);
+            crate::test_support::submit_published(&mut exact, p);
             let scene = r.scene.as_ref().unwrap();
             let records = scene.scale_commands.as_ref().unwrap().cursor;
             assert!(records <= record_bound, "32 photos, first paint on an empty layer and end edits must reuse the other branches: step={step} {kind:?}, {records} > {record_bound}");
@@ -1181,8 +1182,8 @@ fn cached_branches_recompose_logarithmic_work_and_preserve_untouched_regions() {
             2 => swap_entries(&mut doc,15,31),
             _ => paint_mut(&mut doc,15).base = Some(layer_core::authored::PaintBase::new((Arc::new((*photo_source).clone())).into())),
         }
-        crate::test_support::submit_ready(&mut r, frame(doc.scene(), extent)).unwrap();
-        crate::test_support::submit_ready(&mut exact, frame(doc.scene(), extent)).unwrap();
+        crate::test_support::submit_published(&mut r, frame(doc.scene(), extent));
+        crate::test_support::submit_published(&mut exact, frame(doc.scene(), extent));
         let cache = r.scale_display.as_ref().unwrap();
         let error = quality(&display_pixels(&r), &pixels(&exact, crate::test_support::document_texture(&exact)), cache.plan);
         assert!(error[0] < 0.003 && error[1] < 0.025, "metadata step={step}: {error:?}");
@@ -1221,15 +1222,15 @@ fn layer_edits_reuse_balanced_branches_across_the_stack() {
             frame.composite_all = false;
             frame.reset_layers = true;
             frame.view.document_to_surface = [0.25, 0., 0., 0.25, 0., 0.];
-            crate::test_support::submit_ready(&mut r, frame).unwrap();
-            crate::test_support::submit_ready(&mut exact, frame).unwrap();
+            crate::test_support::submit_published(&mut r, frame);
+            crate::test_support::submit_published(&mut exact, frame);
             frame.reset_layers = false;
             let bound = (count as u32 + 1 + u32::from(paper > 0.)).next_power_of_two().ilog2();
             for index in [0, count / 2, count] {
                 let batch = dab_batch(source_at(&doc,index), crate::layer_tests::preset_style(DefaultBrushPreset::GPen), dab.bounds());
                 let stroke = FramePacket { dabs: std::slice::from_ref(&dab), dab_batches: std::slice::from_ref(&batch), ..frame };
-                crate::test_support::submit_ready(&mut r, stroke).unwrap();
-                crate::test_support::submit_ready(&mut exact, stroke).unwrap();
+                crate::test_support::submit_published(&mut r, stroke);
+                crate::test_support::submit_published(&mut exact, stroke);
                 let cache = r.scale_display.as_ref().unwrap();
                 for index in 0..=count {
                     let target=source_at(&doc,index);
@@ -1397,6 +1398,8 @@ fn materialized_display(r: &WgpuRasterizer) -> Image {
         });
         let (texture, view) = create_color_target(&r.device, cache.plan.size, "materialized display query");
         let pass = &r.scene_pipelines.resample;
+        pollster::block_on(r.compilation.prepare_all([&pass.area])).unwrap();
+        pollster::block_on(r.compilation.prepare_all([&pass.mesh[4]])).unwrap();
         let kept = match root { Presentation::Placed(_) => root.view(), Presentation::Mapped(_) => root.next() };
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
         match root {
@@ -2011,6 +2014,8 @@ fn analytic_display_resample(transform: layer_core::Projective) {
         fine.written(slot,&encoder);
         fine.write_directory(&mut r,&mut encoder,[0;2]).unwrap();
         let fine_pass=r.scene_pipelines.fine_resample.clone();
+        pollster::block_on(r.compilation.prepare_all([&resample.area])).unwrap();
+        pollster::block_on(r.compilation.prepare_all([&resample.mesh[4], &fine_pass.mesh[4]])).unwrap();
         let tiled_binding=fine_pass.fine_binding(&r.device,&uniforms,&[source.clone(),r.empty_view.clone()],&fine.view,&fine.directory);
         fine_pass.encode_mesh(&mut encoder,&tiled_binding,&tiled.create_view(&Default::default()),texels,None,false);
         if let Some(binding)=&binding {resample.encode(&mut encoder,binding,texels);}

@@ -296,7 +296,7 @@ mod tests {
         host.session
             .import_layer_source("Photo", source.finish().unwrap())
             .unwrap();
-        host.session.frame(0, 0).unwrap();
+        crate::test_support::frames_until(&mut host, |_| true);
         host.dispatch(UiAction::Invoke {
             command: CommandId::ExportDocument,
         })
@@ -372,7 +372,7 @@ mod tests {
             source.push_row(&(0..8).flat_map(|x| pixel(x, y)).collect::<Vec<_>>()).unwrap();
         }
         host.session.import_layer_source("Photo", source.finish().unwrap()).unwrap();
-        host.session.frame(0, 0).unwrap();
+        crate::test_support::frames_until(&mut host, |_| true);
         host.dispatch(UiAction::Invoke { command: CommandId::ExportDocument }).unwrap();
         let request = host.session.state().requests.last().unwrap().id;
         let mut task = ExportTask::capture(&host.session, request, "Photo.capy", RgbSpace::Srgb).unwrap();

@@ -118,6 +118,7 @@ fn object_frame_work_uses_the_scene_grant_beyond_cache_retention() {
     assert!(matches!(scene.object_results.resolve_collection(&r, doc.scene(), &request), Ok(None)));
     let mut cache = std::mem::take(&mut scene.object_results);
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+    pollster::block_on(r.compilation.prepare_all(r.scene_pipelines.objects.pipelines())).unwrap();
     cache.advance(&mut r, &mut scene, &mut encoder, false).unwrap();
     assert!(cache.required_bytes() > crate::memory::OBJECT_CACHE_BYTES / 2);
     r.uploads.finish(&encoder);
@@ -414,7 +415,7 @@ fn nearest_reduced_object_display_keeps_level_zero_aliases_after_idle() {
     frame.view.width_px = 8; frame.view.height_px = 8;
     frame.view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
     submit_ready(&mut r, frame);
-    for _ in 0..3 { r.submit(FramePacket { composite_all: false, ..frame }).unwrap(); }
+    for _ in 0..3 { crate::test_support::submit_ready(&mut r, FramePacket { composite_all: false, ..frame }).unwrap(); }
     let cache = r.scale_display.as_ref().unwrap();
     let pixels = float_pixels(&r, cache.texture());
     assert!(pixels.iter().all(|pixel| pixel[..3] == [1.; 3] && pixel[3] == 1.), "Nearest never uses averaged source or native-result levels");
@@ -474,7 +475,7 @@ fn pending_native_store_reads_keep_the_display_and_wake_exact_preparation() {
     r.analysis_dirty=false;
     assert!(woken.try_recv().is_err());
     for _ in 0..2 {
-        if r.raster_dependencies_ready(frame,None) {r.submit(frame).unwrap();}
+        if r.raster_dependencies_ready(frame,None) {crate::test_support::submit_ready(&mut r, frame).unwrap();}
         assert_eq!(float_pixels(&r,r.presentation_views().unwrap()[0].texture()),previous);
     }
     store.gate.release();
@@ -546,7 +547,7 @@ fn tablet_fit_photo_scene_completes_many_private_windows_within_cache_budget() {
     let scale = 1440. / 4248.; frame.view.document_to_surface = [scale, 0., 0., scale, 0., 0.];
     let mut ready = false; let mut peak = 0;
     for iteration in 0..10000 {
-        r.submit(FramePacket { composite_all: iteration == 0, reset_layers: iteration == 0, ..frame }).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket { composite_all: iteration == 0, reset_layers: iteration == 0, ..frame }).unwrap();
         let scene = r.scene.as_ref().unwrap();
         let bytes = scene.object_results.bytes(); peak = peak.max(bytes);
         assert!(bytes <= 64 * 1024 * 1024 + resident_object_bytes([4248,2832],4,1), "private sampling scratch and four independently paged output planes stay bounded: {bytes}");
@@ -586,7 +587,7 @@ fn tablet_fit_shared_photos_with_paint_above_remain_admitted_during_strokes() {
     let zoom = 0.15970339;
     let view = layer_render::ViewState { width_px:1920,height_px:1200,document_to_surface:[zoom,0.,0.,zoom,670.,260.] };
     let frame = FramePacket { view, composite_all:false,..packet(doc.scene(),extent) };
-    r.submit(FramePacket { reset_layers:true,composite_all:true,..frame }).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket { reset_layers:true,composite_all:true,..frame }).unwrap();
     let mut ready = false;
     let mut scratch_peak = 0;
     for _ in 0..50000 {
@@ -595,7 +596,7 @@ fn tablet_fit_shared_photos_with_paint_above_remain_admitted_during_strokes() {
         assert!(scratch_peak <= 64,"cold retry scratch stays bounded: {scratch_peak} tiles");
         if !r.has_pending_work() { ready = true; break; }
         std::thread::sleep(std::time::Duration::from_millis(1));
-        r.submit(frame).unwrap();
+        crate::test_support::submit_ready(&mut r, frame).unwrap();
     }
     assert!(ready,"shared photo cold preparation settles");
     let mut ink = crate::layer_tests::dab([0.2,0.6,0.9,1.]);
@@ -605,7 +606,7 @@ fn tablet_fit_shared_photos_with_paint_above_remain_admitted_during_strokes() {
         ink.center = layer_core::Point {x:2100.+(step as f32*0.1).cos()*1200.,y:1400.+(step as f32*0.1).sin()*800.};
         let mut batch = crate::test_support::dab_batch(target,style.clone(),ink.bounds());
         batch.stroke_start = step == 0; batch.stroke_end = step ==159;
-        r.submit(FramePacket {dabs:std::slice::from_ref(&ink),dab_batches:std::slice::from_ref(&batch),..frame}).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket {dabs:std::slice::from_ref(&ink),dab_batches:std::slice::from_ref(&batch),..frame}).unwrap();
         r.wait_idle().unwrap();
         assert!(r.scene.as_ref().unwrap().object_results.bytes() <= 64*1024*1024 + resident_object_bytes(extent,4,2));
         scratch_peak = scratch_peak.max(r.scene.as_ref().unwrap().pool.len());
@@ -616,7 +617,7 @@ fn tablet_fit_shared_photos_with_paint_above_remain_admitted_during_strokes() {
     let mut checkpoint = start;
     let mut previous = None;
     while start.elapsed() < std::time::Duration::from_secs(120) {
-        r.submit(frame).unwrap(); r.wait_idle().unwrap();
+        crate::test_support::submit_ready(&mut r, frame).unwrap(); r.wait_idle().unwrap();
         let scene = r.scene.as_ref().unwrap();
         assert!(scene.object_results.bytes() <= 64*1024*1024 + resident_object_bytes(extent,4,2));
         scratch_peak = scratch_peak.max(scene.pool.len());
@@ -968,7 +969,7 @@ fn batch_motion_of_twenty_sibling_images_pauses_queued_canonical_work_and_resume
     assert!(r.scene.as_ref().unwrap().object_results.pending(),"accepted canonical work stays queued during motion");
     let paused=r.scene.as_ref().unwrap().object_results.work_progress();
     for _ in 0..3 {
-        r.submit(FramePacket {view,reset_layers:false,composite_all:false,..packet(doc.scene(),[128;2])}).unwrap();r.wait_idle().unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket {view,reset_layers:false,composite_all:false,..packet(doc.scene(),[128;2])}).unwrap();r.wait_idle().unwrap();
         assert!(!r.has_pending_work());assert_eq!(r.scene.as_ref().unwrap().object_results.work_progress(),paused);
     }
     let original=handles.iter().map(|h|doc.scene().object(*h).unwrap().affine).collect::<Vec<_>>();
@@ -1011,7 +1012,7 @@ fn moving_blurred_object_layer_publishes_every_pose_without_queueing_canonical_w
             let (revision, composited) = (r.composite_revision, r.metrics.composited_pixels);
             let frame = FramePacket { view, composite_all: true, time_seconds: f32::from(step as u8) / 60., ..packet(doc.scene(), [4248, 2832]) };
             crate::memory::memory_tests::legacy_scene_frame(&mut r, frame);
-            r.submit(frame).unwrap();
+            crate::test_support::submit_ready(&mut r, frame).unwrap();
             r.wait_idle().unwrap();
             assert!(r.composite_revision != revision && !r.object_deferred, "pose {step} publishes a fresh preview (distinct={distinct})");
             let full = r.scale_display.as_ref().unwrap().plan.size.into_iter().map(u64::from).product::<u64>();
@@ -1114,7 +1115,7 @@ fn moving_nearest_objects_publish_level_zero_poses_with_and_without_effects() {
             let mut affine = doc.scene().object(handles[0]).unwrap().affine; affine.0[4] += 1.37; affine.0[5] -= 0.61;
             doc.apply(doc.set_image_object_affine_edit(handles[0], affine).unwrap()).unwrap();
             let revision = r.composite_revision;
-            r.submit(FramePacket { view, composite_all: false, ..packet(doc.scene(), [256; 2]) }).unwrap();
+            crate::test_support::submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(doc.scene(), [256; 2]) }).unwrap();
             r.wait_idle().unwrap();
             assert!(r.composite_revision != revision && !r.object_deferred, "Nearest pose {step} publishes (blur={blur})");
             assert!(!r.scene.as_ref().unwrap().object_results.pending(), "Nearest motion queues no canonical work");

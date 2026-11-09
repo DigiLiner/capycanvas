@@ -158,7 +158,7 @@ fn liquify_sparse_original_atlas_chunks_match_unfragmented_source() {
         contact.motion = [1., 0.];
         let mut batch = crate::test_support::dab_batch(placement::target(&doc), style, contact.bounds());
         batch.stroke_id = StrokeId(291);
-        r.submit(FramePacket { dabs: &[contact], dab_batches: &[batch],
+        crate::test_support::submit_ready(&mut r, FramePacket { dabs: &[contact], dab_batches: &[batch],
             ..crate::test_support::packet(doc.scene(), extent) }).unwrap();
         let image = r.readback_srgb_rgba8().unwrap();
         let at = (128 * extent[0] as usize + 64) * 4;
@@ -181,7 +181,7 @@ fn liquify_filtered_and_manual_source_sampling_agree_inside_and_across_tiles() {
             [((x*37+y*13)%256) as u8,((x*7+y*43)%256) as u8,
                 ((x*23+y*29)%256) as u8,alpha]
         }));
-        r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
         let before=r.readback_srgb_rgba8().unwrap();
         let source_pages=r.paint_layers.iter().find(|layer|layer.id==placement::target(&doc)).unwrap()
             .pages.iter().map(|page|(page.coordinate,crate::layer_tests::page_bytes(&r,&page.active().texture)))
@@ -217,7 +217,7 @@ fn liquify_compression_mips_average_one_pixel_stripes_at_32_and_64_to_one() {
     let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut doc=placement::paint_document(extent,"liquify minification reference");
     placement::set_source(&mut doc,layer_core::color::source::rgba8_source(extent,|x,_| if x%2==0 {[0,0,0,255]} else {[255;4]}));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let context=seeded_context(&r,&doc,|x,_|{
         let ratio=if x<128 {32.} else {64.};
         ([255.5-(x as f32+0.5),0.],[ratio,0.,0.,1.])
@@ -238,7 +238,7 @@ fn local_liquify_keeps_previously_deformed_untouched_pixels_in_preview_and_commi
         let value=((x*37+y*71+x*y%251)%256) as u8;
         [value,value,value,255]
     }));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let mut context=seeded_context(&r,&doc,|_,_|([0.375,0.],[8.25,0.,0.,1.]));
     context.amount=Some(1.);
     let before=render_seeded(&mut r,&mut doc,context,90);
@@ -256,7 +256,7 @@ fn local_liquify_keeps_previously_deformed_untouched_pixels_in_preview_and_commi
     preview.kind=DabBatchKind::Preview;
     preview.stroke_id=StrokeId(91);
     preview.stroke_end=false;
-    r.submit(FramePacket{dabs:&[contact],dab_batches:&[preview],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{dabs:&[contact],dab_batches:&[preview],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let predicted=r.readback_srgb_rgba8().unwrap();
     assert!((105..150).any(|y|(175..210).any(|x| {
         let at=(y*256+x)*4;
@@ -265,12 +265,12 @@ fn local_liquify_keeps_previously_deformed_untouched_pixels_in_preview_and_commi
     let preview_mismatches=(100..150).flat_map(|y|(32..96).map(move |x|(x,y)))
         .filter(|&(x,y)| {let at=(y*256+x)*4;predicted[at..at+4]!=before[at..at+4]})
         .count();
-    r.submit(crate::test_support::packet(doc.scene(),extent)).unwrap();
+    crate::test_support::submit_ready(&mut r, crate::test_support::packet(doc.scene(),extent)).unwrap();
     assert_eq!(r.readback_srgb_rgba8().unwrap(),before,"cancelled preview restores the prior deformation");
     placement::paint_mut(&mut doc).raster=RasterRevision::pending();
     let mut commit=crate::test_support::dab_batch(placement::target(&doc),style,contact.bounds());
     commit.stroke_id=StrokeId(92);
-    r.submit(FramePacket{dabs:&[contact],dab_batches:&[commit],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{dabs:&[contact],dab_batches:&[commit],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let committed=r.readback_srgb_rgba8().unwrap();
     let current=placement::paint(&doc).raster.liquify().unwrap();
     let current_field=current.field.as_any().downcast_ref::<Field>().unwrap();
@@ -294,14 +294,14 @@ fn fit_persistent_preview_preserves_untouched_prior_compression_in_same_tile() {
         if (176..208).contains(&x) && (104..152).contains(&y) {[245,35,45,255]}
         else {[value,value,value,255]}
     }));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let mut context=seeded_context(&r,&doc,|_,_|([0.375,0.],[8.25,0.,0.,1.]));
     context.amount=Some(1.);
     render_seeded(&mut r,&mut doc,context,270);
     let target=placement::target(&doc);
     let view=layer_render::ViewState{width_px:32,height_px:32,
         document_to_surface:[0.125,0.,0.,0.125,0.,0.]};
-    r.submit(FramePacket{view,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{view,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let before=crate::scene::scale::tests::display_pixels(&r);
     let [width,height]=r.scale_display.as_ref().unwrap().plan.size.map(|n|n as usize);
     let raw_before={
@@ -322,14 +322,14 @@ fn fit_persistent_preview_preserves_untouched_prior_compression_in_same_tile() {
     isolated.kind=DabBatchKind::Preview;
     isolated.stroke_id=StrokeId(272);
     isolated.stroke_end=false;
-    r.submit(FramePacket{view,dabs:&[predicted],dab_batches:&[isolated],
+    crate::test_support::submit_ready(&mut r, FramePacket{view,dabs:&[predicted],dab_batches:&[isolated],
         ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let isolated_display=crate::scene::scale::tests::display_pixels(&r);
     let isolated_mismatches=(height*11/32..height*21/32).flat_map(|y|
         (width*4/32..width*12/32).map(move |x|y*width+x))
         .filter(|&at|isolated_display[at]!=before[at]).count();
     assert_eq!(isolated_mismatches,0,"a preview-only dab must retain untouched compressed pixels");
-    r.submit(FramePacket{view,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{view,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     assert!(crate::scene::scale::tests::display_pixels(&r)==before,"cancel restores the prior compressed display");
     placement::paint_mut(&mut doc).raster=RasterRevision::pending();
     let mut persistent=crate::test_support::dab_batch(target,style,real.bounds());
@@ -339,7 +339,7 @@ fn fit_persistent_preview_preserves_untouched_prior_compression_in_same_tile() {
     preview.kind=DabBatchKind::Preview;
     preview.first_dab=1;
     preview.damage=predicted.bounds();
-    r.submit(FramePacket{view,dabs:&[real,predicted],dab_batches:&[persistent,preview],
+    crate::test_support::submit_ready(&mut r, FramePacket{view,dabs:&[real,predicted],dab_batches:&[persistent,preview],
         ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     assert_eq!(r.preview_level,2,"the persistent tail must use the reduced Fit preview");
     let stroke=r.liquify.as_ref().unwrap().strokes.get(&target).unwrap();
@@ -399,7 +399,7 @@ fn tiny_footprint_is_bit_exact_where_local_dab_has_no_influence() {
         let value=((x*37+y*71+x*y%251)%256) as u8;
         [value,value,value,255]
     }));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let mut context=seeded_context(&r,&doc,|_,_|([0.375,0.],[1e-5,0.,0.,1.]));
     context.amount=Some(1.);
     let before=render_seeded(&mut r,&mut doc,context,220);
@@ -416,7 +416,7 @@ fn tiny_footprint_is_bit_exact_where_local_dab_has_no_influence() {
     let mut batch=crate::test_support::dab_batch(placement::target(&doc),style,contact.bounds());
     batch.stroke_id=StrokeId(221);
     placement::paint_mut(&mut doc).raster=RasterRevision::pending();
-    r.submit(FramePacket{dabs:&[contact],dab_batches:&[batch],
+    crate::test_support::submit_ready(&mut r, FramePacket{dabs:&[contact],dab_batches:&[batch],
         ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let after=r.readback_srgb_rgba8().unwrap();
     let current=placement::paint(&doc).raster.liquify().unwrap();
@@ -444,7 +444,7 @@ fn untouched_own_map_survives_when_it_is_in_a_later_source_chunk() {
         let value=((x*37+y*71+x*y%251)%256) as u8;
         [value,value,value,255]
     }));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let seed=seeded_context(&r,&doc,|_,_|([0.375,0.],[1e-5,0.,0.,1.]));
     let bytes={
         let field=seed.field.as_ref().unwrap().as_any().downcast_ref::<Field>().unwrap();
@@ -559,7 +559,7 @@ fn capture_liquify_filter_tap_reference_images() {
             let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
             let mut doc=placement::paint_document(extent,"liquify tap reference");
             placement::set_source(&mut doc,source.clone());
-            r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+            crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
             let mut context=seeded_context(&r,&doc,|_,_|([0.375,0.21],footprint));
             context.amount=Some(1.);
             let mut style=preset_style(DefaultBrushPreset::LiquifyPush);
@@ -572,7 +572,7 @@ fn capture_liquify_filter_tap_reference_images() {
                 batch.kind=DabBatchKind::Preview;
                 batch.stroke_end=false;
             } else {placement::paint_mut(&mut doc).raster=RasterRevision::pending();}
-            r.submit(FramePacket{dab_batches:&[batch],
+            crate::test_support::submit_ready(&mut r, FramePacket{dab_batches:&[batch],
                 ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
             if preview {assert_eq!(r.preview_level,0,"the comparison must vary tap count at one-pixel blocks");}
             r.readback_srgb_rgba8().unwrap()
@@ -618,17 +618,17 @@ fn fit_view_liquify_preview_matches_committed_display_and_cancel_restores_it() {
     batch.stroke_id=StrokeId(200);
     batch.stroke_end=false;
     batch.kind=DabBatchKind::Preview;
-    preview.submit(FramePacket{dabs:&[contact],dab_batches:std::slice::from_ref(&batch),..fit}).unwrap();
+    crate::test_support::submit_ready(&mut preview, FramePacket{dabs:&[contact],dab_batches:std::slice::from_ref(&batch),..fit}).unwrap();
     assert_eq!(preview.preview_level,2,"Fit view must select 4-by-4 map and color preview blocks");
     assert!(preview.preview_pages.iter().all(|page|page.active().texture.width()==64));
     let predicted=crate::scene::scale::tests::display_pixels(&preview);
-    preview.submit(fit).unwrap();
+    crate::test_support::submit_ready(&mut preview, fit).unwrap();
     assert!(crate::scene::scale::tests::display_pixels(&preview)==before,"cancel restores the exact display");
     batch.kind=DabBatchKind::Persistent;
     batch.stroke_end=true;
     let commit=FramePacket{dabs:&[contact],dab_batches:std::slice::from_ref(&batch),
         scene:commit_doc.scene(),..fit};
-    committed.submit(commit).unwrap();
+    crate::test_support::submit_ready(&mut committed, commit).unwrap();
     let accepted=crate::scene::scale::tests::display_pixels(&committed);
     assert_eq!(predicted.len(),accepted.len());
     let changed=accepted.iter().zip(&before).filter(|(a,b)|a!=b).count();
@@ -656,7 +656,7 @@ fn grouped_liquify_chunks_match_split_frames_in_pixels_and_map() {
             let value=((x*37+y*71+x*y%251)%256) as u8;
             [value,255-value,value/2,255]
         }));
-        r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
         let original_pixels=r.readback_srgb_rgba8().unwrap();
         let before=r.metrics().command_passes;
         let mut style=preset_style(DefaultBrushPreset::LiquifyPush);
@@ -682,12 +682,12 @@ fn grouped_liquify_chunks_match_split_frames_in_pixels_and_map() {
                 if i==2 {placement::paint_mut(&mut doc).raster=RasterRevision::pending();}
                 let mut batch=batches[i].clone();
                 batch.first_dab=0;
-                r.submit(FramePacket{dabs:&dabs[i..i+1],dab_batches:std::slice::from_ref(&batch),
+                crate::test_support::submit_ready(&mut r, FramePacket{dabs:&dabs[i..i+1],dab_batches:std::slice::from_ref(&batch),
                     ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
             }
         } else {
             placement::paint_mut(&mut doc).raster=RasterRevision::pending();
-            r.submit(FramePacket{dabs:&dabs,dab_batches:&batches,
+            crate::test_support::submit_ready(&mut r, FramePacket{dabs:&dabs,dab_batches:&batches,
                 ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
         }
         let passes=r.metrics().command_passes-before;
@@ -715,7 +715,7 @@ fn strong_pinch_keeps_opaque_source_when_footprint_exceeds_trace_tile() {
         let mut doc = placement::paint_document(extent, "strong Pinch source footprint");
         placement::set_source(&mut doc, layer_core::color::source::rgba8_source(extent,
             |_, _| [83, 149, 211, 255]));
-        r.submit(FramePacket { reset_layers: true,
+        crate::test_support::submit_ready(&mut r, FramePacket { reset_layers: true,
             ..crate::test_support::packet(doc.scene(), extent) }).unwrap();
         let target = placement::target(&doc);
         let raw_center = |r: &WgpuRasterizer| {
@@ -869,7 +869,7 @@ fn fit_preview_defers_persistent_color_until_zero_dab_end_across_tiles() {
                 idle.stroke_start=false;
                 idle.stroke_end=false;
                 idle.dab_count=0;
-                r.submit(FramePacket{view,composite_all:false,dab_batches:&[idle.clone()],
+                crate::test_support::submit_ready(&mut r, FramePacket{view,composite_all:false,dab_batches:&[idle.clone()],
                     ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
                 assert_eq!(r.preview_level,2,"zero-dab tail must retain the reduced Fit preview");
                 assert!(colors(&r).iter().all(|(coordinate,pixels)|source_colors.get(coordinate)==Some(pixels)),
@@ -881,7 +881,7 @@ fn fit_preview_defers_persistent_color_until_zero_dab_end_across_tiles() {
                     .filter(|&at|idle_display[at]!=shown[at]).count();
                 assert_eq!(left_drift,0,"zero-dab preview must retain the earlier tile's displayed pixels");
                 let before=r.metrics();
-                r.submit(FramePacket{view,composite_all:false,dab_batches:&[idle],
+                crate::test_support::submit_ready(&mut r, FramePacket{view,composite_all:false,dab_batches:&[idle],
                     ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
                 let after=r.metrics();
                 assert_eq!(after.composited_pixels,before.composited_pixels,
@@ -925,7 +925,7 @@ fn fit_preview_defers_persistent_color_until_zero_dab_end_across_tiles() {
                         "the next preview plan must include the earlier dirty tile");
                 }
                 let before=r.metrics();
-                r.submit(FramePacket{view,composite_all:false,dabs:&dabs,dab_batches:&batches,
+                crate::test_support::submit_ready(&mut r, FramePacket{view,composite_all:false,dabs:&dabs,dab_batches:&batches,
                     ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
                 let after=r.metrics();
                 let work=(after.composited_pixels-before.composited_pixels,
@@ -962,7 +962,7 @@ fn fit_preview_defers_persistent_color_until_zero_dab_end_across_tiles() {
                         "a later frame must preserve unchanged preview tile pixels");
                 }
             } else {
-                r.submit(FramePacket{view,composite_all:false,dabs:&[real],dab_batches:&[persistent],
+                crate::test_support::submit_ready(&mut r, FramePacket{view,composite_all:false,dabs:&[real],dab_batches:&[persistent],
                     ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
                 let current=colors(&r);
                 assert!(current.iter().any(|(coordinate,pixels)|source_colors.get(coordinate)!=Some(pixels)),
@@ -982,7 +982,7 @@ fn fit_preview_defers_persistent_color_until_zero_dab_end_across_tiles() {
         end.stroke_start=false;
         end.stroke_end=true;
         end.dab_count=0;
-        r.submit(FramePacket{view,composite_all:false,dab_batches:&[end],
+        crate::test_support::submit_ready(&mut r, FramePacket{view,composite_all:false,dab_batches:&[end],
             ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
         let final_colors=colors(&r);
         assert_ne!(final_colors,original_colors,"zero-dab end must flush the persistent color");
@@ -1008,7 +1008,7 @@ fn liquify_selection_stops_deformation_at_a_sparse_tile_boundary() {
         let value=((x*37+y*71+x*y%251)%256) as u8;
         [value,value,value,255]
     }));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let before=r.readback_srgb_rgba8().unwrap();
     let mut style=preset_style(DefaultBrushPreset::LiquifyPush);
     style.selection=Some(Arc::new(Selection::polygon(vec![
@@ -1023,7 +1023,7 @@ fn liquify_selection_stops_deformation_at_a_sparse_tile_boundary() {
     contact.motion=[3.,0.];
     let mut batch=crate::test_support::dab_batch(placement::target(&doc),style,contact.bounds());
     batch.stroke_id=StrokeId(93);
-    r.submit(FramePacket{dabs:&[contact],dab_batches:&[batch],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{dabs:&[contact],dab_batches:&[batch],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let after=r.readback_srgb_rgba8().unwrap();
     let mut selected_changes=0;
     for y in 108..148 {for x in 232..280 {
@@ -1040,7 +1040,7 @@ fn liquify_adjust_zero_half_and_full_use_the_anchored_field() {
     let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut doc=placement::paint_document(extent,"liquify adjust reference");
     placement::set_source(&mut doc,layer_core::color::source::rgba8_source(extent,|x,_| if x%4<2 {[0,0,0,255]} else {[255;4]}));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     let anchor=seeded_context(&r,&doc,|_,_|([2.,0.],[1.,0.,0.,1.]));
     for (i,amount) in [0.,0.5,1.].into_iter().enumerate() {
         let mut context=anchor.clone();context.amount=Some(amount);
@@ -1080,7 +1080,7 @@ fn fit_amount_preview_keeps_authored_color_and_matches_full_resolution_commit() 
         preview.stroke_id=StrokeId(260+index as u64);
         preview.dab_count=0;
         preview.stroke_end=false;
-        fit.submit(FramePacket{view,dab_batches:&[preview],
+        crate::test_support::submit_ready(&mut fit, FramePacket{view,dab_batches:&[preview],
             ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
         assert_eq!(fit.preview_level,2,"Amount {amount} must use a reduced Fit preview");
         assert!(fit.liquify.as_ref().unwrap().strokes.get(&target).is_some_and(|stroke|stroke.preview_only),
@@ -1090,7 +1090,7 @@ fn fit_amount_preview_keeps_authored_color_and_matches_full_resolution_commit() 
         let changes=display.iter().zip(&before).filter(|(a,b)|a!=b).count();
         if amount==0. {assert_eq!(changes,0,"zero Amount preview must restore the original display");}
         else {assert!(changes>100,"Amount {amount} preview must be visible at Fit scale: {changes} pixels");}
-        fit.submit(FramePacket{view,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+        crate::test_support::submit_ready(&mut fit, FramePacket{view,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
         assert!(!fit.liquify.as_ref().unwrap().strokes.contains_key(&target),
             "a no-batch frame must discard the canceled Amount {amount} preview stroke");
         assert!(crate::scene::scale::tests::display_pixels(&fit)==before,
@@ -1133,14 +1133,14 @@ fn liquify_edge_and_reconstruct_transport_the_seeded_map_and_footprint() {
     let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut doc=placement::paint_document(extent,"liquify map edit oracles");
     placement::set_source(&mut doc,layer_core::color::source::rgba8_source(extent,|_,_|[255;4]));
-    r.submit(FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket{reset_layers:true,..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     for (i,mode) in [LiquifyMode::Edge,LiquifyMode::Reconstruct].into_iter().enumerate() {
         let context=seeded_context(&r,&doc,|_,_|([2.,0.],[1.,0.,0.,1.]));
         let mut style=preset_style(DefaultBrushPreset::LiquifyPush);style.deform.mode=mode;style.liquify=Some(Arc::new(context));
         placement::paint_mut(&mut doc).raster=RasterRevision::pending();
         let mut contact=dab([0.;4]);contact.material[3]=1.;contact.motion=[1.,0.];contact.previous_contact=[1.,0.,0.,1.];
         let mut batch=crate::test_support::dab_batch(placement::target(&doc),style,layer_core::Rect::from_extent([128;2]));batch.stroke_id=StrokeId(80+i as u64);
-        r.submit(FramePacket{dabs:&[contact],dab_batches:&[batch],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket{dabs:&[contact],dab_batches:&[batch],..crate::test_support::packet(doc.scene(),extent)}).unwrap();
         let state=placement::paint(&doc).raster.liquify().unwrap();let field=state.field.as_any().downcast_ref::<Field>().unwrap();
         let bytes=crate::layer_tests::page_bytes(&r,&field.tiles[&[0,0]].texture);
         let at=(72*256+64)*16;
@@ -1218,7 +1218,7 @@ fn smooth_liquify_gpu_map_and_footprint_match_numerical_reference() {
     let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut doc = placement::paint_document([128; 2], "liquify finite difference reference");
     placement::set_source(&mut doc, layer_core::color::source::rgba8_source([128; 2], |_, _| [255; 4]));
-    renderer.submit(FramePacket { reset_layers: true,
+    crate::test_support::submit_ready(&mut renderer, FramePacket { reset_layers: true,
         ..crate::test_support::packet(doc.scene(), [128; 2]) }).unwrap();
     let points = [[85.5, 71.5], [79.5, 79.5], [69.5, 86.5], [56.5, 43.5]];
     let mut max_displacement_error: f64 = 0.;
@@ -1244,7 +1244,7 @@ fn smooth_liquify_gpu_map_and_footprint_match_numerical_reference() {
         contact.previous_contact = [1., 0., 0.6, 0.8];
         let mut batch = crate::test_support::dab_batch(placement::target(&doc), style, contact.bounds());
         batch.stroke_id = StrokeId(300 + index as u64);
-        renderer.submit(FramePacket { dabs: &[contact], dab_batches: &[batch],
+        crate::test_support::submit_ready(&mut renderer, FramePacket { dabs: &[contact], dab_batches: &[batch],
             ..crate::test_support::packet(doc.scene(), [128; 2]) }).unwrap();
         let state = placement::paint(&doc).raster.liquify().unwrap();
         let field = state.field.as_any().downcast_ref::<Field>().unwrap();
@@ -1288,7 +1288,7 @@ fn smooth_liquify_gpu_map_and_footprint_match_numerical_reference() {
     contact.previous_contact[0] = 1.;
     let mut batch = crate::test_support::dab_batch(placement::target(&doc), style, contact.bounds());
     batch.stroke_id = StrokeId(308);
-    renderer.submit(FramePacket { dabs: &[contact], dab_batches: &[batch],
+    crate::test_support::submit_ready(&mut renderer, FramePacket { dabs: &[contact], dab_batches: &[batch],
         ..crate::test_support::packet(doc.scene(), [128; 2]) }).unwrap();
     let state = placement::paint(&doc).raster.liquify().unwrap();
     let field = state.field.as_any().downcast_ref::<Field>().unwrap();
@@ -1370,7 +1370,7 @@ fn sustained_pinch_preview_keeps_opaque_center_at_finite_footprint() {
     preview.kind=DabBatchKind::Preview;
     preview.stroke_id=StrokeId(311);
     preview.dab_count=8;
-    r.submit(FramePacket{view,composite_all:false,dabs:&[predicted;8],dab_batches:&[preview],
+    crate::test_support::submit_ready(&mut r, FramePacket{view,composite_all:false,dabs:&[predicted;8],dab_batches:&[preview],
         ..crate::test_support::packet(doc.scene(),extent)}).unwrap();
     assert_eq!(r.preview_level,2,"Fit preview must use a four-pixel map block");
     let page=r.preview_pages.iter().find(|page|page.coordinate==[0,0]).unwrap();

@@ -115,17 +115,16 @@ impl FilterPreviews {
         if r.startup.is_some() && (!r.poll_startup()?.brush_ready || r.effect_validation.is_some()) { return Ok(()); }
         let request = self.request.as_ref().unwrap();
         let snapshot = self.program_snapshot.clone().unwrap();
-        if let Some(startup) = &r.startup {
+        {
             // Visible rows prepare just their own preview variants. No draw or
             // readback is admitted until their asynchronous pipelines are ready.
             for effect in &request.filters {
                 self.scene.effects.prepare(r, snapshot.view(), &[self.programs[&effect.program.id]], effects::Execution::Preview, 0., 0, preview_space(effect.view(), snapshot.view().composition().blend))?;
             }
-            let mut ready = self.scene.effects.enqueue_active(&startup.compiler, startup::OTHER);
-            ready &= startup.compiler.require([&self.scene.pipeline[fragment_pipeline(10,false,false).expect("tone fragment pipeline")]], startup::OTHER);
+            let mut ready = self.scene.effects.enqueue_active(&r.compilation, startup::OTHER);
+            ready &= r.compilation.require([&self.scene.pipeline[fragment_pipeline(10,false,false).expect("tone fragment pipeline")]], startup::OTHER);
             // Preview readback uses the same conversion as document export.
             ready &= r.ui_readback_ready();
-            startup.compiler.start();
             if !ready { return Ok(()); }
         }
         if let Some(job) = &mut self.analysis {
@@ -332,9 +331,8 @@ impl Scene {
         self.effects.retain(scene);
         let prepared = self.effects.prepare(r, scene, &[handle], effects::Execution::Preview, frame.time, grid.level,
             preview_space(effect, frame.blend_space))?;
-        if let Some(startup) = &r.startup {
-            let ready = self.effects.enqueue(&startup.compiler, startup::VALIDATION);
-            startup.compiler.start();
+        {
+            let ready = self.effects.enqueue(&r.compilation, startup::VALIDATION);
             if !ready { return Ok(None); }
         }
         let count = effect.program.passes.len().max(1);
@@ -480,9 +478,9 @@ mod tests {
         assert!(r.request_filter_previews(request(2, &["gaussian_blur"])).unwrap());
         assert!(r.filter_previews_pending());
         assert!(r.take_filter_previews().is_none());
-        assert!(r.startup.as_ref().unwrap().compiler.pending() > 0);
+        assert!(!r.filter_previews.as_ref().unwrap().scene.effects.needs().ready());
         let progress = r.poll_startup().unwrap();
-        assert!(progress.brush_ready);assert!(!progress.complete);
+        assert!(progress.brush_ready && progress.complete);
         r.cancel_filter_previews();
         let mut reopened = curves;reopened.request_id = 3;
         assert!(!r.filter_previews_pending());
@@ -490,7 +488,7 @@ mod tests {
         let completed = finish(&mut r).image;
         assert_eq!(completed.request_id, 3);
         assert_eq!(completed.bytes, original.bytes);
-        assert!(r.startup.as_ref().unwrap().compiler.pending() > 0, "Unrelated optional shaders remain unready");
+        assert!(!r.filter_previews.as_ref().unwrap().scene.effects.needs().ready(), "Unrelated optional shaders remain unready");
         assert_eq!(r.filter_previews.as_ref().unwrap().scene.effects.preparation_count(), preparations, "Cancelled lookup dispatches never run");
         r.shader_idle(true, true);
     }

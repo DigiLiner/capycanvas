@@ -37,7 +37,7 @@ impl AreasJob {
         match result {Err(GpuRasterError::DeferredObjectWork)=>Ok(None),other=>other}
     }
     fn encode(&mut self,r:&mut WgpuRasterizer,regions:&mut RegionRequests,encoder:&mut crate::submission::CommandEncoder)->Result<Option<RegionOutput>,GpuRasterError> {
-        if let Some(startup)=&r.startup {startup.compiler.check()?;}
+        r.compilation.check()?;
         if matches!(self.phase,Phase::Cache) {
             if r.native_edit.is_none() || !self.request.source.valid_parameters(self.request.reference_count,self.request.tolerance)
                 || self.request.source.sources().iter().any(|source|!matches!(source,layer_render::RegionSource::Composite|layer_render::RegionSource::Source(_)|layer_render::RegionSource::Objects(_)|layer_render::RegionSource::Scene {..}))
@@ -51,9 +51,10 @@ impl AreasJob {
             if pages[0].checked_mul(pages[1]).and_then(|count|count.checked_mul(bytes)).is_none_or(|bytes|bytes>layer_core::raster::MAX_PUBLICATION_BYTES) {return Err(GpuRasterError::SizeOverflow);}
             if let Some(binding)=&self.request.paper {r.prepare_paper_binding(binding,startup::BRUSH)?;}
             if regions.cache.as_ref().is_some_and(|cache|cache.pending()) {return Err(GpuRasterError::DeferredObjectWork);}
-            if let Some(startup)=&r.startup {
-                let ready=regions.raw.prepare(&startup.compiler,startup::BRUSH);
-                if !regions.flood.prepare_areas(&startup.compiler,startup::BRUSH) || !ready {return Err(GpuRasterError::DeferredObjectWork);}
+            {
+                let ready=regions.raw.prepare(&r.compilation,startup::BRUSH)
+                    & r.compilation.require(r.native_edit.as_ref().unwrap().required_pipelines(r.document_color.depth,false),startup::BRUSH);
+                if !regions.flood.prepare_areas(&r.compilation,startup::BRUSH) || !ready {return Err(GpuRasterError::DeferredObjectWork);}
             }
             r.drain_image_decodes(encoder)?;
             regions.refiner(r).poll_timing();

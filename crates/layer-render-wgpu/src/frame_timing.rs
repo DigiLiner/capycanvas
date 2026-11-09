@@ -37,10 +37,10 @@ pub struct GpuFrameTimingStats {
 // is part of the measured span, and must be calibrated by the caller.
 pub(crate) enum TimestampMarker {
     Encoder,
-    Pass { pipeline: crate::Deferred<wgpu::ComputePipeline>, bind_group: wgpu::BindGroup },
+    Pass { pipeline: crate::Deferred<wgpu::ComputePipeline>, bind_group: wgpu::BindGroup, _scope: crate::compile::Scope },
 }
 impl TimestampMarker {
-    pub fn new(device: &wgpu::Device, _invalid: Arc<AtomicU64>) -> Self {
+    pub fn new(device: &crate::PipelineDevice, _invalid: Arc<AtomicU64>) -> Self {
         if device.features().contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS) {
             return Self::Encoder;
         }
@@ -55,17 +55,17 @@ impl TimestampMarker {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("timestamp marker"), bind_group_layouts: &[Some(&layout)], immediate_size: 0,
         });
-        let pipeline = crate::Deferred::compute_module(&crate::PipelineDevice::from(device.clone()),
+        let pipeline = crate::Deferred::compute_module(device,
             "timestamp marker", &pipeline_layout, &module, "main");
-        #[cfg(target_arch = "wasm32")]
+        let scope=device.compilation().expect("Timer compilation coordinator");
+        scope.require([&pipeline],crate::compile::Class::Validation);
+        #[cfg(target_arch="wasm32")]
         {
-            let prepare = pipeline.clone();
+            let (pipeline,scope)=(pipeline.clone(),scope.clone());
             wasm_bindgen_futures::spawn_local(async move {
-                if prepare.prepare().await.is_err() { _invalid.fetch_add(1, Ordering::Relaxed); }
+                if scope.prepare_all([&pipeline]).await.is_err() { _invalid.fetch_add(1,Ordering::Relaxed); }
             });
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        pipeline.compile();
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("timestamp marker"),
             size: 4,
@@ -75,7 +75,12 @@ impl TimestampMarker {
         let bind_group = crate::bindings::group(device, "timestamp marker", &layout, [
             buffer.as_entire_binding(),
         ]);
-        Self::Pass { pipeline, bind_group }
+        Self::Pass { pipeline, bind_group, _scope: scope }
+    }
+    #[cfg(test)]
+    pub async fn prepare(&self)->Result<(),String> {
+        if let Self::Pass {pipeline,_scope:scope,..}=self {scope.prepare_all([pipeline]).await?;}
+        Ok(())
     }
     fn ready(&self) -> bool {
         match self { Self::Encoder => true, Self::Pass { pipeline, .. } => pipeline.ready() }
@@ -84,7 +89,7 @@ impl TimestampMarker {
         match self { Self::Encoder => 2, Self::Pass { .. } => 4 }
     }
     pub fn write(&self, encoder: &mut wgpu::CommandEncoder, query: &wgpu::QuerySet, index: u32) {
-        let Self::Pass { pipeline, bind_group } = self else {
+        let Self::Pass { pipeline, bind_group, .. } = self else {
             encoder.write_timestamp(query, index);
             return;
         };
@@ -124,7 +129,15 @@ pub struct GpuFrameTimer {
     skipped: u64,
 }
 impl GpuFrameTimer {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    #[cfg(test)]
+    pub(crate) async fn prepare(&self)->Result<(),String> {
+        if let Some(marker)=&self.marker {marker.prepare().await?;}
+        Ok(())
+    }
+    pub fn new(renderer: &crate::WgpuRasterizer) -> Self {
+        Self::with_device(&renderer.device,&renderer.queue)
+    }
+    pub(crate) fn with_device(device:&crate::PipelineDevice,queue:&wgpu::Queue)->Self {
         let period = if device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
             f64::from(queue.get_timestamp_period())
         } else {
@@ -357,7 +370,17 @@ mod tests {
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
-        let mut timer = GpuFrameTimer::new(&device, &queue);
+        let device=crate::PipelineDevice::from(device);
+        let owner=device.compilation().unwrap();
+        owner.idle(false,false);
+        let mut timer = GpuFrameTimer::with_device(&device, &queue);
+        let Some(TimestampMarker::Pass {_scope:scope,..})=&timer.marker else {panic!("pass timestamps without encoder timestamps")};
+        assert!(!scope.is_idle(),"the timer shares the active drawing's coordinator");
+        owner.idle(true,true);
+        assert!(scope.is_idle(),"a passive timer does not hold optional compilation");
+        owner.idle(false,false);
+        assert!(!scope.is_idle());
+        pollster::block_on(timer.prepare()).unwrap();
         let mut previous_end = 0;
         for frame in 1..=12 {
             let mut encoder = device.create_command_encoder(&Default::default());
@@ -411,7 +434,9 @@ mod tests {
             ..Default::default()
         }))
         .unwrap();
-        let mut timer = GpuFrameTimer::new(&device, &queue);
+        let device=crate::PipelineDevice::from(device);
+        let mut timer = GpuFrameTimer::with_device(&device, &queue);
+        pollster::block_on(timer.prepare()).unwrap();
         let mut encoder = device.create_command_encoder(&Default::default());
         assert!(timer.begin_encoded(&mut encoder, 42));
         // This deliberate CPU stall must not become a reported GPU spike.
@@ -455,7 +480,9 @@ mod tests {
             ..Default::default()
         }))
         .unwrap();
-        let mut timer = GpuFrameTimer::new(&device, &queue);
+        let device=crate::PipelineDevice::from(device);
+        let mut timer = GpuFrameTimer::with_device(&device, &queue);
+        pollster::block_on(timer.prepare()).unwrap();
         let mut expected = Vec::new();
         let mut samples = [GpuFrameSample::default(); 16];
         let mut observed = Vec::new();
@@ -532,8 +559,9 @@ mod tests {
         let instance=crate::WgpuRasterizer::headless_instance();
         let adapter=pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
         let (device,queue)=pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {required_features:wgpu::Features::TIMESTAMP_QUERY,..Default::default()})).unwrap();
+        let device=crate::PipelineDevice::from(device);
         let wait=||device.poll(wgpu::PollType::Wait {submission_index:None,timeout:Some(std::time::Duration::from_secs(5))}).unwrap();
-        let mut timer=GpuFrameTimer::new(&device,&queue);let mut samples=[GpuFrameSample::default();3];
+        let mut timer=GpuFrameTimer::with_device(&device,&queue);pollster::block_on(timer.prepare()).unwrap();let mut samples=[GpuFrameSample::default();3];
         let mut held=device.create_command_encoder(&Default::default());
         assert!(timer.begin_encoded(&mut held,101));timer.end_encoded(&mut held);let held=held.finish();
         queue.submit([]);wait();timer.poll(&device,&queue);

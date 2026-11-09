@@ -850,6 +850,9 @@ impl CanvasFade {
     pub const WAITING: Self = Self {drawing:Some(1.),navigator:Some(1.)};
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PreparationContext { pub selection: bool }
+
 /// GPU command boundary implemented by the renderer owned by each platform.
 ///
 /// `submit` consumes the borrowed frame without retaining it and enqueues GPU
@@ -862,8 +865,8 @@ pub trait CanvasRenderer {
     /// holds admission during a stroke/gesture or unfinished document edit.
     fn shader_input(&mut self) {}
     fn shader_idle(&mut self, _idle: bool, _speculative_idle: bool) {}
-    /// Prepare optional brush pipelines before a selection is created.
-    fn prepare_selection_brush(&mut self, _document: &layer_core::Document, _brush: &layer_core::BrushSnapshot) {}
+    /// Declare optional pipeline needs for the current tool context.
+    fn prepare_context(&mut self, _document: &layer_core::Document, _brush: &layer_core::BrushSnapshot, _context: PreparationContext) {}
     /// UI-only tool changes may still need a first-use preparation callback.
     fn shaders_need_update(&self, _document: &layer_core::Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool { false }
     /// Native interpretation configured on this renderer. Adoption/recovery

@@ -345,13 +345,11 @@ impl WgpuRasterizer {
         renderer.memory.invalidate_limits();
         renderer.refresh_memory_limits();
         if let Some(native)=&mut renderer.native_edit {native.color_cache_bytes=0;}
-        renderer.preparation_compiler=self.startup.as_ref().map(|startup|startup.compiler.clone())
-            .or_else(||self.preparation_compiler.clone());
+        renderer.compilation=self.compilation.clone();
         #[cfg(not(target_arch="wasm32"))]
         if let Some(wake)=&self.preparation_wake {renderer.set_preparation_wake(wake.clone());}
         #[cfg(target_arch="wasm32")]
         {
-            if renderer.preparation_compiler.is_none() {return Err(GpuRasterError::Effect("Shader compiler is unavailable".into()));}
             renderer.browser_image_decoder=self.browser_image_decoder.clone();
             renderer.browser_raster_decoder=self.browser_raster_decoder.clone();
             renderer.browser_nearest_coordinate_decoder=self.browser_nearest_coordinate_decoder.clone();

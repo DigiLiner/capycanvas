@@ -892,14 +892,15 @@ mod tests {
                                     .expect("a specialized exact recipe")[slot + usize::from(coverage)] = expected.clone();
                             }
                             let selected = r.pipelines.dry_material.selected_kernel(&style, plan.material, coverage, extra);
+                            pollster::block_on(r.compilation.prepare_all([selected,&expected])).unwrap();
                             assert!(std::ptr::eq(selected.compile(), expected.compile()),
                                 "{case:?} write_only={write_only} extra={extra:#x} coverage={coverage}: selected recipe identity");
                             identities.push((extra, coverage, expected));
                         }
                     }
-                    r.submit(FramePacket { dabs: &[], dab_batches: &[], ..frame }).unwrap();
+                    crate::test_support::submit_ready(&mut r, FramePacket { dabs: &[], dab_batches: &[], ..frame }).unwrap();
                     let blank = r.readback_srgb_rgba8().unwrap();
-                    r.submit(FramePacket { reset_layers: false, ..frame }).unwrap();
+                    crate::test_support::submit_ready(&mut r, FramePacket { reset_layers: false, ..frame }).unwrap();
                     let rgba = r.readback_srgb_rgba8().unwrap();
                     assert!(rgba != blank, "{case:?} write_only={write_only}: composed paint must be visible");
                     for (extra, coverage, expected) in identities {
@@ -1055,7 +1056,7 @@ mod tests {
             eprintln!("BEGIN contact={contact:#x} operation={operation:?} entry={entry} blend={blend}");
             let internal_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Internal);
             let validation_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
-            pollster::block_on(pipeline.prepare()).unwrap();
+            pollster::block_on(renderer.compilation.prepare_all([pipeline])).unwrap();
             let validation = pollster::block_on(validation_scope.pop());
             let internal = pollster::block_on(internal_scope.pop());
             eprintln!("END contact={contact:#x} operation={operation:?} entry={entry} blend={blend} validation={validation:?}; internal={internal:?}");
@@ -1088,13 +1089,14 @@ mod tests {
                 let plan = BrushPassPlan::for_device(&style, &renderer.device);
                 let ready = |kernels: &Kernels| kernels.iter().filter(|k| k.ready()).count();
                 let blended = p.blended.values().map(ready).sum::<usize>();
-                let copied = plan.material == MaterialOperation::Deposit && dry_flow(&style);
+                let copied = if p.in_place() {1+usize::from(plan.state.coverage)}
+                    else {usize::from(plan.material == MaterialOperation::Deposit && dry_flow(&style))};
                 println!("{preset:?} {blend:?}: {blended} blend kernels, copy {}", p.copy_kernel(false).ready());
                 assert_eq!(blended, 1 + usize::from(plan.state.coverage), "{preset:?} {blend:?} compiles its commit and prediction kernels");
                 assert!(p.selected_kernel(&style, plan.material, plan.state.coverage, 0).ready() && p.selected_kernel(&style, plan.material, false, 0).ready());
                 assert_eq!(ready(&p.kernels) + p.variants.values().map(ready).sum::<usize>() + usize::from(p.gather.ready()), 0,
                     "{preset:?} {blend:?} compiles no normal kernel");
-                assert_eq!(p.copy.iter().filter(|k| k.ready()).count(), usize::from(copied), "{preset:?} {blend:?} prepares the unchanged-pixel copy only for dry-contact deposits");
+                assert_eq!(p.copy.iter().filter(|k| k.ready()).count(), copied, "{preset:?} {blend:?} prepares the unchanged-pixel copies its prediction binds");
             }
         }
     }

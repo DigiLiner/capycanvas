@@ -327,8 +327,7 @@ impl WgpuRasterizer {
                 Some((target,operation,damage,external(edges,packet,self.fill_preview.as_ref())))
             }).collect();
         if requested.is_empty() {self.fill_edges_preflight=None;return true;}
-        if let Some(compiler)=self.startup.as_ref().map(|startup|&startup.compiler).or(self.preparation_compiler.as_ref())
-            && !compiler.require([&self.scene_pipelines.pipeline[fill_line_pipeline(&self.device)]],startup::DOCUMENT) {compiler.start();return false;}
+        if !self.compilation.require([&self.scene_pipelines.pipeline[fill_line_pipeline(&self.device)]],startup::DOCUMENT) {return false;}
         let mut state=if let Some(state)=self.fill_edges_preflight.take().filter(|state|requested.iter().all(|(target,operation,_,external)|
             matches!(&operation.kind,RasterOperationKind::Fill {edges:Some(edges),..} if state.input(*target,edges,external,
                 packet.scene.target_extent(*target),packet.scene.target_offset(*target)).is_some()))) {state}else {

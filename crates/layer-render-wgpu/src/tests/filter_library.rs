@@ -95,7 +95,7 @@ fn submit(
         ..test_view()
     };
     let context=layer_core::EvaluationContext {elapsed:time,phases:Vec::new().into()};
-    crate::test_support::submit_ready(r, FramePacket {
+    crate::test_support::submit_published(r, FramePacket {
         view,
         time_seconds: time,
         dabs: &dabs,
@@ -103,8 +103,7 @@ fn submit(
         reset_layers: reset,
         composite_all: all,
         ..packet(document.scene().with_context(&context), extent)
-    })
-    .unwrap();
+    });
 }
 fn image(r: &mut WgpuRasterizer) -> Vec<u8> {
     r.readback_srgb_rgba8().unwrap()

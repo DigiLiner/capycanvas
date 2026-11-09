@@ -446,7 +446,7 @@ mod tests {
                 ..crate::test_support::dab_batch(target,crate::tests::test_style(BrushExecution::Dry),layer_core::Rect::from_extent(extent))};
             placement::paint_mut(&mut document).operations=Arc::new(vec![operation]);
             let packet=FramePacket {dab_batches:std::slice::from_ref(&batch),..crate::test_support::packet(document.scene(),extent)};
-            r.layer_masks.pipelines.initialize.compile();
+            r.compilation.blocking(||r.layer_masks.pipelines.initialize.compile());
             let mut encoder=submission::CommandEncoder::new(&r.device,&Default::default());
             r.layer_masks.prepare(&r.device,&mut encoder,(packet.scene,packet.dab_batches,None),extent,false,&mut r.selection_clip).unwrap();
             assert_eq!(r.layer_masks.command_pages.keys().filter(|(key,_)|!key.2).count(),9);

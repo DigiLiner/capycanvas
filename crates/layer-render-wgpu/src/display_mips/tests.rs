@@ -77,6 +77,7 @@ fn queued_tile_mips_match_float64_area_reference_through_partial_edges_and_updat
     })
     .unwrap();
     let pipelines = Pipelines::new(&r.device);
+    pollster::block_on(r.compilation.prepare_all([&pipelines.reduce,&pipelines.fused_reduce])).unwrap();
     for extent in [[257, 3], [513, 273], [2051, 1027], [4097, 1]] {
         let plan = Plan::new(extent).unwrap();
         let expected: Vec<_> = (0..extent[1])

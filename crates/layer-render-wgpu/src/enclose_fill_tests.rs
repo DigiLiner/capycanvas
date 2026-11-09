@@ -980,7 +980,7 @@ fn swept_footprint(r:&mut WgpuRasterizer)->Selection {
     }
     let paint=layer_render::SelectionPaint {id:71,before:Arc::new(Selection::empty()),mode:layer_render::SelectionPaintMode::Add,
         opacity:1.,gray:1.,gradient:None,style:stroke.style(),dabs,enclosed:None,finish:false,restart:false};
-    assert!(r.paint_selection(&paint).unwrap());
+    assert!(super::selection_painting::paint(r, &paint).unwrap());
     let footprint=super::selection_painting::receive(r,paint);
     let layer_core::SelectionShape::Pixels(pixels)=&footprint.shape else {panic!("captured footprint")};
     for [x,y] in [[48,48],[96,48]] {assert_eq!(value(pixels,x,y),255,"swept footprint {x},{y}");}

@@ -81,6 +81,7 @@ fn pixels(renderer: &WgpuRasterizer, presenter: &mut ViewportPresenter, surface:
     let size = SIZE.map(|v| v * scale);
     let texture = crate::create_target(renderer.device(), size, format, "panel surface regression").0;
     presenter.set_panel_surfaces(renderer, &[surface.clone().scaled(scale as f32)]);
+    pollster::block_on(presenter.prepare(renderer)).unwrap();
     presenter.present(renderer, &texture.create_view(&Default::default()), camera(size), [0., 0., 0., 1.]).unwrap();
     let bytes = crate::layer_tests::page_bytes(renderer, &texture);
     if format == wgpu::TextureFormat::Rgba8Unorm
@@ -159,6 +160,7 @@ fn gpu_panel_surface_audit_glass_matches_backdrop_regions_at_odd_extents() {
             let mut camera = view(size);
             camera.document_to_surface[4..].copy_from_slice(&translation);
             let render = |presenter: &mut ViewportPresenter| {
+                pollster::block_on(presenter.prepare(&renderer)).unwrap();
                 presenter.present(&renderer, &target.create_view(&Default::default()), camera, [0., 0., 0., 1.]).unwrap();
                 crate::layer_tests::page_bytes(&renderer, &target)
             };
@@ -195,6 +197,7 @@ fn gpu_panel_surface_audit_absent_sidebar_casts_no_origin_shadow() {
     scene.groups = vec![group([16., 24., 144., 64.])];
     presenter.set_panel_surfaces(&renderer, &[scene]);
     let target = crate::create_target(renderer.device(), SIZE, format, "absent sidebar shadow").0;
+    pollster::block_on(presenter.prepare(&renderer)).unwrap();
     presenter.present(&renderer, &target.create_view(&Default::default()), camera(SIZE), WHITE).unwrap();
     let bytes = crate::layer_tests::page_bytes(&renderer, &target);
     for [x, y] in [[4.5, 8.5], [8.5, 4.5]] {
@@ -526,6 +529,7 @@ fn gpu_panel_surface_scene_replacement_clears_old_sources_and_anchor_attachments
     let render = |presenter: &mut ViewportPresenter, surfaces: &[PanelSurface], target: &wgpu::Texture| {
         presenter.set_panel_surfaces(&renderer, surfaces);
         assert!(presenter.needs_present(&renderer, camera(size), [0., 0., 0., 1.]));
+        pollster::block_on(presenter.prepare(&renderer)).unwrap();
         presenter.present(&renderer, &target.create_view(&Default::default()), camera(size), [0., 0., 0., 1.]).unwrap();
         crate::layer_tests::page_bytes(&renderer, target)
     };
@@ -580,6 +584,7 @@ fn gpu_panel_surface_cached_shapes_follow_resize_scale_palette_and_rotation() {
             presenter.set_panel_surfaces(&renderer,&surfaces);
             let extent=if turns%2==0 {size}else {[size[1],size[0]]};
             let target=crate::create_target(renderer.device(),extent,format,"cached panel shape transition").0;
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer,&target.create_view(&Default::default()),camera(size),[0.,0.,0.,1.]).unwrap();
             crate::layer_tests::page_bytes(&renderer,&target)
         };
@@ -598,13 +603,16 @@ fn gpu_panel_shape_cache_recovers_a_discarded_presentation() {
     let mut presenter=ViewportPresenter::for_renderer(&renderer,format);
     presenter.set_target_retention(true);
     presenter.set_panel_surfaces(&renderer,&[surface(104.)]);
+    pollster::block_on(presenter.prepare(&renderer)).unwrap();
     presenter.present(&renderer,&target.create_view(&Default::default()),camera(SIZE),[0.,0.,0.,1.]).unwrap();
     let replacement=mirrored(surface(77.),false);
     presenter.set_panel_surfaces(&renderer,&[replacement.clone()]);
     let mut discarded=renderer.device().create_command_encoder(&Default::default());
+    pollster::block_on(presenter.prepare(&renderer)).unwrap();
     presenter.encode(&renderer,&mut discarded,&target.create_view(&Default::default()),camera(SIZE),[0.,0.,0.,1.]).unwrap();
     drop(discarded);
     assert!(presenter.needs_present(&renderer,camera(SIZE),[0.,0.,0.,1.]),"discarded shape rendering must schedule another presentation");
+    pollster::block_on(presenter.prepare(&renderer)).unwrap();
     presenter.present(&renderer,&target.create_view(&Default::default()),camera(SIZE),[0.,0.,0.,1.]).unwrap();
     let actual=crate::layer_tests::page_bytes(&renderer,&target);
     let expected=pixels(&renderer,&mut ViewportPresenter::for_renderer(&renderer,format),&replacement,1,format);
@@ -619,7 +627,7 @@ fn gpu_panel_shape_cache_keeps_reprojection_and_recovers_discarded_geometry() {
         size:crate::present::CAMERA_SIZE,usage:wgpu::BufferUsages::UNIFORM,mapped_at_creation:false});
     let shader=crate::present::viewport_shader(&renderer.device,wgpu::TextureFormat::Rgba8Unorm,crate::SdrSurfaceColor::Srgb,false);
     let mut panels=super::PanelSurfaces::new(&renderer.device,&uniform,&shader,wgpu::TextureFormat::Rgba8Unorm);
-    pollster::block_on(crate::Deferred::prepare_all([&panels.pipeline,&panels.mask_pipeline])).unwrap();
+    pollster::block_on(renderer.compilation.prepare_all([&panels.pipeline,&panels.mask_pipeline])).unwrap();
     let blur=crate::create_target(device,[64,56],wgpu::TextureFormat::Rgba16Float,"panel cached blur").0;
     let frame=|panels:&mut super::PanelSurfaces,affine| {
         let mut encoder=device.create_command_encoder(&Default::default());
@@ -743,6 +751,7 @@ fn gpu_panel_surface_linear_targets_reproduce_opaque_palette_colors() {
             presenter.set_backdrop(&renderer,&[crate::BackdropRegion::rounded([0.,0.,256.,224.],[0.;4],crate::BackdropRegion::SQUIRCLE)],
                 crate::BackdropBlurStyle {levels:palette.glass.blur.levels,offset:palette.glass.blur.offset},false);
             presenter.set_panel_surfaces(&renderer,&[scene]);
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer,&target.create_view(&Default::default()),camera(SIZE),[1.;4]).unwrap();
             let bytes=crate::layer_tests::page_bytes(&renderer,&target);
             let scale=if encoding==crate::SdrSurfaceColor::WindowsScrgb {layer_core::color::hdr::REFERENCE_WHITE_NITS/80.}else{1.};
@@ -791,6 +800,7 @@ fn gpu_panel_glass_crossfade_preserves_rest_and_scales_premultiplied_output() {
             crate::BackdropBlurStyle {levels:palette.glass.blur.levels,offset:palette.glass.blur.offset},false);
         let render = |presenter: &mut ViewportPresenter, surfaces: &[PanelSurface]| {
             presenter.set_panel_surfaces(&renderer, surfaces);
+            pollster::block_on(presenter.prepare(&renderer)).unwrap();
             presenter.present(&renderer,&target.create_view(&Default::default()),view(SIZE),[0.,0.,0.,1.]).unwrap();
             crate::layer_tests::page_bytes(&renderer,&target)
         };

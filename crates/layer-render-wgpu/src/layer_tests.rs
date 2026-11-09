@@ -116,7 +116,7 @@ fn retained_scene_viewport_preserves_pixels_outside_local_paint_and_preview_dama
         stroke.kind = if preview { DabBatchKind::Preview } else { DabBatchKind::Persistent };
         stroke.style = preset_style(layer_core::DefaultBrushPreset::Pencil);
         stroke.damage = ink.bounds();
-        r.submit(FramePacket {
+        crate::test_support::submit_ready(&mut r, FramePacket {
             view: camera,
             dabs: &[ink],
             dab_batches: &[stroke],
@@ -496,7 +496,7 @@ fn in_place_dry_strokes_match_ping_pong_pages() {
         let mut stroke = batch(target(&document));
         stroke.style = style;
         stroke.damage = ink.bounds();
-        r.submit(FramePacket { dabs: &[ink], dab_batches: &[stroke], ..packet(document.scene(), extent) }).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket { dabs: &[ink], dab_batches: &[stroke], ..packet(document.scene(), extent) }).unwrap();
         let mut pages: Vec<_> = r.paint_layers.iter().find(|l| l.id == target(&document)).unwrap().pages.iter()
             .map(|p| (p.coordinate, page_bytes(&r, &p.active().texture))).collect();
         pages.sort_by_key(|(coordinate, _)| *coordinate);
@@ -528,7 +528,7 @@ fn display_predictions_wider_than_the_input_sets_match_single_page_predictions()
         let mut committed = batch(target(&document));
         committed.dab_count = base.len() as u32;
         committed.damage = Rect::from_extent(extent);
-        r.submit(FramePacket { dabs: &base, dab_batches: &[committed], ..frame }).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket { dabs: &base, dab_batches: &[committed], ..frame }).unwrap();
         let ink: Vec<_> = predicted.iter().map(|&page| {
             let mut ink = dab([0.9, 0.2, 0.1, 1.]);
             ink.center = at(page, 40.);
@@ -542,7 +542,7 @@ fn display_predictions_wider_than_the_input_sets_match_single_page_predictions()
         stroke.damage = Rect::from_extent(extent);
         stroke.kind = DabBatchKind::Preview;
         stroke.stroke_end = false;
-        r.submit(FramePacket { dabs: &ink, dab_batches: std::slice::from_ref(&stroke), composite_all: false, ..frame }).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket { dabs: &ink, dab_batches: std::slice::from_ref(&stroke), composite_all: false, ..frame }).unwrap();
         assert!(r.dry_display_gathers(&stroke), "the prediction averages its inputs at display resolution");
         let predicted: Vec<_> = predicted.iter().map(|&page| page_bytes(&r, &r.preview_page(page).unwrap().active().texture)).collect();
         (r.dry_display_inputs.len(), predicted)
@@ -574,7 +574,7 @@ fn reduced_color_live_strokes_constrain_pixels_before_publication() {
             ink.center = Point { x: 128., y: 128. }; ink.radii = [80.; 2];
             let mut stroke = batch(target(&document));
             stroke.style = preset_style(preset); stroke.damage = ink.bounds(); stroke.stroke_end = false;
-            r.submit(FramePacket { dabs: &[ink], dab_batches: &[stroke], ..packet(document.scene(), [256; 2]) }).unwrap();
+            crate::test_support::submit_ready(&mut r, FramePacket { dabs: &[ink], dab_batches: &[stroke], ..packet(document.scene(), [256; 2]) }).unwrap();
             assert!(paint(&document).raster.is_empty());
             let pages = &r.paint_layers.iter().find(|p| p.id == target(&document)).unwrap().pages;
             assert!(!pages.is_empty());

@@ -11,11 +11,12 @@ pub(super) struct SelectionPreviews {
     pub definitions: std::collections::BTreeMap<SourceTarget, Selection>,
     key: Option<PreviewKey>,
     pub texture: Option<wgpu::TextureView>,
+    pub pending: bool,
     pipeline: Option<PreviewPipeline>,
 }
 impl SelectionPreviews {
     fn reset(&mut self) {
-        (self.key, self.texture) = (None, None);
+        (self.key, self.texture, self.pending) = (None, None, false);
     }
 }
 struct PreviewPipeline {
@@ -108,18 +109,14 @@ impl PreviewPipeline {
         crate::bindings::group(&r.device, "saved mask display", &self.layout, [&params, input, output].map(|b| b.as_entire_binding()))
     }
     fn ready(&self, r: &WgpuRasterizer, thumbnail: bool) -> Result<bool, GpuRasterError> {
-        let Some(startup) = &r.startup else {
-            return Ok(true);
-        };
-        startup.compiler.check()?;
-        let clip = startup
-            .compiler
+        r.compilation.check()?;
+        let clip = r.compilation
             .require(r.selection_clip.pipelines(), startup::BRUSH);
         Ok(clip
             & if thumbnail {
-                startup.compiler.require([&self.thumbnail], startup::BRUSH)
+                r.compilation.require([&self.thumbnail], startup::BRUSH)
             } else {
-                startup.compiler.require([&self.merge], startup::BRUSH)
+                r.compilation.require([&self.merge], startup::BRUSH)
             })
     }
 }
@@ -160,9 +157,8 @@ impl WgpuRasterizer {
             let gpu = previews
                 .pipeline
                 .get_or_insert_with(|| PreviewPipeline::new(self));
-            if !gpu.ready(self, false)? {
-                return Ok(());
-            }
+            previews.pending = !gpu.ready(self, false)?;
+            if previews.pending { return Ok(()); }
             let [w, h] = self.document_extent;
             let row = (w * 4).div_ceil(256) * 256;
             let limits = self.device.limits();

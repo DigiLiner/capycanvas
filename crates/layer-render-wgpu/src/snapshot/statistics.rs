@@ -50,7 +50,7 @@ impl SnapshotGpu {
                 };
             }
         let pipeline = StatisticsPipeline::new(&self.device);
-        Deferred::prepare_all([&pipeline.count, &pipeline.fold, &pipeline.resolve]).await?;
+        self.device.compilation().map_err(|e|e.to_string())?.prepare_all([&pipeline.count, &pipeline.fold, &pipeline.resolve]).await?;
         let buffer = |label, size| self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label), size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,

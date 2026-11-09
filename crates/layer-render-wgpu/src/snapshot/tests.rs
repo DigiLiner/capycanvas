@@ -62,7 +62,7 @@ fn assert_constant_capture_prepared(snapshot:&mut SnapshotRenderer,paper:Occurre
     for (layers,execution) in scene::effect_chains(view,scene::EffectPreparation::Display) {
         display.prepare(&snapshot.renderer,view,&layers,execution,snapshot.time,0,snapshot.blend_space).unwrap();
     }
-    display.compile();
+    pollster::block_on(display.needs().prepare(&snapshot.renderer.compilation)).unwrap();
     assert!(!display.chain_ready(view,&[paper],effects::Execution::Fused,snapshot.blend_space),
         "the old display-only policy must omit this constant fallback recipe");
     pollster::block_on(snapshot.prepare_scene_pipelines()).unwrap();
@@ -1603,6 +1603,7 @@ fn presented_green(document: &Document) -> Vec<i32> {
     crate::test_support::submit_settled(&mut r, layer_render::FramePacket { view, blend_space: document.composition().blend, ..packet(document.scene(), [width, height]) });
     let (texture, surface) = crate::create_target(&r.device, [width, height], wgpu::TextureFormat::Rgba8UnormSrgb, "relief canvas");
     let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    crate::test_support::prepare_lit_presenter(&r, &mut presenter);
     presenter.present(&r, &surface, view, [0., 0., 0., 1.]).unwrap();
     crate::layer_tests::page_bytes(&r, &texture).as_chunks::<4>().0.iter().map(|p| i32::from(p[1])).collect()
 }

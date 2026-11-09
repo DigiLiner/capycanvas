@@ -155,13 +155,13 @@ fn offset_photo_incremental_composition_matches_rebuild_with_alpha_edges() {
             for (r, full) in [(&mut r, false), (&mut rebuilt, true)] {
                 if full { r.scale_display = None; }
                 let before = r.metrics.composited_pixels;
-                crate::test_support::submit_ready(r, FramePacket {
+                crate::test_support::submit_published(r, FramePacket {
                     view: ViewState { width_px: canvas[0], height_px: canvas[1], ..view() },
                     dabs: if prediction { std::slice::from_ref(&ink) } else { &[] },
                     dab_batches: if prediction { std::slice::from_ref(&stroke) } else { &[] },
                     composite_all: full || baseline.is_none(),
                     ..packet(photo.scene(), canvas)
-                }).unwrap();
+                });
                 if prediction && !full {
                     assert!(r.metrics.composited_pixels - before < u64::from(canvas[0]) * u64::from(canvas[1]),
                         "an offset contact must not rebuild the entire canvas");
@@ -183,13 +183,13 @@ fn offset_photo_incremental_composition_matches_rebuild_with_alpha_edges() {
             let mut images = Vec::new();
             for (r, full) in [(&mut r, false), (&mut rebuilt, true)] {
                 if full { r.scale_display = None; }
-                crate::test_support::submit_ready(r, FramePacket {
+                crate::test_support::submit_published(r, FramePacket {
                     view: ViewState { width_px: canvas[0], height_px: canvas[1], ..view() },
                     dabs: std::slice::from_ref(&ink),
                     dab_batches: std::slice::from_ref(&stroke),
                     composite_all: full,
                     ..packet(photo.scene(), canvas)
-                }).unwrap();
+                });
                 images.push(page_bytes(r, crate::test_support::document_texture(r)));
             }
             assert!(images[0] != baseline.unwrap(), "mask painting changes live pixels");
@@ -369,7 +369,7 @@ fn offset_photo_samples_full_source_across_tiles_without_creating_raster() {
     set_source(&mut layer, source.clone());
     for (n, offset) in [[30, 10], [-1050, -700], [-700, 15], [0, 0]].into_iter().enumerate() {
         occurrence_mut(&mut layer).offset = offset;
-        r.submit(FramePacket {
+        crate::test_support::submit_ready(&mut r, FramePacket {
             reset_layers: n == 0,
             ..packet(layer.scene(), canvas)
         })
@@ -470,7 +470,7 @@ pub(crate) fn watercolor_prediction_and_commit_with_renderer(mut r: WgpuRasteriz
         if reduced && reset && dabs.is_empty() {
             crate::test_support::submit_settled(r, frame);
         } else {
-            crate::test_support::submit_ready(r, frame).unwrap();
+            crate::test_support::submit_published(r, frame);
         }
     };
     let read = |r: &mut WgpuRasterizer| {
@@ -610,7 +610,7 @@ fn watercolor_multitile_prediction_commit_and_restore(restored_empty: bool) {
 fn first_watercolor_frame_batches_page_initialization() {
     let layer = paint_document([512; 2], "first watercolor frame");
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    r.submit(FramePacket { reset_layers: true, ..packet(layer.scene(), [512; 2]) }).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket { reset_layers: true, ..packet(layer.scene(), [512; 2]) }).unwrap();
     let mut ink = dab([0.1, 0.3, 0.8, 1.]);
     ink.center = Point { x: 256., y: 256. };
     ink.radii = [160.; 2];
@@ -620,7 +620,7 @@ fn first_watercolor_frame_batches_page_initialization() {
     stroke.damage = ink.bounds();
     stroke.stroke_end = false;
     let before = r.metrics().command_passes;
-    r.submit(FramePacket { dabs: &[ink], dab_batches: &[stroke], commit_rasters: false,
+    crate::test_support::submit_ready(&mut r, FramePacket { dabs: &[ink], dab_batches: &[stroke], commit_rasters: false,
         composite_all: false, ..packet(layer.scene(), [512; 2]) }).unwrap();
     r.wait_idle().unwrap();
     assert_eq!(r.paint_layers[0].pages.len(), 4);
@@ -649,7 +649,7 @@ fn watercolor_microbatches_never_lower_the_wetness_of_their_update() {
     for alpha_locked in [false, true] {
         let wetness = (0..=dabs.len()).map(|microbatches| {
             let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-            let mut send = |dabs: &[Dab], batches: &[DabBatch], reset_layers| r.submit(FramePacket { dabs, dab_batches: batches, reset_layers,
+            let mut send = |dabs: &[Dab], batches: &[DabBatch], reset_layers| crate::test_support::submit_ready(&mut r, FramePacket { dabs, dab_batches: batches, reset_layers,
                 ..packet(layer.scene(), [512; 2]) }).unwrap();
             send(&[], &[], true);
             send(&[ink], std::slice::from_ref(&base), false);
@@ -660,7 +660,7 @@ fn watercolor_microbatches_never_lower_the_wetness_of_their_update() {
                 stroke_id: StrokeId(2), stroke_start: i == 0, stroke_end: false, first_dab: i as u32, damage: dab.bounds(),
                 style: DabStyle { alpha_locked, ..style.clone() }, ..base.clone()
             }).collect();
-            r.submit(FramePacket { dabs: &dabs, dab_batches: &update, ..packet(layer.scene(), [512; 2]) }).unwrap();
+            crate::test_support::submit_ready(&mut r, FramePacket { dabs: &dabs, dab_batches: &update, ..packet(layer.scene(), [512; 2]) }).unwrap();
             let mut pages: Vec<_> = r.paint_layers[0].watercolor_wetness_pages.iter().map(|page| (page.coordinate, page.active())).collect();
             pages.sort_by_key(|(coordinate, _)| [coordinate[1], coordinate[0]]);
             let bytes: Vec<_> = pages.iter().flat_map(|(_, page)| crate::layer_tests::page_bytes(&r, &page.texture)).collect();

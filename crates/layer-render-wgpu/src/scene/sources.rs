@@ -656,7 +656,7 @@ impl DecodedTiles {
         samples:Samples,input:&wgpu::Texture,output:&wgpu::TextureView,uniforms:&wgpu::BindGroup,offset:u32,
     ) -> Result<(), GpuRasterError> {
         let pipelines = &r.scene_pipelines.source;
-        if !pipelines.require(r, pipelines.for_format(input.format())) { return Err(GpuRasterError::DeferredObjectWork); }
+        if !r.compilation.require([pipelines.for_format(input.format())], startup::VALIDATION) { return Err(GpuRasterError::DeferredObjectWork); }
         let admission=self.make_room(if self.transfer.contains(samples.space) {0}else{transfer::TABLE_BYTES},
             self.slots.iter().find(|slot|slot.texture==*input).map(|slot|slot.view.clone()).as_ref());
         self.flush_retired(encoder);
@@ -995,17 +995,6 @@ fn display_samples(p: vec2<i32>) -> vec4<f32> { let code=native_samples(p); retu
         | wgpu::TextureFormat::Rgba8Uint | wgpu::TextureFormat::Rgba16Uint | wgpu::TextureFormat::Rgba32Uint) }
     pub(crate) fn for_format(&self, format: wgpu::TextureFormat) -> &Deferred<wgpu::RenderPipeline> {
         if Self::integer_format(format) { &self.integer } else { &self.pipeline }
-    }
-    pub(crate) fn require(&self, r: &WgpuRasterizer, pipeline: &Deferred<wgpu::RenderPipeline>) -> bool {
-        if pipeline.ready() { return true; }
-        if let Some(compiler) = r.startup.as_ref().map(|startup| &startup.compiler).or(r.preparation_compiler.as_ref()) {
-            let ready = compiler.require([pipeline], startup::VALIDATION); compiler.start(); ready
-        } else {
-            #[cfg(not(target_arch = "wasm32"))]
-            { pipeline.compile(); true }
-            #[cfg(target_arch = "wasm32")]
-            { false }
-        }
     }
     fn normalize(&self, device: &PipelineDevice, encoder: &mut crate::submission::CommandEncoder, input: &wgpu::TextureView,
         output: &wgpu::TextureView, transfer: &transfer::NativeTransfer, uniforms: &wgpu::BindGroup, offset: u32,

@@ -193,10 +193,10 @@ impl RawRegions {
     pub fn pipelines(&self) -> impl Iterator<Item = &Deferred<wgpu::ComputePipeline>> {
         [&self.seed_pipeline, &self.tile_pipeline].into_iter()
     }
-    pub fn prepare(&self, compiler: &startup::Compiler, priority:u8) -> bool {
+    pub fn prepare(&self, compiler: &compile::Scope, priority:startup::Class) -> bool {
         compiler.require(self.pipelines(), priority)
     }
-    pub fn prepare_tonal(&self, compiler: &startup::Compiler) -> bool {
+    pub fn prepare_tonal(&self, compiler: &compile::Scope) -> bool {
         compiler.require(
             [&self.tonal_pipeline, &self.tonal_cached_pipeline],
             startup::BRUSH,

@@ -33,7 +33,7 @@ impl SnapshotGpu {
         }
         let (mut snapshot,output)=self.artwork_capture(&query,control.clone()).await?;
         let pipeline=LevelsPipeline::new(&self.device);
-        Deferred::prepare_all([&pipeline.measure, &pipeline.count, &pipeline.fold]).await?;
+        self.device.compilation().map_err(|e|e.to_string())?.prepare_all([&pipeline.measure, &pipeline.count, &pipeline.fold]).await?;
         let initial:Vec<u8>=[u32::MAX,u32::MAX,u32::MAX,0,0,0,0,0].into_iter().chain(std::iter::repeat_n(0,12288)).flat_map(u32::to_le_bytes).collect();
         let summary=self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("Levels exact summary"),contents:&initial,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC});
         let shards=self.device.create_buffer(&wgpu::BufferDescriptor {label:Some("Levels quantile shards"),size:16*12288*4,usage:wgpu::BufferUsages::STORAGE,mapped_at_creation:false});

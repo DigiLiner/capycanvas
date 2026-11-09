@@ -105,7 +105,7 @@ impl SnapshotGpu {
         let (mut snapshot, output) = self.artwork_capture(&request.query, control.clone()).await?;
         snapshot.prepare_effect_analysis_async(output).await?;
         let pipeline = SamplePipeline::new(&self.device);
-        Deferred::prepare_all([&pipeline.measure, &pipeline.accumulate]).await?;
+        self.device.compilation().map_err(|e|e.to_string())?.prepare_all([&pipeline.measure, &pipeline.accumulate]).await?;
         let summary = snapshot.with_region_gpu([origin[0], origin[1], size[0], size[1]], 64,
             |r, packet, region, encoder| {
                 let (texture, _) = create_color_target(&r.device, size, "artwork sample footprint");

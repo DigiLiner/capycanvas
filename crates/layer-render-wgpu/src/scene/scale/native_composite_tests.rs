@@ -43,6 +43,7 @@ fn capture(r:&mut WgpuRasterizer,frame:FramePacket<'_>,handles:[OccurrenceHandle
     let destination=Image {texture:texture.clone(),view,plan:display_mips::Plan::window(frame.document_extent,0,region)};
     scene.copy_window_tile(output,&destination,tile);
     let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+    pollster::block_on(scene.prepare_capture_work_async(r)).unwrap();
     scene.encode_jobs(r,&mut encoder).unwrap();r.uploads.finish(&encoder);encoder.submit(&r.queue);
     r.scene=Some(scene);
     (pixels(r,&texture),work)

@@ -94,7 +94,7 @@ fn viewport_paper_compilation_stays_optional_after_startup() {
     let mut document = rough_gray_paper();
     set_paper(&mut document, &[(paper::RELIEF, EffectValue::Number(150.))]);
     let mut reference = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
-    reference.submit(packet(document.scene(), [128; 2])).unwrap();
+    crate::test_support::submit_settled(&mut reference,packet(document.scene(), [128; 2]));
     assert!(reference.paper_shade().is_some());
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     for overview in [false, true] {
@@ -127,7 +127,7 @@ fn viewport_paper_compilation_stays_optional_after_startup() {
             assert!(Instant::now() < deadline, "paper slope prepares, overview={overview}");
             std::thread::sleep(Duration::from_millis(1));
         }
-        r.submit(packet(document.scene(), [128; 2])).unwrap();
+        crate::test_support::submit_settled(&mut r,packet(document.scene(), [128; 2]));
         r.wait_idle().unwrap();
         let composited = r.metrics.composited_pixels;
         let (texture, target) = crate::create_target(&r.device, [128; 2], format, "optional viewport lighting");
@@ -148,11 +148,15 @@ fn viewport_paper_compilation_stays_optional_after_startup() {
         assert!(r.ui_readback_ready());
         assert!(!r.has_pending_work());
         r.shader_idle(true, false);
-        crate::test_support::wait_startup(&mut r, deadline, |progress| progress.complete,
-            format_args!("optional viewport lighting completes, overview={overview}"));
-        draw(&mut presenter, &r, &target);
+        while !presenter.paper_lighting_drawn() {
+            r.poll_startup().unwrap();
+            draw(&mut presenter,&r,&target);
+            assert!(Instant::now()<deadline,"optional viewport lighting never drew, overview={overview}");
+            std::thread::sleep(Duration::from_millis(1));
+        }
         assert!(presenter.paper_lighting_drawn(), "idle admits viewport lighting, overview={overview}");
         let lit = page_bytes(&r, &texture);
+        crate::test_support::prepare_lit_presenter(&reference,&mut expected);
         draw(&mut expected, &reference, &target);
         assert!(expected.paper_lighting_drawn());
         assert_eq!(lit, page_bytes(&reference, &texture), "staged and eager presentation agree, overview={overview}");
@@ -170,7 +174,8 @@ fn paper_relief_lights_the_canvas_keeps_its_tone_and_turns_with_the_light() {
     let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     let mut first = true;
     let mut present = |r: &mut WgpuRasterizer, document: &Document, camera: ViewState| {
-        r.submit(FramePacket { view: camera, composite_all: std::mem::take(&mut first), ..packet(document.scene(), [128, 128]) }).unwrap();
+        crate::test_support::submit_settled(r,FramePacket { view: camera, composite_all: std::mem::take(&mut first), ..packet(document.scene(), [128, 128]) });
+        crate::test_support::prepare_lit_presenter(r,&mut presenter);
         presenter.present(r, &texture.create_view(&Default::default()), camera, [0.2, 0.3, 0.4, 1.]).unwrap();
         linear(&page_bytes(r, &texture))
     };
@@ -214,6 +219,7 @@ fn separated_paper_and_the_paper_preview_light_the_artwork_in_its_own_encoding()
             crate::test_support::submit_settled(r, FramePacket {
                 composite_all: std::mem::take(&mut first), blend_space: blend, ..packet(document.scene(), [128, 128])
             });
+            crate::test_support::prepare_lit_presenter(r,&mut presenter);
             presenter.present(r, &texture.create_view(&Default::default()), view(), [0.2, 0.3, 0.4, 1.]).unwrap();
             page_bytes(r, &texture)
         };

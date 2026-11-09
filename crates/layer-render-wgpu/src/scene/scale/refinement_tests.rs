@@ -60,13 +60,17 @@ fn first_watercolor_contact_on_empty_layer_batches_source_reduction() {
         ViewTransform { revision: 0, surface_to_document: [8., 0., 0., 8., 0., 0.] }).unwrap();
     let mut brush = layer_core::default_brush(DefaultBrushPreset::WatercolorWash);
     brush.diameter = 50.;
+    let mut required=crate::compile::Needs::default();
+    let style=layer_render::DabStyle::for_brush(&brush,layer_core::StrokeTool::Brush);
+    for preview in [false,true] {required.style(engine.backend(),&style,crate::dry_material::Reach::of(&brush),false,preview);}
+    pollster::block_on(required.prepare(&engine.backend().compilation)).unwrap();
     engine.set_brush(brush).unwrap();
     let settle = |engine: &mut CanvasEngine<WgpuRasterizer>| {
         let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
         loop {
             engine.render_frame().unwrap();
             engine.backend_mut().wait_idle().unwrap();
-            if !engine.has_pending_input() && !engine.backend().has_pending_work() { break; }
+            if !engine.has_pending_input() && !engine.has_pending_document_edits() && !engine.backend().has_pending_work() { break; }
             assert!(std::time::Instant::now() < deadline);
         }
     };
@@ -131,11 +135,12 @@ fn strokes_and_replays_repair_only_touched_pages() {
             loop {
                 engine.render_frame().unwrap();
                 engine.backend_mut().wait_idle().unwrap();
-                if !engine.has_pending_input() && (!settle || !engine.backend().has_pending_work()) { break; }
+                if !engine.has_pending_input() && (!settle || !engine.has_pending_document_edits() && !engine.backend().has_pending_work()) { break; }
                 assert!(std::time::Instant::now() < deadline);
             }
         };
         drain(&mut engine, true);
+        assert!(!engine.has_pending_document_edits(),"initial stroke fixture has an unsubmitted document frame");
         for stroke in 0..3 {
             for i in 0..=32 {
                 let phase = if i == 0 { PenPhase::Down } else if i == 32 { PenPhase::Up } else { PenPhase::Move };
@@ -186,6 +191,7 @@ fn idle_refinement_presents_completion_and_never_holds_new_input() {
         let (_, target) = create_target(&r.device, [frame.view.width_px, frame.view.height_px],
             wgpu::TextureFormat::Rgba32Float, "refinement presentation");
         presenter.set_target_retention(true);
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target, frame.view, [0.; 4]).unwrap();
         crate::test_support::submit_ready(&mut r, frame).unwrap();
         assert!(r.has_pending_work());
@@ -571,7 +577,7 @@ fn settled_composition_reuses_every_zoom_and_refines_only_changed_pages() {
     insert_occurrence(&mut doc,effect,0);
     frame = packet(doc.scene(), extent);
     frame.view.document_to_surface = [0.25, 0., 0., 0.25, 0., 0.];
-    crate::test_support::submit_ready(&mut r, frame).unwrap(); crate::test_support::submit_ready(&mut exact, frame).unwrap();
+    submit_published(&mut r, frame); submit_published(&mut exact, frame);
     assert!(!r.scale_display.as_ref().unwrap().has_pending_work(&r));
     assert_settled(&mut r, frame, &pixels(&exact, crate::test_support::document_texture(&exact)));
 }
@@ -609,7 +615,8 @@ fn global_filters_evict_optional_levels_before_rejecting_the_document() {
     assert_eq!(budget.image_pixel_budget(0),256 << 20);
     assert!(windows::Plan::new(doc.scene(), extent, budget.image_pixel_budget(resident), r.device.limits().max_texture_dimension_2d).is_err());
     assert!(windows::Plan::new(doc.scene(), extent, budget.image_pixel_budget(0), r.device.limits().max_texture_dimension_2d).is_ok());
-    crate::test_support::submit_ready(&mut r, frame).unwrap();
+    submit_published(&mut r,frame);
+    assert!(!r.object_deferred,"initial global composition must publish before measuring refinement");
     assert_eq!(r.scale_display.as_ref().unwrap().resident_bytes(), 0);
     assert!(!r.scale_display.as_ref().unwrap().has_pending_work(&r));
     let mut exact = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
@@ -662,7 +669,7 @@ fn watercolor_uses_the_display_graph_across_preview_commit_and_zoom() {
         frame.blend_space = space;
         frame.composite_all = false;
         frame.view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
-        for renderer in [&mut r, &mut exact] { crate::test_support::submit_ready(renderer, frame).unwrap(); }
+        for renderer in [&mut r, &mut exact] { crate::test_support::submit_published(renderer, frame); }
         for (step, kind) in [DabBatchKind::Persistent, DabBatchKind::Preview, DabBatchKind::Persistent].into_iter().enumerate() {
             let mut dab = crate::tests::test_dab([252. + step as f32 * 20., 128.], [0.2, 0.3, 0.8, 0.8], 0.8);
             dab.radii = [90.; 2];
@@ -672,19 +679,19 @@ fn watercolor_uses_the_display_graph_across_preview_commit_and_zoom() {
             batch.stroke_start = step == 0;
             batch.stroke_end = step == 2;
             let stroke = FramePacket { dabs: std::slice::from_ref(&dab), dab_batches: std::slice::from_ref(&batch), ..frame };
-            for renderer in [&mut r, &mut exact] { crate::test_support::submit_ready(renderer, stroke).unwrap(); }
+            for renderer in [&mut r, &mut exact] { crate::test_support::submit_published(renderer, stroke); }
             assert!(r.paint_layers[0].watercolor.is_some());
             assert!(r.scale_display.is_some(), "watercolor stays in the common display cache");
             let error = quality(&display_pixels(&r), &pixels(&exact, crate::test_support::document_texture(&exact)), r.scale_display.as_ref().unwrap().plan);
             assert!(error[0] < 0.002 && error[1] < 0.015, "watercolor {space:?} {kind:?}: {error:?}");
             if kind == DabBatchKind::Preview {
-                for renderer in [&mut r, &mut exact] { crate::test_support::submit_ready(renderer, frame).unwrap(); }
+                for renderer in [&mut r, &mut exact] { crate::test_support::submit_published(renderer, frame); }
             }
             assert_settled(&mut r, frame, &pixels(&exact, crate::test_support::document_texture(&exact)));
         }
         for zoom in [1., 0.5, 0.125] {
             frame.view.document_to_surface = [zoom, 0., 0., zoom, 0., 0.];
-            for renderer in [&mut r, &mut exact] { crate::test_support::submit_ready(renderer, frame).unwrap(); }
+            for renderer in [&mut r, &mut exact] { crate::test_support::submit_published(renderer, frame); }
             assert_settled(&mut r, frame, &pixels(&exact, crate::test_support::document_texture(&exact)));
         }
     }
@@ -798,7 +805,12 @@ fn idle_display_reuses_global_effect_dependencies_until_the_next_edit() {
         let mut frame = packet(doc.scene(), extent);
         frame.view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
         submit_published(&mut r, frame); submit_published(&mut exact, frame);
-        crate::test_support::submit_ready(&mut r, FramePacket { composite_all: false, ..frame }).unwrap();
+        let deadline=std::time::Instant::now()+READBACK_TIMEOUT;
+        while r.scene.as_ref().unwrap().image_pass_pixels()==0 {
+            crate::test_support::submit_ready(&mut r, FramePacket { composite_all: false, ..frame }).unwrap();
+            r.wait_idle().unwrap();
+            assert!(std::time::Instant::now()<deadline,"global effect work must start");
+        }
         let work = r.scene.as_ref().unwrap().image_pass_pixels();
         assert!(work > 0);
         assert_settled(&mut r, frame, &pixels(&exact, crate::test_support::document_texture(&exact)));

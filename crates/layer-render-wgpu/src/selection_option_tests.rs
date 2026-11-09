@@ -575,13 +575,16 @@ fn replacing_a_displayed_preview_repaints_only_around_either_outline() {
     let mut kept = presenter(&r);
     kept.set_target_retention(true);
     r.set_selection_outline(Some(&cells(2, 6))).unwrap();
+    pollster::block_on(kept.prepare(&r)).unwrap();
     kept.present(&r, &retained.create_view(&Default::default()), view(), [1.; 4]).unwrap();
     assert_eq!(kept.damage_area_pixels(), 128 * 128);
     r.set_selection_outline(Some(&cells(3, 8))).unwrap();
+    pollster::block_on(kept.prepare(&r)).unwrap();
     kept.present(&r, &retained.create_view(&Default::default()), view(), [1.; 4]).unwrap();
     let repainted = kept.damage_area_pixels();
     assert!(repainted > 0 && repainted < 128 * 128 / 2, "a new preview repaints its outlines only: {repainted}");
     let mut full = presenter(&r);
+    pollster::block_on(full.prepare(&r)).unwrap();
     full.present(&r, &fresh.create_view(&Default::default()), view(), [1.; 4]).unwrap();
     assert!(page_bytes(&r, &retained) == page_bytes(&r, &fresh), "and matches a complete redraw");
     let outlined = page_bytes(&r, &fresh).as_chunks::<4>().0.iter().filter(|p| p[0] < 10 || p[0] > 245).count();

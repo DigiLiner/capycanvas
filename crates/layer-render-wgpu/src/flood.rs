@@ -136,13 +136,13 @@ impl Flood {
     }
     #[cfg(test)]
     pub fn compaction_pending(&self)->Option<bool> {self.lines.compaction_pending()}
-    pub fn prepare(&self, compiler: &startup::Compiler, refinement: RegionRefinement, enclosed: bool, contiguous: bool, priority:u8) -> bool {
+    pub fn prepare(&self, compiler: &compile::Scope, refinement: RegionRefinement, enclosed: bool, contiguous: bool, priority:startup::Class) -> bool {
         compiler.require(self.request_pipelines(refinement,enclosed,contiguous,priority==startup::OTHER),priority)
     }
     pub fn request_pipelines(&self,refinement:RegionRefinement,enclosed:bool,contiguous:bool,prepare_ends:bool)->impl Iterator<Item=&Deferred<wgpu::ComputePipeline>> {
         self.lines.pipelines(refinement,prepare_ends).chain(stages(enclosed,contiguous).map(|entry|&self.pipelines[entry]))
     }
-    pub fn prepare_cache(&self,compiler:&startup::Compiler,priority:u8)->bool {self.lines.prepare_cache(compiler,priority)}
+    pub fn prepare_cache(&self,compiler:&compile::Scope,priority:startup::Class)->bool {self.lines.prepare_cache(compiler,priority)}
     pub fn build_lines(&mut self,input:&Input<'_>,encoder:&mut crate::submission::CommandEncoder,extent:[u32;2],paper:([f32;4],u32,bool),(budget,demand):(f64,bool),dirty:&std::collections::BTreeSet<[u32;2]>)->Result<(bool,f64),GpuRasterError> {
         let device=input.device;
         let labels=Labels::new(extent,&device.limits()).ok_or(GpuRasterError::SizeOverflow)?;
@@ -150,7 +150,7 @@ impl Flood {
         if !self.lines.building() {self.lines.allocate(device,extent,labels.side,&windows)?;}
         self.lines.build(input,encoder,paper,budget,demand,dirty)
     }
-    pub fn prepare_areas(&self,compiler:&startup::Compiler,priority:u8)->bool {
+    pub fn prepare_areas(&self,compiler:&compile::Scope,priority:startup::Class)->bool {
         self.lines.prepare_areas(compiler,priority) & compiler.require(["initialize","merge","mark_exterior","export_border","seam_merge","propagate_flags","area_tokens"].map(|entry|&self.pipelines[entry]),priority)
     }
     pub fn area_tokens(&self)->&wgpu::Buffer {self.lines.token_buffer()}

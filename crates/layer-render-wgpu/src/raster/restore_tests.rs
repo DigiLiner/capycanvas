@@ -85,7 +85,7 @@ fn ready_restore_requires_consumed_preparation_progress_between_iterations() {
     assert!(r.preparation_progress() > previous);
     let original = live_pixels(&r);
 
-    let compiler = Arc::new(crate::startup::Compiler::new().unwrap());
+    let compiler = r.compilation.clone();
     let (entered, entered_rx) = mpsc::channel();
     let (release, release_rx) = mpsc::channel();
     compiler.enqueue(crate::startup::DOCUMENT, move || {
@@ -93,11 +93,9 @@ fn ready_restore_requires_consumed_preparation_progress_between_iterations() {
         let _ = release_rx.recv();
         Ok(())
     });
-    compiler.start();
     entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     r.scene_pipelines.source = crate::scene::Pipelines::new(&r.device).source;
     assert!(!r.scene_pipelines.source.pipeline.ready());
-    r.preparation_compiler = Some(compiler);
 
     let second = data(color, 1, &[RasterPlane::Color], 2);
     let blob = second.tiles.values().next().unwrap().wait_backing().unwrap();

@@ -254,7 +254,7 @@ pub(super) struct Scene {
     record_count: usize,
     upload: Vec<u8>,
     pipeline: [Deferred<wgpu::RenderPipeline>; FRAGMENTS.len()],
-    pending_pipelines: u16,
+    pending_pipelines: compile::Needs,
     pub(super) effects: effects::Effects,
     pub effect_passes: u64,
     images: images::ImageStages,
@@ -286,6 +286,14 @@ pub(super) struct Pipelines {
     edges: wgpu::BindGroupLayout,
 }
 
+fn is_material_compute(jobs:&[Job],index:usize)->bool {
+    match &jobs[index] {
+        Job::Placement(_) | Job::Reduce {..} => true,
+        Job::Watercolor {target,..} => index>0 && matches!(&jobs[index-1],
+            Job::Clear(previous,color) if previous==target && *color==wgpu::Color::TRANSPARENT),
+        _=>false,
+    }
+}
 fn is_compute(job: &Job) -> bool {
     if matches!(job,Job::Effect {prepared:effects::PreparedEffect {pipeline:effects::Pipeline::Compute(_),..},..}) {return true;}
     let Job::Draw { data, over: false, clip, .. } = job else { return false; };
@@ -593,7 +601,7 @@ impl Scene {
             record_count: 0,
             upload: Vec::new(),
             pipeline,
-            pending_pipelines: 0,
+            pending_pipelines: Default::default(),
             effects,
             effect_passes: 0,
             images: images::ImageStages::default(),
@@ -939,6 +947,7 @@ impl Scene {
             return Ok(out);
         }
         let prepared = self.effects.prepare(r, packet.scene, indices, effects::Execution::Fused, packet.time_seconds, 0, packet.blend_space)?;
+        if self.object_live && !self.effects.enqueue(&r.compilation,startup::DOCUMENT) { return Err(GpuRasterError::DeferredObjectWork); }
         let mask = if indices.len() == 1 && !direct_effect_mask(packet.scene, handle) {
             packet.scene.mask(handle).filter(|(use_, _)| use_.enabled).map(|(use_, source)| {
                 self.mask_at(r, use_, source, packet.scene.target_offset(SourceTarget::Coverage(use_.source)), tile)
@@ -1850,13 +1859,10 @@ impl Scene {
     }
 
     pub(crate) async fn prepare_capture_work_async(&mut self,r:&mut WgpuRasterizer)->Result<(),GpuRasterError> {
-        Deferred::prepare_all(self.pipeline.iter().enumerate().filter_map(|(i,pipeline)|
-            (self.pending_pipelines & (1 << i) != 0).then_some(pipeline))).await.map_err(GpuRasterError::Effect)?;
-        self.pending_pipelines = 0;
-        #[cfg(not(target_arch="wasm32"))]
-        self.effects.compile();
-        #[cfg(target_arch="wasm32")]
-        self.effects.compile_async().await.map_err(GpuRasterError::Effect)?;
+        if !self.jobs.is_empty() { self.jobs_ready(r); }
+        r.transforms.as_ref().unwrap().materialization_needs().prepare(&r.compilation).await.map_err(GpuRasterError::Effect)?;
+        self.pending_pipelines.prepare(&r.compilation).await.map_err(GpuRasterError::Effect)?;
+        self.effects.needs().prepare(&r.compilation).await.map_err(GpuRasterError::Effect)?;
         while self.exact_object_results.pending() || r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending()) {
             if r.snapshot_cancelled.as_ref().is_some_and(|cancelled|cancelled.load(std::sync::atomic::Ordering::Relaxed)) {
                 return Err(GpuRasterError::Color("Snapshot capture cancelled".into()));
@@ -2016,6 +2022,7 @@ impl Scene {
             if let Output::EffectComposite(handle)=output && destination.plan.level>0 {
                 let execution=if matches!(self.jobs.last(),Some(Job::Effect {data,..}) if data[19]>2.5) {effects::Execution::ReducedContribution} else {effects::Execution::Reduced};
                 let prepared=self.effects.prepare(r,packet.scene,&[handle],execution,packet.time_seconds,0,packet.blend_space)?;
+                if self.object_live && !self.effects.enqueue(&r.compilation,startup::DOCUMENT) {return Err(GpuRasterError::DeferredObjectWork);}
                 let Job::Effect {target,data,prepared:effect,source_target,changed_cells,..}=self.jobs.last_mut().unwrap() else {unreachable!()};
                 let rect=paint_transform::texel_rect(covered.window_local(destination.plan.bounds),1<<destination.plan.level);
                 *target=destination.view.clone();
@@ -2112,8 +2119,8 @@ impl Scene {
         self.scale_sources.object_refinements = refinements;
         self.scale_sources.object_damage = damage;
         self.vector_damage(r, packet);
-        self.prepare_presented_motion(r, packet, encoder)?;
         self.object_results = objects;
+        self.prepare_presented_motion(r, packet, encoder)?;
         advanced?;
         let dirty = self.scale_sources.object_damage.values().fold(dirty, |dirty, damage| dirty.union(damage.bounds()));
         self.scale_sources.prepare(r, packet, batch_tiles);
@@ -2213,43 +2220,46 @@ impl Scene {
     }
 
     fn jobs_ready(&mut self,r:&WgpuRasterizer)->bool {
-        self.pending_pipelines = 0;
-        let mut effects_ready = self.effects.preparation_ready();
+        let mut required=std::mem::take(&mut self.pending_pipelines);
+        required.render.clear();required.compute.clear();
+        let mut render=|pipeline:&Deferred<wgpu::RenderPipeline>| {
+            if !pipeline.ready() {required.render.push(pipeline.clone());}
+        };
+        let mut compute=|pipeline:&Deferred<wgpu::ComputePipeline>| {
+            if !pipeline.ready() {required.compute.push(pipeline.clone());}
+        };
+        let mut effects_ready=true;
         for (i,job) in self.jobs.iter().enumerate() {
+            if is_compute(job) || matches!(job,Job::Clear(..)) {compute(&r.scene_pipelines.constant.2);}
             match job {
                 Job::Draw {target,data,over,pipeline,..} => {
                     let format=if portable_draw(&r.device,&self.jobs,i) {r.device.working_format()}else{target.texture().format()};
-                    if let Some(index) = pipeline.or_else(||fragment_pipeline(data[8] as u32,*over,format==r.device.scalar_format()))
-                        && !self.pipeline[index].ready() && !is_compute(job) {self.pending_pipelines |= 1 << index;}
-                }
-                Job::Effect {prepared,..} => effects_ready &= prepared.pipeline.ready(),
-                Job::DecodedTile(source) => if let Some(pipeline) = source.pipeline(&r.scene_pipelines.source) {
-                    effects_ready &= r.scene_pipelines.source.require(r, pipeline);
+                    if let Some(index)=pipeline.or_else(||fragment_pipeline(data[8] as u32,*over,format==r.device.scalar_format()))
+                        && !is_compute(job) {render(&self.pipeline[index]);}
                 },
-                _ => {}
+                Job::Effect {prepared,..} => {
+                    effects_ready &= self.effects.preparation_ready() && prepared.pipeline.ready();
+                    match &prepared.pipeline {
+                        effects::Pipeline::Render(pipeline)=>render(pipeline),
+                        effects::Pipeline::Compute(pipeline)=>compute(pipeline),
+                    }
+                },
+                Job::Placement(job)=>compute(&self.placement[usize::from(job.scalar)].placement_pipeline(&job.transform,job.taps)),
+                Job::Positions(..)=>r.transforms.as_ref().unwrap().mesh_pipelines().iter().for_each(&mut render),
+                Job::Vector(_)=>r.scene_pipelines.vector.pipelines().into_iter().for_each(&mut compute),
+                Job::Sampling(_)=>r.scene_pipelines.objects.pipelines().into_iter().for_each(&mut compute),
+                Job::Collection(job)=>job.objects.iter().for_each(|object|compute(if object.samples.is_some_and(|samples|samples.format()==wgpu::TextureFormat::Rg32Uint) {&r.scene_pipelines.objects.preview_integer}else{&r.scene_pipelines.objects.preview})),
+                Job::DecodedTile(source)=>if let Some(pipeline)=source.pipeline(&r.scene_pipelines.source) {render(pipeline);},
+                Job::Watercolor {..}=>if is_material_compute(&self.jobs,i) {compute(&r.pipelines.watercolor_compute.1);} else {render(&r.pipelines.watercolor_composite);},
+                _=>{},
             }
         }
-        if effects_ready && self.pending_pipelines == 0 {return true;}
-        let compiler=r.startup.as_ref().map(|startup|&startup.compiler).or(r.preparation_compiler.as_ref());
-        if let Some(compiler)=compiler {
-            if !effects_ready {self.effects.enqueue(compiler,startup::DOCUMENT);}
-            compiler.require(self.pipeline.iter().enumerate().filter_map(|(index,pipeline)|
-                (self.pending_pipelines & (1 << index) != 0).then_some(pipeline)),startup::DOCUMENT);
-            compiler.start();
-            return false;
-        }
-        #[cfg(not(target_arch="wasm32"))]
-        {
-            self.effects.compile();
-            for (index,pipeline) in self.pipeline.iter().enumerate() {
-                if self.pending_pipelines & (1 << index) != 0 {pipeline.compile();}
-            }
-            self.pending_pipelines = 0;
-            true
-        }
-        #[cfg(target_arch="wasm32")]
-        {false}
+        let ready=required.require(&r.compilation,startup::DOCUMENT)
+            & (effects_ready || self.effects.enqueue(&r.compilation,startup::DOCUMENT));
+        self.pending_pipelines=required;
+        ready
     }
+
     fn encode_query_jobs(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, grid: Option<[u32;4]>) -> Result<(), GpuRasterError> {
         r.source_tiles.get_mut().flush_retired(encoder);
         if self.ordered {return self.encode_ordered_jobs(r,encoder,grid).and_then(|ready|if ready {Ok(())}else {Err(GpuRasterError::DeferredObjectWork)});}
@@ -2298,7 +2308,7 @@ impl Scene {
         }
         let source_jobs = self.source_jobs.clone();
         let job_grid = |i| grid.filter(|_| !source_jobs.iter().any(|range| range.contains(&i)));
-        self.effects.encode_preparation(encoder);
+        if self.jobs.iter().any(|job|matches!(job,Job::Effect {..})) { self.effects.encode_preparation(encoder); }
         let base=self.reserve_records(r,self.jobs.len());
         self.upload.resize(self.jobs.len() * self.stride, 0);
         for (i, job) in self.jobs.iter().enumerate() {
@@ -2349,19 +2359,13 @@ impl Scene {
                 && (!is_compute(next) || matches!(next, Job::Draw { data, .. } | Job::Effect {data,..}
                     if data[..2] == [0., 0.] && data[2..4] == data[4..6])))
         };
-        let is_material_compute = |i: usize| match &self.jobs[i] {
-            Job::Placement(_) | Job::Reduce { .. } => true,
-            Job::Watercolor { target, .. } => i > 0 && matches!(&self.jobs[i - 1],
-                Job::Clear(previous, color) if previous == target && *color == wgpu::Color::TRANSPARENT),
-            _ => false,
-        };
         let compute_clear = |i: usize| matches!(&self.jobs[i], Job::Clear(target, _) if !overwritten_clear(i) && {
             let texture = target.texture();
             texture.format() == wgpu::TextureFormat::Rgba32Float && texture.usage().contains(wgpu::TextureUsages::STORAGE_BINDING)
                 && texture.mip_level_count() == 1 && texture.depth_or_array_layers() == 1
         });
         let material_clear = |i: usize| matches!(self.jobs[i], Job::Clear(..))
-            && matches!(self.jobs.get(i + 1), Some(Job::Placement(_) | Job::Watercolor { .. })) && is_material_compute(i + 1);
+            && matches!(self.jobs.get(i + 1), Some(Job::Placement(_) | Job::Watercolor { .. })) && is_material_compute(&self.jobs,i + 1);
         let source_bindings = &mut self.source_bindings;
         let mask_bindings = &mut self.mask_bindings;
         let output_bindings = &mut self.output_bindings;
@@ -2372,14 +2376,14 @@ impl Scene {
             if i < encoded_through {
                 continue;
             }
-            if is_material_compute(i) {
+            if is_material_compute(&self.jobs,i) {
                 let end = (i + 1..self.jobs.len()).find(|&j| match &self.jobs[j] {
                     Job::DecodedTile(pending) => self.jobs[i..j].iter().any(|job| match job {
                         Job::Placement(job) => job.reads(&pending.texture),
                         Job::Reduce { sources, .. } => sources.iter().any(|source| source.texture() == &pending.texture),
                         _ => false,
                     }),
-                    _ => !is_material_compute(j) && !material_clear(j),
+                    _ => !is_material_compute(&self.jobs,j) && !material_clear(j),
                 }).unwrap_or(self.jobs.len());
                 let mut draws = Vec::new();
                 for (j,job) in self.jobs.iter().enumerate().take(end).skip(i) {
@@ -2980,6 +2984,8 @@ mod shader_tests {
         let device = PipelineDevice::from(device);
         assert!(device.attachment_blend(device.working_format(), Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)).is_none());
         let pipelines = Pipelines::new(&device);
+        let scope=device.compilation().unwrap();
+        pollster::block_on(scope.prepare_all([&pipelines.pipeline[0],&pipelines.pipeline[1]])).unwrap();
         assert!(std::ptr::eq(pipelines.pipeline[0].compile(), pipelines.pipeline[1].compile()));
     }
 

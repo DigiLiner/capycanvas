@@ -180,6 +180,7 @@ fn clone_strokes_stay_inside_the_selection_and_keep_alpha_locked_transparency() 
             kind: RasterOperationKind::Fill { edges: None, underfill: None, texture: Default::default(), color: FILL, alpha_locked: false },
         })
         .unwrap();
+    flush(&mut engine);
     let edit = occurrence_edit(engine.document(), TARGET_USE, |o| o.alpha_locked = true);
     engine.apply_edit(edit).unwrap();
     flush(&mut engine);

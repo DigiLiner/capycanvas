@@ -280,6 +280,11 @@ pub struct SceneDisplay {
 }
 
 impl NativeHost {
+    pub fn prepare_canvas_presentation(&mut self, presenter: &ViewportPresenter) -> bool {
+        let ready=self.session.engine().backend().0.as_ref().is_some_and(|gpu|presenter.pipelines_ready(gpu));
+        self.dirty|=!ready;
+        ready
+    }
     pub fn poll_canvas_presentation(&mut self, presenter: &mut ViewportPresenter) -> Result<(), String> {
         if self.session.rendering_suspended() { return Ok(()); }
         let Some(renderer)=self.session.renderer_mut().0.as_mut() else { return Ok(()); };

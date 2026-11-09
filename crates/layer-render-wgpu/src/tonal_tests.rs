@@ -189,7 +189,7 @@ fn opaque_photo_cache_preserves_odd_rows_and_falls_back_for_opacity() {
     placement::set_source(&mut layer, Arc::new(builder.finish().unwrap()));
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let submit = |r: &mut WgpuRasterizer, layer: &Document| {
-        r.submit(FramePacket { view: view(), ..packet(layer.scene(), extent) })
+        crate::test_support::submit_ready(r, FramePacket { view: view(), ..packet(layer.scene(), extent) })
         .unwrap()
     };
     submit(&mut r, &layer);
@@ -265,7 +265,7 @@ fn tonal_61mp_performance() {
     let mut layer = paint_document(extent, "Generated 61 MP photograph");
     placement::set_source(&mut layer, Arc::new(builder.finish().unwrap()));
     let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
-    r.submit(FramePacket { view: view(), reset_layers: true, ..packet(layer.scene(), extent) })
+    crate::test_support::submit_ready(&mut r, FramePacket { view: view(), reset_layers: true, ..packet(layer.scene(), extent) })
     .unwrap();
     let before = r.telemetry().resident_bytes;
     let mut held = Vec::new();
@@ -442,7 +442,7 @@ fn tonal_hdr_masks_and_probes_match_luminance_reference() {
     let root = layer.artwork.root;
     layer.artwork.compositions.get_mut(root).unwrap().color = color;
     placement::set_source(&mut layer, Arc::new(source.finish().unwrap()));
-    r.submit(FramePacket { view: view(), reset_layers: true, ..packet(layer.scene(), extent) })
+    crate::test_support::submit_ready(&mut r, FramePacket { view: view(), reset_layers: true, ..packet(layer.scene(), extent) })
     .unwrap();
     let bands = vec![
         TonalBand::defaults()[0].clone(),
@@ -606,7 +606,7 @@ fn tonal_sdr_native_painted_source_and_composite() {
         min: Point::default(),
         max: Point { x: 512., y: 512. },
     };
-    r.submit(FramePacket {
+    crate::test_support::submit_ready(&mut r, FramePacket {
         view: view(),
         dabs: &[ink],
         dab_batches: &[stroke],

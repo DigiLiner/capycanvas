@@ -55,6 +55,7 @@ fn cold_correction_gather_finishes_resident_pages_and_requests_the_next() {
         assert!(2 * attempts < pages, "a gather attempt must finish every page whose decode arrived and request more than one page");
         crate::test_support::complete(&r);
         crate::test_support::settle_decodes(&mut r);
+        pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
     }
     assert!(attempts > 1, "the photo starts cold");
 }
@@ -152,7 +153,7 @@ fn correction_progress(change: CorrectionChange) {
         assert!(result.is_ok() || matches!(result, Err(GpuRasterError::DeferredObjectWork)), "{result:?}");
         if let Some(gather) = scene.images.stages.iter().find(|stage| stage.id == effect).and_then(|stage| stage.input_gather.as_ref()) {
             assert_eq!(gather.revision, doc.revision);
-            assert!(gather.pages.len() <= remaining, "a committed input prefix was restarted");
+            assert!(gather.pages.len() <= remaining, "a committed input prefix was restarted: {} > {remaining}", gather.pages.len());
             remaining = gather.pages.len();
             progressed |= remaining > 0 && remaining < 80;
         }
@@ -195,6 +196,7 @@ fn independent_pointwise_tiles_share_a_compute_pass() {
         (output, convert)
     }).collect();
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+    pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
     scene.encode_jobs(&mut r, &mut encoder).unwrap();
     assert_eq!(encoder.pass_count(), 1);
     r.uploads.finish(&encoder);
@@ -236,6 +238,7 @@ fn normal_composition_converts_in_its_final_destination() {
         assert_eq!(scene.jobs.iter().filter(|j| matches!(j, Job::Draw { .. })).count(), 1,
             "normal layers and their output conversion require one destination write");
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
         scene.encode_jobs(&mut r, &mut encoder).unwrap();
         r.uploads.finish(&encoder);
         encoder.submit(&r.queue);
@@ -268,6 +271,7 @@ fn complete_compute_composition_replaces_the_clear_but_partial_writes_preserve_i
         let Some(Job::Draw { clip, .. }) = scene.jobs.last_mut() else { unreachable!() };
         *clip = Some(region);
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
         scene.encode_jobs(&mut r, &mut encoder).unwrap();
         let passes = encoder.pass_count();
         r.uploads.finish(&encoder);
@@ -345,6 +349,7 @@ fn effect_grids_preserve_document_coordinates_and_partial_edge_centers() {
                 masks: Box::new(std::array::from_fn(|_| r.empty_view.clone())),
                 source_target: None, changed_cells: None,
             });
+            pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
             scene.encode_jobs(&mut r, &mut encoder).unwrap();
             r.uploads.finish(&encoder);
             encoder.submit(&r.queue);
@@ -463,6 +468,7 @@ fn authored_spatial_references_preserve_builtin_windows_and_orientation() {
                 scene.jobs.push(Job::Effect { target: output.view.clone(), sources: [previous.view.clone(), original.clone(), r.empty_view.clone(), r.empty_paper_view.clone()],
                     data, prepared, masks: Box::new(std::array::from_fn(|_| r.empty_view.clone())), source_target:None, changed_cells:None });
                 let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+                pollster::block_on(scene.prepare_capture_work_async(r)).unwrap();
                 scene.encode_jobs(r, &mut encoder).unwrap();
                 r.uploads.finish(&encoder);
                 encoder.submit(&r.queue);
@@ -549,6 +555,7 @@ fn multipass_opacity_reads_original_finite_support_independently_of_intermediate
                 data: effects::image_grid(input_plan, front, input_plan), prepared,
                 masks: Box::new(std::array::from_fn(|_| r.empty_view.clone())), source_target:None, changed_cells:None });
             let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+            pollster::block_on(scene.prepare_capture_work_async(r)).unwrap();
             scene.encode_jobs(r, &mut encoder).unwrap();
             r.uploads.finish(&encoder);
             encoder.submit(&r.queue);
@@ -609,6 +616,7 @@ fn encoded_effect_jobs_retain_distinct_spatial_mappings_and_parameters_before_su
             output
         }).collect();
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        pollster::block_on(scene.prepare_capture_work_async(r)).unwrap();
         scene.encode_jobs(r, &mut encoder).unwrap();
         r.uploads.finish(&encoder);
         encoder.submit(&r.queue);

@@ -60,33 +60,48 @@ impl PaintTransforms {
         let pass = if scalar { &state.scalar } else { &state.color };
         pass.placement_pipeline(transform, pixel_transform::exact_taps(transform))
     }
-    pub fn require_frame(&self, r: &WgpuRasterizer, packet: FramePacket<'_>, preview: Option<&layer_render::TransformPreview>, required: &mut startup::Requirements) {
+    pub fn require_frame(&self, r: &WgpuRasterizer, packet: FramePacket<'_>, preview: Option<&layer_render::TransformPreview>, required: &mut compile::Needs) {
         let mut require = |target: SourceTarget, transform: &layer_core::ImageTransform, taps| {
             let state = &self.0[0];
-            if target.is_coverage() { required.render.push(state.visibility.render_pipeline(transform, taps)); }
-            else {
-                required.render.push(state.color.render_pipeline(transform, taps));
-                let wet = r.paint_layers.iter().any(|layer| layer.id == target && !layer.watercolor_wetness_pages.is_empty())
+            let wet = packet.dab_batches.iter().any(|batch|batch.target==target && batch.style.execution==BrushExecution::Watercolor)
+                    || r.paint_layers.iter().any(|layer| layer.id == target && !layer.watercolor_wetness_pages.is_empty())
                     || r.native_backing(target).is_some_and(|data| data.has_plane(layer_core::raster::RasterPlane::WatercolorWetness))
                     || packet.scene.raster(target).and_then(|raster| raster.try_data()).and_then(Result::ok).is_some_and(|data| data.has_plane(layer_core::raster::RasterPlane::WatercolorWetness));
-                if wet { required.render.push(state.scalar.render_pipeline(transform, taps)); }
-            }
+            state.extend_pipelines(target,transform,taps,wet,required);
         };
+        for state in &self.0 {
+            if let Some(previous)=&state.preview { require(previous.target,&previous.drawn(),preview_taps(previous)); }
+        }
+        let mut selected = false;
+        let mut mesh = false;
         for batch in packet.dab_batches {
             if let DabBatchKind::RasterOperation(index) = batch.kind
-                && let Some(layer_core::RasterOperation {kind: layer_core::RasterOperationKind::Transform(transform), ..}) = packet.scene.operations(batch.target).and_then(|ops| ops.get(index as usize)) {
+                && let Some(layer_core::RasterOperation {kind: layer_core::RasterOperationKind::Transform(transform), coverage, ..}) = packet.scene.operations(batch.target).and_then(|ops| ops.get(index as usize)) {
+                selected |= coverage.selection.is_some();
+                mesh |= transform.placement.mesh.is_some();
                 require(batch.target, transform, pixel_transform::exact_taps(transform));
             }
         }
         if let Some(preview) = preview {
             let companion = preview.companion(packet.scene);
             for preview in std::iter::once(preview).chain(companion.as_ref()) {
+                selected |= preview.selection.is_some();
                 require(preview.target, &preview.drawn(), preview_taps(preview));
             }
-            if preview.transform.placement.mesh.is_some() {
-                required.render.extend(self.mesh_pipelines());
+            mesh |= preview.transform.placement.mesh.is_some();
+        }
+        if mesh { required.render.extend(self.mesh_pipelines()); }
+        if preview.is_some() { required.compute.extend(self.display_pipelines()); }
+        if selected { required.compute.extend(r.selection_clip.pipelines().into_iter().cloned()); }
+    }
+    pub fn materialization_needs(&self) -> compile::Needs {
+        let mut required=compile::Needs::default();
+        for state in self.0.iter().filter(|state|!state.native_preview) {
+            if let Some(preview)=&state.preview {
+                state.extend_pipelines(preview.target,&preview.drawn(),preview_taps(preview),state.sources[1].is_some(),&mut required);
             }
         }
+        required
     }
     pub fn begin_frame(&mut self) {
         for t in &mut self.0 {
@@ -210,17 +225,17 @@ impl PaintTransforms {
     }
     pub fn prepare_standby(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
         scene: SceneView<'_>, id: SourceTarget, selection: &layer_core::Selection, level: u32,
-    ) -> Result<(), GpuRasterError> {
-        if !matches!(id, SourceTarget::Paint(_)) || scene.raster(id).is_none() { return Ok(()); }
+    ) -> Result<bool, GpuRasterError> {
+        if !matches!(id, SourceTarget::Paint(_)) || scene.raster(id).is_none() { return Ok(true); }
         let state = &mut self.0[0];
-        if state.preview.is_some() { return Ok(()); }
-        if let Some(startup) = &r.startup {
+        if state.preview.is_some() { return Ok(true); }
+        {
             let mip = r.display_pipelines.get_or_insert_with(|| r.recipes.display.clone());
-            let ready = startup.compiler.require([&r.scene_pipelines.source.pipeline], startup::OTHER)
-                & startup.compiler.require([&state.color.display_pipeline()], startup::OTHER)
-                & startup.compiler.require([&mip.reduce, &mip.fused_reduce], startup::OTHER)
-                & startup.compiler.require(r.selection_clip.pipelines(), startup::OTHER);
-            if !ready { return Ok(()); }
+            let ready = r.compilation.require([&r.scene_pipelines.source.pipeline], startup::OTHER)
+                & r.compilation.require([&state.color.display_pipeline()], startup::OTHER)
+                & r.compilation.require([&mip.reduce, &mip.fused_reduce], startup::OTHER)
+                & r.compilation.require(r.selection_clip.pipelines(), startup::OTHER);
+            if !ready { return Ok(false); }
         }
         let extent = r.target_extent(id);
         let standby = Standby::of(scene, id, selection);
@@ -229,7 +244,7 @@ impl PaintTransforms {
             state.standby = Some(standby);
         }
         let local = sampling::selection_level(level, Some(selection), extent);
-        state.prepare_reduced(r, encoder, Some(selection), Some((scene, id)), extent, local)
+        state.prepare_reduced(r, encoder, Some(selection), Some((scene, id)), extent, local).map(|()|true)
     }
     pub fn release_standby(&mut self) {
         for state in &mut self.0 {
@@ -284,6 +299,7 @@ impl PaintTransforms {
         &mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
         scene: SceneView<'_>, region: DocRect,
     ) -> Result<(), GpuRasterError> {
+        if !self.materialization_needs().require(&r.compilation,startup::DOCUMENT) {return Err(GpuRasterError::DeferredObjectWork);}
         let scene = scene.with_offset64(region.min.map(|value| -(value as f64)));
         let local = PixelRect::full(region.size()?);
         for state in self.0.iter_mut().filter(|t| !t.native_preview && t.preview.is_some()) {
@@ -863,6 +879,15 @@ impl ImageTransformState {
         }
         self.retain_pool_bindings();
         Ok(())
+    }
+    fn extend_pipelines(&self,target:SourceTarget,transform:&layer_core::ImageTransform,taps:u32,wet:bool,required:&mut compile::Needs) {
+        let pass=if target.is_coverage() {&self.visibility} else {&self.color};
+        required.render.push(pass.render_pipeline(transform,taps));
+        if !transform.is_identity() {required.render.push(pass.render_pipeline(&Default::default(),pixel_transform::PREVIEW_TAPS));}
+        if wet && !target.is_coverage() {
+            required.render.push(self.scalar.render_pipeline(transform,taps));
+            if !transform.is_identity() {required.render.push(self.scalar.render_pipeline(&Default::default(),pixel_transform::PREVIEW_TAPS));}
+        }
     }
     fn render_source(
         &mut self,

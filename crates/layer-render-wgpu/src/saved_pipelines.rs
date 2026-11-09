@@ -5,8 +5,6 @@ use std::{
     time::Duration,
 };
 
-use crate::startup::{BACKGROUND, Compiler};
-
 const BUDGET: usize = 64 * 1024 * 1024;
 const MAGIC: [u8; 8] = *b"CAPYPLC1";
 static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
@@ -14,7 +12,8 @@ static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
 pub struct SavedPipelines {
     cache: wgpu::PipelineCache,
     path: PathBuf,
-    unsaved: AtomicUsize,
+    compiled: AtomicUsize,
+    saved: AtomicUsize,
     saving: AtomicBool,
     full: AtomicBool,
     published: Mutex<Option<(usize, u32)>>,
@@ -54,28 +53,30 @@ impl SavedPipelines {
             if error.is_some() { return None; }
             cache
         } else { cache };
-        Some(Arc::new(Self { cache, path, unsaved: AtomicUsize::new(0), saving: AtomicBool::new(false), full: AtomicBool::new(false), published: Mutex::new(published) }))
+        Some(Arc::new(Self { cache, path, compiled: AtomicUsize::new(0), saved: AtomicUsize::new(0), saving: AtomicBool::new(false), full: AtomicBool::new(false), published: Mutex::new(published) }))
     }
 
     pub(crate) fn cache(&self) -> &wgpu::PipelineCache { &self.cache }
-    pub(crate) fn compiled(&self) { self.unsaved.fetch_add(1, Ordering::Relaxed); }
+    pub(crate) fn compiled(&self) { self.compiled.fetch_add(1, Ordering::Release); }
 
-    pub(crate) fn schedule(self: &Arc<Self>, compiler: &Compiler) {
-        if self.unsaved.load(Ordering::Relaxed) > 0 && !self.full.load(Ordering::Relaxed)
-            && !self.saving.swap(true, Ordering::AcqRel) {
-            let store = self.clone();
-            compiler.enqueue_untracked(BACKGROUND, false, move || { store.save(); Ok(()) });
-        }
+    pub(crate) fn claim_save(self: &Arc<Self>) -> Option<Save> {
+        (
+        self.compiled.load(Ordering::Acquire) != self.saved.load(Ordering::Acquire) && !self.full.load(Ordering::Relaxed)
+            && !self.saving.swap(true, Ordering::AcqRel)).then(||Save(self.clone()))
     }
 
     fn save(&self) {
-        self.unsaved.store(0, Ordering::Relaxed);
+        let epoch = self.compiled.load(Ordering::Acquire);
         if let Some(data) = self.cache.get_data() && let Ok(false) = write_file(&self.path, &data, &self.published) {
             self.full.store(true, Ordering::Relaxed);
         }
-        self.saving.store(false, Ordering::Release);
+        self.saved.store(epoch, Ordering::Release);
     }
 }
+
+pub(crate) struct Save(Arc<SavedPipelines>);
+impl Save {pub(crate) fn run(self) {self.0.save();}}
+impl Drop for Save {fn drop(&mut self) {self.0.saving.store(false,Ordering::Release);}}
 
 fn cache_path(directory: &Path, info: &wgpu::AdapterInfo) -> Option<PathBuf> {
     let backend = match info.backend {

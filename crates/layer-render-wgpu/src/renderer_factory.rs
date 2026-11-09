@@ -261,6 +261,7 @@ mod tests {
         assert!(Arc::ptr_eq(&factory.0, &first.factory.0));
         let second = factory.rasterizer(DocumentColor::default()).unwrap();
         assert!(Arc::ptr_eq(&first.pipelines, &second.pipelines));
+        pollster::block_on(first.compilation.prepare_all([&first.pipelines.export,&first.pipelines.direct[0],&first.pipelines.direct[1]])).unwrap();
         assert_eq!(first.pipelines.export.compile(), second.pipelines.export.compile());
         assert_eq!(first.pipelines.direct[0].compile(), second.pipelines.direct[0].compile());
         assert_ne!(first.pipelines.direct[0].compile(), second.pipelines.direct[1].compile());
@@ -375,7 +376,7 @@ mod tests {
         let factory = renderer.renderer_factory();
         let owner = Arc::downgrade(&factory.0);
         let raw = renderer.device().clone();
-        let pipeline = renderer.pipelines.export.compile().clone();
+        let pipeline = renderer.compilation.blocking(||renderer.pipelines.export.compile().clone());
         drop(renderer);
         assert!(owner.upgrade().is_some());
         drop(factory);

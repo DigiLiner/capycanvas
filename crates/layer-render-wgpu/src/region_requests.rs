@@ -202,8 +202,7 @@ impl RegionRequests {
                 if let Some(saved)=&cache.mask {encoder.copy_buffer_to_buffer(&classified,0,saved,0,saved.size());}
                 else{cache.mask=Some(Self::copy(&r.device,encoder,&classified,"cached reference classification"));}
             }
-            if let Some(startup)=&r.startup
-                && !self.flood.prepare_cache(&startup.compiler,if demand {startup::BRUSH}else{startup::OTHER}) {return Err(GpuRasterError::DeferredObjectWork);}
+            if !self.flood.prepare_cache(&r.compilation,if demand {startup::BRUSH}else{startup::OTHER}) {return Err(GpuRasterError::DeferredObjectWork);}
             let classified=self.raw.mask().ok_or(GpuRasterError::InvalidExtent)?;
             let (paper,grain,radius)=Self::paper(r,request)?;
             const DEMAND_CHUNKS:f64=3.;
@@ -267,8 +266,7 @@ impl RegionRequests {
             self.classify_target(r,&target,encoder)?;
         }
         self.build_cache(r,request,request.enclosure.is_some(),encoder,true,false)?;
-        if let Some(startup)=&r.startup
-            && !self.flood.prepare(&startup.compiler,Self::refinement(request),request.enclosure.is_some(),request.contiguous,startup::BRUSH) {return Err(GpuRasterError::DeferredObjectWork);}
+        if !self.flood.prepare(&r.compilation,Self::refinement(request),request.enclosure.is_some(),request.contiguous,startup::BRUSH) {return Err(GpuRasterError::DeferredObjectWork);}
         let source=cache::source(r,request);
         let base=RegionRequest {source,limit:None,reference_count:None,..request.clone()};
         let classified={
@@ -314,7 +312,7 @@ impl RegionRequests {
     pub fn background_pending(&self)->bool {self.preparation.as_ref().is_some_and(|preparation|!preparation.recipes_ready || self.cache.as_ref().is_none_or(|cache|!cache.ready || !cache.submitted()))}
     fn prewarm(&mut self,r:&mut WgpuRasterizer,encoder:&mut crate::submission::CommandEncoder)->Result<(),GpuRasterError> {
         if self.pending.is_some() || self.waiting.is_some() || self.running.is_some() || self.areas.is_some() {return Ok(());}
-        if r.startup.as_ref().is_some_and(|startup|!startup.compiler.is_idle()) {return Ok(());}
+        if !r.compilation.is_idle() {return Ok(());}
         let Some(preparation)=&self.preparation else {return Ok(());};
         let (request,enclosed)=(cache::current(r,&preparation.request),preparation.enclosed);
         let _=r.device.poll(wgpu::PollType::Poll);
@@ -324,9 +322,9 @@ impl RegionRequests {
             r.prepare_paper_binding(binding,startup::OTHER)?;
             if paper::PaperTile::id_for(binding).is_some_and(|id|r.papers.view(&id).is_none()) {return Ok(());}
         }
-        if let Some(startup)=&r.startup {
-            let ready=self.raw.prepare(&startup.compiler,startup::OTHER);
-            self.flood.prepare_cache(&startup.compiler,startup::OTHER);
+        {
+            let ready=self.raw.prepare(&r.compilation,startup::OTHER);
+            self.flood.prepare_cache(&r.compilation,startup::OTHER);
             if !ready {return Ok(());}
         }
         self.refiner(r).poll_timing();
@@ -334,9 +332,8 @@ impl RegionRequests {
         if self.cache.as_ref().is_none_or(|cache|!cache.matches(r,&request,&cache::source(r,&request),enclosed)) {self.sampling=region_sources::Sampling::Transparent;}
         match self.build_cache(r,&request,enclosed,encoder,false,false) {
             Ok(())=>{
-                self.preparation.as_mut().unwrap().recipes_ready=r.startup.as_ref().is_none_or(|startup|
-                    self.flood.prepare(&startup.compiler,Self::refinement(&request),enclosed,true,startup::OTHER)
-                    & (!enclosed || startup.compiler.require(r.selection_clip.pipelines(),startup::OTHER)));
+                self.preparation.as_mut().unwrap().recipes_ready=self.flood.prepare(&r.compilation,Self::refinement(&request),enclosed,true,startup::OTHER)
+                    & (!enclosed || r.compilation.require(r.selection_clip.pipelines(),startup::OTHER));
                 Ok(())
             },
             Err(GpuRasterError::DeferredObjectWork)=>Ok(()),Err(error)=>Err(error),
@@ -388,6 +385,7 @@ impl RegionRequests {
             return Err(GpuRasterError::InvalidExtent);
         }
         let lines=!mapped && tone.is_none() && !matches!(request.source,layer_render::RegionSource::Selection(_)|layer_render::RegionSource::Coverage(_)|layer_render::RegionSource::ObjectCoverage(_));
+        if lines && !flood::fits(extent,&r.device.limits()) { return Err(GpuRasterError::SizeOverflow); }
         if lines && (self.cache.as_ref().is_some_and(|cache|cache.pending()) || !self.flood.lines_ready(true)? && !self.flood.lines_discarded()) {self.waiting=Some(request);return Ok(true);}
         if mapped || request.selection.is_some() {
             self.refiner(r);
@@ -396,21 +394,21 @@ impl RegionRequests {
             r.prepare_paper_binding(binding,startup::BRUSH)?;
             if paper::PaperTile::id_for(binding).is_some_and(|id|r.papers.view(&id).is_none()) {self.waiting=Some(request);return Ok(true);}
         }
-        if let Some(startup) = &r.startup {
-            startup.compiler.check()?;
+        {
+            r.compilation.check()?;
             let mut ready = true;
             if let layer_render::RegionSource::TransformedSelection { map, .. } = &request.source {
                 if map.mesh.is_some() {
-                    ready &= startup.compiler.require([&self.positions(r).pipelines.pipeline], startup::BRUSH);
+                    ready &= r.compilation.require([&self.positions(r).pipelines.pipeline], startup::BRUSH);
                 }
-                ready &= startup.compiler.require([&r.selection_clip.resample], startup::BRUSH);
-                ready &= self.refiner.as_ref().unwrap().prepare_bounds(&startup.compiler);
+                ready &= r.compilation.require([&r.selection_clip.resample], startup::BRUSH);
+                ready &= self.refiner.as_ref().unwrap().prepare_bounds(&r.compilation);
             } else if tone.is_some() {
-                ready &= self.raw.prepare_tonal(&startup.compiler);
+                ready &= self.raw.prepare_tonal(&r.compilation);
             } else if !matches!(request.source, layer_render::RegionSource::Selection(_)) {
-                ready &= self.raw.prepare(&startup.compiler,startup::BRUSH);
+                ready &= self.raw.prepare(&r.compilation,startup::BRUSH);
                 if !matches!(request.source, layer_render::RegionSource::Coverage(_) | layer_render::RegionSource::ObjectCoverage(_)) {
-                    let prepared=self.flood.prepare(&startup.compiler,Self::refinement(&request),request.enclosure.is_some(),request.contiguous,startup::BRUSH);
+                    let prepared=self.flood.prepare(&r.compilation,Self::refinement(&request),request.enclosure.is_some(),request.contiguous,startup::BRUSH);
                     if !lines || self.cache.as_ref().is_some_and(|cache|cache.ready) {ready &= prepared;}
                 }
             }
@@ -419,11 +417,10 @@ impl RegionRequests {
                     .refiner
                     .as_ref()
                     .unwrap()
-                    .prepare(&startup.compiler, [&Stage::refinement(options)], false);
+                    .prepare(&r.compilation, [&Stage::refinement(options)], false);
             }
             if request.limit.is_some() || request.enclosure.is_some() || request.selection.is_some() {
-                ready &= startup
-                    .compiler
+                ready &= r.compilation
                     .require(r.selection_clip.pipelines(), startup::BRUSH);
             }
             if !ready {
@@ -608,10 +605,10 @@ impl RegionRequests {
         let built = self.modify_source.as_ref().map_or(0, |s| s.levels.len() as u32);
         let preview = self.refiner(r).preview();
         let plan = ModifyPlan::new(modify, extent, preview, built);
-        if let Some(startup) = &r.startup {
-            startup.compiler.check()?;
-            let ready = self.refiner.as_ref().unwrap().prepare(&startup.compiler, &plan.stages, plan.level > built)
-                & startup.compiler.require(r.selection_clip.pipelines(), startup::BRUSH);
+        {
+            r.compilation.check()?;
+            let ready = self.refiner.as_ref().unwrap().prepare(&r.compilation, &plan.stages, plan.level > built)
+                & r.compilation.require(r.selection_clip.pipelines(), startup::BRUSH);
             if !ready {
                 self.waiting = Some(request);
                 return Ok(true);
@@ -790,7 +787,7 @@ impl WgpuRasterizer {
             source:p.source.clone(),reference_count:p.reference_count,paper:p.paper.clone(),tolerance:p.tolerance,
             enclosure:None,
             position:[0;2],request_id:0,refinement:p.refinement,contiguous:true,limit:None,selection:None,
-        },enclosed:p.enclosed,recipes_ready:self.startup.is_none() || previous.as_ref().is_some_and(|old|
+        },enclosed:p.enclosed,recipes_ready:previous.as_ref().is_some_and(|old|
             old.recipes_ready && old.enclosed==p.enclosed && old.request.refinement==p.refinement)});
         if let Some(preparation)=&regions.preparation {
             let request=cache::current(self,&preparation.request);let source=cache::source(self,&request);
@@ -841,16 +838,16 @@ impl WgpuRasterizer {
         if regions.pending.is_some() || regions.waiting.is_some() || regions.running.is_some() || regions.areas.is_some() {self.regions=Some(regions);return Ok(false);}
         regions.sampling=region_sources::Sampling::Transparent;
         regions.cache_request=None;
-        if let RegionTask::Fill {request,..}=&task && let Some(startup)=&self.startup {
+        if let RegionTask::Fill {request,..}=&task {
             let refinement=RegionRequests::refinement(request);
             let prepare_ends=refinement.close_gaps && request.fill.as_ref().is_none_or(|fill|fill.reach!=Some(0));
-            startup.compiler.require(regions.raw.pipelines().chain(regions.flood.request_pipelines(refinement,request.enclosure.is_some(),request.contiguous,prepare_ends)),startup::DOCUMENT);
-            let mut required=self.artwork_frame.as_ref().map_or_else(startup::Requirements::default,|frame|startup::Requirements::capture_scene(self,frame.scene.view(),true));
+            self.compilation.require(regions.raw.pipelines().chain(regions.flood.request_pipelines(refinement,request.enclosure.is_some(),request.contiguous,prepare_ends)),startup::DOCUMENT);
+            let mut required=self.artwork_frame.as_ref().map_or_else(compile::Needs::default,|frame|compile::Needs::capture_scene(self,frame.scene.view(),true));
             required.render.extend(self.scene_pipelines.fill_pipelines(&self.device).into_iter().cloned());
             required.render.push(self.layer_masks.initialize.clone());
             required.compute.extend(self.selection_clip.pipelines().into_iter().cloned());
             required.compute.push(self.selection_clip.resample.clone());
-            required.require(&startup.compiler,startup::DOCUMENT);
+            required.require(&self.compilation,startup::DOCUMENT);
         }
         regions.fill_seed=None;
         let result = match task {
@@ -1039,9 +1036,9 @@ pub(crate) mod tests {
             let source=RegionSource::reference(document.snapshot(),owner).unwrap();
             let request=reference_query(source);r.set_refine_chunk(Some(1.));
             let mut regions=r.regions.take().unwrap();
-            pollster::block_on(startup::Requirements::capture_scene(&r,document.scene(),false).prepare()).unwrap();
-            pollster::block_on(Deferred::prepare_all(regions.raw.pipelines())).unwrap();
-            pollster::block_on(Deferred::prepare_all([&r.scene_pipelines.source.pipeline])).unwrap();
+            pollster::block_on(crate::compile::Needs::capture_scene(&r,document.scene(),false).prepare(&r.compilation)).unwrap();
+            pollster::block_on(r.compilation.prepare_all(regions.raw.pipelines())).unwrap();
+            pollster::block_on(r.compilation.prepare_all([&r.scene_pipelines.source.pipeline])).unwrap();
             let mut calls=0;let mut defers=0;
             for call in 1..=pages+4 {
                 test_support::settle_decodes(&mut r);
@@ -1089,8 +1086,7 @@ pub(crate) mod tests {
         let (mut r,source)=prepared_reference();
         let RegionSource::Scene {snapshot,..}=&source else {unreachable!()};
         r.regions=None;
-        r.startup=Some(startup::Startup::new(&r.device).unwrap());
-        r.startup.as_ref().unwrap().compiler.start();
+        r.startup=Some(startup::Startup::new(r.compilation.clone()).unwrap());
         r.shader_idle(true,true);
         r.prepare_regions(Some(&RegionPreparation {source:source.clone(),reference_count:None,paper:None,tolerance:0.,refinement:Default::default(),enclosed:false}));
         test_support::submit_settled(&mut r,test_support::packet(snapshot.view(),[64;2]));

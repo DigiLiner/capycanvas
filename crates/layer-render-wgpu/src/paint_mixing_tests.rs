@@ -31,7 +31,7 @@ fn submit(r: &mut WgpuRasterizer, scene: SceneView<'_>, dabs: &[Dab], batches: &
         b.style.blend_space = space;
         b
     }).collect();
-    r.submit(FramePacket { dabs, dab_batches: &batches, reset_layers: reset, blend_space: space, ..crate::test_support::packet(scene, [128, 128]) })
+    crate::test_support::submit_ready(r, FramePacket { dabs, dab_batches: &batches, reset_layers: reset, blend_space: space, ..crate::test_support::packet(scene, [128, 128]) })
         .unwrap();
 }
 

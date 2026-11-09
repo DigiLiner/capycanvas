@@ -337,7 +337,7 @@ pub struct UiSession<R: CanvasRenderer> {
     logical_viewport: Option<[f32; 2]>,
     initial_fit: bool,
     restored_view: Option<(session_recovery::SessionCamera, u64)>,
-    selection_brush_requested: bool,
+    preparation_context: layer_render::PreparationContext,
     automatic_camera_revision: u64,
     workspace_view_revision: Option<u64>,
     divider_drag: Option<(u32, ResizeDrag)>,
@@ -619,7 +619,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             logical_viewport: None,
             initial_fit: true,
             restored_view: None,
-            selection_brush_requested: false,
+            preparation_context: Default::default(),
             automatic_camera_revision: 0,
             workspace_view_revision: None,
             divider_drag: None,
@@ -6617,8 +6617,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
         }
         let selecting = self.layer_interaction.tool.selection_tool().is_some() && self.engine.document().working.selection.is_none();
-        if selecting && !self.selection_brush_requested { self.engine.prepare_selection_brush(); }
-        self.selection_brush_requested = selecting;
+        let context = layer_render::PreparationContext { selection: selecting };
+        if context != self.preparation_context { self.engine.prepare_context(context); self.preparation_context = context; }
         UiChange {
             revision: self.state.revision,
             regions,

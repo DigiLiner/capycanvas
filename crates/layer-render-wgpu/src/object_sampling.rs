@@ -508,6 +508,7 @@ mod tests {
     fn photo_size_sampling_culls_empty_work_and_reuses_one_parameter_allocation() {
         let r=crate::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let sampler=ObjectSampler::new(&r.device);
+        pollster::block_on(r.compilation.prepare_all(sampler.pipelines())).unwrap();
         let mut uploads=crate::Uploads::new(&r.device,64*1024);
         let inverse=[16.,0.,0.,16.,0.,0.];let extent:[u32;2]=[4000,3000];let size=[256;2];
         let exact=dispatches(inverse,size,false,extent,u64::MAX-1).unwrap();
@@ -562,6 +563,7 @@ mod tests {
     fn unminified_full_tile_uses_three_bounded_passes_and_preserves_exact_samples() {
         let r=crate::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let sampler=ObjectSampler::new(&r.device);
+        pollster::block_on(r.compilation.prepare_all(sampler.pipelines())).unwrap();
         let mut uploads=crate::Uploads::new(&r.device,64*1024);
         let source=page_texture(&r,wgpu::TextureFormat::Rgba32Float);
         let bytes:Vec<_>=(0..256).flat_map(|y|(0..256).flat_map(move|x|signal(x,y))).flat_map(f32::to_le_bytes).collect();
@@ -586,6 +588,7 @@ mod tests {
     fn gpu_tent_accumulates_partial_source_tiles_against_uncapped_reference() {
         let r=crate::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let sampler=ObjectSampler::new(&r.device);
+        pollster::block_on(r.compilation.prepare_all(sampler.pipelines())).unwrap();
         let mut uploads=crate::Uploads::new(&r.device,64*1024);
         let extent=[513i64,257i64];
         let color=|x,y|if (0..extent[0]).contains(&x) && (0..extent[1]).contains(&y) {signal(x,y)} else {[0.;4]};
@@ -632,6 +635,7 @@ mod tests {
     fn gpu_matches_independent_uncapped_affine_reference() {
         let r=crate::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let sampler=ObjectSampler::new(&r.device);
+        pollster::block_on(r.compilation.prepare_all(sampler.pipelines())).unwrap();
         let mut uploads=crate::Uploads::new(&r.device,64*1024);
         for hdr in [false,true] {
         let color=move |x,y| {
@@ -730,6 +734,7 @@ mod tests {
     fn nearest_uses_f64_source_floor_after_large_coefficient_cancellation() {
         let r=crate::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let sampler=ObjectSampler::new(&r.device);
+        pollster::block_on(r.compilation.prepare_all(sampler.pipelines())).unwrap();
         let mut uploads=crate::Uploads::new(&r.device,64*1024);
         let source=page_texture(&r,wgpu::TextureFormat::Rgba32Float);
         let bytes:Vec<_>=(0..256).flat_map(|y|(0..256).flat_map(move|x|[x as f32,y as f32,-(x as f32),1.])).flat_map(f32::to_le_bytes).collect();

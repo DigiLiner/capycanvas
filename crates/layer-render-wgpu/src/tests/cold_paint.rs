@@ -434,6 +434,7 @@ fn cold_native_overrides_keep_the_original_photo_and_its_thumbnail_contributions
     let mut resident = renderer(&p, RESIDENT);
     let mut cold = renderer(&p, 0);
     close(&image(&cold), &image(&resident));
+    pollster::block_on(crate::thumbnails::prepare_pipelines(&mut cold));
     let mut preparations = 1;
     while !cold.prepare_thumbnail_batch(ThumbnailTarget::Source(id)).unwrap() {
         preparations += 1;
@@ -547,6 +548,10 @@ fn native_cache_keeps_prepared_brush_pages() {
         dab.motion = [13.25, -24.5];
         let batch = crate::test_support::dab_batch(id, style, dab.bounds());
         let frame = FramePacket { dabs: &[dab], dab_batches: std::slice::from_ref(&batch), ..packet(&b, false) };
+        let mut needs=compile::Needs::default();
+        needs.style(&bounded,&batch.style,dry_material::Reach::of_dabs(frame.dabs),false,false);
+        needs.compute.extend(bounded.native_edit.as_ref().unwrap().required_pipelines(b.composition().color.depth,false).cloned());
+        pollster::block_on(needs.prepare(&bounded.compilation)).unwrap();
         assert!(bounded.raster_dependencies_ready(frame, None));
         let required = bounded.restore_preflight.as_ref().unwrap().dependencies().to_vec();
         assert!(!required.is_empty());
@@ -829,6 +834,7 @@ fn tier_frame(document: &Document, all: bool) -> FramePacket<'_> {
     FramePacket { view: crate::test_support::view(TIER), composite_all: all, ..crate::test_support::packet(document.scene(), TIER) }
 }
 fn polls_until_ready(r: &mut WgpuRasterizer, id: SourceTarget) -> (usize, u64) {
+    pollster::block_on(crate::thumbnails::prepare_pipelines(r));
     let (mut polls, before) = (0, r.metrics.thumbnail_pages);
     loop {
         let pages = r.metrics.thumbnail_pages;

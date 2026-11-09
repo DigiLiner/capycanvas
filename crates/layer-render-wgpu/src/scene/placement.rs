@@ -20,8 +20,8 @@ pub(super) struct PlacementJob {
     origin: [i64; 2],
     region: PixelRect,
     bounds: PixelRect,
-    transform: layer_core::ImageTransform,
-    taps: u32,
+    pub(super) transform: layer_core::ImageTransform,
+    pub(super) taps: u32,
     background: f32,
     sources: Vec<([u32; 2], wgpu::TextureView)>,
     source_size: [u32; 2],
@@ -427,6 +427,7 @@ mod tests {
                     outputs.push((scene.pool[output].texture.clone(), held));
                 }
                 let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+                pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
                 scene.encode_jobs(&mut r, &mut encoder).unwrap();
                 r.uploads.finish(&encoder);encoder.submit(&r.queue);
                 assert_eq!(crate::test_support::float_pixels(&r, &outputs[0].0), crate::test_support::float_pixels(&r, &outputs[1].0),

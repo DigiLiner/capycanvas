@@ -321,6 +321,7 @@ fn binned_coverage_matches_the_exact_reference() {
 fn gpu_kernel_matches_its_emulation() {
     let r = crate::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let kernel = Kernel::new(&r.device);
+    pollster::block_on(r.compilation.prepare_all(kernel.pipelines())).unwrap();
     let mut uploads = crate::Uploads::new(&r.device, 1 << 20);
     let mut pool = Pool::new(64 << 20);
     let mut arena = super::Arena::default();

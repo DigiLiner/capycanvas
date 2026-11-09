@@ -39,7 +39,7 @@ fn staged_startup_matches_eager_pixels_and_waits_for_catalog() {
         reset_layers: true,
         ..crate::test_support::packet(doc.scene(), [64; 2])
     };
-    reference.submit(packet).unwrap();
+    crate::test_support::submit_ready(&mut reference, packet).unwrap();
     let expected = reference.readback_srgb_rgba8().unwrap();
     assert_ne!(
         &expected[..4],

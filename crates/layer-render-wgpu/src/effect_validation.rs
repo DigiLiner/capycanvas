@@ -56,7 +56,7 @@ impl WgpuRasterizer {
         } else {
             self.scene_pipelines.effects(self)
         };
-        if let Some(startup) = &self.startup {
+        {
             let programs = request.programs.clone();
             let state = Arc::new(std::sync::Mutex::new(BackgroundValidation {
                 effects: Some(candidate),
@@ -107,13 +107,13 @@ impl WgpuRasterizer {
                     }
                 };
                 #[cfg(not(target_arch = "wasm32"))]
-                startup.compiler.enqueue(startup::VALIDATION, work);
+                self.compilation.enqueue(startup::VALIDATION, work);
                 #[cfg(target_arch = "wasm32")]
-                startup.compiler.enqueue_async(startup::VALIDATION, work);
+                self.compilation.enqueue_async(startup::VALIDATION, work);
             }
             let (tx, rx) = mpsc::channel();
             let request_id = request.request_id;
-            startup.compiler.enqueue(startup::VALIDATION, move || {
+            self.compilation.enqueue(startup::VALIDATION, move || {
                 let mut state = state.lock().unwrap();
                 let errors = std::mem::take(&mut state.errors);
                 let value = Validation {
@@ -140,13 +140,7 @@ impl WgpuRasterizer {
                 value: None,
                 background: Some(rx),
             });
-            return Ok(true);
         }
-        self.effect_validation = Some(Pending {
-            request_id: request.request_id,
-            value: Some(compile_candidate(self, candidate, request)),
-            background: None,
-        });
         Ok(true)
     }
     pub(super) fn poll_effect_validation(&mut self) -> Option<EffectValidationResult> {

@@ -7,7 +7,7 @@ type PreparedPixels = std::sync::Mutex<Option<Result<Pixels, GpuRasterError>>>;
 struct Mask {
     id: AssetId,
     pixels: Deferred<PreparedPixels>,
-    priority: u8,
+    requested: bool,
     uploaded: bool,
 }
 pub(super) struct Masks(Vec<Mask>);
@@ -20,7 +20,7 @@ impl Masks {
                 .map(|(id, generate)| Mask {
                     id: AssetId::from(id),
                     pixels: Deferred::new(move || std::sync::Mutex::new(Some(generate()))),
-                    priority: u8::MAX,
+                    requested: false,
                     uploaded: false,
                 })
                 .collect(),
@@ -28,24 +28,22 @@ impl Masks {
     }
     pub fn style(
         &mut self,
-        compiler: &startup::Compiler,
+        compiler: &compile::Scope,
         style: &layer_render::DabStyle,
-        priority: u8,
+        priority: startup::Class,
     ) {
         let key = WgpuRasterizer::texture_set_key(style);
         for id in [key.primary, key.grain, key.transport] {
             if let Some(mask) = self.0.iter_mut().find(|m| m.id == id) {
-                mask.priority = mask.priority.min(priority);
-                compiler.pipeline(&mask.pixels, priority);
+                mask.requested = true;
+                compiler.require([&mask.pixels], priority);
             }
         }
     }
     pub fn generates(&self, id: &AssetId) -> bool {
         self.0.iter().any(|mask| mask.id == *id)
     }
-    pub fn ready_through(&self, priority: u8) -> bool {
-        self.0.iter().all(|m| m.priority > priority || m.uploaded)
-    }
+    pub fn ready(&self) -> bool { self.0.iter().all(|m| !m.requested || m.uploaded) }
     pub fn take_ready(&mut self) -> Result<Vec<(AssetId, Pixels)>, GpuRasterError> {
         let mut ready = Vec::new();
         for mask in &mut self.0 {
@@ -95,13 +93,12 @@ fn generated_pixels_do_not_signal_readiness_before_upload() {
     let mut masks = Masks(vec![Mask {
         id: AssetId::from("test:tip"),
         pixels: Deferred::new(|| std::sync::Mutex::new(Some(Ok((1, 1, vec![255]))))),
-        priority: 3,
+        requested: true,
         uploaded: false,
     }]);
-    assert!(masks.ready_through(2));
-    masks.0[0].pixels.compile();
-    assert!(!masks.ready_through(3));
+    crate::compile::execute(||masks.0[0].pixels.compile());
+    assert!(!masks.ready());
     assert_eq!(masks.take_ready().unwrap().len(), 1);
-    assert!(masks.ready_through(3));
+    assert!(masks.ready());
     assert!(masks.take_ready().unwrap().is_empty());
 }

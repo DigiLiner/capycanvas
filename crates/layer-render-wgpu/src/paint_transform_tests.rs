@@ -83,7 +83,7 @@ fn reduced_selection_standby_prepares_its_pipelines_without_encoding_on_the_fram
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     crate::test_support::wait_startup(&mut r, deadline, |p| p.complete, format_args!("Selection startup timed out"));
     r.submit(packet(document.scene(), extent)).unwrap();
-    r.submit(FramePacket { dabs: &[dab([1., 0., 0., 1.])], dab_batches: &[batch(target(&document))],
+    crate::test_support::submit_ready(&mut r, FramePacket { dabs: &[dab([1., 0., 0., 1.])], dab_batches: &[batch(target(&document))],
         ..packet(document.scene(), extent) }).unwrap();
     r.shader_idle(false, false);
     assert!(!r.scene_pipelines.source.pipeline.ready());
@@ -95,7 +95,11 @@ fn reduced_selection_standby_prepares_its_pipelines_without_encoding_on_the_fram
     assert_eq!(transforms.storage_bytes(), bytes, "Cold standby dependencies must finish before capture or reduction");
     assert!(!r.scene_pipelines.source.pipeline.ready());
     r.shader_idle(true, false);
-    crate::test_support::wait_startup(&mut r, deadline, |p| p.complete, format_args!("Standby compilation timed out"));
+    while !r.scene_pipelines.source.pipeline.ready() || !transforms.display_pipelines()[0].ready() {
+        r.poll_startup().unwrap();
+        assert!(std::time::Instant::now()<deadline,"Standby compilation timed out");
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert!(r.scene_pipelines.source.pipeline.ready());
     assert!(transforms.display_pipelines()[0].ready());
     transforms.prepare_standby(&mut r, &mut encoder, document.scene(), target(&document), &selection, 1).unwrap();

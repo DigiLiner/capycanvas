@@ -146,8 +146,8 @@ fn region_cache_restore_keeps_all_pages_while_frame_time_advances() {
         (TileKey {plane:RasterPlane::Color,coordinate:[x,0]},tile.clone())).collect(),..Default::default()});
     let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     frame(&mut r,&document,extent);
-    r.startup=Some(startup::Startup::new(&r.device).unwrap());
-    r.startup.as_ref().unwrap().compiler.start();r.shader_idle(true,true);
+    r.startup=Some(startup::Startup::new(r.compilation.clone()).unwrap());
+    r.shader_idle(true,true);
     let leaf=placement::occurrence_id(&document);
     let source=|document:&Document|RegionSource::reference(document.snapshot(),leaf).unwrap();
     r.prepare_regions(Some(&RegionPreparation {source:source(&document),reference_count:None,paper:None,tolerance:0.,refinement:Default::default(),enclosed:false}));
@@ -287,8 +287,7 @@ fn region_cache_prewarm_pauses_for_contact_resumes_idle_and_promotes_demand() {
     let source=RegionSource::Scene {snapshot:document.snapshot(),scope:layer_core::SceneScope::Raw(target(&document))};
     let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     submit_settled(&mut r,packet(document.scene(),extent));
-    r.startup=Some(startup::Startup::new(&r.device).unwrap());
-    r.startup.as_ref().unwrap().compiler.start();
+    r.startup=Some(startup::Startup::new(r.compilation.clone()).unwrap());
     r.shader_idle(false,false);
     r.prepare_regions(Some(&RegionPreparation {source:source.clone(),reference_count:None,paper:None,tolerance:0.,refinement:Default::default(),enclosed:false}));
     assert!(r.regions.as_ref().unwrap().background_pending());

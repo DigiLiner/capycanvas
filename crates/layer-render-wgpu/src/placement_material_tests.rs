@@ -181,7 +181,7 @@ fn semitransparent_material_over_nontransparent_backdrop_matches_premultiplied_o
     }
     paint_mut(&mut background).raster = RasterRevision::backed(data);
     let mut pixels = |doc: &Document| {
-        crate::test_support::submit_ready(&mut renderer, FramePacket { reset_layers: true, ..packet(doc.scene(), EXTENT) }).unwrap();
+        crate::test_support::submit_published(&mut renderer, FramePacket { reset_layers: true, ..packet(doc.scene(), EXTENT) });
         crate::scene::scale::tests::display_pixels(&renderer)
     };
     let source = pixels(&front);

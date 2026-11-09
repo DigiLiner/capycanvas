@@ -78,9 +78,9 @@ impl Lines {
             ||STAGES[..8].contains(entry) || **entry=="reset_ends",
             |work|work.steps.iter().any(|(pending,_,_)|pending==*entry))).map(|entry|&self.pipelines[entry])
     }
-    pub fn prepare_cache(&self,compiler:&startup::Compiler,priority:u8)->bool {
+    pub fn prepare_cache(&self,compiler:&compile::Scope,priority:startup::Class)->bool {
         if self.building.as_ref().is_none_or(|work|!work.ranked) {
-            for entry in ["refine_ends","seal_candidates"] {compiler.pipeline(&self.pipelines[entry],priority);}
+            compiler.require(["refine_ends","seal_candidates"].map(|entry|&self.pipelines[entry]),priority);
         }
         compiler.require(self.cache_pipelines(),priority)
     }
@@ -95,7 +95,7 @@ impl Lines {
             _=>true,
         }).map(|entry|&self.pipelines[entry]))
     }
-    pub fn prepare_areas(&self,compiler:&startup::Compiler,priority:u8)->bool {
+    pub fn prepare_areas(&self,compiler:&compile::Scope,priority:startup::Class)->bool {
         self.prepare_cache(compiler,priority)
             & compiler.require(["open_bits","apply_seals","hold_barriers","reset_ends","region_seeds","jump_distance","assign_tokens"].map(|entry|&self.pipelines[entry]),priority)
             & compiler.require([&self.colour],priority)
@@ -454,9 +454,10 @@ mod tests {
     fn cache_build_requests_tail_pipelines_before_reading_the_end_count() {
         let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         for before_build in [true,false] {
-            let compiler=startup::Compiler::new().unwrap();
+            let compiler=r.device.compilation().unwrap();
             let mut lines=Lines::new(&r.device);
-            for pipeline in lines.cache_pipelines() {pipeline.compile();}
+            pollster::block_on(compiler.prepare_all(lines.cache_pipelines())).unwrap();
+            let held=compiler.batch();
             lines.allocate(&r.device,[64;2],64,&[(0,[0,0,64,64])]).unwrap();
             let mask=r.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label:Some("open reference"),contents:&[255;512],usage:wgpu::BufferUsages::STORAGE,
@@ -469,8 +470,9 @@ mod tests {
             assert!(lines.prepare_cache(&compiler,startup::BRUSH));
             for entry in ["refine_ends","seal_candidates"] {
                 assert!(!lines.pipelines[entry].ready());
-                assert!(lines.pipelines[entry].promote(startup::BRUSH).is_none(),"{entry} was not requested");
+                assert!(compile::tests::requested(&compiler,&lines.pipelines[entry],startup::BRUSH),"{entry} was not requested");
             }
+            drop(held);
             r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
         }
     }

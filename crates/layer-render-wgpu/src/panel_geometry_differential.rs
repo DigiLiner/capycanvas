@@ -154,6 +154,7 @@ fn mesh_pixels(r: &WgpuRasterizer,white: &wgpu::RenderPipeline,surface: &PanelSu
     let size=SIZE.map(|v|v*scale);
     let mut blur=crate::backdrop_blur::BackdropBlur::new(&r.device,wgpu::TextureFormat::Rgba8Unorm);
     blur.set_regions(&mesh_regions(surface,scale));
+    pollster::block_on(r.compilation.prepare_all(blur.pipelines())).unwrap();
     let mut encoder=r.device().create_command_encoder(&Default::default());
     let mut uploads=crate::Uploads::new(r.device(),4096);
     blur.encode(r,&mut encoder,&mut uploads,size,0,layer_core::Affine::IDENTITY,false,None,

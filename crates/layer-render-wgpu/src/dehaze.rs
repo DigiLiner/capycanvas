@@ -24,7 +24,7 @@ impl Builder {
         let extent=guide_extent(document)?;
         Ok(u64::from(extent[0])*u64::from(extent[1])*112+65536+4096)
     }
-    pub(crate) async fn prepare_pipelines(device:&PipelineDevice)->Result<(),String> {pipelines(device).prepare().await}
+    pub(crate) async fn prepare_pipelines(device:&PipelineDevice)->Result<(),String> {pipelines(device).prepare(device).await}
     pub(crate) fn new(device:&PipelineDevice,document:[u32;2],space:RgbSpace)->Result<Self,String> {
         use wgpu::util::DeviceExt;
         let extent=guide_extent(document)?;let count=u64::from(extent[0])*u64::from(extent[1]);
@@ -93,6 +93,7 @@ mod tests {
 #[test]
 fn dehaze_constant_area_means_keep_exact_airlight_coordinate_ties(){
     let renderer=crate::WgpuRasterizer::new_native_headless(layer_core::color::DocumentColor{space:RgbSpace::Srgb,depth:layer_core::color::SampleDepth::F32}).unwrap();
+    pollster::block_on(Builder::prepare_pipelines(&renderer.device)).unwrap();
     let builder=Builder::new(&renderer.device,[769,3],RgbSpace::Srgb).unwrap();let air=builder.air.clone();
     let texture=renderer.device.create_texture(&wgpu::TextureDescriptor{label:None,size:wgpu::Extent3d{width:769,height:3,depth_or_array_layers:1},mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,format:wgpu::TextureFormat::Rgba32Float,usage:wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST,view_formats:&[]});
     let bytes=(0..3).flat_map(|y|(0..769).flat_map(move|x|{let alpha=if y==1 && x%2==0{0.5}else{1.};[0.25*alpha,0.5*alpha,0.75*alpha,alpha].into_iter().flat_map(f32::to_le_bytes)})).collect::<Vec<_>>();
@@ -105,6 +106,7 @@ fn dehaze_constant_area_means_keep_exact_airlight_coordinate_ties(){
 #[test]
 fn dehaze_area_mean_preserves_small_bright_fraction_in_both_tile_orders(){
     let renderer=crate::WgpuRasterizer::new_native_headless(layer_core::color::DocumentColor{space:RgbSpace::Srgb,depth:layer_core::color::SampleDepth::F32}).unwrap();
+    pollster::block_on(Builder::prepare_pipelines(&renderer.device)).unwrap();
     let tiny=f32::from_bits((2f32.powi(-32)).to_bits()-1);
     let expected=((1f64+768.*f64::from(tiny))/769.).log2();
     for reverse in [false,true]{
@@ -127,7 +129,7 @@ fn dehaze_deferred_recipe_does_not_retain_owner_cache(){
         let renderer=crate::WgpuRasterizer::new_native_headless(layer_core::color::DocumentColor{space:layer_core::color::RgbSpace::Srgb,depth:layer_core::color::SampleDepth::F32}).unwrap();
         let owner=std::sync::Arc::downgrade(&renderer.device.dehaze_pipelines);
         let retained=pipelines(&renderer.device).clone();
-        if compiled{pollster::block_on(retained.prepare()).unwrap();}
+        if compiled{pollster::block_on(retained.prepare(&renderer.device)).unwrap();}
         drop(renderer);
         assert!(owner.upgrade().is_none(),"Deferred recipes retain the analysis owner cache; compiled={compiled}");
         drop(retained);

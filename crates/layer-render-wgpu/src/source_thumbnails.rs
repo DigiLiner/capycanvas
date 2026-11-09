@@ -175,11 +175,8 @@ impl SourceThumbnails {
     /// Prepare at most `tile_limit` original or painted tiles. Submit or drop
     /// the encoder before preparing another batch.
     fn pipelines_ready(&self, r: &WgpuRasterizer) -> bool {
-        let Some(startup) = &r.startup else { return true; };
-        let ready = startup.compiler.require([&self.horizontal, &self.vertical], startup::VALIDATION)
-            & startup.compiler.require([&self.display], startup::VALIDATION);
-        startup.compiler.start();
-        ready
+        r.compilation.require([&self.horizontal, &self.vertical], startup::VALIDATION)
+            & r.compilation.require([&self.display], startup::VALIDATION)
     }
     pub fn prepare(
         &mut self,
@@ -486,3 +483,11 @@ fn overview_buffer(device: &wgpu::Device) -> wgpu::Buffer {
 #[cfg(test)]
 #[path = "tests/source_thumbnails.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+impl SourceThumbnails {
+    pub(crate) async fn prepare_pipelines(&self, scope: &compile::Scope) {
+        scope.prepare_all([&self.horizontal,&self.vertical]).await.unwrap();
+        scope.prepare_all([&self.display]).await.unwrap();
+    }
+}

@@ -36,7 +36,7 @@ impl Canvas {
         let (_, base) = crate::test_support::add_paint(&mut artwork, "Paint", extent);
         let document = Document::from_artwork(artwork).unwrap();
         let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
-        r.submit(FramePacket { reset_layers: true, blend_space: space, ..packet(document.scene(), extent) }).unwrap();
+        crate::test_support::submit_ready(&mut r, FramePacket { reset_layers: true, blend_space: space, ..packet(document.scene(), extent) }).unwrap();
         Self { r, document, base, over, space, strokes: 0, extent }
     }
 
@@ -45,8 +45,7 @@ impl Canvas {
         self.strokes += 1;
         let damage = Rect { min: Point { x: 0., y: 0. }, max: Point { x: self.extent[0] as f32, y: self.extent[1] as f32 } };
         let batch = DabBatch { stroke_id: StrokeId(self.strokes), ..crate::test_support::dab_batch(target, style, damage) };
-        self.r
-            .submit(FramePacket { dabs: &[dab], dab_batches: &[batch], blend_space: self.space, ..packet(self.document.scene(), self.extent) })
+        crate::test_support::submit_ready(&mut self.r, FramePacket { dabs: &[dab], dab_batches: &[batch], blend_space: self.space, ..packet(self.document.scene(), self.extent) })
             .unwrap();
     }
 
@@ -82,7 +81,7 @@ impl Canvas {
             stroke_start: i == 0, stroke_end: kind == DabBatchKind::Persistent && (i + 1) * chunk >= dabs.len(),
             ..crate::test_support::dab_batch(self.base, style.clone(), contacts.iter().fold(Rect::EMPTY, |r, d| r.union(d.bounds())))
         }).collect();
-        self.r.submit(FramePacket { dabs, dab_batches: &batches, blend_space: self.space, ..packet(self.document.scene(), self.extent) }).unwrap();
+        crate::test_support::submit_published(&mut self.r, FramePacket { dabs, dab_batches: &batches, blend_space: self.space, ..packet(self.document.scene(), self.extent) });
         self.pixels()
     }
 
@@ -94,7 +93,7 @@ impl Canvas {
 
     /// The composite, as the document's blend space holds it.
     pub(super) fn composite(&mut self) -> Vec<[f64; 4]> {
-        self.r.submit(FramePacket { blend_space: self.space, ..packet(self.document.scene(), self.extent) }).unwrap();
+        crate::test_support::submit_settled(&mut self.r, FramePacket { blend_space: self.space, ..packet(self.document.scene(), self.extent) });
         self.pixels()
     }
 
@@ -149,7 +148,7 @@ fn uniform_stroke_colors_and_coverage_do_not_depend_on_contact_batching() {
                         batch.dab_count = contacts.len() as u32;
                         batch.stroke_start = i == 0;
                         batch.stroke_end = (i + 1) * chunk >= dabs.len();
-                        canvas.r.submit(FramePacket { dabs: contacts, dab_batches: std::slice::from_ref(&batch),
+                        crate::test_support::submit_ready(&mut canvas.r, FramePacket { dabs: contacts, dab_batches: std::slice::from_ref(&batch),
                             blend_space: space, ..packet(canvas.document.scene(), EXTENT) }).unwrap();
                     }
                     canvas.composite()
@@ -235,6 +234,7 @@ fn dry_flow_batch_dose_matches_ordered_contacts_and_closed_form() {
                     base.copy_to(&output, &mut encoder);
                     { let mut pass = encoder.begin_compute_pass(&Default::default());
                         let pipeline = r.pipelines.dry_material.selected_kernel(&batch.style, MaterialOperation::Deposit, false, if enabled && !reference {8192} else {0});
+                        pollster::block_on(r.compilation.prepare_all([pipeline])).unwrap();
                         pass.set_pipeline(pipeline);
                         pass.set_bind_group(0, &binding, &[0]);
                         pass.set_bind_group(1, r.paint_target_binding(&batch.style), &[0]);
@@ -495,6 +495,9 @@ fn cropped_dry_dispatch_preserves_every_untouched_hdr_pixel() {
                 dirty,
             };
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+            let mut needs=crate::compile::Needs::default();
+            needs.style(r,&batch.style,crate::dry_material::Reach::of_dabs(std::slice::from_ref(&dab)),false,batch.kind==DabBatchKind::Preview);
+            pollster::block_on(needs.prepare(&r.compilation)).unwrap();
             r.encode_dry_material_jobs(&mut encoder,0,&batch,&[job]);
             encoder.submit(&r.queue);
             let actual=crate::test_support::float_pixels(r,&output.texture);
@@ -555,6 +558,9 @@ fn cropped_display_restores_hdr_blocks_at_partial_document_edges() {
         let output_binding=r.pipelines.dry_material.output(r,&output,None,None);
         let display=crate::test_support::dry_display(r,&batch,[&base.view;9],&output);
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+        let mut needs=crate::compile::Needs::default();
+        needs.style(r,&batch.style,crate::dry_material::Reach::of_dabs(std::slice::from_ref(&dab)),false,batch.kind==DabBatchKind::Preview);
+        pollster::block_on(needs.prepare(&r.compilation)).unwrap();
         r.encode_dry_material_jobs(&mut encoder,0,&batch,&[crate::dry_material::Job {output:output_binding,source:sources,display,coordinate:[0;2],
                 coverage: false,
                 record_offset: 0,
@@ -657,6 +663,7 @@ fn independent_full_page_dispatch_preserves_contact_hull_pixels() {
             base.copy_to(&output,&mut encoder);
             {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("full independent page"),timestamp_writes:None});
                 let pipeline = kernels.selected_kernel(&style,MaterialOperation::Deposit,false,if aggregate {8192}else{0}|if fine{16384}else{0});
+                pollster::block_on(r.compilation.prepare_all([pipeline])).unwrap();
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0,&binding,&[0]);pass.set_bind_group(1,r.paint_target_binding(&style),&[0]);pass.set_bind_group(2,&sources,&[0]);
                 pass.set_bind_group(3,&r.texture_sets.iter().find(|s|s.key==key).unwrap().bind_group,&[]);pass.dispatch_workgroups(8,128,1);}
@@ -953,7 +960,7 @@ fn dither_and_uniform_brushes_can_share_a_queued_frame() {
                 stroke_id: StrokeId(100 + i as u64), first_dab: i as u32,
                 ..crate::test_support::dab_batch(canvas.base, style.clone(), dab.bounds())
             }).collect();
-            canvas.r.submit(FramePacket { dabs: &dabs, dab_batches: &batches, ..packet(canvas.document.scene(), canvas.extent) }).unwrap();
+            crate::test_support::submit_ready(&mut canvas.r, FramePacket { dabs: &dabs, dab_batches: &batches, ..packet(canvas.document.scene(), canvas.extent) }).unwrap();
         } else {
             for (i, (style, dab)) in styles.iter().zip(&dabs).enumerate() {
                 canvas.styled_stroke(100 + i as u64, style.clone(), &[*dab], 1);
@@ -989,7 +996,7 @@ fn dither_prediction_forks_committed_exposure_and_preserves_prior_tiles() {
         let damage = contacts.iter().fold(Rect::EMPTY, |r, d| r.union(d.bounds()));
         let batch = DabBatch { stroke_id: StrokeId(100), dab_count: contacts.len() as u32,
             kind, stroke_start: start, stroke_end: end, ..crate::test_support::dab_batch(canvas.base, style, damage) };
-        canvas.r.submit(FramePacket { dabs: contacts, dab_batches: &[batch], ..packet(canvas.document.scene(), canvas.extent) }).unwrap();
+        crate::test_support::submit_ready(&mut canvas.r, FramePacket { dabs: contacts, dab_batches: &[batch], ..packet(canvas.document.scene(), canvas.extent) }).unwrap();
     };
     let mut preview = Canvas::at(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None, [512, 128]);
     let mut reference = Canvas::at(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None, [512, 128]);
@@ -1027,7 +1034,7 @@ fn engine_generated_partial_opacity_prediction_forks_and_preserves_committed_bud
         let damage=contacts.iter().fold(Rect::EMPTY,|r,d|r.union(d.bounds()));
         let batch=DabBatch {stroke_id:StrokeId(7),dab_count:contacts.len() as u32,kind,stroke_start:start,stroke_end:end,
             ..crate::test_support::dab_batch(canvas.base,style,damage)};
-        canvas.r.submit(FramePacket {dabs:contacts,dab_batches:std::slice::from_ref(&batch),
+        crate::test_support::submit_ready(&mut canvas.r, FramePacket {dabs:contacts,dab_batches:std::slice::from_ref(&batch),
             ..packet(canvas.document.scene(),canvas.extent)}).unwrap();
     };
     let mut preview=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
@@ -1079,7 +1086,7 @@ fn engine_generated_opacity_keeps_later_opaque_pigment_changes_inside_the_stroke
                 let mut style=DabStyle::for_brush(&brush,StrokeTool::Brush);style.blend_space=space;style.wet_mix.dilution=1.;
                 let batch=DabBatch {stroke_id:StrokeId(7),dab_count:1,kind,stroke_start:start,stroke_end:end,
                     ..crate::test_support::dab_batch(canvas.base,style,dab.bounds())};
-                canvas.r.submit(FramePacket {dabs:std::slice::from_ref(dab),dab_batches:std::slice::from_ref(&batch),
+                crate::test_support::submit_ready(&mut canvas.r, FramePacket {dabs:std::slice::from_ref(dab),dab_batches:std::slice::from_ref(&batch),
                     blend_space:space,..packet(canvas.document.scene(),canvas.extent)}).unwrap();
             };
             send(&mut preview,&first,DabBatchKind::Persistent,true,false);let committed=preview.pixels();
@@ -1244,6 +1251,9 @@ fn partial_analytic_display_averages_current_and_stroke_start_over_the_same_foot
                 let binding=r.pipelines.dry_material.output(r,&output,None,None);
                 let display=crate::test_support::dry_display(r,&batch,[&current.view;9],&output);
                 let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+                let mut needs=crate::compile::Needs::default();
+                needs.style(r,&batch.style,crate::dry_material::Reach::of_dabs(std::slice::from_ref(&dab)),false,batch.kind==DabBatchKind::Preview);
+                pollster::block_on(needs.prepare(&r.compilation)).unwrap();
                 r.encode_dry_material_jobs(&mut encoder,0,&batch,&[crate::dry_material::Job {output:binding,source:sources,display,coordinate:[0;2],
                         coverage: false,
                         record_offset: 0,
@@ -1286,7 +1296,7 @@ fn partial_gpen_scaled_prediction_cancels_and_exact_queries_match_commit() {
         let send=|canvas:&mut Canvas,dabs:&[Dab],batches:&[DabBatch]| {
             let mut frame=packet(canvas.document.scene(),canvas.extent);frame.composite_all=false;
             frame.view.document_to_surface=[0.125,0.,0.,0.125,0.,0.];frame.view.width_px=128;frame.view.height_px=128;
-            canvas.r.submit(FramePacket {dabs,dab_batches:batches,blend_space:space,..frame}).unwrap();
+            crate::test_support::submit_ready(&mut canvas.r, FramePacket {dabs,dab_batches:batches,blend_space:space,..frame}).unwrap();
         };
         for canvas in [&mut preview,&mut reference] {
             canvas.paint(canvas.base,test_style(BrushExecution::Dry),soft([512.;2],[0.1,0.6,0.3,0.6],2000.,1.));

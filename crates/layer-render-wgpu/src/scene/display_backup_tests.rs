@@ -29,7 +29,7 @@ fn cold_late_object_window_preserves_accepted_pixels_and_pose_until_complete() {
     let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.test.reference=true;r.native_edit.as_mut().unwrap().image_pixel_bytes=Some(8<<20);
     assert!(windows::Plan::new(doc.scene(),extent,8<<20,r.device.limits().max_texture_dimension_2d).unwrap().is_some());
-    r.submit(packet(doc.scene(),extent)).unwrap();r.wait_idle().unwrap();
+    crate::test_support::submit_published(&mut r,packet(doc.scene(),extent));r.wait_idle().unwrap();
     let expected=float_pixels(&r,r.display_views().unwrap()[0].texture());
     let accepted=r.evaluated_object_revision();let windows=r.metrics.image_window_submissions;
     doc.artwork.occurrences.get_mut(owner).unwrap().visible=true;

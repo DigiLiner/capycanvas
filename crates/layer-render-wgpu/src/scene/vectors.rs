@@ -843,6 +843,9 @@ impl Vectors {
         for (_, entry) in self.replacements.drain() { if let Some(base) = entry.base { pool.retire(base, &entry.geometry); } }
     }
     pub fn encode(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, job: &VectorJob) -> Result<(), GpuRasterError> {
+        if job.batch.tile_count() > 0 && !r.compilation.require([r.scene_pipelines.vector.pipeline()], startup::DOCUMENT) {
+            return Err(GpuRasterError::DeferredObjectWork);
+        }
         r.metrics.vector_tiles += job.batch.tile_count() as u64;
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let buffer = pool.flush(&r.device, encoder, &mut r.uploads)?;

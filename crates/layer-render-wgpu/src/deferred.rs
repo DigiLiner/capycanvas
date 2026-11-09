@@ -62,28 +62,24 @@ type Factory<T> = Box<dyn FnOnce(CompileMode) -> Compilation<T>>;
 
 struct Inner<T> {
     value: OnceLock<T>,
+    error: OnceLock<String>,
     #[cfg(target_arch = "wasm32")]
     validating: std::cell::Cell<u32>,
     #[cfg(target_arch = "wasm32")]
     preparation: std::cell::OnceCell<futures_util::future::Shared<futures_util::future::LocalBoxFuture<'static, Result<(), String>>>>,
     async_pipeline: bool,
     factory: Mutex<Option<Factory<T>>>,
-    priority: std::sync::atomic::AtomicU8,
 }
 pub(super) struct Deferred<T>(Arc<Inner<T>>);
-pub(super) struct Promotion<T> { pipeline: Deferred<T>, priority: u8 }
-impl<T> Drop for Promotion<T> {
-    fn drop(&mut self) {
-        let _ = self.pipeline.0.priority.compare_exchange(self.priority, u8::MAX,
-            std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed);
-    }
-}
 #[cfg(target_arch = "wasm32")]
 pub(super) struct Validation<T> { pipeline: Deferred<T>, active: std::cell::Cell<bool> }
 #[cfg(target_arch = "wasm32")]
 impl<T> Validation<T> {
     pub fn begin(&self) {
         if !self.active.replace(true) { self.pipeline.0.validating.set(self.pipeline.0.validating.get() + 1); }
+    }
+    pub fn finish(&self, result: &Result<(),String>) {
+        if let Err(error)=result {self.pipeline.fail(error);}
     }
 }
 #[cfg(target_arch = "wasm32")]
@@ -117,19 +113,20 @@ impl<T> Deferred<T> {
     fn boxed(factory: Factory<T>, async_pipeline: bool) -> Self {
         Self(Arc::new(Inner {
             value: OnceLock::new(),
+            error: OnceLock::new(),
             #[cfg(target_arch = "wasm32")]
             validating: std::cell::Cell::new(0),
             #[cfg(target_arch = "wasm32")]
             preparation: Default::default(),
             async_pipeline,
             factory: Mutex::new(Some(factory)),
-            priority: std::sync::atomic::AtomicU8::new(u8::MAX),
         }))
     }
     pub fn async_pipeline(&self) -> bool {
         self.0.async_pipeline
     }
     pub fn compile(&self) -> &T {
+        if !self.ready() { crate::compile::assert_execution(); }
         self.0.value.get_or_init(|| {
             #[cfg(target_arch = "wasm32")]
             assert!(!self.0.async_pipeline, "Pipeline used before preparation");
@@ -137,6 +134,14 @@ impl<T> Deferred<T> {
             let mode = CompileMode::Async;
             #[cfg(not(target_arch = "wasm32"))]
             let mode = CompileMode::Immediate;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(||self.take_factory()(mode).immediate())) {
+                    Ok(value)=>value,
+                    Err(payload)=>{self.fail(&crate::panic_message(&*payload));std::panic::resume_unwind(payload)}
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
             self.take_factory()(mode).immediate()
         })
     }
@@ -153,11 +158,13 @@ impl<T> Deferred<T> {
     where
         T: 'static,
     {
+        if let Some(error)=self.error() {let error=error.to_string();return Box::pin(async move {Err(error)});}
         if self.0.value.get().is_some() {
             return Box::pin(async { Ok(()) });
         }
         use futures_util::FutureExt;
         Box::pin(self.0.preparation.get_or_init(|| {
+            crate::compile::assert_execution();
             let compilation = self.take_factory()(CompileMode::Async);
             let owner = Arc::downgrade(&self.0);
             async move {
@@ -170,19 +177,8 @@ impl<T> Deferred<T> {
             }.boxed_local().shared()
         }).clone())
     }
-    pub async fn prepare(&self) -> Result<(), String> where T: 'static {
-        #[cfg(target_arch = "wasm32")]
-        { self.compile_async().await }
-        #[cfg(not(target_arch = "wasm32"))]
-        { self.compile(); Ok(()) }
-    }
-    pub async fn prepare_all<'a>(pipelines: impl IntoIterator<Item = &'a Self>) -> Result<(), String> where T: 'static {
-        #[cfg(target_arch = "wasm32")]
-        { futures_util::future::try_join_all(pipelines.into_iter().map(Self::prepare)).await.map(|_| ()) }
-        #[cfg(not(target_arch = "wasm32"))]
-        { for pipeline in pipelines { pipeline.prepare().await?; } Ok(()) }
-    }
     pub fn ready(&self) -> bool {
+        if self.error().is_some() {return false;}
         #[cfg(target_arch = "wasm32")]
         if self.0.validating.get() != 0 {
             return false;
@@ -191,10 +187,9 @@ impl<T> Deferred<T> {
     }
     #[cfg(target_arch = "wasm32")]
     pub fn validation(&self) -> Validation<T> { Validation { pipeline: self.clone(), active: std::cell::Cell::new(false) } }
-    pub fn promote(&self, priority: u8) -> Option<Promotion<T>> {
-        (!self.ready() && self.0.priority.fetch_min(priority, std::sync::atomic::Ordering::Relaxed) > priority)
-            .then(|| Promotion { pipeline: self.clone(), priority })
-    }
+    pub(crate) fn identity(&self) -> usize { Arc::as_ptr(&self.0) as usize }
+    pub(crate) fn error(&self)->Option<&str> {self.0.error.get().map(String::as_str)}
+    fn fail(&self,error:&str) {let _=self.0.error.set(error.into());}
 }
 impl<T> std::ops::Deref for Deferred<T> {
     type Target = T;
@@ -233,6 +228,14 @@ impl Deferred<wgpu::ComputePipeline> {
     }
 }
 
+#[cfg(all(test, debug_assertions, not(target_arch = "wasm32")))]
+mod permit_tests {
+    use super::*;
+    #[test]
+    #[should_panic(expected = "Cold recipe compiled outside the compilation coordinator")]
+    fn a_cold_recipe_requires_the_executor_permit() { Deferred::new(|| ()).compile(); }
+}
+
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::*;
@@ -242,7 +245,7 @@ mod tests {
         let first = recipe.validation();
         let second = recipe.validation();
         first.begin(); second.begin();
-        recipe.compile();
+        crate::compile::execute(|| recipe.compile());
         assert!(!recipe.ready());
         drop(first);
         assert!(!recipe.ready());

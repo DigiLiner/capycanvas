@@ -42,8 +42,10 @@ fn native(r: &mut WgpuRasterizer, doc: &layer_core::Document) -> Vec<[f32; 4]> {
     let extent = doc.composition().size;
     let (texture, _) = create_color_target(&r.device, extent, "vector native reference");
     let mut scene = r.scene.take().unwrap_or_else(|| Scene::new(r).unwrap());
+    pollster::block_on(crate::compile::Needs::capture_scene(r, doc.scene(), false).prepare(&r.compilation)).unwrap();
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
-    scene.capture_region_prepared(r, packet(doc.scene(), extent), &texture, PixelRect::full(extent), Output::Artwork(None), &mut encoder).unwrap();
+    crate::test_support::query_ready(r, &mut encoder, |r, encoder|
+        scene.capture_region_prepared(r, packet(doc.scene(), extent), &texture, PixelRect::full(extent), Output::Artwork(None), encoder));
     r.uploads.finish(&encoder); encoder.submit(&r.queue);
     r.scene = Some(scene);
     float_pixels(r, &texture)
@@ -257,6 +259,8 @@ fn crowded_layers_derive_across_frames_and_settle_to_the_exact_render() {
     let (editor, _) = document(extent, records);
     let doc = editor.document();
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    pollster::block_on(crate::compile::Needs::capture_scene(&r,doc.scene(),false).prepare(&r.compilation)).unwrap();
+    pollster::block_on(r.compilation.prepare_all(r.scene_pipelines.vector.pipelines())).unwrap();
     r.submit(packet(doc.scene(), extent)).unwrap();
     r.wait_idle().unwrap();
     let derived = |r: &WgpuRasterizer| r.scene.as_ref().unwrap().vectors.layers.values().flat_map(|layer| layer.items.iter().flatten()).filter(|item| !item.derived.is_empty()).count();
@@ -454,10 +458,8 @@ fn vector_layer_thumbnails_show_their_paths() {
     let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
     submit_ready(&mut r, packet(editor.document().scene(), [2048, 1536]));
     let inked = |r: &mut WgpuRasterizer| {
-        for _ in 0..50 { if r.prepare_thumbnail_batch(layer_render::ThumbnailTarget::Occurrence(layer)).unwrap() { break; } crate::test_support::complete(r); }
-        r.request_thumbnail(1, layer_render::ThumbnailTarget::Occurrence(layer)).unwrap();
-        crate::test_support::complete(r);
-        r.take_thumbnail().unwrap().unwrap().bytes.as_chunks::<4>().0.iter().filter(|p| p[3] > 128).count()
+        crate::test_support::thumbnail(r, 1, layer_render::ThumbnailTarget::Occurrence(layer))
+            .as_chunks::<4>().0.iter().filter(|p| p[3] > 128).count()
     };
     let shown = inked(&mut r);
     assert!(shown > 20, "the thumbnail shows the line: {shown} pixels");
@@ -475,6 +477,7 @@ fn vector_layer_thumbnails_show_their_paths() {
 fn presented(r: &WgpuRasterizer, view: layer_render::ViewState) -> Vec<u8> {
     let (texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
     let mut presenter = crate::present::ViewportPresenter::for_surface(r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    pollster::block_on(presenter.prepare(r)).unwrap();
     presenter.present(r, &target, view, [1.; 4]).unwrap();
     crate::layer_tests::page_bytes(r, &texture)
 }
@@ -730,6 +733,7 @@ fn replacement_previews_present_only_the_moving_images_bounds() {
     let (texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "replacement presentation");
     let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     presenter.set_target_retention(true);
+    pollster::block_on(presenter.prepare(&r)).unwrap();
     presenter.present(&r, &target, view, [1.; 4]).unwrap();
     let object = editor.document().scene().vector_layer(layer).unwrap().clone();
     for width in [14., 4., 20.] {
@@ -737,6 +741,7 @@ fn replacement_previews_present_only_the_moving_images_bounds() {
         r.set_vector_motion_paths(Some(widened(object.selected(&items), width)));
         submit_ready(&mut r, frame);
         let after = r.display_motion().unwrap().2;
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target, view, [1.; 4]).unwrap();
         let mut expected = Vec::new();
         for moved in [before, after] { crate::present_damage::add_region(&mut expected, crate::present_damage::damage(moved.in_frame(extent), view, 0)); }
@@ -854,6 +859,7 @@ fn crowded_vector_layer_edit_frames() {
         let hidden = timed(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         eprintln!("recompositing without vector work over {} pages: frame cpu {:.2} wall {:.2} ms", r.metrics.frame_composited_pages.len(), hidden.0, hidden.1);
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target, view, [1.; 4]).unwrap();
         r.wait_idle().unwrap();
     }
@@ -869,6 +875,7 @@ fn crowded_vector_layer_edit_frames() {
             r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([i as f64 * 0.7, i as f64 * -0.4]) }));
             let start = std::time::Instant::now();
             r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, view, [1.; 4]).unwrap();
             let cpu = start.elapsed().as_secs_f64() * 1e3;
             r.wait_idle().unwrap();
@@ -892,6 +899,7 @@ fn crowded_vector_layer_edit_frames() {
             r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: turn(i) }));
             let start = std::time::Instant::now();
             r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, view, [1.; 4]).unwrap();
             let cpu = start.elapsed().as_secs_f64() * 1e3;
             r.wait_idle().unwrap();
@@ -906,6 +914,7 @@ fn crowded_vector_layer_edit_frames() {
             let turned = object.transform_items(&selected, turn(i), true).unwrap();
             preview.perform(preview.document().vector_object_edit(layer, turned).unwrap()).unwrap();
             r.submit(FramePacket { view, composite_all: false, ..packet(preview.document().scene(), extent) }).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, view, [1.; 4]).unwrap();
             let cpu = start.elapsed().as_secs_f64() * 1e3;
             r.wait_idle().unwrap();
@@ -922,6 +931,7 @@ fn crowded_vector_layer_edit_frames() {
             let start = std::time::Instant::now();
             r.set_vector_motion_paths(Some(widened(object.selected(&selected), 1. + i as f64 * 0.2)));
             r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, view, [1.; 4]).unwrap();
             let cpu = start.elapsed().as_secs_f64() * 1e3;
             r.wait_idle().unwrap();
@@ -940,6 +950,7 @@ fn crowded_vector_layer_edit_frames() {
             let widths = object.with_paths(positions.iter().copied().zip(widened(object.selected(&selected), 1. + i as f64 * 0.2).iter().cloned())).unwrap();
             preview.perform(preview.document().vector_object_edit(layer, widths).unwrap()).unwrap();
             r.submit(FramePacket { view, composite_all: false, ..packet(preview.document().scene(), extent) }).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, view, [1.; 4]).unwrap();
             let cpu = start.elapsed().as_secs_f64() * 1e3;
             r.wait_idle().unwrap();
@@ -1252,6 +1263,7 @@ fn crowded_vector_layer_zoom_frames() {
         let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
         presenter.set_target_retention(true);
         submit_ready(&mut r, FramePacket { view: at(from), ..packet(editor.document().scene(), extent) });
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target, at(from), [1.; 4]).unwrap();
         r.wait_idle().unwrap();
         let mut frames = Vec::new();
@@ -1260,6 +1272,7 @@ fn crowded_vector_layer_zoom_frames() {
             let view = at(from * (to / from).powf(i as f32 / 60.));
             let (start, recorded) = (std::time::Instant::now(), r.metrics.command_passes);
             r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, view, [1.; 4]).unwrap();
             let cpu = start.elapsed().as_secs_f64() * 1e3;
             r.wait_idle().unwrap();
@@ -1271,6 +1284,7 @@ fn crowded_vector_layer_zoom_frames() {
         let mut settling = 0;
         while r.has_pending_work() && settling < 2000 {
             r.submit(FramePacket { view: at(to), composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, at(to), [1.; 4]).unwrap();
             r.wait_idle().unwrap();
             settling += 1;
@@ -1404,6 +1418,7 @@ fn crowded_vector_layer_width_scrub_frames() {
         r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
         r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0., 0.]) }));
         submit_ready(&mut r, frame());
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target, view, [1.; 4]).unwrap();
         r.wait_idle().unwrap();
         let paths = object.selected(&selected);
@@ -1414,6 +1429,7 @@ fn crowded_vector_layer_width_scrub_frames() {
             r.set_vector_motion_paths(Some(widened));
             r.submit(frame()).unwrap();
             pages.push(r.metrics.frame_composited_pages.len() as f64);
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target, view, [1.; 4]).unwrap();
             let cpu = start.elapsed().as_secs_f64() * 1e3;
             canvas.push(thread_cpu_ms(libc::CLOCK_THREAD_CPUTIME_ID) - thread);
@@ -1450,6 +1466,7 @@ fn crowded_vector_layer_press_frames() {
         r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
         r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([4., 3.]) }));
         r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target, view, [1.; 4]).unwrap();
         let cpu = start.elapsed().as_secs_f64() * 1e3;
         r.wait_idle().unwrap();

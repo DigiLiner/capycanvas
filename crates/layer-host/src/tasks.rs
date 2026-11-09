@@ -414,11 +414,12 @@ mod tests {
         let gpu = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
         let mut host = NativeHost::new(layer_ui::Platform::Mac).unwrap();
         *host.session = UiSession::new(Renderer(Some(gpu.into())), document, [64, 48], layer_ui::Platform::Mac).unwrap();
-        host.session.frame(0, 0).unwrap();
+        crate::test_support::frames_until(&mut host, |_| true);
         host
     }
 
     fn invoke(host: &mut NativeHost, command: CommandId) {
+        crate::test_support::frames_until(host, |_| true);
         host.dispatch(UiAction::Invoke { command }).unwrap();
     }
 
@@ -487,7 +488,7 @@ mod tests {
         host.session
             .import_layer_source("Photo", source.finish().unwrap())
             .unwrap();
-        host.session.frame(0, 0).unwrap();
+        crate::test_support::frames_until(&mut host, |_| true);
         let layer = host.session.engine().document().working.target.unwrap();
         invoke(&mut host, CommandId::RepairSourceProfile);
         let mut task = SourceTask::capture(&host.session, None, RgbSpace::Srgb).unwrap();

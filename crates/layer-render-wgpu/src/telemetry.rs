@@ -66,7 +66,7 @@ impl Telemetry {
     // Mark the drawing itself without separate start/end queue submissions.
     pub fn begin(
         &mut self,
-        device: &wgpu::Device,
+        device: &crate::PipelineDevice,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         frame: u64,
@@ -79,7 +79,7 @@ impl Telemetry {
         gpu.frame = frame;
         let timer = gpu
             .timer
-            .get_or_insert_with(|| GpuFrameTimer::new(device, queue));
+            .get_or_insert_with(|| GpuFrameTimer::with_device(device, queue));
         timer.begin_encoded(encoder, frame);
     }
     pub fn end(&mut self, encoder: &mut wgpu::CommandEncoder) {
@@ -100,7 +100,7 @@ impl Telemetry {
     pub fn phase_begin(
         &mut self,
         index: usize,
-        device: &wgpu::Device,
+        device: &crate::PipelineDevice,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
     ) -> bool {
@@ -109,7 +109,7 @@ impl Telemetry {
         }
         let gpu = self.gpu.get_mut().unwrap();
         if gpu.phases.is_empty() {
-            gpu.phases = PHASE_NAMES.map(|_| GpuFrameTimer::new(device, queue)).into();
+            gpu.phases = PHASE_NAMES.map(|_| GpuFrameTimer::with_device(device, queue)).into();
         }
         let frame = gpu.frame;
         let timer = &mut gpu.phases[index];
@@ -173,10 +173,13 @@ mod tests {
             required_features: wgpu::Features::TIMESTAMP_QUERY,
             ..Default::default()
         })).unwrap();
+        let device=crate::PipelineDevice::from(device);
         let mut telemetry = Telemetry::new(&device, &queue);
         telemetry.enabled = true;
-        telemetry.gpu.get_mut().unwrap().phases = (0..2)
-            .map(|_| GpuFrameTimer::new(&device, &queue)).collect();
+        let gpu=telemetry.gpu.get_mut().unwrap();
+        gpu.timer=Some(GpuFrameTimer::with_device(&device,&queue));
+        gpu.phases=(0..2).map(|_|GpuFrameTimer::with_device(&device,&queue)).collect();
+        for timer in gpu.timer.iter().chain(&gpu.phases) {pollster::block_on(timer.prepare()).unwrap();}
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: 4096,

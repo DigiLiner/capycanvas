@@ -213,6 +213,13 @@ impl std::ops::Deref for Effects {
     fn deref(&self) -> &Self::Target { &self.recipes }
 }
 impl Effects {
+    pub(crate) fn needs(&self) -> crate::compile::Needs {
+        let mut needs=crate::compile::Needs::default();
+        for (_,_,pipeline,_) in &self.pipelines {match pipeline {
+            Pipeline::Render(p)=>needs.render.push(p.clone()),Pipeline::Compute(p)=>needs.compute.push(p.clone()),
+        }}
+        needs.compute.extend(self.preparation.pipelines.iter().map(|(_,p)|p.clone()));needs
+    }
     pub(super) fn chain_ready(&self, scene: SceneView<'_>, layers: &[OccurrenceHandle], execution: Execution, space: layer_core::BlendSpace) -> bool {
         if self.pipelines.is_empty() {return false;}
         let requested=(execution, space, normal_chain(scene,layers), identity_chain(scene,layers));
@@ -223,12 +230,12 @@ impl Effects {
     }
     /// Queue missing variants without starting compilation on the render path.
     /// The same cache serves document rendering and visible filter previews.
-    pub(super) fn enqueue(&self, compiler: &startup::Compiler, priority: u8) -> bool {
+    pub(super) fn enqueue(&self, compiler: &compile::Scope, priority: startup::Class) -> bool {
         compiler.require(self.pipelines.iter().filter_map(|(_,_,p,_)|match p {Pipeline::Render(p)=>Some(p),_=>None}), priority)
             & compiler.require(self.pipelines.iter().filter_map(|(_,_,p,_)|match p {Pipeline::Compute(p)=>Some(p),_=>None}), priority)
             & compiler.require(self.preparation.pipelines.iter().map(|(_, p)| p), priority)
     }
-    pub(super) fn enqueue_active(&self, compiler: &startup::Compiler, priority: u8) -> bool {
+    pub(super) fn enqueue_active(&self, compiler: &compile::Scope, priority: startup::Class) -> bool {
         compiler.require(self.instances.values().flat_map(|instance| instance.pipelines.values())
             .filter_map(|(pipeline,_)|match pipeline {Pipeline::Render(p)=>Some(p),_=>None}), priority)
             & compiler.require(self.instances.values().flat_map(|instance| instance.pipelines.values())

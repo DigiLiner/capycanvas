@@ -18,6 +18,7 @@ fn held_capture_blends_and_releases_its_device_charge_after_completion() {
         @fragment fn fs()->@location(0) vec4<f32> {return vec4(1.,0.,0.,1.);}
     "#.into())});
     let pipeline=crate::present::surface_pipeline(device,"capture test",&pipeline_layout,&shader,["vs","fs"],None,format,None);
+    pollster::block_on(renderer.compilation.prepare_all([&pipeline])).unwrap();
     let mut encoder=device.create_command_encoder(&Default::default());
     let view=HeldCanvas::texture(device,[8,8],format);
     HeldCanvas::capture(&mut encoder,&view,|pass| {pass.set_pipeline(&pipeline);pass.set_bind_group(0,&group,&[0]);pass.draw(0..3,0..1);});
@@ -31,6 +32,7 @@ fn held_capture_blends_and_releases_its_device_charge_after_completion() {
     assert!(!held.compatible(device,[8,8],format,SdrSurfaceColor::WindowsScrgb));
     assert!(Arc::ptr_eq(&device.transient_display,&device.for_recipe().transient_display));
     let recipes=TransitionRecipes::new(device,format);
+    pollster::block_on(renderer.compilation.prepare_all([&recipes.pipeline])).unwrap();
     let mut draw=TransitionDraw::new(device,&recipes,&held);
     let mut uploads=Uploads::new(device,1024);
     renderer.queue.submit([encoder.finish()]);
@@ -56,6 +58,7 @@ fn held_capture_blends_and_releases_its_device_charge_after_completion() {
     renderer.queue.submit([encoder.finish()]);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert_eq!(device.transient_display.load(Ordering::Acquire),0);
+    pollster::block_on(renderer.compilation.prepare_all([&pipeline])).unwrap();
     let mut encoder=device.create_command_encoder(&Default::default());
     let view=HeldCanvas::texture(device,[8,8],format);
     HeldCanvas::capture(&mut encoder,&view,|pass| {pass.set_pipeline(&pipeline);pass.set_bind_group(0,&group,&[0]);pass.draw(0..3,0..1);});

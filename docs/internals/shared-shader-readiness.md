@@ -78,7 +78,8 @@ the evaluator samples the starting paint and commits write the other half of a
 ping-pong pair. Sampling a page inside the evaluator, even on a branch commits
 never take, costs Adreno and Mali tablets up to a third of their painting rate.
 
-The native compiler workers and browser task runner share `shader_admission.rs`.
+The native compiler workers and browser task runner share the registry and
+admission policy in `compile/`. Renderer scopes cancel their queued demand when dropped.
 Native hosts run three eighths of `available_parallelism()`, rounded up and
 clamped to one through six, required jobs at once, plus one thread for an
 optional pipeline compile. Only independent required pipeline recipes compile
@@ -179,7 +180,7 @@ package installation and atomic validation remain available. Identical library
 refreshes are no-ops on all three hosts. Prepared pipeline recipes remain in
 process for reuse. The native process GPU loads and saves its pipeline cache in
 `shaders/`, one checked file per backend, GPU and driver, kept across app updates
-and rewritten after idle. Entries are reused for unchanged shaders and compilers;
+and rewritten when compilation drains, including when no frame follows. Entries are reused for unchanged shaders and compilers;
 unreadable or foreign data is discarded. Web relies on the browser's caches.
 Native startup completes after required
 dependencies and host catalog admission, without a disk-cache finalization job.

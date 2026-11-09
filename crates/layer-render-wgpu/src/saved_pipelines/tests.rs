@@ -182,7 +182,7 @@ fn identical_cache_bytes_are_not_rewritten_but_changed_bytes_are() {
 }
 
 #[test]
-fn compiled_cache_loads_on_a_second_device() {
+fn background_compilation_saves_without_frames_and_loads_on_a_second_device() {
     use crate::{PipelineDevice, WgpuRasterizer};
     let directory = Directory::new();
     let instance = WgpuRasterizer::headless_instance();
@@ -208,30 +208,55 @@ fn compiled_cache_loads_on_a_second_device() {
     ] {
         assert!(Arc::ptr_eq(shared.saved_pipelines().unwrap(), &store));
     }
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("saved pipeline fixture"),
-        source: wgpu::ShaderSource::Wgsl("@compute @workgroup_size(1) fn main() {}".into()),
-    });
-    let _pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("saved pipeline fixture"), layout: None, module: &shader,
-        entry_point: Some("main"), compilation_options: Default::default(), cache: None,
-    });
-    assert_eq!(store.unsaved.load(Ordering::Relaxed), 1);
-    store.save();
-    assert!(store.path.exists());
+    let scope = device.compilation().unwrap();
+    let _other = PipelineDevice::from((*device).clone()).with_device_recipes(&recipes).compilation().unwrap();
+    let shader = crate::Deferred::wgsl(&device, "saved pipeline fixture", "@compute @workgroup_size(1) fn main() {}");
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {label: None, bind_group_layouts: &[], immediate_size: 0});
+    let recipe = crate::Deferred::compute(&device, "saved pipeline fixture", &layout, &shader, "main");
+    scope.warm(&recipe, crate::compile::Class::Background, scope.generation());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !store.path.exists() {
+        assert!(std::time::Instant::now() < deadline, "background drain never saved the cache");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(recipe.ready());
+    assert_eq!(store.compiled.load(Ordering::Relaxed), 1);
+    scope.idle(false, false);
+    let canceled = crate::Deferred::new(|| ());
+    scope.warm(&canceled, crate::compile::Class::Background, scope.generation());
+    let shader = crate::Deferred::wgsl(&device, "saved pipeline after cancellation", "@compute @workgroup_size(2) fn main() {}");
+    let required = crate::Deferred::compute(&device, "saved pipeline after cancellation", &layout, &shader, "main");
+    scope.require([&required], crate::compile::Class::Required);
+    while !required.ready() || scope.pending() != 0 {
+        assert!(std::time::Instant::now() < deadline, "required cache contribution never finished");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(store.compiled.load(Ordering::Relaxed) > store.saved.load(Ordering::Relaxed));
+    scope.idle(true, true);
+    scope.advance();
+    while store.saved.load(Ordering::Relaxed) != store.compiled.load(Ordering::Relaxed) {
+        assert!(std::time::Instant::now() < deadline, "canceling the final optional recipe never saved the cache");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!canceled.ready());
     let data = read_file(&directory.0, &info).unwrap();
     assert!(!data.is_empty());
     assert_eq!(store.cache().get_data().unwrap(), data);
     std::fs::remove_file(&store.path).unwrap();
     store.compiled();
-    store.saving.store(true, Ordering::Relaxed);
-    store.save();
+    let cancelled = store.claim_save().unwrap();
+    assert!(store.claim_save().is_none());
+    drop(cancelled);
+    store.claim_save().unwrap().run();
+    assert!(store.claim_save().is_none(), "a settled epoch schedules no save loop");
     assert!(!store.path.exists(), "identical cache bytes must not be written again");
-    assert_eq!(store.unsaved.load(Ordering::Relaxed), 0);
+    assert_eq!(store.saved.load(Ordering::Relaxed), store.compiled.load(Ordering::Relaxed));
     assert!(!store.saving.load(Ordering::Relaxed));
     let (second, _) = pollster::block_on(adapter.request_device(&descriptor)).unwrap();
     let published = (data.len(), crc32fast::hash(&data));
     let loaded = SavedPipelines::open_at(&directory.0, &second, &info, Some(data)).unwrap();
     assert_eq!(*loaded.published.lock().unwrap(), Some(published));
     assert!(!loaded.cache().get_data().unwrap().is_empty());
+    drop((scope, _other));
+    crate::finish_shader_compiler_shutdown();
 }

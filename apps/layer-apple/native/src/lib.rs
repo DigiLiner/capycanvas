@@ -1,5 +1,6 @@
 //! Apple host ABI. The same library serves UIKit and AppKit. Rust owns the
 //! shared session; Swift owns UI, frame scheduling and serial execution.
+#![recursion_limit = "256"]
 mod handles;
 pub use handles::{capy_apple_string_copy,capy_apple_string_free,capy_apple_string_length};
 mod metal;

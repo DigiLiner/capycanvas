@@ -503,6 +503,7 @@ fn canonical_paint(
     use layer_core::color::{SampleDepth, AlphaAssociation, LayerColorMode};
     let transfer = r.prepare_native_transfer(color.space).unwrap();
     let encoder = NativeTileEncoder::with_device(&r.device);
+    pollster::block_on(r.compilation.prepare_all(encoder.pipelines_for_depth(color.depth,false))).unwrap();
     let format = match color.depth {
         SampleDepth::U8 => wgpu::TextureFormat::Rgba8Uint,
         SampleDepth::U16 | SampleDepth::F16 => wgpu::TextureFormat::Rgba16Uint,

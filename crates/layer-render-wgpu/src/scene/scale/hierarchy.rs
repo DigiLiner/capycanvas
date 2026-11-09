@@ -138,7 +138,7 @@ impl Hierarchy {
             }
             image
         }).collect();
-        let pipelines = r.display_pipelines.take().unwrap_or_else(|| display_mips::Pipelines::new(&r.device));
+        let pipelines = r.display_pipelines.take().unwrap_or_else(|| r.recipes.display.clone());
         let views: Vec<_> = levels.iter().map(|i| &i.view).collect();
         let updates = display_mips::CompleteUpdates::from_level(&r.device, &pipelines,
             display_mips::Plan::at(extent, last), 0, &views);

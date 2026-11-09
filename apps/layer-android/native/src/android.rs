@@ -652,9 +652,14 @@ impl App {
             surface.presenter=presenter;
             surface.color=color;
         }
+        let extent = [view.width_px, view.height_px];
+        if output_changed || extent != surface.logical_extent {
+            surface.configure(gpu, extent)?;
+        }
         let display = SceneDisplay { scale, headroom: 1., blank_presented: self.blank_presented, compositor_hdr: hdr_output };
         self.host.compose_scene(&mut surface.presenter, &mut self.cursor, &self.navigators, &self.glass, tone, display)?;
         surface.presenter.set_surface_rotation(surface.quarter_turns);
+        if !self.host.prepare_canvas_presentation(&surface.presenter) {return Ok(true);}
         let gpu = self.host.session.renderer_mut().0.as_ref().unwrap();
         surface.presenter.set_screen_check(gpu, screen_check);
         let trace_timings = unsafe { ndk_sys::ATrace_isEnabled() };
@@ -667,10 +672,6 @@ impl App {
             surface.trace_timings = trace_timings;
         }
 
-        let extent = [view.width_px, view.height_px];
-        if output_changed || extent != surface.logical_extent {
-            surface.configure(gpu, extent)?;
-        }
         self.frame_cost[0] = elapsed();
         if !surface.presenter.needs_present(gpu, view, surround) {
             return Ok(self.host.dirty);

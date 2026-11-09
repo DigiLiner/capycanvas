@@ -4,6 +4,7 @@ use super::*;
 fn relaxation_matches_sparse_block_reference() {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let k = Pipelines::new(&r.device);
+    pollster::block_on(r.compilation.prepare_all([&k.relax])).unwrap();
     for scale in [1, 4] {
         let pages = [[0, 0], [1, 0], [0, 1], [3, 3]];
         let pyramid = Pyramid::scaled(&pages, [0, 0], [4, 4], scale);

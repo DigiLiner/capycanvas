@@ -79,7 +79,7 @@ fn committed_frame_passes(style: &DabStyle, radius: f32, batches: usize) -> u64 
     let full = layer_core::Rect::from_extent(extent);
     let frame = |dabs, batches| FramePacket { dabs, dab_batches: batches, commit_rasters: false, ..packet(document.scene(), extent) };
     let paint = crate::test_support::dab_batch(layer, crate::tests::test_style(BrushExecution::Dry), full);
-    r.submit(FramePacket { reset_layers: true, ..frame(std::slice::from_ref(&base), std::slice::from_ref(&paint)) }).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket { reset_layers: true, ..frame(std::slice::from_ref(&base), std::slice::from_ref(&paint)) }).unwrap();
     let contacts: Vec<_> = (0..batches).map(|i| {
         let mut contact = dab([0.9, 0.2, 0.1, 1.]);
         contact.center = Point { x: 400. + 6. * i as f32, y: 400. };
@@ -91,7 +91,7 @@ fn committed_frame_passes(style: &DabStyle, radius: f32, batches: usize) -> u64 
     let strokes: Vec<_> = contacts.iter().enumerate().map(|(i, contact)| DabBatch { stroke_id: StrokeId(2), first_dab: i as u32,
         stroke_start: i == 0, stroke_end: false, ..crate::test_support::dab_batch(layer, style.clone(), contact.bounds()) }).collect();
     let before = r.metrics().command_passes;
-    r.submit(frame(&contacts, &strokes)).unwrap();
+    crate::test_support::submit_ready(&mut r, frame(&contacts, &strokes)).unwrap();
     r.wait_idle().unwrap();
     r.metrics().command_passes - before
 }

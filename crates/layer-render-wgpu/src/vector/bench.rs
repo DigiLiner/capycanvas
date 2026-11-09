@@ -63,10 +63,10 @@ fn median(mut values: Vec<f64>) -> f64 { values.sort_by(f64::total_cmp); values[
 struct Timer { query: wgpu::QuerySet, marker: crate::frame_timing::TimestampMarker, resolved: wgpu::Buffer, readback: wgpu::Buffer, period: f64 }
 impl Timer {
     fn new(r: &crate::WgpuRasterizer) -> Option<Self> {
-        let device: &wgpu::Device = &r.device;
+        let device = &r.device;
         device.features().contains(wgpu::Features::TIMESTAMP_QUERY).then(|| Self {
             query: device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("vector bench"), ty: wgpu::QueryType::Timestamp, count: 2 }),
-            marker: crate::frame_timing::TimestampMarker::new(device, Default::default()),
+            marker: {let marker=crate::frame_timing::TimestampMarker::new(device, Default::default());pollster::block_on(marker.prepare()).unwrap();marker},
             resolved: device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 16, usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false }),
             readback: device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 16, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }),
             period: f64::from(r.queue.get_timestamp_period()),

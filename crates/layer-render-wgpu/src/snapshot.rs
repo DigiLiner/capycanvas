@@ -271,7 +271,7 @@ impl SnapshotRenderer {
         if self.pipelines_ready { return Ok(()); }
         self.control.check()?;
         let r = &mut self.renderer;
-        let mut required = startup::Requirements::default();
+        let mut required = compile::Needs::default();
         required.render.extend(startup::SourceKinds::for_scene(self.scene.view().with_scope(&self.scope))
             .pipelines(&r.scene_pipelines.source).cloned());
         if let Some(plan) = &self.raw_plan {
@@ -290,7 +290,7 @@ impl SnapshotRenderer {
             required.render.push(r.layer_masks.initialize.clone());
             required.compute.extend(r.selection_clip.pipelines().into_iter().cloned());
         }
-        required.prepare().await.map_err(GpuRasterError::Effect)?;
+        required.prepare(&r.compilation).await.map_err(GpuRasterError::Effect)?;
         self.control.check()?;
         self.pipelines_ready = true;
         Ok(())
@@ -301,7 +301,10 @@ impl SnapshotRenderer {
         if self.scene_pipelines_ready { return Ok(()); }
         let r = &mut self.renderer;
         let view = self.scene.view().with_scope(&self.scope).with_offset(self.offset);
-        let required = startup::Requirements::capture_scene(r,view,self.backing.values().any(|data|data.watercolor.is_some()));
+        let mut required = compile::Needs::capture_scene(r,view,self.backing.values().any(|data|data.watercolor.is_some()));
+        if matches!(self.scope,SceneScope::All) && layer_core::paper::lit_paper(view).is_some() {
+            required.render.push(r.paper_export.get_or_insert_with(||r.recipes.paper_export.get_or_init(||Arc::new(paper::ExportShade::new(&r.device))).clone()).pipeline.clone());
+        }
         let mut scene = r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
         let prepared = (|| {
             if !matches!(self.scope, SceneScope::Raw(_)) {
@@ -311,15 +314,11 @@ impl SnapshotRenderer {
             }
             Ok::<_, GpuRasterError>(())
         })();
-        #[cfg(target_arch = "wasm32")]
-        let compiled = scene.effects.compile_async();
-        #[cfg(not(target_arch = "wasm32"))]
-        scene.effects.compile();
+        let effects=scene.effects.needs();
         r.scene = Some(scene);
         prepared?;
-        #[cfg(target_arch = "wasm32")]
-        compiled.await.map_err(GpuRasterError::Effect)?;
-        required.prepare().await.map_err(GpuRasterError::Effect)?;
+        effects.prepare(&r.compilation).await.map_err(GpuRasterError::Effect)?;
+        required.prepare(&r.compilation).await.map_err(GpuRasterError::Effect)?;
         self.control.check()?;
         self.scene_pipelines_ready = true;
         Ok(())
@@ -955,7 +954,7 @@ impl SnapshotRenderer {
         [x, y, width, height]: [u32; 4],
     ) -> Result<SelectionCoverage, GpuRasterError> {
         self.check_cancelled()?;
-        Deferred::prepare_all(self.renderer.selection_clip.pipelines())
+        self.renderer.compilation.prepare_all(self.renderer.selection_clip.pipelines())
             .await.map_err(GpuRasterError::Effect)?;
         let region = PixelRect::new(
             x,

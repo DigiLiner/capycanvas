@@ -14,6 +14,7 @@ fn the_crop_shield_dims_outside_the_crop_and_shows_added_canvas_as_transparency(
     let texture = target(&r, wgpu::TextureFormat::Rgba8UnormSrgb);
     let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     let mut present = |r: &WgpuRasterizer| {
+        crate::test_support::prepare_lit_presenter(r,&mut presenter);
         presenter.present(r, &texture.create_view(&Default::default()), camera, surround).unwrap();
         page_bytes(r, &texture)
     };
@@ -51,6 +52,7 @@ fn the_crop_shield_darkens_encoding_and_linear_surfaces_alike() {
         let texture = target(r, format);
         let mut presenter = crate::ViewportPresenter::for_surface(r, format, crate::SdrSurfaceColor::Srgb).unwrap();
         let mut present = |r: &WgpuRasterizer| {
+            pollster::block_on(presenter.prepare(r)).unwrap();
             presenter.present(r, &texture.create_view(&Default::default()), camera, [0.2, 0.3, 0.4, 1.]).unwrap();
             let pixels = page_bytes(r, &texture);
             <[u8; 4]>::try_from(&pixels[(80 * 128 + 80) * 4..][..4]).unwrap()
@@ -79,6 +81,7 @@ fn paper_relief_shades_only_the_canvas_and_leaves_no_trace() {
     let texture = target(&r, wgpu::TextureFormat::Rgba8UnormSrgb);
     let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     let mut present = |r: &WgpuRasterizer| {
+        crate::test_support::prepare_lit_presenter(r,&mut presenter);
         presenter.present(r, &texture.create_view(&Default::default()), camera, [0.2, 0.3, 0.4, 1.]).unwrap();
         page_bytes(r, &texture)
     };
@@ -125,6 +128,7 @@ fn staged_paper_relief_follows_a_new_scale_at_once_and_reports_only_its_own_bake
     let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     pollster::block_on(presenter.prepare(&r)).unwrap();
     let mut present = |r: &WgpuRasterizer| {
+        crate::test_support::prepare_lit_presenter(r,&mut presenter);
         presenter.present(r, &texture.create_view(&Default::default()), camera, [0.2, 0.3, 0.4, 1.]).unwrap();
         (page_bytes(r, &texture), presenter.paper_lighting_drawn())
     };

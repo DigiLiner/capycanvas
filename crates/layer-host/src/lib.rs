@@ -1553,6 +1553,33 @@ mod tests {
     }
 
     #[test]
+    fn native_presentation_waits_for_initial_replacement_and_glass_pipelines() {
+        let (_reference,mut host)=gpu_host(layer_ui::Platform::Android,[64;2]);
+        for format in [wgpu::TextureFormat::Rgba8UnormSrgb,wgpu::TextureFormat::Bgra8UnormSrgb] {
+            let gpu=host.session.engine().backend().0.as_ref().unwrap();
+            let mut presenter=layer_render_wgpu::ViewportPresenter::for_surface(gpu,format,layer_render_wgpu::SdrSurfaceColor::Srgb).unwrap();
+            host.dirty=false;
+            assert!(!host.prepare_canvas_presentation(&presenter));
+            assert!(host.dirty);
+            let gpu=host.session.engine().backend().0.as_ref().unwrap();
+            pollster::block_on(presenter.prepare(gpu)).unwrap();
+            host.dirty=false;
+            assert!(host.prepare_canvas_presentation(&presenter));
+            assert!(!host.dirty);
+            if format==wgpu::TextureFormat::Rgba8UnormSrgb {
+                let gpu=host.session.engine().backend().0.as_ref().unwrap();
+                presenter.set_backdrop(gpu,&[layer_render_wgpu::BackdropRegion {
+                    bounds:[4.,4.,32.,32.],radii:[2.;4],shape:layer_render_wgpu::BackdropRegion::SQUIRCLE,
+                }],Default::default(),false);
+                assert!(!host.prepare_canvas_presentation(&presenter));
+                let gpu=host.session.engine().backend().0.as_ref().unwrap();
+                pollster::block_on(presenter.prepare(gpu)).unwrap();
+                assert!(host.prepare_canvas_presentation(&presenter));
+            }
+        }
+    }
+
+    #[test]
     fn undrawable_overviews_do_not_hold_canvas_presentation() {
         use scene::{Navigators, NavigatorSlot, SceneDisplay, SlotUnits};
         let (_reference, mut host) = gpu_host(layer_ui::Platform::Windows, [64; 2]);
@@ -1682,7 +1709,7 @@ mod tests {
         host.dirty = false;
         host.poll_canvas_presentation(&mut presenter).unwrap();
         assert!(!host.dirty, "parked optional pipelines do not pump frames");
-        assert!(!host.startup.complete);
+        assert!(host.startup.complete, "optional lighting does not hold startup completion");
         host.session.engine().backend().0.as_ref().unwrap().shader_idle(true, false);
         let mut frames = 0;
         while !presenter.paper_lighting_drawn() {
@@ -2096,8 +2123,9 @@ mod tests {
             mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
         });
-        layer_render_wgpu::ViewportPresenter::for_surface(gpu, wgpu::TextureFormat::Rgba8UnormSrgb, layer_render_wgpu::SdrSurfaceColor::Srgb)
-            .unwrap().present(gpu, &texture.create_view(&Default::default()), view, host.session.state().palette.surround_linear).unwrap();
+        let mut presenter = layer_render_wgpu::ViewportPresenter::for_surface(gpu, wgpu::TextureFormat::Rgba8UnormSrgb, layer_render_wgpu::SdrSurfaceColor::Srgb).unwrap();
+        pollster::block_on(presenter.prepare(gpu)).unwrap();
+        presenter.present(gpu, &texture.create_view(&Default::default()), view, host.session.state().palette.surround_linear).unwrap();
         let row = (view.width_px * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("presented warp readback"),
             size: u64::from(row * view.height_px), usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
@@ -2250,9 +2278,11 @@ mod tests {
         let (_reference,mut host)=gpu_document_host(layer_ui::Platform::Android,document);
         let (notify,woken)=mpsc::channel();host.set_wake(Arc::new(move ||{let _=notify.send(());}));
         let clock=std::cell::Cell::new(0);let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
-        while !host.startup.brush_ready || host.session.engine().wants_continuous_frames() {frame_step(&mut host,&clock,deadline);}
+        while !host.startup.complete || host.session.engine().wants_continuous_frames() {frame_step(&mut host,&clock,deadline);}
         waiting.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-        host.dirty=false;assert!(!host.poll_preparation());assert!(woken.try_recv().is_err());
+        while woken.try_recv().is_ok() {}
+        host.poll_preparation();host.dirty=false;
+        assert!(!host.poll_preparation());assert!(woken.try_recv().is_err());
         *held.0.0.lock().unwrap()=true;held.0.1.notify_all();
         woken.recv_timeout(std::time::Duration::from_secs(10)).unwrap();assert!(host.poll_preparation());
         let pixels=thumbnail(&mut host,&clock,1,layer_ui::occurrence_token(layer));
@@ -3660,6 +3690,17 @@ mod tests {
 #[cfg(all(test,not(target_arch="wasm32")))]
 mod test_support {
     use layer_core::{Document, SourceTarget, authored::{PaintSource, Composition}};
+    pub fn frames_until(owner: &mut super::NativeHost, ready: impl Fn(&layer_core::Document) -> bool) {
+        let started = std::time::Instant::now();
+        loop {
+            let now = started.elapsed().as_nanos() as u64;
+            owner.prepare_canvas_frame(now, now, true).unwrap();
+            if owner.startup.canvas_ready && owner.session.can_park_document() && !owner.session.engine().raster_backing_pending()
+                && ready(owner.session.engine().document()) { break; }
+            assert!(started.elapsed() < std::time::Duration::from_secs(30), "canvas startup timed out");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
     pub fn active_source(document: &Document) -> &PaintSource {
         let SourceTarget::Paint(handle) = document.working.target.unwrap() else { panic!("paint target"); };
         document.artwork.paint.get(handle).unwrap()

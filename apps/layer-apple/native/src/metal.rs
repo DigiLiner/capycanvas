@@ -293,7 +293,7 @@ impl MetalHost {
         if self.timing_enabled
             && let Some(gpu) = &host.session.renderer_mut().0 {
                 timing
-                    .get_or_insert_with(|| GpuFrameTimer::new(gpu.device(), gpu.queue()))
+                    .get_or_insert_with(|| GpuFrameTimer::new(gpu))
                     .begin(gpu.device(), gpu.queue(), now);
             }
         let result = self.frame_inner(host, now, presentation);

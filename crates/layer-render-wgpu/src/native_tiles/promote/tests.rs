@@ -10,6 +10,7 @@ fn floats(values: impl Iterator<Item = f32>) -> Vec<u8> {
 fn promotion_preserves_float32_bits_and_pixels_outside_each_region() {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let promoter = NativePromoter::with_device(&r.device);
+    pollster::block_on(r.compilation.prepare_all(&promoter.pipelines)).unwrap();
     for format in [
         wgpu::TextureFormat::Rgba32Float,
         wgpu::TextureFormat::R32Float,

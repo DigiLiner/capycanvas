@@ -63,6 +63,7 @@ mod flat_areas_tests;
 pub use view_color::SdrSurfaceColor;
 mod raster;
 mod deferred;
+mod compile;
 mod paint_transform;
 mod upload_capacity;
 #[cfg(all(test,not(target_arch="wasm32")))]
@@ -977,6 +978,7 @@ impl Pipelines {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Initialization {
+    #[cfg(not(target_arch="wasm32"))]
     Headless,
     Interactive,
     /// A worker compiles only the dependencies of its immutable capture.
@@ -1017,6 +1019,7 @@ pub struct WgpuRasterizer {
     layer_masks: layer_masks::MaskRenderer,
     selection_clip: selection_clip::SelectionClip,
     display_selection: Option<(layer_core::Selection, wgpu::Buffer)>,
+    pending_display_selection: Option<layer_core::Selection>,
     /// Counts replacements of the displayed selection; the latest one
     /// repaints `display_selection_damage`, in document pixels.
     display_selection_revision: u64,
@@ -1072,7 +1075,8 @@ pub struct WgpuRasterizer {
     #[cfg(target_arch = "wasm32")]
     snapshot_decode_wake: Option<Arc<std::sync::Mutex<Option<std::task::Waker>>>>,
     transforms: Option<paint_transform::PaintTransforms>,
-    preparation_compiler: Option<startup::CompilerHandle>,
+    compilation: compile::Scope,
+    context_compilation: compile::Scope,
     transform_preview: Option<layer_render::TransformPreview>,
     fill_preview: Option<layer_render::FillPreview>,
     fill_preview_shown: Option<(u64,u64,SourceTarget)>,
@@ -1400,6 +1404,8 @@ impl WgpuRasterizer {
         let transforms = Some(paint_transform::PaintTransforms::from_recipes(&recipes.transforms));
         #[cfg(not(target_arch = "wasm32"))]
         let memory_samples=factory.memory_samples();
+        let compilation = device.compilation()?;
+        let context_compilation = device.compilation()?;
         let mut renderer = Box::new(Self {
             #[cfg(not(target_arch = "wasm32"))]
             memory_samples,
@@ -1418,6 +1424,7 @@ impl WgpuRasterizer {
             layer_masks,
             selection_clip,
             display_selection: None,
+            pending_display_selection: None,
             display_selection_revision: 0,
             display_selection_damage: PixelRect::EMPTY,
             selection_painter: None,
@@ -1471,7 +1478,8 @@ impl WgpuRasterizer {
             #[cfg(target_arch = "wasm32")]
             snapshot_decode_wake: None,
             transforms,
-            preparation_compiler: None,
+            compilation,
+            context_compilation,
             transform_preview: None,
             fill_preview: None,
             fill_preview_shown: None,
@@ -1597,11 +1605,14 @@ impl WgpuRasterizer {
             last_submission: None,
             metrics: GpuRasterMetrics::default(),
         });
-        if initialization == Initialization::Headless { renderer.install_builtin_masks()?; }
+        #[cfg(not(target_arch = "wasm32"))]
+        if initialization == Initialization::Headless {
+            renderer.compilation.clone().blocking(||renderer.install_builtin_masks())?;
+        }
         if initialization == Initialization::Interactive {
             renderer.upload_mask(&AssetId::from(WHITE_MASK_ASSET), 1, 1, 1, &[255])?;
             renderer.validated_effects = Some(renderer.scene_pipelines.effects(&renderer));
-            renderer.startup = Some(startup::Startup::new(&renderer.device)?);
+            renderer.startup = Some(startup::Startup::new(renderer.compilation.clone())?);
         }
         renderer.refresh_memory_limits();
         Ok(renderer)
@@ -1725,6 +1736,7 @@ impl WgpuRasterizer {
         Ok(())
     }
 
+    #[cfg(not(target_arch="wasm32"))]
     fn install_builtin_masks(&mut self) -> Result<(), GpuRasterError> {
         for (id, generate) in builtin_masks() {
             let (width, height, pixels) = generate()?;
@@ -1847,19 +1859,19 @@ impl WgpuRasterizer {
         }
     }
 
-    fn prepare_paper(&mut self, style: &layer_render::DabStyle, priority: u8) -> Result<(), GpuRasterError> {
+    fn prepare_paper(&mut self, style: &layer_render::DabStyle, priority: startup::Class) -> Result<(), GpuRasterError> {
         let (Some(_), Some(binding)) = (style.grain, &style.paper) else { return Ok(()) };
         self.prepare_paper_binding(binding, priority)
     }
 
-    fn prepare_paper_binding(&mut self, binding: &layer_core::paper::PaperBinding, priority: u8) -> Result<(), GpuRasterError> {
-        let compiler = self.startup.as_ref().map(|startup| -> &startup::Compiler { &startup.compiler });
+    fn prepare_paper_binding(&mut self, binding: &layer_core::paper::PaperBinding, priority: startup::Class) -> Result<(), GpuRasterError> {
+        let compiler = Some(&self.compilation);
         self.papers.require(&self.device, compiler, binding, priority)?;
         if self.startup.is_none() { self.papers.advance(&self.device, &self.queue, true, None)?; }
         Ok(())
     }
 
-    fn paper_ready(&mut self, style: &layer_render::DabStyle, priority: u8) -> Result<bool, GpuRasterError> {
+    fn paper_ready(&mut self, style: &layer_render::DabStyle, priority: startup::Class) -> Result<bool, GpuRasterError> {
         self.prepare_paper(style, priority)?;
         Ok(style.grain.and(style.paper.as_ref()).and_then(paper::PaperTile::id_for).is_none_or(|id| self.papers.view(&id).is_some()))
     }
@@ -1888,8 +1900,8 @@ impl WgpuRasterizer {
             1., f32::from(u8::from(separated.is_some())), f32::from(u8::from(flash)), 0.], flash && exact.is_some()))
     }
 
-    fn require_paper_slope(&mut self, binding: &layer_core::paper::PaperBinding, priority: u8) -> Result<(), GpuRasterError> {
-        let compiler = self.startup.as_ref().map(|startup| -> &startup::Compiler { &startup.compiler });
+    fn require_paper_slope(&mut self, binding: &layer_core::paper::PaperBinding, priority: startup::Class) -> Result<(), GpuRasterError> {
+        let compiler = Some(&self.compilation);
         let id = self.papers.require(&self.device, compiler, binding, priority)?;
         self.papers.require_slope(&self.device, compiler, &id, priority);
         if self.startup.is_none() {
@@ -1992,11 +2004,18 @@ impl WgpuRasterizer {
             if let DabBatchKind::RasterOperation(index) = batch.kind
                 && let Some(operation) = packet.scene.operations(batch.target).and_then(|ops| ops.get(index as usize))
             {
+                ready &= self.compilation.require([&self.layer_masks.initialize],startup::BRUSH)
+                    & self.compilation.require(self.selection_clip.pipelines(),startup::BRUSH);
                 if !batch.target.is_coverage()
-                    && let Some(pipeline) = scene::operation_pipeline(&operation.kind)
-                    && let Some(startup) = &self.startup {
-                    ready &= startup.compiler.require([&self.scene_pipelines.pipeline[pipeline]], startup::BRUSH);
-                    startup.compiler.start();
+                    && let Some(pipeline) = scene::operation_pipeline(&operation.kind) {
+                    ready &= self.compilation.require([&self.scene_pipelines.pipeline[pipeline]], startup::BRUSH);
+                }
+                if matches!(operation.kind, layer_core::RasterOperationKind::ApplyMask | layer_core::RasterOperationKind::Erase { alpha_locked: false }) {
+                    let settles = matches!(operation.kind, layer_core::RasterOperationKind::ApplyMask)
+                        || batch_pixel_rect(batch, packet.scene.target_extent(batch.target)) == PixelRect::full(packet.scene.target_extent(batch.target));
+                    if settles && self.paint_layers.iter().any(|layer| layer.id == batch.target && layer.watercolor.is_some()) {
+                        ready &= self.compilation.require([&self.pipelines.watercolor_compute.1], startup::BRUSH);
+                    }
                 }
                 if let Some(texture) = scene::fill_texture(&operation.kind)
                     && let Some(binding) = &texture.paper
@@ -2006,22 +2025,19 @@ impl WgpuRasterizer {
                 if batch.dab_count==0 {continue;}
             }
             ready &= self.brush_textures_ready(&batch.style);
-            if let Some(startup) = &self.startup && !startup.strokes.covers(&batch.style) {
+            if !self.startup.as_ref().is_some_and(|startup|startup.strokes.covers(&batch.style)) {
                 let dabs = packet.dabs.get(batch.first_dab as usize..(batch.first_dab + batch.dab_count) as usize).unwrap_or_default();
                 let mask = layer_masks::MaskRenderer::is_mask(packet.scene, batch.target);
-                let mut required = startup::Requirements::default();
+                let mut required = compile::Needs::default();
                 required.style(self, &batch.style, dry_material::Reach::of_dabs(dabs), mask, batch.kind == DabBatchKind::Preview);
-                ready &= required.require(&startup.compiler, startup::BRUSH);
+                ready &= required.require(&self.compilation, startup::BRUSH);
             }
         }
         ready
     }
 
     pub(crate) fn background_pipeline_ready(&self, pipeline: &deferred::Deferred<wgpu::ComputePipeline>) -> bool {
-        let Some(startup) = &self.startup else { return true };
-        let ready = startup.compiler.require([pipeline], startup::VALIDATION);
-        startup.compiler.start();
-        ready
+        self.compilation.require([pipeline],startup::VALIDATION)
     }
 
     fn validate_and_prepare_brush_resources(
@@ -3415,6 +3431,7 @@ impl WgpuRasterizer {
         &mut self,
         selection: Option<&layer_core::Selection>,
     ) -> Result<(), GpuRasterError> {
+        self.pending_display_selection = None;
         if let Some(selection) = selection
             && let layer_core::SelectionShape::Pixels(pixels) = &selection.shape
         {
@@ -3436,9 +3453,10 @@ impl WgpuRasterizer {
             }
         } else if let Some(selection) = selection.filter(|_| self.selection_overlay.is_some_and(|o|o.active)) {
             if self.display_selection.as_ref().is_none_or(|(old,_)| old != selection) {
-                if let Some(startup) = &self.startup {
-                    startup.compiler.check()?;
-                    if !startup.compiler.require(self.selection_clip.pipelines().into_iter().take(2), startup::BRUSH) { return Ok(()); }
+                self.compilation.check()?;
+                if !self.compilation.require(self.selection_clip.pipelines().into_iter().take(2), startup::BRUSH) {
+                    self.pending_display_selection = Some(selection.clone());
+                    return Ok(());
                 }
                 let mut encoder = crate::submission::CommandEncoder::new(&self.device,
                     &wgpu::CommandEncoderDescriptor { label: Some("selection overlay") });
@@ -3627,6 +3645,7 @@ impl WgpuRasterizer {
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_preparation_wake(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.compilation.set_wake(wake.clone());
         self.papers.set_wake(wake.clone());
         if let Some((_,queue))=&self.moving_decode {queue.set_wake(wake.clone());}
         self.preparation_wake=Some(wake);
@@ -3802,6 +3821,10 @@ impl WgpuRasterizer {
         let budget = if packet.dab_batches.is_empty() && self.moving_layer.is_none() { MOVING_IMAGE_IDLE_STEPS } else { MOVING_IMAGE_INPUT_STEPS };
         let mut changed = false;
         let result = (|| {
+            if !self.moving_projection.as_ref().unwrap().requests.is_empty()
+                && !self.compilation.require(images.pipelines(&self.device),startup::DOCUMENT) {
+                self.moving_images_waiting=true;return Ok(false);
+            }
             let budget_bytes = self.source_tiles.borrow().mip_budget();
             let plan = images.plan(self, &self.moving_projection.as_ref().unwrap().requests, budget_bytes, encoder)?;
             self.moving_images_waiting = plan.waiting;
@@ -3864,8 +3887,8 @@ impl WgpuRasterizer {
 impl CanvasRenderer for WgpuRasterizer {
     fn shader_input(&mut self) { WgpuRasterizer::shader_input(self); }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { WgpuRasterizer::shader_idle(self, idle, speculative_idle); }
-    fn prepare_selection_brush(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot) {
-        WgpuRasterizer::prepare_selection_brush(self, document, brush);
+    fn prepare_context(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, context: layer_render::PreparationContext) {
+        WgpuRasterizer::prepare_context(self, document, brush, context);
     }
     fn shaders_need_update(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
         self.startup_needs_update(document, brush, transform)
@@ -3901,28 +3924,31 @@ impl CanvasRenderer for WgpuRasterizer {
         } else { self.begin_frame_memory(packet); }
         if self.bake_preflight.as_ref().is_some_and(|state|!state.matches(packet,self.document_color())) {self.bake_preflight=None;}
         if self.fill_edges_preflight.as_ref().is_some_and(|state|!state.matches(packet,self.document_color())) {self.fill_edges_preflight=None;}
-        let mut required = startup::Requirements::default();
+        let mut required = compile::Needs::default();
         self.transforms.as_ref().unwrap().require_frame(self, packet, preview, &mut required);
-        let transforms_ready = required.render.is_empty() || self.startup.as_ref().is_none_or(|startup| {
-            let ready = startup.compiler.require(&required.render, startup::BRUSH);
-            startup.compiler.start();
-            ready
-        });
+        if let Some(native)=&self.native_edit {
+            let gray=packet.scene.targets().any(|t|packet.scene.color_mode(t)!=layer_core::color::LayerColorMode::FullColor);
+            required.compute.extend(native.required_pipelines(self.document_color.depth,gray).cloned());
+        }
+        if packet.scene.targets().any(SourceTarget::is_coverage) {
+            required.render.push(self.layer_masks.initialize.clone());
+            required.compute.extend(self.selection_clip.pipelines().into_iter().cloned());
+        }
+        let transforms_ready = required.require(&self.compilation,startup::BRUSH);
+        let scene_ready = self.compilation.require(self.scene_pipelines.for_scene(&self.device,packet.scene), startup::DOCUMENT);
         let fill_ready=if let Some(fill)=self.fill_preview.clone() {
             let pipeline=scene::operation_pipeline(&fill.operation.kind).unwrap_or(0);
-            self.startup.as_ref().is_none_or(|startup| {
-                let ready=startup.compiler.require([&self.scene_pipelines.pipeline[pipeline],&self.layer_masks.initialize],startup::BRUSH)
-                    & startup.compiler.require(self.selection_clip.pipelines(),startup::BRUSH);
-                startup.compiler.start();ready
-            })
+            self.compilation.require([&self.scene_pipelines.pipeline[pipeline],&self.layer_masks.initialize],startup::BRUSH)
+                & self.compilation.require(self.selection_clip.pipelines(),startup::BRUSH)
         }else{true};
-        fill_ready && transforms_ready && self.scene_scale_ready() && self.startup.as_ref().is_none_or(|s| s.document.ready() && s.current.ready())
+        fill_ready && transforms_ready && scene_ready && self.scene_scale_ready() && self.startup.as_ref().is_none_or(|s| s.document.ready() && s.current.ready())
             && self.brush_batches_ready(packet)
             && self.prepare_raster_restores(packet) && self.bake_analyses_ready(packet) && self.retouch_analyses_ready(packet)
             && self.bake_vectors_ready(packet) && self.prepare_bakes(packet) && self.prepare_fill_edges(packet) && self.prepare_transform_preview(packet,preview)
     }
     fn has_pending_submission(&self) -> bool { self.settling.is_some() }
     fn poll_pending(&mut self, view: layer_render::ViewState) -> Result<(), Self::Error> {
+        if let Some(selection) = self.pending_display_selection.clone() { self.set_selection_outline(Some(&selection))?; }
         let Some(mut pending) = self.settling.take() else { return Ok(()); };
         let moving = pending.view != view;
         pending.view = view;
@@ -3995,11 +4021,12 @@ impl CanvasRenderer for WgpuRasterizer {
     }
     fn has_pending_work(&self) -> bool {
         let waiting_objects=self.object_deferred && self.decode_wait_blocks_frame();
-        self.papers.images_ready() || self.papers.image_waiting() && !self.preparation_can_wake()
+        self.pending_display_selection.is_some() || self.selection_previews.pending && !self.preparation_can_wake()
+            || self.papers.images_ready() || self.papers.image_waiting() && !self.preparation_can_wake()
             || self.fill_preview.is_some() && self.fill_preview_ready().is_none()
             || self.held_result_ready() || self.fill_edges_preflight.as_ref().is_some_and(|state|state.pending() && !self.decode_wait_blocks_frame()) || self.bake_preflight.as_ref().is_some_and(|state|state.pending() && (!self.preparation_can_wake() || !state.waiting())) || self.restore_preparation_pending() && !self.decode_wait_blocks_frame() || self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() && !waiting_objects || self.settling.is_some() || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && !self.decode_wait_blocks_frame())
             || self.navigator_pending() && !waiting_objects
-            || self.transform_sources_pending && self.transform_preview.is_some() && !self.decode_wait_blocks_frame()
+            || self.transform_sources_pending && (self.transform_preview.is_some() || self.moving_pixels.is_some()) && !self.decode_wait_blocks_frame()
             || self.moving_images_pending()
             || self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())
                 && !self.decode_wait_blocks_frame()
@@ -4079,7 +4106,7 @@ impl CanvasRenderer for WgpuRasterizer {
     }
     fn paint_selection(&mut self, update: &layer_render::SelectionPaint) -> Result<bool,Self::Error> { self.update_selection_paint(update) }
     fn take_selection_paint(&mut self) -> Option<Result<layer_render::SelectionPaintResult,Self::Error>> { self.poll_selection_paint() }
-    fn cancel_selection_paint(&mut self) { self.selection_painter = None; self.display_selection = None; }
+    fn cancel_selection_paint(&mut self) { self.selection_painter = None; self.display_selection = None; self.pending_display_selection = None; }
     fn set_quick_mask_thumbnail(&mut self, selection: Option<&layer_core::Selection>) {
         if let Some(selection) = selection { self.selection_previews.definitions.insert(SourceTarget::Selection(layer_core::authored::SelectionHandle::INVALID), selection.clone()); }
         else { self.selection_previews.definitions.remove(&SourceTarget::Selection(layer_core::authored::SelectionHandle::INVALID)); }
@@ -4528,7 +4555,7 @@ impl WgpuRasterizer {
             && !motion_changed
             && !prepared_changed
             && same_frame
-            && !self.transform_sources_pending;
+            && !(self.transform_sources_pending && self.transform_preview.is_some());
         let motion_held = self.vector_motion_split.is_some();
         let navigator_unchanged =
             !preview_changed && (!motion_changed || motion_held) && same_frame;
@@ -4938,8 +4965,9 @@ impl WgpuRasterizer {
         }
         if source_access::placed_targets(packet.scene).any(|t| packet.scene.paint_base(t).is_some() || self.native_backing(t).is_some()) {
             let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
-            scene.initialize_source_paint(self, packet.scene, &mut encoder)?;
+            let result = scene.initialize_source_paint(self, packet.scene, &mut encoder);
             self.scene = Some(scene);
+            result?;
         }
         self.keep_stroke_start_pages(packet.dab_batches, &batch_tiles, &mut encoder);
         for layer in &mut self.paint_layers {
@@ -4991,8 +5019,9 @@ impl WgpuRasterizer {
                 } else {
                     let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
                     let damage = batch_pixel_rect(batch, self.target_extent(batch.target));
-                    scene.apply_operation(self, packet, batch.target, scene::PaintOperation::Stored(op as usize), damage, &mut encoder)?;
+                    let result = scene.apply_operation(self, packet, batch.target, scene::PaintOperation::Stored(op as usize), damage, &mut encoder);
                     self.scene = Some(scene);
+                    result?;
                 }
                 let bounds = operation
                     .bounds(self.target_extent(batch.target));
@@ -5173,8 +5202,9 @@ impl WgpuRasterizer {
             if new_preview_requires_base && !new_preview_from_persistent
                 && (packet.scene.paint_base(layer_id).is_some() || self.native_backing(layer_id).is_some()) {
                 let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
-                scene.initialize_source_preview(self, packet.scene, layer_id, copied, &mut encoder)?;
+                let result = scene.initialize_source_preview(self, packet.scene, layer_id, copied, &mut encoder);
                 self.scene = Some(scene);
+                result?;
             }
 
             let source = self.paint_layers.iter().find(|l| l.id == layer_id)
@@ -5305,8 +5335,9 @@ impl WgpuRasterizer {
         }
         if fill_changed && let Some(fill)=&fill_preview {
             let mut scene=self.scene.take().map(Ok).unwrap_or_else(||scene::Scene::new(self))?;
-            scene.apply_operation(self,packet,fill.target,scene::PaintOperation::Preview(&fill.operation),new_preview_damage,&mut encoder)?;
+            let result=scene.apply_operation(self,packet,fill.target,scene::PaintOperation::Preview(&fill.operation),new_preview_damage,&mut encoder);
             self.scene=Some(scene);
+            result?;
         }
         self.fill_preview_shown=fill_preview.as_ref().map(layer_render::FillPreview::key);
         if fill_changed {self.fill_preview_done=None;}
@@ -5500,7 +5531,11 @@ impl WgpuRasterizer {
             let mut transforms = self.transforms.take().unwrap();
             let result = transforms.prepare_standby(self, &mut encoder, packet.scene, layer, &selection, level);
             self.transforms = Some(transforms);
-            result?;
+            self.transform_sources_pending = match result {
+                Ok(ready) => !ready && !self.preparation_can_wake(),
+                Err(error) if error.is_preparation_pending() => true,
+                Err(error) => return Err(error),
+            };
         }
         let frame = Arc::new(artwork::Frame::new(packet, context.clone()));
         let moving = !original_batches.is_empty()
@@ -6872,7 +6907,7 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
         );
         let frame =
             |r: &mut WgpuRasterizer, document: &layer_core::Document, dabs: &[Dab], batches: &[DabBatch]| {
-                r.submit(FramePacket {
+                crate::test_support::submit_ready(r, FramePacket {
                     view: test_view(),
                     dabs,
                     dab_batches: batches,

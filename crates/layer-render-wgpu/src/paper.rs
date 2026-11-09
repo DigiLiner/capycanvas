@@ -28,7 +28,7 @@ pub(super) fn separated_color(scene: layer_core::authored::SceneView<'_>, workin
 
 pub(super) struct ExportShade {
     layout: wgpu::BindGroupLayout,
-    pipeline: Deferred<wgpu::RenderPipeline>,
+    pub(super) pipeline: Deferred<wgpu::RenderPipeline>,
     sampler: wgpu::Sampler,
 }
 impl ExportShade {
@@ -259,7 +259,7 @@ struct Bake {
     surface: Arc<PaperSurface>,
     tile: PaperTile,
     data: wgpu::Buffer,
-    priority: u8,
+    priority: startup::Class,
     used: u64,
     stage: Stage,
     image: Option<ImageInput>,
@@ -469,7 +469,7 @@ impl Papers {
         Ok(id)
     }
 
-    pub fn require(&mut self, device: &PipelineDevice, compiler: Option<&startup::Compiler>, binding: &PaperBinding, priority: u8) -> Result<AssetId, GpuRasterError> {
+    pub fn require(&mut self, device: &PipelineDevice, compiler: Option<&compile::Scope>, binding: &PaperBinding, priority: startup::Class) -> Result<AssetId, GpuRasterError> {
         let tile = PaperTile::new(&binding.surface)?;
         let id = tile.id(&binding.surface);
         self.clock += 1;
@@ -504,7 +504,7 @@ impl Papers {
         Ok(id)
     }
 
-    pub fn require_slope(&mut self, device: &PipelineDevice, compiler: Option<&startup::Compiler>, id: &AssetId, priority: u8) {
+    pub fn require_slope(&mut self, device: &PipelineDevice, compiler: Option<&compile::Scope>, id: &AssetId, priority: startup::Class) {
         let programs = self.slope_programs.get_or_insert_with(|| self.recipes.slope.get_or_init(|| Arc::new(SlopePrograms::new(device))).clone());
         if let Some(compiler) = compiler {
             compiler.require([&programs.slope, &programs.mip], priority);
@@ -537,10 +537,6 @@ impl Papers {
         self.bakes.iter().any(|bake| bake.id == *id)
     }
 
-    pub fn ready_through(&self, priority: u8) -> bool {
-        self.bakes.iter().all(|b| b.priority > priority || matches!(b.stage, Stage::Ready { .. }))
-    }
-
     pub fn view(&self, id: &AssetId) -> Option<&wgpu::TextureView> {
         self.bakes.iter().find_map(|b| match &b.stage { Stage::Ready { view, .. } if b.id == *id => Some(view), _ => None })
     }
@@ -560,6 +556,11 @@ impl Papers {
     }
 
     pub fn advance(&mut self, device: &PipelineDevice, queue: &wgpu::Queue, wait: bool, held: Option<&TextureSource>) -> Result<(), GpuRasterError> {
+        #[cfg(not(target_arch="wasm32"))]
+        if wait {
+            pollster::block_on(device.compilation()?.prepare_all(self.programs.iter().flat_map(|program|[&program.probe,&program.bake])
+                .chain(self.slope_programs.iter().flat_map(|programs|[&programs.slope,&programs.mip])))).map_err(GpuRasterError::Effect)?;
+        }
         self.advance_images(device,queue,held)?;
         if !wait && !self.submitted.load(Ordering::Acquire) {
             let _ = device.poll(wgpu::PollType::Poll);
@@ -771,7 +772,7 @@ mod tests {
         let id=renderer.papers.require(&renderer.device,None,&binding,startup::BRUSH).unwrap();
         let bake=renderer.papers.bakes.iter().find(|bake|bake.id==id).unwrap();
         let programs=renderer.papers.programs.iter().find(|programs|programs.id==bake.program).unwrap();
-        pollster::block_on(Deferred::prepare_all([&programs.probe,&programs.bake])).unwrap();
+        pollster::block_on(renderer.compilation.prepare_all([&programs.probe,&programs.bake])).unwrap();
         let (send,receive)=std::sync::mpsc::channel();
         let owner=std::thread::spawn(move || {
             let result=renderer.papers.advance(&renderer.device,&renderer.queue,false,None);

@@ -61,22 +61,12 @@ fn color_picker_circular_oklab_averaging_keeps_points_alpha_and_extended_values(
         })
         .unwrap();
         for area in [ColorSampleArea::Point, ColorSampleArea::Circle5] {
-            assert!(
-                r.request_color_sample(ColorSampleRequest {
+            let rgba = crate::test_support::color_sample(&mut r, ColorSampleRequest {
                     request_id: 2,
                     source: ColorSampleSource::Source(target),
                     position: [8, 8],
                     area
-                })
-                .unwrap()
-            );
-            r.device
-                .poll(wgpu::PollType::Wait {
-                    submission_index: None,
-                    timeout: Some(READBACK_TIMEOUT),
-                })
-                .unwrap();
-            let rgba = r.take_color_sample().unwrap().unwrap().rgba;
+                }).rgba;
             for (got, expected) in rgba[..3].iter().zip([4., -0.1, 0.5]) {
                 assert!(
                     (*got - expected).abs() < 2e-5,
@@ -101,22 +91,12 @@ fn color_picker_circular_oklab_averaging_keeps_points_alpha_and_extended_values(
                 (ColorSampleArea::Circle5, [64, 64], 0.125),
                 (ColorSampleArea::Point, [65, 64], 1.),
             ] {
-                assert!(
-                    r.request_color_sample(ColorSampleRequest {
+                let rgba = crate::test_support::color_sample(&mut r, ColorSampleRequest {
                         request_id: 1,
                         source,
                         position,
                         area
-                    })
-                    .unwrap()
-                );
-                r.device
-                    .poll(wgpu::PollType::Wait {
-                        submission_index: None,
-                        timeout: Some(READBACK_TIMEOUT),
-                    })
-                    .unwrap();
-                let rgba = r.take_color_sample().unwrap().unwrap().rgba;
+                    }).rgba;
                 assert!(
                     rgba[..3].iter().all(|c| (*c - expected).abs() < 2e-5),
                     "{space:?} {source:?} {area:?}: {rgba:?}"

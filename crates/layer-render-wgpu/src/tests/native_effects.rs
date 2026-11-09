@@ -105,13 +105,17 @@ fn source(rgb: [f32;3], alpha: f32) -> EffectInstance {
     program.wgsl = format!("fn fixture(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{{return vec4<f32>({:?},{:?},{:?},{:?});}}",rgb[0]*alpha,rgb[1]*alpha,rgb[2]*alpha,alpha).into();
     effect
 }
-fn frame_document(r: &mut WgpuRasterizer, document: &Document) -> [f32;4] {
+fn render_document(r: &mut WgpuRasterizer, document: &Document) -> Vec<u8> {
     let document = Document::from_artwork(document.artwork.clone()).unwrap();
     let revision = r.artwork_frame.as_ref().map_or(0, |frame| frame.scene.view().revision() + 1);
     crate::test_support::submit_settled(r, packet(document.scene().with_owner(0,revision),document.composition().size));
-    let bytes = crate::layer_tests::page_bytes(r,crate::test_support::document_texture(r));
+    crate::layer_tests::page_bytes(r,crate::test_support::document_texture(r))
+}
+fn frame_document(r: &mut WgpuRasterizer, document: &Document) -> [f32;4] {
+    let bytes=render_document(r,document);
     std::array::from_fn(|c| f32::from_le_bytes(bytes[c*4..c*4+4].try_into().unwrap()))
 }
+
 fn frame(r: &mut WgpuRasterizer, effects: &[EffectInstance]) -> [f32;4] {
     let document = effect_document(effects,[256;2],r.document_color);
     frame_document(r,&document)

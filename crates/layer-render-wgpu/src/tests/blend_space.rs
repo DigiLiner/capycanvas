@@ -244,6 +244,7 @@ fn black_at_half_opacity_over_white_is_middle_gray_only_when_blending_perceptual
             assert!((f32::from(srgb[center]) - expected).abs() <= 1., "{depth:?} {space:?}: read back {}", srgb[center]);
             let target = crate::create_target(&r.device, [EXTENT[0], EXTENT[1]], wgpu::TextureFormat::Rgba8UnormSrgb, "presented gray").0;
             let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present(&r, &target.create_view(&Default::default()), view, [0.2, 0.3, 0.4, 1.]).unwrap();
             let presented = crate::layer_tests::page_bytes(&r, &target);
             assert!((f32::from(presented[center]) - expected).abs() <= 1., "{depth:?} {space:?}: presented {}", presented[center]);

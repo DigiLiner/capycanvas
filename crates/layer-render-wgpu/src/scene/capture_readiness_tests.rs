@@ -31,7 +31,6 @@ fn cold_fragment_family_defers_before_encoding_and_capture_prepares_only_that_fa
         let (entered,entry) = std::sync::mpsc::channel();
         let (release,held) = std::sync::mpsc::channel();
         compiler.enqueue(startup::BRUSH,move || {let _=entered.send(());let _=held.recv_timeout(std::time::Duration::from_secs(10));Ok(())});
-        compiler.start();
         entry.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         let deferred = scene.encode_query_jobs(&mut r,&mut encoder,None);
         let passes = encoder.pass_count();
@@ -54,7 +53,7 @@ fn cold_fragment_family_defers_before_encoding_and_capture_prepares_only_that_fa
         assert!(scene.pipeline.iter().enumerate().all(|(i,pipeline)| i==3 || !pipeline.ready()));
         if !ordered {scene.jobs.push(job);}
         scene.encode_query_jobs(&mut r,&mut encoder,None).unwrap();
-        assert_eq!(scene.pending_pipelines,0);
+        assert!(scene.pending_pipelines.render.is_empty() && scene.pending_pipelines.compute.is_empty());
         assert!(encoder.pass_count()>0);
         r.uploads.finish(&encoder);
         encoder.submit(&r.queue);
@@ -68,7 +67,7 @@ fn cold_compute_copy_encodes_without_admitting_fragment_pipelines() {
     let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut r = staged_renderer(&reference,Default::default());
     let mut scene = Scene::new(&r).unwrap();
-    r.scene_pipelines.constant.2.compile();
+    r.compilation.blocking(||r.scene_pipelines.constant.2.compile());
     let (source,source_view) = create_color_target(&r.device,EXTENT,"compute copy source");
     let (output,view) = create_color_target(&r.device,EXTENT,"compute copy output");
     let color = [0.125_f32,0.25,0.375,0.5];
@@ -134,7 +133,7 @@ fn prepared_scene(doc: &Document, broad: &[OccurrenceHandle], missing: &[Occurre
     for (chain, execution) in chains {
         scene.effects.prepare(&r, doc.scene(), &chain, execution, 0., 0, frame.blend_space).unwrap();
     }
-    scene.effects.compile();
+    pollster::block_on(scene.effects.needs().prepare(&r.compilation)).unwrap();
     assert!(scene.effects.chain_ready(doc.scene(), broad, effects::Execution::Fused, frame.blend_space));
     assert!(!scene.effects.chain_ready(doc.scene(), missing, effects::Execution::Fused, frame.blend_space));
     (r, scene)
@@ -248,7 +247,6 @@ fn native_bake_defers_cold_effects_to_its_parent_compiler_and_preserves_history(
     let (entered, entry) = mpsc::channel();
     let (release, held) = mpsc::channel();
     compiler.enqueue(startup::DOCUMENT,move || {let _=entered.send(());let _=held.recv();Ok(())});
-    compiler.start();
     entry.recv_timeout(Duration::from_secs(5)).unwrap();
     let pending = compiler.pending();
     assert!(!engine.backend_mut().prepare_bakes(frame));
@@ -318,7 +316,7 @@ fn native_bake_defers_cold_mask_restoration_to_its_parent_compiler() {
     }
     assert!(!normalization.ready());
     let (entered,entry)=mpsc::channel();let (release,held)=mpsc::channel();
-    compiler.enqueue(startup::DOCUMENT,move || {let _=entered.send(());let _=held.recv();Ok(())});compiler.start();
+    compiler.enqueue(startup::DOCUMENT,move || {let _=entered.send(());let _=held.recv();Ok(())});
     entry.recv_timeout(Duration::from_secs(5)).unwrap();let pending=compiler.pending();
     while compiler.pending()==pending {
         assert!(!engine.backend_mut().prepare_bakes(frame));

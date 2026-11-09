@@ -185,7 +185,7 @@ pub(crate) fn materialize_mask(source: &mut layer_core::authored::CoverageSource
     let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
     let batch = DabBatch { kind: DabBatchKind::RasterOperation(0), dab_count: 0,
         ..dab_batch(SourceTarget::Coverage(handle), crate::tests::test_style(BrushExecution::Dry), damage) };
-    r.submit(FramePacket { dab_batches: std::slice::from_ref(&batch), reset_layers: true, view: view([64; 2]),
+    submit_ready(&mut r, FramePacket { dab_batches: std::slice::from_ref(&batch), reset_layers: true, view: view([64; 2]),
         ..packet(document.scene(), source.domain) }).unwrap();
     let mut tiles = raster.wait_data().unwrap().tiles.clone();
     if let Some(Ok(stored)) = source.raster.try_data() { tiles.extend(stored.tiles.iter().map(|(key, tile)| (*key, tile.clone()))); }
@@ -296,7 +296,8 @@ pub(crate) fn submit_ready(r: &mut WgpuRasterizer, frame: FramePacket<'_>) -> Re
 /// Submit `frame`, then idle frames as the engine does, until it publishes.
 pub(crate) fn submit_published(r: &mut WgpuRasterizer, frame: FramePacket<'_>) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    let idle = FramePacket { composite_all: false, reset_layers: false, dabs: &[], dab_batches: &[], restore_rasters: &[], ..frame };
+    let previews: Vec<_> = frame.dab_batches.iter().filter(|batch| batch.kind == DabBatchKind::Preview).cloned().collect();
+    let idle = FramePacket { composite_all: false, reset_layers: false, dabs: if previews.is_empty() { &[] } else { frame.dabs }, dab_batches: &previews, restore_rasters: &[], ..frame };
     submit_ready(r, frame).unwrap();
     while r.object_deferred {
         assert!(std::time::Instant::now() < deadline, "deferred composition must publish");
@@ -484,8 +485,19 @@ pub(crate) fn float_pixels(r: &WgpuRasterizer, texture: &wgpu::Texture) -> Vec<[
     floats(&crate::layer_tests::page_bytes(r, texture))
 }
 
+pub(crate) fn prepare_scene_effects(r:&mut WgpuRasterizer,frame:FramePacket<'_>) {
+    let mut scene=r.scene.take().unwrap_or_else(||scene::Scene::new(r).unwrap());
+    for (layers,execution) in scene::effect_chains(frame.scene,scene::EffectPreparation::Display) {
+        scene.effects.prepare(r,frame.scene,&layers,execution,frame.time_seconds,0,frame.blend_space).unwrap();
+    }
+    pollster::block_on(scene.effects.needs().prepare(&r.compilation)).unwrap();
+    r.scene=Some(scene);
+}
+
 pub(crate) fn float_presenter(r: &WgpuRasterizer) -> ViewportPresenter {
-    ViewportPresenter::for_surface(r, wgpu::TextureFormat::Rgba32Float, SdrSurfaceColor::ExtendedLinearSrgb).unwrap()
+    let mut presenter=ViewportPresenter::for_surface(r, wgpu::TextureFormat::Rgba32Float, SdrSurfaceColor::ExtendedLinearSrgb).unwrap();
+    pollster::block_on(presenter.prepare(r)).unwrap();
+    presenter
 }
 
 pub(crate) fn max_error(a: &[[f32; 4]], b: &[[f32; 4]]) -> f32 {
@@ -544,4 +556,10 @@ fn canonical_pixels(r: &mut WgpuRasterizer) -> Vec<[f32; 4]> {
         }
     }
     pixels
+}
+
+pub(crate) fn prepare_lit_presenter(r: &WgpuRasterizer, presenter: &mut crate::ViewportPresenter) {
+    pollster::block_on(presenter.prepare(r)).unwrap();
+    presenter.prepare_paper_lighting(r);
+    if let Some(pipelines)=&presenter.paper_pipeline {pollster::block_on(r.compilation.prepare_all(pipelines)).unwrap();}
 }

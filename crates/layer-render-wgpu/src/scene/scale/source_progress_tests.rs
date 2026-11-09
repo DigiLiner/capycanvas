@@ -50,6 +50,7 @@ fn scene_page_output_binding_survives_frames_and_both_compute_layouts() {
         let layout = if watercolor_first { &r.pipelines.watercolor_compute.0 } else { &r.scene_pipelines.constant.0 };
         let accepted = scene.pool[slot].scene_output(&r, layout).clone();
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
         scene.encode_jobs(&mut r, &mut encoder).unwrap();
         for _ in 0..3 { scene.begin_frame(); }
         let target = scene.pool[slot].view.clone();
@@ -58,11 +59,13 @@ fn scene_page_output_binding_survives_frames_and_both_compute_layouts() {
         scene.jobs.push(Job::Clear(target.clone(), wgpu::Color::TRANSPARENT));
         scene.jobs.push(Job::Watercolor { coordinates: (r.target_bind_group.clone(), 0), target,
             binding, record: 0 });
+        pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
         scene.encode_jobs(&mut r, &mut encoder).unwrap();
         assert_eq!(scene.pool[slot].scene_output(&r, &r.scene_pipelines.constant.0), &accepted);
         assert!(scene.output_bindings.entries.is_empty(), "page bindings have one owner");
         let (_texture, external) = create_color_target(&r.device, [PAGE_SIZE; 2], "external binding target");
         scene.jobs.push(Job::Clear(external.clone(), wgpu::Color::WHITE));
+        pollster::block_on(scene.prepare_capture_work_async(&mut r)).unwrap();
         scene.encode_jobs(&mut r, &mut encoder).unwrap();
         assert!(scene.output_bindings.entries.contains_key(&external), "external images retain the bounded fallback");
         r.uploads.finish(&encoder);

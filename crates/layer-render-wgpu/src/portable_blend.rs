@@ -220,6 +220,7 @@ mod tests {
         assert!(device.portable_blend());
         let a = Renderer::new(&device);
         let b = Renderer::new(&device);
+        pollster::block_on(device.compilation().unwrap().prepare_all(a.pipelines.iter().chain(&b.pipelines))).unwrap();
         assert!(Arc::ptr_eq(&a.shared, &b.shared));
         let size = [8, 4];
         let rect = PixelRect::new(1, 1, 7, 3);

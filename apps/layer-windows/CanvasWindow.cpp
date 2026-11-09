@@ -1178,7 +1178,6 @@ void CanvasWindow::Run() {
             return true;
         };
         bool inputStarted=false;
-        bool brushReady=false;
         bool probeReady=false;
         unsigned recoveryAttempts=0;
         bool repeat=false;
@@ -1292,13 +1291,9 @@ void CanvasWindow::Run() {
             CapySnapshotInfo routing{};
             if(auto snapshot=capy_snapshot(host,&routing)) {
                 NativeString owned(snapshot,capy_string_free);
-                if(routing.brush_ready.length) {
-                    bool ready=Windows::Data::Json::JsonValue::Parse(to_hstring(std::string(owned.get()+routing.brush_ready.offset,routing.brush_ready.length))).GetBoolean();
-                    brushReady=ready;
-                    if(ready)recoveryAttempts=0;
-                }
                 Publish(std::move(owned.bytes),routing);
             }
+            if(brushReady)recoveryAttempts=0;
             CompleteCommands();
             if(latencyTrace.enabled&&!probeReady&&result==0&&brushReady) {
                 auto info=capy_surface_info(host);
@@ -1558,6 +1553,7 @@ void CanvasWindow::UpdateNavigationCursor() {
 void CanvasWindow::Publish(std::string snapshot,CapySnapshotInfo const& info) {
     bool full=info.full!=0;
     auto value=[&](CapySnapshotRange range){return snapshot.substr(range.offset,range.length);};
+    if(info.brush_ready.length)brushReady=Windows::Data::Json::JsonValue::Parse(to_hstring(value(info.brush_ready))).GetBoolean();
     std::optional<std::string> camera;
     if(info.camera.length)camera="{\"camera\":"+value(info.camera)+"}";
     auto localizationBytes=value(info.localization);

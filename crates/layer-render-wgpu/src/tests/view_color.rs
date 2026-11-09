@@ -114,6 +114,7 @@ fn tool_cursor_bank_draws_distinct_dark_icons_with_light_surrounds_and_clears() 
         let view = ViewState { width_px: extent, height_px: extent,
             document_to_surface: [scale, 0., 0., scale, 0., 0.] };
         p.set_cursor(r.device(), &[], scale);
+        pollster::block_on(p.prepare(&r)).unwrap();
         p.present(&r, &target.create_view(&Default::default()), view, [0.2, 0.2, 0.2, 1.]).unwrap();
         let before = crate::layer_tests::page_bytes(&r, &target);
         let segments: Vec<_> = layer_render::TOOL_CURSOR_ICONS.iter().enumerate().map(|(i, (name, _))| {
@@ -122,6 +123,7 @@ fn tool_cursor_bank_draws_distinct_dark_icons_with_light_surrounds_and_clears() 
                 marker: layer_render::tool_cursor_marker(name).unwrap(), scale: 1. }
         }).collect();
         p.set_cursor(r.device(), &segments, scale);
+        pollster::block_on(p.prepare(&r)).unwrap();
         p.present(&r, &target.create_view(&Default::default()), view, [0.2, 0.2, 0.2, 1.]).unwrap();
         let actual = crate::layer_tests::page_bytes(&r, &target);
         if let Ok(directory) = std::env::var("LAYER_TEST_ARTIFACTS") {
@@ -143,6 +145,7 @@ fn tool_cursor_bank_draws_distinct_dark_icons_with_light_surrounds_and_clears() 
             assert!(icons.insert(icon), "{name} at {scale}: distinct tool silhouette");
         }
         p.set_cursor(r.device(), &[], scale);
+        pollster::block_on(p.prepare(&r)).unwrap();
         p.present(&r, &target.create_view(&Default::default()), view, [0.2, 0.2, 0.2, 1.]).unwrap();
         assert_eq!(crate::layer_tests::page_bytes(&r, &target), before);
     }
@@ -159,6 +162,7 @@ fn presentation_wakes_for_visible_changes_and_skips_unchanged_frames() {
     let surround = [0.04, 0.08, 0.2, 1.];
     let draw = |p: &mut ViewportPresenter, r: &WgpuRasterizer, v| {
         assert!(p.needs_present(r, v, surround));
+        pollster::block_on(p.prepare(r)).unwrap();
         p.present(r, &target, v, surround).unwrap();
         assert!(!p.needs_present(r, v, surround));
     };
@@ -243,6 +247,7 @@ fn navigator_shows_transparency_without_a_paper_or_fill_layer() {
             outline_linear: [0.; 3], scale: 1., opacity: 1.,
         }]);
         assert!(p.needs_overview_present(&r,[256;2]));
+        pollster::block_on(p.prepare(&r)).unwrap();
         p.present_overviews(&r, &target, [256; 2]).unwrap();
         assert!(!p.needs_overview_present(&r,[256;2]));
         assert!(p.needs_overview_present(&r,[257,256]));
@@ -270,6 +275,7 @@ fn retained_navigator_invalidates_changed_placements_and_targets() {
         work_area:[[40.,40.],[100.,40.],[100.,100.],[40.,100.]],outline_linear:[0.;3],scale:1.,opacity:1.};
     let commit=|p:&mut ViewportPresenter,r:&WgpuRasterizer| {
         assert!(p.needs_overview_present(r,[256;2]));
+        pollster::block_on(p.prepare(r)).unwrap();
         p.present_overviews(r,&target,[256;2]).unwrap();
         assert!(!p.needs_overview_present(r,[256;2]));
         crate::layer_tests::page_bytes(r,&texture)
@@ -303,10 +309,12 @@ fn retained_navigator_invalidates_changed_placements_and_targets() {
     assert!(!p.needs_overview_present(&r,[256;2]));
     let (_,resized)=crate::create_target(r.device(),[128,256],wgpu::TextureFormat::Rgba8UnormSrgb,"resized Navigator");
     assert!(p.needs_overview_present(&r,[128,256]));
+    pollster::block_on(p.prepare(&r)).unwrap();
     p.present_overviews(&r,&resized,[128,256]).unwrap();
     assert!(!p.needs_overview_present(&r,[128,256]));
     p.set_target_retention(false);
     assert!(p.needs_overview_present(&r,[128,256]));
+    pollster::block_on(p.prepare(&r)).unwrap();
     p.present_overviews(&r,&resized,[128,256]).unwrap();
     assert!(!p.needs_overview_present(&r,[128,256]));
 }
@@ -320,6 +328,7 @@ fn retained_navigator_invalidates_a_legally_replaced_source_image() {
     let (texture,target)=crate::create_target(r.device(),[256;2],wgpu::TextureFormat::Rgba8UnormSrgb,"changed Navigator source");
     p.set_overviews(&r,&[crate::OverviewPlacement {bounds:[0.,0.,256.,256.],clip:None,
         work_area:[[-1000.;2];4],outline_linear:[0.;3],scale:1.,opacity:1.}]);
+    pollster::block_on(p.prepare(&r)).unwrap();
     p.present_overviews(&r,&target,[256;2]).unwrap();
     assert!(!p.needs_overview_present(&r,[256;2]));
     let previous=crate::layer_tests::page_bytes(&r,&texture);
@@ -334,6 +343,7 @@ fn retained_navigator_invalidates_a_legally_replaced_source_image() {
     let main_after=crate::layer_tests::page_bytes(&r,r.presentation_views().unwrap()[0].texture());
     assert!(main_before!=main_after,"legal source edit must update the display source");
     assert!(p.needs_overview_present(&r,[256;2]));
+    pollster::block_on(p.prepare(&r)).unwrap();
     p.present_overviews(&r,&target,[256;2]).unwrap();
     assert!(!p.needs_overview_present(&r,[256;2]));
     assert!(previous!=crate::layer_tests::page_bytes(&r,&texture),"new Navigator image must replace retained pixels");
@@ -352,6 +362,7 @@ fn retained_navigator_invalidates_inherited_proof_buffers_and_viewing_options() 
         work_area:[[-1000.;2];4],outline_linear:[0.;3],scale:1.,opacity:1.}]);
     let commit=|p:&mut ViewportPresenter| {
         assert!(p.needs_overview_present(&r,[256;2]));
+        pollster::block_on(p.prepare(&r)).unwrap();
         p.present_overviews(&r,&target,[256;2]).unwrap();
         assert!(!p.needs_overview_present(&r,[256;2]));
         crate::test_support::float_pixels(&r,&texture)
@@ -396,8 +407,10 @@ fn canvas_and_navigator_checker_colors_are_exact_srgb_white_and_cccccc() {
                 bounds: [0., 0., 256., 256.], clip: None, work_area: [[-1000.; 2]; 4],
                 outline_linear: [0.; 3], scale: 1., opacity: 1.,
             }]);
+            pollster::block_on(presenter.prepare(&r)).unwrap();
             presenter.present_overviews(&r, &target, [256; 2]).unwrap();
-        } else { presenter.present(&r, &target, view(), [0.; 4]).unwrap(); }
+        } else { pollster::block_on(presenter.prepare(&r)).unwrap();
+        presenter.present(&r, &target, view(), [0.; 4]).unwrap(); }
         let actual = crate::layer_tests::page_bytes(&r, &texture);
         for (x, gray) in [(32, 255), (if overview { 40 } else { 48 }, 204)] {
             assert_eq!(&actual[(32 * 256 + x) * 4..][..4], [gray, gray, gray, 255], "overview={overview}");
@@ -427,6 +440,7 @@ fn native_surface_rotation_preserves_artwork_cursor_and_clipped_overview() {
         let [width, height] = if turns % 2 == 0 { [192, 128] } else { [128, 192] };
         let target = crate::create_target(r.device(), [width, height], wgpu::TextureFormat::Rgba8UnormSrgb, "rotated viewport reference").0;
         presenter.set_surface_rotation(turns);
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target.create_view(&Default::default()), view, [0.04, 0.08, 0.2, 1.]).unwrap();
         let actual = crate::layer_tests::page_bytes(&r, &target);
         if turns == 0 { reference = actual; continue; }
@@ -503,12 +517,10 @@ fn native_export_thumbnails_and_raw_samples_keep_their_declared_color_coordinate
                     let alpha = f64::from(codes[3]) / 65535.;
                     let export = r.readback_srgb_rgba8().unwrap();
                     close(&export[0..4], bytes(expected, alpha), "sRGB export");
-                    r.request_thumbnail(7, ThumbnailTarget::Occurrence(owner(&layer))).unwrap();
-                    complete(&r);
-                    let thumbnail = r.take_thumbnail().unwrap().unwrap();
+                    let thumbnail = crate::test_support::thumbnail(&mut r,7,ThumbnailTarget::Occurrence(owner(&layer)));
                     let i = (16 * 32 + 16) * 4;
                     close(
-                        &thumbnail.bytes[i..i + 4],
+                        &thumbnail[i..i + 4],
                         bytes(preview.map(|v| v * alpha + 1. * (1. - alpha)), 1.),
                         "retained photo thumbnail",
                     );
@@ -581,6 +593,7 @@ fn explicit_sdr_surfaces_transform_artwork_and_ui_without_changing_document_pixe
                 let alpha = f64::from(codes[3]) / 65535.;
                 let expected = linear(RgbSpace::ProPhoto, codes, color.primaries())
                     .map(|v| v * alpha + 1. * (1. - alpha));
+                pollster::block_on(presenter.prepare(&r)).unwrap();
                 presenter
                     .present(&r, &target_view, view(), [0.; 4])
                     .unwrap();
@@ -599,6 +612,7 @@ fn explicit_sdr_surfaces_transform_artwork_and_ui_without_changing_document_pixe
                 );
                 let mut outside = view();
                 outside.document_to_surface[4] = 256.;
+                pollster::block_on(presenter.prepare(&r)).unwrap();
                 presenter
                     .present(&r, &target_view, outside, surround)
                     .unwrap();
@@ -640,9 +654,14 @@ fn screen_check_counts_and_marks_only_colors_the_screen_cannot_show() {
         let mut presenter = ViewportPresenter::for_surface(&r, format, SdrSurfaceColor::DisplayP3).unwrap();
         assert!(!presenter.check_screen(&r), "nothing to count before a check is configured");
         presenter.set_screen_check(&r, Some(check));
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target_view, view(), [0.; 4]).unwrap();
         let plain = crate::layer_tests::page_bytes(&r, &target);
-        assert!(presenter.check_screen(&r));
+        let deadline=std::time::Instant::now()+READBACK_TIMEOUT;
+        while !presenter.check_screen(&r) {
+            assert!(std::time::Instant::now()<deadline,"screen count was not admitted");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         assert!(!presenter.check_screen(&r), "one count per unchanged view");
         let clipped = loop {
             complete(&r);
@@ -653,6 +672,7 @@ fn screen_check_counts_and_marks_only_colors_the_screen_cannot_show() {
         assert_eq!(clipped, outside, "{codes:?}");
         assert!(!presenter.check_screen(&r), "the counted view is current");
         presenter.set_screen_check(&r, Some(crate::ScreenCheck { mark: true, ..check }));
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target_view, view(), [0.; 4]).unwrap();
         let marked = crate::layer_tests::page_bytes(&r, &target);
         let i = (16 * 256 + 16) * 4;
@@ -664,6 +684,7 @@ fn screen_check_counts_and_marks_only_colors_the_screen_cannot_show() {
     }
     let mut presenter = ViewportPresenter::for_surface(&r, format, SdrSurfaceColor::DisplayP3).unwrap();
     presenter.set_screen_check(&r, Some(crate::ScreenCheck { from_view: None, surface_clips: false, bounded: true, mark: true }));
+    pollster::block_on(presenter.prepare(&r)).unwrap();
     presenter.present(&r, &target_view, view(), [0.; 4]).unwrap();
     assert!(!presenter.check_screen(&r), "an unknown screen gamut is never counted");
 }
@@ -696,11 +717,9 @@ fn native_paint_thumbnail_converts_the_same_color_as_export() {
         });
         let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
         frame(&mut r, &mut layer);
-        r.request_thumbnail(7, ThumbnailTarget::Occurrence(owner(&layer))).unwrap();
-        complete(&r);
-        let thumbnail = r.take_thumbnail().unwrap().unwrap();
+        let thumbnail = crate::test_support::thumbnail(&mut r,7,ThumbnailTarget::Occurrence(owner(&layer)));
         close(
-            &thumbnail.bytes[(16 * 32 + 16) * 4..][..4],
+            &thumbnail[(16 * 32 + 16) * 4..][..4],
             bytes(linear(space, codes, RgbSpace::Srgb), 1.),
             "paint thumbnail",
         );
@@ -735,10 +754,9 @@ fn hdr_paint_and_photo_thumbnails_follow_the_sdr_rendition_without_clipping() {
         let original = crate::layer_tests::page_bytes(&r, crate::test_support::document_texture(&r));
         for recipe in [SdrRendition::default(), SdrRendition { exposure: -2., ..Default::default() }, SdrRendition::default()] {
             r.set_ui_rendition(Some(recipe)).unwrap();
-            r.request_thumbnail(7, ThumbnailTarget::Occurrence(owner(&layer))).unwrap(); complete(&r);
-            let thumbnail = r.take_thumbnail().unwrap().unwrap();
+            let thumbnail = crate::test_support::thumbnail(&mut r,7,ThumbnailTarget::Occurrence(owner(&layer)));
             let expected = recipe.mapper(RgbSpace::Srgb, RgbSpace::Srgb).map_rgb(pixel[..3].try_into().unwrap());
-            close(&thumbnail.bytes[(16 * 32 + 16) * 4..][..4], bytes(expected.map(f64::from), 1.), "HDR thumbnail");
+            close(&thumbnail[(16 * 32 + 16) * 4..][..4], bytes(expected.map(f64::from), 1.), "HDR thumbnail");
         }
         assert_eq!(crate::layer_tests::page_bytes(&r, crate::test_support::document_texture(&r)), original);
     }
@@ -867,6 +885,7 @@ fn check_proof_renderer(recipe: &layer_core::color::ProofRecipe, renderer: impl 
                         else { space.decode(codes[i] as f64 / 65535.) as f32 * alpha });
                     for (proof, warning) in [(false, false), (true, false), (true, true), (false, true), (false, false)] {
                         presenter.set_proof(&r, Some(lut.clone()), proof, warning).unwrap();
+                        pollster::block_on(presenter.prepare(&r)).unwrap();
                         presenter.present(&r, &target_view, view(), [0.; 4]).unwrap();
                         let actual = crate::layer_tests::page_bytes(&r, &target);
                         let expected = apply_proof(&lut, input, proof, warning);
@@ -919,6 +938,7 @@ fn check_hdr_renderer(mut make: impl FnMut(DocumentColor) -> WgpuRasterizer) {
                             // Retained captures share proof buffers. HDR uniforms must
                             // still update when the proof inheritance shortcut applies.
                             capture.inherit_proof(&r,&presenter);
+                            pollster::block_on(capture.prepare(&r)).unwrap();
                             capture.present(&r,&output,view(),[0.;4]).unwrap();
                             let mut expected=if compositor && !proof {[p[0]*p[3],p[1]*p[3],p[2]*p[3],p[3]]}
                             else if headroom==1. || proof {recipe.mapper(space,if proof {space} else {RgbSpace::Srgb}).map_premultiplied([p[0]*p[3],p[1]*p[3],p[2]*p[3],p[3]])}
@@ -1057,6 +1077,7 @@ fn local_sdr_spatial_guide_matches_cpu_and_preserves_master() {
                         .set_proof(&r, Some(lut.clone()), proof, false)
                         .unwrap();
                     capture.inherit_proof(&r, &presenter);
+                    pollster::block_on(capture.prepare(&r)).unwrap();
                     capture.present(&r, &output, view(), [0.; 4]).unwrap();
                     let actual = crate::layer_tests::page_bytes(&r, &target);
                     for (x, y) in [(30, 30), (126, 45), (129, 170), (203, 211)] {
@@ -1126,6 +1147,7 @@ fn surface_quantization_matches_every_code_with_independent_spatial_noise() {
     for format in [wgpu::TextureFormat::Rgba8UnormSrgb,wgpu::TextureFormat::Bgra8UnormSrgb,wgpu::TextureFormat::Rgba8Unorm,wgpu::TextureFormat::Bgra8Unorm] {
         let (texture,target)=crate::create_target(r.device(),size,format,"every quantized code");
         let mut presenter=ViewportPresenter::for_surface(&r,format,SdrSurfaceColor::Srgb).unwrap();
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r,&target,camera,[0.;4]).unwrap();
         for (i,pixel) in crate::layer_tests::page_bytes(&r,&texture).as_chunks::<4>().0.iter().enumerate() {
             let x=i as u32%size[0];let y=i as u32/size[0];
@@ -1164,20 +1186,24 @@ fn surface_triangular_quantization_is_phase_stable_and_format_aware() {
                 crate::test_support::submit_settled(&mut r, crate::FramePacket {view:camera,..crate::test_support::packet(document.scene(),[512,256])});
                 let target=crate::create_target(r.device(),size,format,"quantization oracle surface").0;
                 let mut presenter=crate::ViewportPresenter::for_surface(&r,format,crate::SdrSurfaceColor::Srgb).unwrap();
+                pollster::block_on(presenter.prepare(&r)).unwrap();
                 presenter.present(&r,&target.create_view(&Default::default()),camera,[0.,0.,0.,1.]).unwrap();
                 let first=crate::layer_tests::page_bytes(&r,&target);
                 let continuous_target=crate::create_target(r.device(),size,wgpu::TextureFormat::Rgba32Float,"continuous display quantization control").0;
                 let mut continuous_presenter=crate::ViewportPresenter::for_surface(&r,wgpu::TextureFormat::Rgba32Float,crate::SdrSurfaceColor::Srgb).unwrap();
+                pollster::block_on(continuous_presenter.prepare(&r)).unwrap();
                 continuous_presenter.present(&r,&continuous_target.create_view(&Default::default()),camera,[0.,0.,0.,1.]).unwrap();
                 let continuous=crate::layer_tests::page_bytes(&r,&continuous_target);
                 let continuous_code=f64::from(f32::from_le_bytes(continuous[16..20].try_into().unwrap()))*255.;
 
+                pollster::block_on(presenter.prepare(&r)).unwrap();
                 presenter.present(&r,&target.create_view(&Default::default()),camera,[0.,0.,0.,1.]).unwrap();
                 assert_eq!(first,crate::layer_tests::page_bytes(&r,&target),"surface noise must be spatially deterministic");
                 if code==100.25 && alpha==1. && scale==1. {
                     let border_size=[size[0]+16,size[1]+16];
                     let border=crate::create_target(r.device(),border_size,format,"unmodified UI surround").0;
                     let border_camera=layer_render::ViewState {width_px:border_size[0],height_px:border_size[1],document_to_surface:[1.,0.,0.,1.,8.,8.]};
+                    pollster::block_on(presenter.prepare(&r)).unwrap();
                     presenter.present(&r,&border.create_view(&Default::default()),border_camera,[0.2,0.3,0.4,1.]).unwrap();
                     let bytes=crate::layer_tests::page_bytes(&r,&border);let stride=if format==wgpu::TextureFormat::Rgba16Float {8}else{4};
                     for y in 1..7 {for x in 1..7 {let index=(y*border_size[0] as usize+x)*stride;assert_eq!(&bytes[index..index+stride],&bytes[stride..stride*2],"UI surround must remain spatially constant");}}

@@ -146,7 +146,14 @@ fn engine(doc: Document, feedback: bool) -> (InputProducer<PenEvent>, CanvasEngi
 
 fn draw(engine: &mut CanvasEngine<WgpuRasterizer>, input: &mut InputProducer<PenEvent>, event: PenEvent) {
     input.push(event).unwrap();
-    engine.render_frame().unwrap();
+    let submitted=engine.backend().submitted_updates();
+    let deadline=std::time::Instant::now()+READBACK_TIMEOUT;
+    loop {
+        engine.render_frame().unwrap();
+        if engine.backend().submitted_updates()!=submitted {break;}
+        assert!(std::time::Instant::now()<deadline,"retouch input was not submitted");
+        std::thread::yield_now();
+    }
 }
 
 fn stroke(engine: &mut CanvasEngine<WgpuRasterizer>, input: &mut InputProducer<PenEvent>, sequence: u64, from: [f32; 2], to: [f32; 2]) {

@@ -289,10 +289,10 @@ fn exact_preview_after_mask_upload(execution: BrushExecution) {
     let mut doc = placement::paint_document(extent, "exact preview after mask upload");
     placement::set_source(&mut doc, layer_core::color::source::rgba8_source(extent,
         |x, y| [(x % 256) as u8, (y % 256) as u8, 80, 255]));
-    r.submit(FramePacket { reset_layers: true, ..packet(doc.scene(), extent) }).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket { reset_layers: true, ..packet(doc.scene(), extent) }).unwrap();
     let view = layer_render::ViewState { width_px: 32, height_px: 32,
         document_to_surface: [0.125, 0., 0., 0.125, 0., 0.] };
-    r.submit(FramePacket { view, ..packet(doc.scene(), extent) }).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket { view, ..packet(doc.scene(), extent) }).unwrap();
     let style = if execution == BrushExecution::Liquify {
         let mut style = preset_style(layer_core::DefaultBrushPreset::LiquifyPush);
         style.liquify = Some(Arc::new(layer_core::liquify::Context::for_source(placement::paint(&doc), false)));
@@ -313,7 +313,7 @@ fn exact_preview_after_mask_upload(execution: BrushExecution) {
     preview.kind = DabBatchKind::Preview;
     preview.first_dab = 1;
     preview.damage = predicted.bounds();
-    r.submit(FramePacket { view, dabs: &[real, predicted], dab_batches: &[persistent, preview],
+    crate::test_support::submit_ready(&mut r, FramePacket { view, dabs: &[real, predicted], dab_batches: &[persistent, preview],
         ..packet(doc.scene(), extent) }).unwrap();
     assert_eq!(r.preview_level, 2);
     assert_eq!(r.artwork_frame.as_ref().unwrap().previews.len(), 1);

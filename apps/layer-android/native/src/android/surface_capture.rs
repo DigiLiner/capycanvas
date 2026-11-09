@@ -13,6 +13,7 @@ fn pixels(a: &mut App) -> Result<Vec<u8>, String> {
     let view = a.host.session.state().camera.view();
     let surround = a.host.session.state().palette.surround_linear;
     let surface = a.surface.as_mut().ok_or("Missing test surface")?;
+    if !a.host.prepare_canvas_presentation(&surface.presenter) {return Err("Canvas presentation is preparing".into());}
     let gpu = a
         .host
         .session

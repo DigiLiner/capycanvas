@@ -88,6 +88,7 @@ mod tests {
         let mut host = NativeHost::new(layer_ui::Platform::Gtk).unwrap();
         let extent = [document.composition().size[0], document.composition().size[1]];
         *host.session = UiSession::new(Renderer(Some(gpu.into())), document, extent, layer_ui::Platform::Gtk).unwrap();
+        crate::test_support::frames_until(&mut host, |_| true);
         host
     }
 
@@ -111,11 +112,12 @@ mod tests {
         crate::test_support::active_source_mut(&mut document).base = Some(layer_core::authored::PaintBase::new(photo([64, 48], |x, y| [(x * 4) as u8, (y * 5) as u8, 200, 255]).into()));
         document.working.selection = selection;
         let mut host = host(document);
-        host.session.frame(0, 0).unwrap();
+        crate::test_support::frames_until(&mut host, |_| true);
         host
     }
 
     fn copy(host: &mut NativeHost, command: CommandId) -> PixelClip {
+        crate::test_support::frames_until(host, |_| true);
         host.dispatch(UiAction::Invoke { command }).unwrap();
         let id = host
             .session
@@ -258,7 +260,7 @@ mod tests {
         document.apply(layer_core::Edit::Working(working)).unwrap();
         let mut host = host(document);
         host.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Tool { tool: layer_ui::LayerCanvasTool::Move } }).unwrap();
-        host.session.frame(0, 0).unwrap();
+        crate::test_support::frames_until(&mut host, |_| true);
         let clip = copy(&mut host, CommandId::Copy);
         assert_eq!(clip.origin, [-5, -3]);
         assert_eq!(clip.source.extent, [8, 6]);

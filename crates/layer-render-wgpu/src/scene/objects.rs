@@ -326,7 +326,7 @@ impl Scene {
         r.moving_images.lookup(id,source,level,bounds,format,r.device.working_space())
             .filter(|mip|!nearest || mip.level==0)
     }
-    pub(super) fn collection_preview(r: &WgpuRasterizer, job: &CollectionJob) -> Result<Option<CollectionPreview>, GpuRasterError> {
+    pub(super) fn collection_preview(&mut self,r: &WgpuRasterizer, job: &CollectionJob) -> Result<Option<CollectionPreview>, GpuRasterError> {
         let mut identities: Vec<(PortableId, SourceIdentity, u32, [u32;2], [u32;2])> = Vec::new();
         let mut sources = Vec::new();
         let mut objects = Vec::with_capacity(job.keys.len());
@@ -342,6 +342,13 @@ impl Scene {
             let identity = (child.key.image, child.key.source.clone(), mip.level, mip.origin, mip.extent);
             let source = identities.iter().position(|known| *known == identity).unwrap_or_else(|| { identities.push(identity); sources.push(mip.view.clone()); sources.len() - 1 });
             objects.push(crate::object_sampling::PreviewSource { source, inverse, extent: mip.extent, nearest: child.nearest, samples: mip.samples });
+        }
+        let required=compile::Needs {compute:objects.iter().map(|object|if object.samples.is_some_and(|samples|samples.format()==wgpu::TextureFormat::Rg32Uint) {
+            &r.scene_pipelines.objects.preview_integer
+        } else {&r.scene_pipelines.objects.preview}).filter(|pipeline|!pipeline.ready()).cloned().collect(),..Default::default()};
+        if !required.require(&r.compilation,startup::DOCUMENT) {
+            self.pending_pipelines=required;
+            return Err(GpuRasterError::DeferredObjectWork);
         }
         Ok(Some((sources, objects)))
     }
@@ -362,7 +369,7 @@ impl Scene {
             r.encode_clear(encoder, &target.1, "empty object layer thumbnail");
             return Ok(Some(target));
         }
-        if let Some((sources, objects)) = Self::collection_preview(r, &request)? {
+        if let Some((sources, objects)) = self.collection_preview(r, &request)? {
             self.object_query = false;
             let scratch = (crate::object_sampling::CollectionPreview::passes(&objects) > 1)
                 .then(|| create_color_target(&r.device, [PAGE_SIZE; 2], "object layer thumbnail scratch"));
@@ -403,7 +410,7 @@ impl Scene {
             self.jobs.push(Job::Copy {source:view.texture().clone(),source_origin:[0;2],destination:self.pool[output].texture.clone(),origin:[0;2],width:PAGE_SIZE,height:PAGE_SIZE});
             return Ok(output);
         }
-        let Some((sources,objects))=(if self.object_display {Self::collection_preview(r,&request)?} else {None}) else {
+        let Some((sources,objects))=(if self.object_display {self.collection_preview(r,&request)?} else {None}) else {
             self.discard_unencoded_jobs();return Err(GpuRasterError::DeferredObjectWork);
         };
         let output=self.reserve(r)?;
@@ -491,7 +498,7 @@ pub(crate) fn promote(r: &mut WgpuRasterizer, encoder: &mut crate::submission::C
     tile: crate::source_access::RawTile,
 ) -> Result<crate::source_access::RawTile, GpuRasterError> {
     if tile.texture.format() != wgpu::TextureFormat::Rgba32Float
-        && !r.scene_pipelines.source.require(r, r.scene_pipelines.source.for_format(tile.texture.format())) {
+        && !r.compilation.require([r.scene_pipelines.source.for_format(tile.texture.format())], startup::VALIDATION) {
         return Err(GpuRasterError::DeferredObjectWork);
     }
     let result = r.source_tiles.borrow_mut().promote(r, tile);
@@ -519,7 +526,7 @@ fn encode_pending(r: &mut WgpuRasterizer, encoder: &mut crate::submission::Comma
     pending: sources::PendingTile,
 ) -> Result<(), GpuRasterError> {
         if let Some(pipeline) = pending.pipeline(&r.scene_pipelines.source)
-            && !r.scene_pipelines.source.require(r, pipeline) { return Err(GpuRasterError::DeferredObjectWork); }
+            && !r.compilation.require([pipeline], startup::VALIDATION) { return Err(GpuRasterError::DeferredObjectWork); }
         let binding = if pending.pipeline(&r.scene_pipelines.source).is_some() {
             let records = r.device.create_buffer(&wgpu::BufferDescriptor { label: Some("source normalization records"),
                 size: 144, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });

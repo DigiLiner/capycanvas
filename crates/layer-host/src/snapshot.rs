@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(warming["canvas_notice"],"brush");
         assert_eq!(warming["brush_ready"],false);
         let warming_renderer=outgoing.replace_renderer(crate::Renderer(Some(Box::new(reference)))).unwrap();
-        outgoing.session.frame(0,0).unwrap();
+        crate::test_support::frames_until(&mut outgoing, |_| true);
         let settings=outgoing.session.state().requests.iter().filter(|request|
             matches!(request.kind,layer_ui::HostRequestKind::SaveSettings {..})).map(|request|request.id).collect::<Vec<_>>();
         for id in settings {outgoing.dispatch(UiAction::CompleteRequest {id,error:None}).unwrap();}

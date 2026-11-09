@@ -150,13 +150,13 @@ fn attached_spatial_effects_expand_owner_alpha_before_common_base_clipping() {
     let ink=crate::tests::test_dab([64.,64.],[0.,1.,0.,1.],1.);
     let target=document.scene().source_target(paint).unwrap();
     let batch=crate::test_support::dab_batch(target,test_style(BrushExecution::Dry),ink.bounds());
-    r.submit(FramePacket {dabs:&[ink],dab_batches:&[batch],..frame}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket {dabs:&[ink],dab_batches:&[batch],..frame}).unwrap();
     assert_eq!(r.scene.as_ref().unwrap().image_work()[1],work,"painting above a filtered base reuses its spatial output");
     let edited=crate::layer_tests::page_bytes(&r,crate::test_support::document_texture(&r));
     assert_eq!(pixel(&edited,64),[0.,0.5,0.,0.5]);
     document.artwork.occurrences.get_mut(base).unwrap().opacity=0.5;
     refresh(&mut document);
-    r.submit(FramePacket {composite_all:true,..packet(document.scene(),extent)}).unwrap();
+    crate::test_support::submit_ready(&mut r, FramePacket {composite_all:true,..packet(document.scene(),extent)}).unwrap();
     assert_eq!(r.scene.as_ref().unwrap().image_work()[1],work,"owner contribution opacity does not change local filter input");
     let faded=crate::layer_tests::page_bytes(&r,crate::test_support::document_texture(&r));
     assert_eq!(pixel(&faded,64),[0.,0.25,0.,0.25]);
@@ -164,7 +164,7 @@ fn attached_spatial_effects_expand_owner_alpha_before_common_base_clipping() {
         document.artwork.occurrences.get_mut(blur).unwrap().opacity=opacity;
         document.artwork.occurrences.get_mut(base).unwrap().opacity=1.;
         refresh(&mut document);
-        r.submit(packet(document.scene(),extent)).unwrap();
+        crate::test_support::submit_ready(&mut r, packet(document.scene(),extent)).unwrap();
         let result=crate::layer_tests::page_bytes(&r,crate::test_support::document_texture(&r));
         let expected=[0.,0.5*opacity,0.,0.5*opacity];
         assert_eq!(pixel(&result,64),expected,"effect strength interpolates alpha");
@@ -183,7 +183,7 @@ fn attached_spatial_effects_expand_owner_alpha_before_common_base_clipping() {
     let work=r.scene.as_ref().unwrap().image_work()[1];
     member.artwork.occurrences.get_mut(shadows).unwrap().attachment=Attachment::None;
     refresh(&mut member);
-    r.submit(packet(member.scene(),extent)).unwrap();
+    crate::test_support::submit_ready(&mut r, packet(member.scene(),extent)).unwrap();
     assert_eq!(r.scene.as_ref().unwrap().image_work()[1],work,"owner clipping does not change local filter input");
     let result=crate::layer_tests::page_bytes(&r,crate::test_support::document_texture(&r));
     assert_eq!(pixel(&result,64),[0.125,0.,0.5,0.625]);
@@ -231,17 +231,17 @@ fn independent_owner_counts_and_local_chain_lengths_bound_resident_work() {
         fn frame(document:&layer_core::Document)->FramePacket<'_> {FramePacket {blend_space:layer_core::BlendSpace::Linear,composite_all:false,..packet(document.scene(),document.composition().size)}}
         for renderer in [&mut r,&mut full] {crate::test_support::submit_settled(renderer,frame(&document));}
         let work=r.scene.as_ref().unwrap().image_work();let composed=r.metrics.composited_pixels;
-        r.submit(frame(&document)).unwrap();
+        crate::test_support::submit_ready(&mut r, frame(&document)).unwrap();
         document.working.occurrence=Some(*groups.last().unwrap());document.working.target=None;
-        r.submit(frame(&document)).unwrap();
+        crate::test_support::submit_ready(&mut r, frame(&document)).unwrap();
         document.artwork.occurrences.get_mut(groups[0]).unwrap().name="renamed".into();refresh(&mut document);
-        r.submit(frame(&document)).unwrap();
+        crate::test_support::submit_ready(&mut r, frame(&document)).unwrap();
         assert_eq!(r.scene.as_ref().unwrap().image_work(),work,"presentation changes dispatch no effects");
         assert_eq!(r.metrics.composited_pixels,composed,"presentation changes do not recompose artwork");
         let pixels=r.scene.as_ref().unwrap().image_pass_pixels();
         let mut dab=test_dab([16.;2],[0.9,0.1,0.3,1.],1.);dab.radii=[64.;2];
         let batch=crate::test_support::dab_batch(SourceTarget::Paint(paints[0]),test_style(BrushExecution::Dry),dab.bounds());
-        for renderer in [&mut r,&mut full] {renderer.submit(FramePacket {dabs:&[dab],dab_batches:std::slice::from_ref(&batch),..frame(&document)}).unwrap();}
+        for renderer in [&mut r,&mut full] {crate::test_support::submit_ready(renderer, FramePacket {dabs:&[dab],dab_batches:std::slice::from_ref(&batch),..frame(&document)}).unwrap();}
         let after=r.scene.as_ref().unwrap().image_work();
         assert_eq!([after[0]-work[0],after[1]-work[1]],[1,length],"only the edited owner chain executes: {owners} owners, {length} effects");
         let input_side=32+2*(length-1);
@@ -251,7 +251,7 @@ fn independent_owner_counts_and_local_chain_lengths_bound_resident_work() {
         assert_eq!(r.metrics.frame_composited_pages,vec![(0,[0,0])]);
         let incremental=crate::layer_tests::page_bytes(&r,crate::test_support::document_texture(&r));
         full.scene=None;
-        full.submit(FramePacket {composite_all:true,..frame(&document)}).unwrap();
+        crate::test_support::submit_published(&mut full,FramePacket {composite_all:true,..frame(&document)});
         assert_eq!(incremental,crate::layer_tests::page_bytes(&full,crate::test_support::document_texture(&full)),"resident incremental output matches independently rebuilt composition");
     }
 }

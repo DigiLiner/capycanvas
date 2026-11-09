@@ -3,7 +3,7 @@ use crate::test_support::packet;
 use crate::{ViewportPresenter, WgpuRasterizer};
 use layer_core::authored::*;
 use std::sync::Arc;
-use layer_render::{CanvasRenderer, FramePacket, ViewState};
+use layer_render::{FramePacket, ViewState};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
@@ -24,16 +24,16 @@ fn document(size: [u32; 2]) -> WgpuRasterizer {
     let mut artwork=Artwork::new([size[0]/2,size[1]]).unwrap();
     crate::test_support::add_paint(&mut artwork,"backdrop",[size[0]/2,size[1]]);
     let index=Arc::new(SceneIndex::build(&artwork).unwrap());
-    r.submit(FramePacket {
+    crate::test_support::submit_settled(&mut r, FramePacket {
         view: view(size, 0.),
         reset_layers: true,
         ..packet(SceneView::new(&artwork,&index),[size[0]/2,size[1]])
-    })
-    .unwrap();
+    });
     r
 }
 
 fn present(r: &WgpuRasterizer, presenter: &mut ViewportPresenter, surface: &wgpu::Texture, x: f32) -> Vec<u8> {
+    pollster::block_on(presenter.prepare(r)).unwrap();
     let size = [surface.width(), surface.height()];
     presenter.present(r, &surface.create_view(&Default::default()), view(size, x), [0., 0., 0., 1.]).unwrap();
     crate::layer_tests::page_bytes(r, surface)
@@ -162,6 +162,7 @@ fn camera_motion_moves_the_cached_blur_between_refreshes() {
 fn region_list_changes_repaint_only_added_and_removed_glass() {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut blur = BackdropBlur::new(&r.device, FORMAT);
+    pollster::block_on(r.compilation.prepare_all(blur.pipelines())).unwrap();
     let frame = |blur: &mut BackdropBlur| {
         let mut encoder = r.device().create_command_encoder(&Default::default());
         let mut repaint = Vec::new();
@@ -193,6 +194,7 @@ fn region_list_changes_repaint_only_added_and_removed_glass() {
 fn zero_strength_regions_keep_blur_demand_without_composite_draws() {
     let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut blur=BackdropBlur::new(&r.device,FORMAT);
+    pollster::block_on(r.compilation.prepare_all(blur.pipelines())).unwrap();
     blur.set_regions(&[region([32.,16.,128.,96.],[18.;4]).with_strength(0.)]);
     let mut encoder=r.device().create_command_encoder(&Default::default());
     let mut uploads=crate::Uploads::new(r.device(),4096);
@@ -213,6 +215,7 @@ fn glass_follows_a_new_surround() {
     let surface = texture(&r, size);
     let glass = [region([150., 32., 90., 64.], [16.; 4])];
     let show = |presenter: &mut ViewportPresenter, surround: [f32; 4]| {
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &surface.create_view(&Default::default()), view(size, 0.), surround).unwrap();
         crate::layer_tests::page_bytes(&r, &surface)
     };
@@ -235,7 +238,7 @@ fn paint_near_glass(r: &mut WgpuRasterizer, size: [u32; 2]) {
     let target=scene.view().targets().find(|target|matches!(target,SourceTarget::Paint(_))).unwrap();
     let mut batch = crate::layer_tests::batch(target);
     batch.damage = layer_core::Rect { min: layer_core::Point { x: 100., y: 54. }, max: layer_core::Point { x: 120., y: 74. } };
-    r.submit(FramePacket {
+    crate::test_support::submit_ready(r, FramePacket {
         view: view(size, 0.),
         dabs: &[dab],
         dab_batches: &[batch],
@@ -396,7 +399,7 @@ fn backdrop_blur_cost() {
         let mut artwork=Artwork::new([4096,3072]).unwrap();
         crate::test_support::add_paint(&mut artwork,"bench",[4096,3072]);
         let index=Arc::new(SceneIndex::build(&artwork).unwrap());
-        r.submit(FramePacket {
+        crate::test_support::submit_ready(&mut r, FramePacket {
             view: camera(200.),
             reset_layers: true,
             ..packet(SceneView::new(&artwork,&index),[4096,3072])

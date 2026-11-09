@@ -14,8 +14,7 @@ fn triangular_noise([x,y]:[u32;2])->f64 {
 
 fn composite(r: &mut WgpuRasterizer, layers: &[EffectInstance]) -> Vec<[f32; 4]> {
     let document=effect_document(layers,EXTENT,r.document_color);
-    r.submit(packet(document.scene().with_owner(0,0),EXTENT)).unwrap();
-    crate::layer_tests::page_bytes(r, crate::test_support::document_texture(r))
+    render_document(r,&document)
         .as_chunks::<16>().0.iter()
         .map(|p| std::array::from_fn(|c| f32::from_le_bytes(p[c * 4..c * 4 + 4].try_into().unwrap())))
         .collect()

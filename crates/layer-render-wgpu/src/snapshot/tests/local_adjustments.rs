@@ -19,6 +19,18 @@ fn finish(engine:&mut CanvasEngine<WgpuRasterizer>)->Result<(),String> {
     }
 }
 
+fn start_bake_analysis(engine:&mut CanvasEngine<WgpuRasterizer>,target:SourceTarget) {
+    let deadline=std::time::Instant::now()+READBACK_TIMEOUT;
+    loop {
+        engine.render_frame_at(0).unwrap();
+        assert!(engine.has_pending_document_edits());
+        assert!(engine.document().target_raster(target).unwrap().try_data().is_none());
+        if !engine.backend().bake_analyses.is_empty() {return;}
+        assert!(std::time::Instant::now()<deadline,"cold bake analysis must start");
+        std::thread::yield_now();
+    }
+}
+
 fn baked_pixel(engine:&CanvasEngine<WgpuRasterizer>,target:SourceTarget,x:u32,y:u32)->[f32;4] {
     let data=engine.document().target_raster(target).unwrap().wait_data().unwrap();
     let tile=data.tiles.get(&TileKey{plane:layer_core::raster::RasterPlane::Color,coordinate:[0,0]}).unwrap();
@@ -201,7 +213,7 @@ fn cold_merge_prepares_retained_noncontiguous_members_and_preserves_group_offset
     document.working.occurrence=Some(occurrence(&document,"Upper"));
     let mut engine=engine(document);assert!(engine.backend().effect_analyses.is_empty());
     let result=merge(&mut engine);
-    engine.render_frame_at(0).unwrap();assert!(engine.has_pending_document_edits());
+    start_bake_analysis(&mut engine,result);assert!(engine.has_pending_document_edits());
     assert_eq!(engine.backend().bake_analyses.len(),1);
     finish(&mut engine).unwrap();
     close(baked_pixel(&engine,result,8,6),output(f64::from(0.01125_f32),0.5,0.5),0.5,false);
@@ -234,7 +246,7 @@ fn cold_frequency_detail_prepares_its_retained_adjustment_input() {
         scene:scene.clone(),scope:SceneScope::Members(vec![original].into()),offset:Point::default()})),
         (high,operation(layer_core::RasterOperationKind::FrequencyDetail {
             scene,scope:SceneScope::All,offset:Point::default(),low:low_handle}))],None).unwrap();
-    engine.render_frame_at(0).unwrap();assert!(engine.has_pending_document_edits());
+    start_bake_analysis(&mut engine,low);assert!(engine.has_pending_document_edits());
     assert_eq!(engine.backend().bake_analyses.len(),1);
     finish(&mut engine).unwrap();
     close(baked_pixel(&engine,low,8,6),f64::from(0.01125_f32),0.5,false);
@@ -328,7 +340,7 @@ fn dropping_a_pending_cold_merge_releases_members_without_publishing_a_partial_r
     let mut document=constant_document(RgbSpace::Srgb,0.5);document.working.occurrence=Some(occurrence(&document,"Upper"));
     let source=Arc::downgrade(document.scene().paint(paint_id(&document)).unwrap().base.as_ref().unwrap().image.storage());
     let mut engine=engine(document);let result=merge(&mut engine);
-    engine.render_frame_at(0).unwrap();assert_eq!(engine.backend().bake_analyses.len(),1);
+    start_bake_analysis(&mut engine,result);assert_eq!(engine.backend().bake_analyses.len(),1);
     assert!(engine.has_pending_document_edits());
     let raster=engine.document().target_raster(result).unwrap().clone();assert!(raster.try_data().is_none());
     drop(engine);

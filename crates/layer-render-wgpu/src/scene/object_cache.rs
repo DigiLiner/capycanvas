@@ -241,6 +241,8 @@ impl ObjectCache {
     pub fn advance(&mut self, r: &mut WgpuRasterizer, scene:&mut Scene, encoder: &mut crate::submission::CommandEncoder, interactive: bool) -> Result<u64, GpuRasterError> {
         self.workspace = scene.object_workspace(r, self.retains);
         let sampler = r.scene_pipelines.objects.clone();
+        if self.tasks.iter().any(|task| !task.complete || !task.valid.load(Ordering::Acquire))
+            && !r.compilation.require(sampler.pipelines(), startup::DOCUMENT) { return Ok(0); }
         if self.in_flight.load(Ordering::Acquire) { return Ok(0); }
         for task in &mut self.tasks { if task.complete && task.valid.load(Ordering::Acquire) { task.accumulation = None; task.tiles = Vec::new(); task.coordinates=None; if let Some(c)=&mut task.collection {c.spare=None;} } }
         let budget = if interactive { INTERACTIVE_TAPS } else { IDLE_TAPS };

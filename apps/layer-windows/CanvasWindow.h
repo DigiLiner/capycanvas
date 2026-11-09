@@ -55,6 +55,7 @@ public:
 private:
     CanvasLatencyTrace latencyTrace{GetEnvironmentVariableW(L"CAPY_LATENCY_TRACE",nullptr,0)!=0};
     PresentationTrace presentationTrace{GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0};
+    bool brushReady=false;
     void TracePresentation(bool frame,bool dirty,bool repeat=false);
     std::vector<std::wstring> launchFiles;
     void SendLaunchFiles(winrt::Windows::Data::Json::JsonObject const& model);

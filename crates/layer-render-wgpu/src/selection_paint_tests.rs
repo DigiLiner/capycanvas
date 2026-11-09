@@ -20,11 +20,15 @@ fn request(id: u64, before: Selection, mode: SelectionPaintMode, opacity: f32) -
         restart: false,
     }
 }
+pub(super) fn paint(r: &mut WgpuRasterizer, request: &SelectionPaint) -> Result<bool, GpuRasterError> {
+    pollster::block_on(r.compilation.prepare_all(r.recipes.selection_paint.pipelines.iter().chain(r.selection_clip.pipelines()))).unwrap();
+    r.paint_selection(request)
+}
 pub(super) fn receive(r: &mut WgpuRasterizer, mut request: SelectionPaint) -> Selection {
     request.dabs.clear();
     request.enclosed = None;
     request.finish = true;
-    assert!(r.paint_selection(&request).unwrap());
+    assert!(self::paint(r, &request).unwrap());
     let until = std::time::Instant::now() + READBACK_TIMEOUT;
     loop {
         if let Some(result) = r.take_selection_paint() {
@@ -59,17 +63,17 @@ fn renderer() -> WgpuRasterizer {
 fn selection_paint_opacity_accumulates_between_contacts_but_not_within_one() {
     let mut r = renderer();
     let first = request(1, Selection::empty(), SelectionPaintMode::Add, 0.5);
-    assert!(r.paint_selection(&first).unwrap());
-    assert!(r.paint_selection(&first).unwrap());
+    assert!(self::paint(&mut r, &first).unwrap());
+    assert!(self::paint(&mut r, &first).unwrap());
     let first = receive(&mut r, first);
     assert_eq!(value(&first, 64, 64), 128);
     assert_eq!(value(&first, 2, 2), 0);
     let second = request(2, first, SelectionPaintMode::Add, 0.5);
-    assert!(r.paint_selection(&second).unwrap());
+    assert!(self::paint(&mut r, &second).unwrap());
     let second = receive(&mut r, second);
     assert_eq!(value(&second, 64, 64), 192);
     let subtract = request(3, second, SelectionPaintMode::Subtract, 0.5);
-    assert!(r.paint_selection(&subtract).unwrap());
+    assert!(self::paint(&mut r, &subtract).unwrap());
     let subtract = receive(&mut r, subtract);
     assert_eq!(value(&subtract, 64, 64), 96);
 }
@@ -104,7 +108,7 @@ fn dry_selection_contact_dose_survives_segment_and_update_partitioning() {
             }).collect();
             for contacts in contacts.chunks(chunk) {
                 paint.dabs = contacts.to_vec();
-                assert!(r.paint_selection(&paint).unwrap());
+                assert!(self::paint(&mut r, &paint).unwrap());
             }
             let result = receive(&mut r, paint);
             let alpha = 1.-(-6_f64*0.4).exp();
@@ -125,7 +129,7 @@ fn selection_paint_overlay_is_coverage_scaled_and_excluded_from_artwork() {
     let mut r = renderer();
     let artwork = r.readback_srgb_rgba8().unwrap();
     let paint = request(1, Selection::empty(), SelectionPaintMode::Add, 0.5);
-    assert!(r.paint_selection(&paint).unwrap());
+    assert!(self::paint(&mut r, &paint).unwrap());
     r.set_selection_overlay(Some(layer_render::SelectionOverlay {
         active: true,
         editing: None,
@@ -140,6 +144,7 @@ fn selection_paint_overlay_is_coverage_scaled_and_excluded_from_artwork() {
         crate::SdrSurfaceColor::Srgb,
     )
     .unwrap();
+    pollster::block_on(presenter.prepare(&r)).unwrap();
     presenter
         .present(
             &r,
@@ -156,6 +161,7 @@ fn selection_paint_overlay_is_coverage_scaled_and_excluded_from_artwork() {
         "soft overlay {center:?}"
     );
     r.set_selection_overlay(None);
+    pollster::block_on(presenter.prepare(&r)).unwrap();
     presenter
         .present(
             &r,
@@ -196,15 +202,15 @@ fn saved_selection_overlay_uses_working_visibility_without_changing_authored_art
         active: false, editing: None, color: [1., 0., 0., 0.5], protected: false, saved_protected: false,
     }));
     let base = FramePacket { selection_overlays: Some(&document.working.selection_overlays), ..packet(document.scene(), [128; 2]) };
-    r.prepare_selection_previews(base).unwrap();
+    crate::test_support::submit_settled(&mut r, base);
     assert!(r.selection_previews.texture.is_none());
     let mut visibility = layer_core::authored::SelectionOverlays {visibility: [(handle,true)].into(), ..Default::default()};
-    r.prepare_selection_previews(FramePacket { selection_overlays: Some(&visibility), ..base }).unwrap();
+    crate::test_support::submit_settled(&mut r, FramePacket { selection_overlays: Some(&visibility), ..base });
     assert!(r.selection_previews.texture.is_some());
     visibility.visibility.insert(handle, false);
-    r.prepare_selection_previews(FramePacket { selection_overlays: Some(&visibility), ..base }).unwrap();
+    crate::test_support::submit_settled(&mut r, FramePacket { selection_overlays: Some(&visibility), ..base });
     assert!(r.selection_previews.texture.is_none());
-    r.prepare_selection_previews(base).unwrap();
+    crate::test_support::submit_settled(&mut r, base);
     assert!(r.selection_previews.texture.is_none());
     assert_eq!(document.artwork, authored);
 }
@@ -233,10 +239,11 @@ fn saved_selection_overlays_beyond_one_storage_binding_draw_in_row_bands() {
         r.set_selection_overlay(Some(layer_render::SelectionOverlay {
             active: false, editing: None, color: [1., 0., 0., 0.5], protected: false, saved_protected: false,
         }));
-        r.submit(FramePacket { selection_overlays: Some(&visibility), ..packet(document.scene(), extent) }).unwrap();
+        crate::test_support::submit_settled(&mut r, FramePacket { selection_overlays: Some(&visibility), ..packet(document.scene(), extent) });
         assert!(r.selection_previews.texture.is_some());
         let target = crate::create_target(&r.device, extent, wgpu::TextureFormat::Rgba8UnormSrgb, "banded overlay").0;
         let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+        pollster::block_on(presenter.prepare(&r)).unwrap();
         presenter.present(&r, &target.create_view(&Default::default()), crate::test_support::view(extent), [1.; 4]).unwrap();
         page_bytes(&r, &target)
     };
@@ -265,8 +272,8 @@ fn selection_gradient_shapes_preserve_scalar_coverage_and_contact_opacity() {
                     ScalarGradientStop {position:1.,value:0.8,opacity:0.25},
                 ]},
             });
-            assert!(r.paint_selection(&paint).unwrap());
-            assert!(r.paint_selection(&paint).unwrap());
+            assert!(self::paint(&mut r, &paint).unwrap());
+            assert!(self::paint(&mut r, &paint).unwrap());
             let result=receive(&mut r,paint);
             for (x,y) in [(56,64),(64,64),(72,64),(64,70)] {
                 let dx=f64::from(x)+0.5-64.;let dy=f64::from(y)+0.5-64.;
