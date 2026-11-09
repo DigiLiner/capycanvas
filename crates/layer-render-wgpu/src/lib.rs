@@ -3935,7 +3935,7 @@ impl CanvasRenderer for WgpuRasterizer {
             required.compute.extend(self.selection_clip.pipelines().into_iter().cloned());
         }
         let transforms_ready = required.require(&self.compilation,startup::BRUSH);
-        let scene_ready = self.compilation.require(self.scene_pipelines.for_scene(&self.device,packet.scene), startup::DOCUMENT);
+        let scene_ready = self.compilation.require(self.scene_pipelines.for_scene(self,packet.scene,packet.dab_batches), startup::DOCUMENT);
         let fill_ready=if let Some(fill)=self.fill_preview.clone() {
             let pipeline=scene::operation_pipeline(&fill.operation.kind).unwrap_or(0);
             self.compilation.require([&self.scene_pipelines.pipeline[pipeline],&self.layer_masks.initialize],startup::BRUSH)

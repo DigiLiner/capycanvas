@@ -44,6 +44,7 @@ struct DocumentKey {
     color: layer_core::color::DocumentColor,
     selection: bool,
     mask: bool,
+    composition: [bool; 2],
     locked: bool,
     sources: SourceKinds,
     objects: bool,
@@ -67,6 +68,7 @@ impl DocumentKey {
         Self {
             extent: document.composition().size, color: document.composition().color,
             selection: document.working.selection.is_some(), mask,
+            composition: scene::composition_pipelines(scene),
             locked: !mask && target.and_then(|t| document.target_owner(t)).and_then(|h| scene.occurrence(h)).is_some_and(|o| o.alpha_locked),
             sources: SourceKinds::for_scene(scene),
             objects,
@@ -76,7 +78,7 @@ impl DocumentKey {
             transform: operations().any(|op| matches!(op.kind, layer_core::RasterOperationKind::Transform(_))),
             mesh: operations().any(|op| matches!(&op.kind, layer_core::RasterOperationKind::Transform(t) if t.placement.mesh.is_some())),
             gray: scene.targets().any(|t|scene.color_mode(t)!=layer_core::color::LayerColorMode::FullColor),
-            watercolor: scene.targets().any(|t|scene.raster(t).is_some_and(|r|r.try_data().is_none_or(|data|data.is_ok_and(|data|data.watercolor.is_some())))),
+            watercolor: has_watercolor(scene),
             blend_space: document.composition().blend,
             chains: scene::effect_chains(scene,scene::EffectPreparation::Display).into_iter().map(|(handles, execution)| {
                 let identity=effects::identity_chain(scene,&handles);
@@ -139,6 +141,10 @@ impl SourceKinds {
         [(self.float, &source.pipeline), (self.integer, &source.integer)].into_iter().filter_map(|(used, pipeline)| used.then_some(pipeline))
     }
 }
+pub(super) fn has_watercolor(scene: SceneView<'_>) -> bool {
+    scene.targets().any(|target| scene.raster(target).is_some_and(|raster|
+        raster.try_data().is_none_or(|data| data.is_ok_and(|data| data.watercolor.is_some()))))
+}
 impl ShaderDocument {
     pub fn new(document: &Document) -> Self {
         Self { id: document.artwork.id, revision: std::cell::Cell::new(document.revision), key: DocumentKey::new(document) }
@@ -146,7 +152,10 @@ impl ShaderDocument {
     pub fn matches(&self, document: &Document) -> bool {
         if self.id != document.artwork.id { return false; }
         if self.revision.get() == document.revision { return true; }
-        if self.key != DocumentKey::new(document) { return false; }
+        let mut key = DocumentKey::new(document);
+        if key.composition.iter().zip(self.key.composition).any(|(required, prepared)| *required && !prepared) { return false; }
+        key.composition = self.key.composition;
+        if self.key != key { return false; }
         self.revision.set(document.revision);
         true
     }
@@ -154,7 +163,7 @@ impl ShaderDocument {
 impl Needs {
     pub(super) fn capture_scene(r:&WgpuRasterizer,view:SceneView<'_>,watercolor:bool)->Self {
         let mut required = Self::default();
-        required.render.extend(r.scene_pipelines.for_scene(&r.device,view).cloned());
+        required.render.extend(r.scene_pipelines.for_scene(r,view,&[]).cloned());
         required.compute.push(r.scene_pipelines.constant.2.clone());
         required.compute.extend([r.recipes.display.reduce.clone(),r.recipes.display.fused_reduce.clone()]);
         required.compute.extend(r.scene_pipelines.scale_pipelines().into_iter().cloned());
@@ -494,7 +503,7 @@ impl WgpuRasterizer {
             let mut required = Needs::default();
             required
                 .render
-                .extend(self.scene_pipelines.for_scene(&self.device,document.scene()).cloned());
+                .extend(self.scene_pipelines.for_scene(self,document.scene(),&[]).cloned());
             if self.device.portable_blend() { required.compute.extend(self.portable_blend.pipelines.iter().cloned()); }
             required.compute.push(self.scene_pipelines.constant.2.clone());
             if shader.key.watercolor {required.compute.push(self.pipelines.watercolor_compute.1.clone());}
@@ -1268,7 +1277,7 @@ mod gpu_tests {
         recolored.color_rgba_linear = [8., 0.25, 0.5, 1.];
         assert!(!renderer.startup_needs_update(&document, &recolored, false));
         assert!(renderer.poll_startup().unwrap().brush_ready);
-        assert!(renderer.scene_pipelines.for_scene(&renderer.device,document.scene()).all(|p| p.ready()));
+        assert!(renderer.scene_pipelines.for_scene(&renderer,document.scene(),&[]).all(|p| p.ready()));
         assert!(renderer.scene_pipelines.pipeline.iter().enumerate().all(|(i,pipeline)| i < 3 || i == 6 || !pipeline.ready()));
         let target = document.drawing_target().unwrap();
         let paper = document.nearest_paper_binding(Some(target)).unwrap();
@@ -1289,7 +1298,7 @@ mod gpu_tests {
                 assert!(std::time::Instant::now() < deadline, "flat fill dependencies must prepare without optional compilation");
                 std::thread::sleep(Duration::from_millis(1));
             }
-            assert!(renderer.scene_pipelines.for_scene(&renderer.device,document.scene()).all(|pipeline| pipeline.ready()));
+            assert!(renderer.scene_pipelines.for_scene(&renderer,document.scene(),&[]).all(|pipeline| pipeline.ready()));
             assert!(renderer.scene_pipelines.pipeline[3].ready(), "flat fills must prepare their operation family before submission");
             assert!(renderer.scene_pipelines.pipeline.iter().enumerate().all(|(i,pipeline)| i < 4 || i == 6 || !pipeline.ready()), "flat fills must not prepare other operation families");
         }

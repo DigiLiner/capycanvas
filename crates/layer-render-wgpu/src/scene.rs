@@ -16,6 +16,23 @@ fn omitted_ancestor_masks(scene: SceneView<'_>, layer: OccurrenceHandle) -> impl
     std::iter::successors(parent, move |id| scene.parent(*id)).take_while(move |id| !scene.includes(*id))
         .filter(move |id| scene.mask(*id).is_some_and(|(mask, _)| mask.enabled))
 }
+fn normal_context(scene: SceneView<'_>, index: OccurrenceHandle) -> bool {
+    !scene.clipping_base(index).is_some_and(|base| !scene.includes(base))
+        && omitted_ancestor_masks(scene, index).next().is_none()
+}
+fn normal_paint(scene: SceneView<'_>, index: OccurrenceHandle) -> bool {
+    let layer = scene.occurrence(index).unwrap();
+    let mask = scene.mask(index).filter(|(mask, _)| mask.enabled);
+    layer.kind() == LayerKind::Paint && layer.blend == layer_core::LayerBlend::Normal
+        && world_offset(scene, index, false) == [0; 2]
+        && mask.is_none_or(|(mask, _)| scene.target_offset(SourceTarget::Coverage(mask.source)) == [0; 2])
+}
+pub(super) fn composition_pipelines(scene: SceneView<'_>) -> [bool; 2] {
+    [scene.targets().any(SourceTarget::is_coverage),
+        startup::has_watercolor(scene) || scene.order().iter().copied().filter(|&index| scene.includes(index) && scene.occurrence(index).unwrap().is_artwork()).any(|index|
+            scene.effective_clipped(index) || scene.visible(index) && (!normal_context(scene, index)
+                || !normal_paint(scene, index) || !scene.attached_effects(index).is_empty()))]
+}
 pub(super) fn same_metadata(r:&WgpuRasterizer,packet:FramePacket<'_>)->bool {
     r.artwork_frame.as_ref().is_some_and(|old| {
         let scene=old.scene.view().with_scope(&old.scope);
@@ -153,6 +170,12 @@ fn portable_draw(device:&PipelineDevice,jobs:&[Job],index:usize)->bool {
     let target=match &jobs[index] {Job::Draw {target,..}|Job::Watercolor {target,..}=>target,_=>return false};
     needs_blend(device,&jobs[index]) && !(index>0 && matches!(&jobs[index-1],Job::Clear(previous,color)
         if previous==target && *color==wgpu::Color::TRANSPARENT))
+}
+fn bound_fragment(device: &PipelineDevice, jobs: &[Job], index: usize) -> Option<usize> {
+    let Job::Draw {target, data, over, pipeline, ..} = &jobs[index] else {return None;};
+    if is_compute(&jobs[index]) {return None;}
+    let format = if portable_draw(device, jobs, index) {device.working_format()} else {target.texture().format()};
+    pipeline.or_else(|| fragment_pipeline(data[8] as u32, *over, format == device.scalar_format()))
 }
 /// What a draw does to the color it writes (`scene_space` in scene.wgsl).
 /// Layer pixels are linear; a Perceptual composite holds encoded values.
@@ -1397,8 +1420,7 @@ impl Scene {
         output: usize,
     ) -> Result<bool, GpuRasterError> {
         let layer = packet.scene.occurrence(index).unwrap();
-        if packet.scene.clipping_base(index).is_some_and(|base| !packet.scene.includes(base))
-            || omitted_ancestor_masks(packet.scene, index).next().is_some() { return Ok(false); }
+        if !normal_context(packet.scene, index) { return Ok(false); }
         if layer.blend == layer_core::LayerBlend::Normal
             && !layer.mask.as_ref().is_some_and(|mask| mask.enabled)
             && let Some(color) = packet.scene.effect(index).and_then(|effect| effect.constant_color())
@@ -1415,23 +1437,9 @@ impl Scene {
             return Ok(true);
         }
         let target = packet.scene.source_target(index).unwrap_or_default();
-        if layer.kind() != LayerKind::Paint
-            || layer.blend != layer_core::LayerBlend::Normal
-        {
-            return Ok(false);
-        }
+        if !normal_paint(packet.scene, index) || r.watercolor_style(target, packet.dab_batches).is_some() { return Ok(false); }
         let mask = packet.scene.mask(index).filter(|(mask, _)| mask.enabled);
-        if world_offset(packet.scene, index, false) != [0; 2] {
-            return Ok(false);
-        }
-        if mask.is_some_and(|(mask, _)| packet.scene.target_offset(SourceTarget::Coverage(mask.source)) != [0; 2])
-        {
-            return Ok(false);
-        }
         let stored = r.paint_layers.iter().find(|l| l.id == target);
-        if r.watercolor_style(target, packet.dab_batches).is_some() {
-            return Ok(false);
-        }
         // Destination-reading previews already contain the complete layer
         // tile. Composite them directly just like persistent paint, instead
         // of allocating a scratch layer and blending it in another pass.
@@ -1443,9 +1451,7 @@ impl Scene {
             // Resolve it over persistent paint before applying layer opacity;
             // drawing the two contributions independently changes the result.
             // An enabled mask needs a third source and retains the general path.
-            if mask.is_some() {
-                return Ok(false);
-            }
+            if mask.is_some() { return Ok(false); }
             let base = if let Some(page) = stored.and_then(|stored| stored.pages.iter().find(|p| p.coordinate == tile)) {
                 Some(page.active().view.clone())
             } else {
@@ -2232,11 +2238,7 @@ impl Scene {
         for (i,job) in self.jobs.iter().enumerate() {
             if is_compute(job) || matches!(job,Job::Clear(..)) {compute(&r.scene_pipelines.constant.2);}
             match job {
-                Job::Draw {target,data,over,pipeline,..} => {
-                    let format=if portable_draw(&r.device,&self.jobs,i) {r.device.working_format()}else{target.texture().format()};
-                    if let Some(index)=pipeline.or_else(||fragment_pipeline(data[8] as u32,*over,format==r.device.scalar_format()))
-                        && !is_compute(job) {render(&self.pipeline[index]);}
-                },
+                Job::Draw {..} => if let Some(index) = bound_fragment(&r.device, &self.jobs, i) {render(&self.pipeline[index]);},
                 Job::Effect {prepared,..} => {
                     effects_ready &= self.effects.preparation_ready() && prepared.pipeline.ready();
                     match &prepared.pipeline {
@@ -2619,9 +2621,9 @@ impl Scene {
                                     })
                                 });
                                 pass.set_bind_group(3, masks, &[]);
-                            } else if let Job::Draw { over, data, edges, pipeline, .. } = job {
+                            } else if let Job::Draw { edges, .. } = job {
                                 pass.set_bind_group(2,edges.as_ref().unwrap_or(&self.edge_binding),&[]);
-                                pass.set_pipeline(&self.pipeline[pipeline.or_else(||fragment_pipeline(data[8] as u32,*over,source.as_ref().unwrap_or(target).texture().format()==r.device.scalar_format())).expect("fragment draw operation")]);
+                                pass.set_pipeline(&self.pipeline[bound_fragment(&r.device, &self.jobs, j).expect("fragment draw operation")]);
                             }
                             pass.set_bind_group(0, &self.binding, &[((base + j) * self.stride) as u32]);
                             pass.set_bind_group(1, binding, &[]);
@@ -2688,13 +2690,20 @@ fn shader_source(space: layer_core::color::RgbSpace) -> Cow<'static,str> {
 }
 
 impl Pipelines {
-    pub fn for_scene(&self, device:&PipelineDevice, scene: SceneView<'_>) -> impl Iterator<Item = &Deferred<wgpu::RenderPipeline>> {
+    pub fn for_scene(&self, r:&WgpuRasterizer, scene: SceneView<'_>, batches:&[DabBatch]) -> impl Iterator<Item = &Deferred<wgpu::RenderPipeline>> {
         let mut used = [false; FRAGMENTS.len()];
-        used[..3].fill(true);
-        used[6] = true;
+        used[..2].fill(true);
+        let [coverage, blend] = composition_pipelines(scene);
+        used[2] = coverage;
+        used[6] = blend
+            || batches.iter().any(|batch| batch.style.execution == BrushExecution::Watercolor)
+            || r.paint_layers.iter().any(|layer| layer.watercolor.is_some() && scene.source_owner(layer.id).is_some_and(|index| scene.visible(index)))
+            || scene.order().iter().copied().filter(|&index| scene.visible(index) && scene.mask(index).is_some_and(|(mask, _)| mask.enabled)).any(|index|
+                scene.source_target(index).is_some_and(|target| r.preview_layer_id == Some(target) && !r.preview_requires_base
+                    || batches.iter().any(|batch| batch.target == target && batch.kind == DabBatchKind::Preview)));
         for operation in scene.targets().filter(|target| !target.is_coverage()).filter_map(|target| scene.operations(target)).flatten() {
             if let Some(pipeline)=operation_pipeline(&operation.kind) {used[pipeline]=true;}
-            if matches!(operation.kind,RasterOperationKind::Fill {edges:Some(_),underfill:Some(_),..}) {used[fill_line_pipeline(device)]=true;}
+            if matches!(operation.kind,RasterOperationKind::Fill {edges:Some(_),underfill:Some(_),..}) {used[fill_line_pipeline(&r.device)]=true;}
         }
         self.pipeline.iter().zip(used).filter_map(|(pipeline,used)| used.then_some(pipeline))
     }
@@ -2972,6 +2981,9 @@ mod display_backup_tests;
 
 #[cfg(test)]
 mod capture_readiness_tests;
+
+#[cfg(test)]
+mod prediction_tests;
 
 #[cfg(test)]
 mod shader_tests {

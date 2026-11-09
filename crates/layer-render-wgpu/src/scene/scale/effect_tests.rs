@@ -327,7 +327,7 @@ fn native_pointwise_warm_prediction_replacement_and_removal_match_full_rebuilds(
         frame.view.document_to_surface = [scale, 0., 0., scale, 0., 0.];
         submit_published(&mut incremental, frame); submit_published(&mut rebuilt, frame);
         for r in [&incremental, &rebuilt] {
-            pollster::block_on(r.compilation.prepare_all(r.scene_pipelines.for_scene(&r.device, doc.scene()))).unwrap();
+            pollster::block_on(r.compilation.prepare_all(r.scene_pipelines.for_scene(r, doc.scene(), &[]))).unwrap();
         }
         for r in [&mut incremental, &mut rebuilt] {crate::test_support::prepare_scene_effects(r,frame);}
         let original = display_pixels(&incremental);
