@@ -61,7 +61,7 @@ extension XCTestCase {
     @MainActor func revealNewDrawingControl(_ id: String, in app: XCUIApplication) {
         let control = newDrawingElement(id, in: app)
         let scroll = newDrawingElement("new-drawing-dialog", in: app).scrollViews.containing(.any, identifier: id).firstMatch
-        if scroll.exists && !control.isHittable { revealEditorControl(control, in: scroll) }
+        if scroll.exists { revealEditorControl(control, in: scroll) }
     }
     #endif
 

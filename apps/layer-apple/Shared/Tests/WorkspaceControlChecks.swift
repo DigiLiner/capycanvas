@@ -43,26 +43,29 @@ extension XCTestCase {
     }
     @MainActor func workspaceActivate(_ element: XCUIElement) {
         XCTAssertTrue(element.exists || element.waitForExistence(timeout: 10))
+        #if os(macOS)
         if element.isHittable {
-            #if os(macOS)
             if element.elementType == .button {
                 element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).clickOrTap()
                 return
             }
-            #endif
             element.clickOrTap()
         } else { workspacePoint(element)?.clickOrTap() }
+        #else
+        let control = element.elementType == .switch ? element.switches.firstMatch : element
+        workspacePoint(control.exists ? control : element)?.clickOrTap()
+        #endif
     }
     @MainActor func workspacePoint(_ element: XCUIElement) -> XCUICoordinate? {
         let window = XCUIApplication().windows.firstMatch
-        let frame = element.frame
+        let frame = element.frame, bounds = window.frame
         guard frame.width > 0, frame.height > 0,
-            frame.midX.isFinite, frame.midY.isFinite, window.frame.contains(frame) else {
-            XCTFail("The workspace control must have finite bounds inside its editor window: control \(frame), window \(window.frame)")
+            frame.midX.isFinite, frame.midY.isFinite, bounds.contains(frame) else {
+            XCTFail("The workspace control must have finite bounds inside its editor window: control \(frame), window \(bounds)")
             return nil
         }
         return window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-            dx: frame.midX - window.frame.minX, dy: frame.midY - window.frame.minY))
+            dx: frame.midX - bounds.minX, dy: frame.midY - bounds.minY))
     }
     @MainActor private func workspaceText(_ field: XCUIElement, _ value: String) {
         workspaceActivate(field)

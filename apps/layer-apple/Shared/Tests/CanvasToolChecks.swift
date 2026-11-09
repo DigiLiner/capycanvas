@@ -1,6 +1,9 @@
 import XCTest
 import CoreGraphics
 import ImageIO
+#if os(iOS)
+import UIKit
+#endif
 
 extension XCTestCase {
     @MainActor func editorText(_ element: XCUIElement) -> String {
@@ -24,35 +27,39 @@ extension XCTestCase {
     }
 
     #if !os(macOS)
+    @MainActor private func editorScrollViewport(_ frame: CGRect) -> CGRect {
+        let app = XCUIApplication(), window = app.windows.firstMatch.frame
+        let viewport = frame.intersection(window)
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists else { return viewport }
+        var keyboardFrame = keyboard.frame
+        if XCUIDevice.shared.orientation.isLandscape, keyboardFrame.height > keyboardFrame.width,
+            !window.contains(keyboardFrame) {
+            let screen = UIScreen.main.nativeBounds.size, scale = UIScreen.main.scale
+            if XCUIDevice.shared.orientation == .landscapeLeft {
+                keyboardFrame = CGRect(x: keyboardFrame.minY, y: screen.width / scale - keyboardFrame.maxX,
+                    width: keyboardFrame.height, height: keyboardFrame.width)
+            } else {
+                keyboardFrame = CGRect(x: screen.height / scale - keyboardFrame.maxY, y: keyboardFrame.minX,
+                    width: keyboardFrame.height, height: keyboardFrame.width)
+            }
+        }
+        let covered = keyboardFrame.intersection(viewport)
+        guard !covered.isNull, covered.maxY >= viewport.maxY else { return viewport }
+        return CGRect(x: viewport.minX, y: viewport.minY, width: viewport.width,
+            height: max(0, covered.minY - viewport.minY))
+    }
     @MainActor func dragEditorScroll(_ scroll: XCUIElement, snapshot: XCUIElementSnapshot, towardEnd: Bool, endingAt destination: XCUICoordinate? = nil) -> Bool {
-        let window = XCUIApplication().windows.firstMatch, windowBounds = window.frame
-        let viewport = snapshot.frame.intersection(windowBounds)
-        let interactive: [XCUIElement.ElementType] = [.button, .textField, .secureTextField, .textView, .slider, .switch, .picker, .pickerWheel, .segmentedControl, .stepper]
-        func obstacles(_ node: XCUIElementSnapshot) -> [CGRect] {
-            interactive.contains(node.elementType) || node.elementType == .other && node.value != nil
-                ? [node.frame.intersection(viewport)] : node.children.flatMap(obstacles)
-        }
-        func text(_ node: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
-            if node.elementType != .button && interactive.contains(node.elementType) { return [] }
-            return node.elementType == .staticText ? [node] : node.children.flatMap(text)
-        }
-        let visibleText: [CGRect] = text(snapshot).map { $0.frame.intersection(viewport) }.filter {
-            $0.width > 0 && $0.height > 0 && $0.midX.isFinite && $0.midY.isFinite
-        }
-        let startArea = CGRect(x: viewport.minX, y: towardEnd ? viewport.midY : viewport.minY,
-            width: viewport.width, height: viewport.height / 2)
-        guard let bounds = editorFreeRegion(viewport: startArea, excluding: obstacles(snapshot))
-            ?? visibleText.max(by: { towardEnd ? $0.midY < $1.midY : $0.midY > $1.midY }) else {
-            let tree = XCTAttachment(string: XCUIApplication().debugDescription)
-            tree.name = "editor-scroll-no-visible-text"; tree.lifetime = .keepAlways; add(tree)
-            XCTFail("The native scroll needs visible noninteractive text inside its editor window: \(scroll.identifier)")
+        let frame = snapshot.frame, viewport = editorScrollViewport(frame)
+        guard viewport.width > 0, viewport.height > 0, frame.width > 0, frame.height > 0 else {
+            XCTFail("The native scroll needs a finite viewport inside its editor window")
             return false
         }
-        let edge = towardEnd ? viewport.minY : viewport.maxY
-        let start = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-            dx: bounds.midX - windowBounds.minX, dy: bounds.midY - windowBounds.minY))
-        let end = destination ?? window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-            dx: bounds.midX - windowBounds.minX, dy: (bounds.midY + edge) / 2 - windowBounds.minY))
+        let x = (viewport.minX - frame.minX + viewport.width * 0.05) / frame.width
+        let startY = (viewport.minY - frame.minY + viewport.height * (towardEnd ? 0.8 : 0.2)) / frame.height
+        let endY = (viewport.minY - frame.minY + viewport.height * (towardEnd ? 0.2 : 0.8)) / frame.height
+        let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: x, dy: startY))
+        let end = destination ?? scroll.coordinate(withNormalizedOffset: CGVector(dx: x, dy: endY))
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         return true
     }
@@ -78,7 +85,12 @@ extension XCTestCase {
         }
         for _ in 0..<30 {
             guard let current = try? scroll.snapshot() else { return XCTFail("The native scroll viewport must remain available") }
-            let nodes = descendants(current), viewport = current.frame
+            let nodes = descendants(current)
+            #if os(macOS)
+            let viewport = current.frame
+            #else
+            let viewport = editorScrollViewport(current.frame)
+            #endif
             let siblings = nodes.filter { $0.elementType == type }
             let frame = siblings.first { identity($0) == key }?.frame ?? .zero
             if frame.width > 0 && frame.height > 0 && viewport.contains(frame) {
@@ -157,7 +169,12 @@ extension XCTestCase {
         var towardEnd = true, reversed = false
         for step in 0..<24 {
             guard let current = try? scroll.snapshot() else { return XCTFail("The native scroll must remain mounted") }
-            let viewport = current.frame.intersection(windowBounds), nodes = descendants(current)
+            #if os(macOS)
+            let viewport = current.frame.intersection(windowBounds)
+            #else
+            let viewport = editorScrollViewport(current.frame)
+            #endif
+            let nodes = descendants(current)
             guard positive(viewport) else { return XCTFail("The native scroll needs a finite viewport inside its window") }
             let matches = nodes.filter {
                 (identifier.isEmpty ? $0.label == label : $0.identifier == identifier) && (type == .any || $0.elementType == type)
