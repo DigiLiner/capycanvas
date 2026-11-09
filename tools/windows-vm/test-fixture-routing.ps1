@@ -916,3 +916,42 @@ public static class CapyReviewOwnershipTest {
     }
     'Timed-out row cleanup uses only its recorded process identities and a bounded exit wait'
 }
+
+& {
+    $HardwareGpu=$true;$controlFixture=$null;$buildManifest=@{fixture_scale=1.5}
+    function Stop-Review{}
+    function Reviews{}
+    function Assert-HardwareTraces{}
+    $directory=Join-Path ([IO.Path]::GetTempPath()) ('capy-editor-scale-'+[guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($directory)|Out-Null
+    try{
+        $Executable=Join-Path $directory 'CapyCanvas.exe';$log=Join-Path $directory 'row'
+        @{process_id=7;trace_directory=$directory;windows=@(@{process_id=8;trace_directory=$directory})}|ConvertTo-Json -Depth 4|Set-Content -LiteralPath ($log+'-context.json')
+        @{process_id=8;window_id=2;model=@{}}|ConvertTo-Json -Depth 4|Set-Content -LiteralPath (Join-Path $directory 'ui-state-8-2.json')
+        $cases=@(
+            @{name='valid';layout=@{cache=@{context=@{scale=1.5}}};scale=1.5;passes=$true},
+            @{name='wrong';layout=@{cache=@{context=@{scale=1.0}}};scale=1.0},
+            @{name='null';layout=@{cache=@{context=@{scale=$null}}};scale=$null},
+            @{name='missing-scale';layout=@{cache=@{context=@{}}};scale=$null},
+            @{name='missing-context';layout=@{cache=@{}};scale=$null},
+            @{name='missing-cache';layout=@{};scale=$null},
+            @{name='malformed-scale';layout=@{cache=@{context=@{scale='not-a-scale'}}};scale='not-a-scale'},
+            @{name='malformed-context';layout=@{cache=@{context='not-a-context'}};scale=$null}
+        )
+        foreach($case in $cases){
+            $scale=$case.scale
+            @{process_id=7;window_id=1;model=@{layout_input=$case.layout}}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath (Join-Path $directory 'ui-state-7-1.json')
+            $failure=$null
+            try{Save-Evidence $log}catch{$failure=$_.Exception.Message}
+            if($case.passes){
+                if($failure){throw "A helper snapshot without layout_input rejected the editor scale: $failure"}
+            }elseif($failure -ne 'Hardware fixture runtime scale differs from the round display'){throw "An editor with incorrect or absent scale passed: $($case.name)"}
+            $display=Get-Content -LiteralPath ($log+'-display.json') -Raw|ConvertFrom-Json
+            if(@($display.context_scales).Count -ne 1 -or $display.context_scales[0].process_id -ne 7 -or $display.context_scales[0].window_id -ne 1 -or $display.context_scales[0].scale -ne $scale){throw 'Editor scale evidence included a helper or lost editor identity or scale'}
+        }
+        Remove-Item -LiteralPath (Join-Path $directory 'ui-state-7-1.json'),(Join-Path $directory 'row-evidence/ui-state-7-1.json')
+        $failure=$null
+        try{Save-Evidence $log}catch{$failure=$_.Exception.Message}
+        if($failure -ne 'Hardware fixture runtime scale differs from the round display'){throw 'A helper-only row supplied editor scale evidence'}
+    }finally{Remove-Item -LiteralPath $directory -Recurse -Force}
+}
