@@ -147,7 +147,9 @@ needs and larger runs split the rest. A run grows when sessions free up, and it
 gives one back after that session's current fixture when another run needs it, so
 a short list started during a full round begins within minutes. `--workers N` caps
 a run. Each session is its own Windows account, desktop, clipboard and user
-settings, with its own copy of the run's source and binaries.
+settings, with its own source tree and writable directories. Immutable build
+files are read-only hardlinks to one shared copy per run. The normal `check`
+suite runs `test-session-view.ps1` to verify sharing and write isolation.
 
 Each fixture must leave hardware-adapter evidence and report 150% scale. Sessions
 run at 2560 × 1600 with the same three-times `CAPY_WAIT_SCALE` as WARP, because 15

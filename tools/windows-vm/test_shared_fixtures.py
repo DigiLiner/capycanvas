@@ -293,6 +293,119 @@ class SharedRunTests(unittest.TestCase):
         self.assertLess(command.index("$complete=Test-Path"), command.index('results.jsonl'))
 
 
+    @contextmanager
+    def session_view_transport(self, run, *, view_failure=False, protection_failure=False):
+        machine=run.machines[0]
+        source=self.root/'source.tar.gz';source.write_bytes(b'owned source archive')
+        build=self.root/'build.tar.gz';build.write_bytes(b'owned build archive')
+        run.payload={'source':source,'build':build,'record':{'controls':{'LayerDrop':{'CapyCanvas.exe':'control'}}},'hashes':{'owned':'source'}}
+        helper=self.root/'guest-files';helper.mkdir(exist_ok=True)
+        actual=vm.GUEST_FILES/'session-view.ps1'
+        body=actual.read_text() if actual.exists() else 'function New-FixtureSessionView {param($Payload,$Repository,$BuildDirectory)}\n'
+        (helper/'session-view.ps1').write_text(body)
+        events=[];archives=[];scripts=[];views=[];protected=[]
+        ssh_command=vm.ssh_command
+        def transport(*arguments,**options):
+            archives.append((options['stdin'].name,arguments[-1]))
+            return subprocess.CompletedProcess(arguments,0)
+        def publish(*arguments,**options):
+            self.assertNotIn(machine.name,run.prepared)
+            events.append('published')
+        def script(target,text,**options):
+            self.assertIs(target,machine)
+            scripts.append(text)
+            if 'published' in events and machine.name not in run.prepared:
+                protected.append(text)
+                events.append('protected')
+                if protection_failure:
+                    raise SystemExit('A PowerShell script in the %s VM exited with status 17.'%target.name)
+            invocation=[line for line in text.splitlines() if line.strip().startswith('New-FixtureSessionView ')]
+            if invocation:
+                views.append((text,invocation[0]))
+                events.append('view')
+                if view_failure:
+                    raise SystemExit('A PowerShell script in the %s VM exited with status 17.'%target.name)
+        self.addCleanup(run.queue.server.server_close)
+        with patch.object(vm,'USER','owned-ssh-maintainer'),patch.object(vm,'GUEST_FILES',helper),patch.object(vm,'guest_script',side_effect=script), \
+                patch.object(vm,'ssh_command',side_effect=lambda target,command:['ssh','owned',command]), \
+                patch.object(vm,'run',side_effect=transport),patch.object(vm,'build_inputs',return_value={'native':'input'}), \
+                patch.object(vm,'build_files',return_value={'CapyCanvas.exe':'binary'}) as files, \
+                patch.object(vm,'validate_build') as validate,patch.object(vm,'validate_controls') as controls, \
+                patch.object(vm,'publish_build_record',side_effect=publish) as published, \
+                patch.object(vm,'desktop',side_effect=lambda *args,**kwargs:events.append('launch')) as desktop:
+            ssh=ssh_command(SimpleNamespace(server=True,ssh_port=SimpleNamespace(read_text=lambda:'22001')),'exit 0')
+            yield SimpleNamespace(machine=machine,events=events,archives=archives,scripts=scripts,views=views,protected=protected,helper_source=body,ssh=ssh,
+                                  files=files,validate=validate,controls=controls,published=published,desktop=desktop)
+
+    def test_fifteen_sessions_reuse_one_validated_payload_and_keep_private_launch_paths(self):
+        run=self.build(['owned'])
+        with self.session_view_transport(run) as transport:
+            sessions=[vm.SharedSession(transport.machine,'capy%02d'%index,MagicMock(),run.id,index) for index in range(1,16)]
+            for session in sessions:
+                run.queue.add_runner(session.id)
+                run.start_session(session)
+            self.assertEqual(len(transport.views),15,'Session startup copied fifteen complete build trees instead of creating private linked views')
+            self.assertEqual(len(transport.archives),2)
+            self.assertEqual([Path(path).name for path,command in transport.archives],['source.tar.gz','build.tar.gz'])
+            self.assertIn(run.payload_root(),transport.archives[0][1])
+            self.assertIn(run.payload_root()+'\\artifacts\\windows',transport.archives[1][1])
+            transport.files.assert_called_once()
+            transport.validate.assert_called_once()
+            transport.controls.assert_called_once()
+            transport.published.assert_called_once()
+            self.assertEqual(len(transport.protected),1,'Validated immutable payload was not protected once before session creation')
+            self.assertLess(transport.events.index('published'),transport.events.index('protected'))
+            self.assertLess(transport.events.index('protected'),transport.events.index('view'))
+            protection=transport.protected[0]
+            self.assertTrue(protection.startswith(transport.helper_source))
+            calls=[line for line in protection.splitlines() if line.strip().startswith('Protect-FixtureSessionPayload ')]
+            self.assertEqual(len(calls),1,'Preparation did not invoke the shared payload ACL producer once')
+            self.assertIn("-Path '%s'"%run.payload_root().rsplit('\\',1)[0],calls[0])
+            self.assertIn("-User 'owned-ssh-maintainer'",calls[0])
+            self.assertIn('owned-ssh-maintainer@127.0.0.1',transport.ssh)
+            self.assertNotIn('icacls.exe',protection[len(transport.helper_source):])
+            for session in sessions:
+                fullcopy="& robocopy.exe '%s' '%s' /E /MT:4 /NFL /NDL /NJH /NJS /NP"%(run.payload_root(),session.repo)
+                self.assertFalse(any(fullcopy in text for text in transport.scripts),
+                                 'Session startup still makes a full per-lease payload copy')
+            self.assertEqual(transport.desktop.call_count,15)
+            for session,(text,invocation),call in zip(sessions,transport.views,transport.desktop.call_args_list):
+                self.assertTrue(text.startswith(transport.helper_source))
+                canonical=run.prepared[transport.machine.name]
+                private=canonical.replace(run.payload_root(),session.repo)
+                command=text[text.index(invocation):]
+                self.assertIn(run.payload_root(),command)
+                self.assertIn(session.repo,command)
+                self.assertIn(canonical,command)
+                grant="/grant '%s:(OI)(CI)F'"%session.account
+                self.assertIn(grant,text)
+                self.assertLess(text.index(grant),text.index(invocation))
+                self.assertNotIn('/grant',text[text.index(invocation)+len(invocation):])
+                self.assertIn('-Executable '+private+'\\CapyCanvas.exe',call.args[1])
+                self.assertIn('-BuildRecord '+private+'\\fixture-build.json',call.args[1])
+                self.assertEqual(call.kwargs['directory'],session.repo)
+                self.assertTrue(session.launched)
+
+    def test_failed_session_view_never_launches_or_rebuilds_the_shared_payload(self):
+        for phase in ('protection','view'):
+            with self.subTest(phase=phase):
+                run=self.build(['owned'])
+                with self.session_view_transport(run,view_failure=phase=='view',protection_failure=phase=='protection') as transport:
+                    session=vm.SharedSession(transport.machine,'capy01',MagicMock(),run.id,1)
+                    run.queue.add_runner(session.id)
+                    with self.assertRaisesRegex(SystemExit,'PowerShell script in .* VM exited with status 17'):
+                        run.start_session(session)
+                    transport.desktop.assert_not_called()
+                    self.assertFalse(session.launched)
+                    self.assertEqual(len(transport.views),int(phase=='view'))
+                    self.assertEqual(len(transport.archives),2)
+                    self.assertEqual(len(transport.protected),1)
+                    self.assertEqual(transport.machine.name in run.prepared,phase=='view')
+                    transport.validate.assert_called_once()
+                    transport.controls.assert_called_once()
+
+
+
 class SharedImageTests(unittest.TestCase):
     def test_server_answer_file_selects_desktop_standard_and_sets_the_administrator_password(self):
         text = vm.server_unattend((Path(vm.__file__).with_name("autounattend.xml")).read_text()).replace("@PASSWORD@", "secret")

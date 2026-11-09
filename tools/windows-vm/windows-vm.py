@@ -1892,6 +1892,11 @@ New-Item -ItemType Directory -Force '{root}\\artifacts\\windows'|Out-Null
             validate_build(record, build_inputs(self.payload["hashes"]), build_files(machine, directory), self.args.profile)
             validate_controls(machine, directory, record, True, record["controls"])
             publish_build_record(machine, directory, dict(record, fixture_scale=1.5))
+            run_root = root.rsplit("\\", 1)[0]
+            guest_script(machine, (GUEST_FILES / "session-view.ps1").read_text() + f"""
+$ErrorActionPreference='Stop'
+Protect-FixtureSessionPayload -Path '{run_root}' -User '{USER}'
+""")
             self.prepared[machine.name] = directory
 
     def start_session(self, session):
@@ -1899,7 +1904,8 @@ New-Item -ItemType Directory -Force '{root}\\artifacts\\windows'|Out-Null
         self.prepare_machine(machine)
         directory = self.prepared[machine.name].replace(self.payload_root(), session.repo)
         queue = json.dumps(self.queue.configuration(session.id))
-        guest_script(machine, f"""$ErrorActionPreference='Stop'
+        guest_script(machine, (GUEST_FILES / "session-view.ps1").read_text() + f"""
+$ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $owned=@(Get-Process -IncludeUserName -ErrorAction SilentlyContinue|Where-Object {{$_.UserName -like '*\\{session.account}' -and $_.ProcessName -in 'pwsh','powershell','conhost','CapyCanvas','capy-photo-reader'}})
 $owned|Stop-Process -Force -ErrorAction SilentlyContinue
@@ -1907,8 +1913,7 @@ Remove-Item -LiteralPath 'C:\\Users\\{session.account}\\AppData\\Local\\CrashDum
 New-Item -ItemType Directory -Force '{session.root}'|Out-Null
 & icacls.exe '{session.root}' /grant '{session.account}:(OI)(CI)F' /Q|Out-Null
 if($LASTEXITCODE){{throw 'Could not grant the session its workspace'}}
-& robocopy.exe '{self.payload_root()}' '{session.repo}' /E /MT:4 /NFL /NDL /NJH /NJS /NP|Out-Null
-if($LASTEXITCODE -ge 8){{throw 'Could not copy the fixture payload'}}
+New-FixtureSessionView -Payload '{self.payload_root()}' -Repository '{session.repo}' -BuildDirectory '{self.prepared[machine.name]}'
 [IO.File]::WriteAllText('{session.root}\\queue.json','{queue}',[Text.UTF8Encoding]::new($false))
 $global:LASTEXITCODE=0
 """, timeout=900)
