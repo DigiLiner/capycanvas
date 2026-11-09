@@ -40,6 +40,13 @@ fn borrow<T:Send+'static>(raw:u64)->Result<Borrowed<T>,String> {
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
+fn configure_surface(surface: &wgpu::Surface<'_>, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    surface.configure(device, config);
+    if pollster::block_on(scope.pop()).is_some() {
+        surface.configure(device, config);
+    }
+}
 
 use crate::events::{CapyPointer, validate_batch};
 pub struct CapyLaunch {
@@ -446,14 +453,7 @@ impl CapyHost {
         } else { wgpu::PresentMode::Fifo };
         config.desired_maximum_frame_latency = crate::frame_pacing::FramePacing::IN_FLIGHT as u32;
         config.alpha_mode = wgpu::CompositeAlphaMode::Opaque;
-        // Keep scRGB across monitor moves; only viewing changes, never artwork.
-        if self.surface.get_capabilities(adapter).format_capabilities.iter().any(|f|
-            f.format == wgpu::TextureFormat::Rgba16Float
-                && f.color_spaces.contains(wgpu::SurfaceColorSpaces::EXTENDED_SRGB_LINEAR)) {
-            config.format = wgpu::TextureFormat::Rgba16Float;
-            config.color_space = wgpu::SurfaceColorSpace::ExtendedSrgbLinear;
-            config.view_formats.clear();
-        }
+        let config = self.display.surface_config(config, &self.surface.get_capabilities(adapter));
         let renderer = layer_host::GpuContext::from_factory(gpu.factory).rasterizer(
             self.native.session.engine().document().composition().color, &self.native.renderer_options(), false)?;
         let encoding = self.display.encoding(config.format);
@@ -877,11 +877,7 @@ pub unsafe extern "C" fn capy_resize(
             let extent = surface_extent(allocated, [width, height], device.limits().max_texture_dimension_2d)?;
             if host.surface_invalid || !configured || extent != allocated {
                 [config.width, config.height] = extent;
-                let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-                host.surface.configure(&device, config);
-                if pollster::block_on(scope.pop()).is_some() {
-                    host.surface.configure(&device, config);
-                }
+                configure_surface(&host.surface, &device, config);
             }
         set_composition_viewport(&host.surface, [width, height], scale)?;
         host.surface_invalid = false;
@@ -1174,6 +1170,19 @@ pub unsafe extern "C" fn capy_acquire(host: u64) -> i32 {
         }
         if host.target.is_some() {
             return Ok(1);
+        }
+        if let Some(config) = &mut host.config
+            && host.display.hdr != (config.format == wgpu::TextureFormat::Rgba16Float) {
+            let gpu = host.native.session.engine().backend().0.as_ref().unwrap();
+            let wanted = host.display.surface_config(host.surface.get_default_config(gpu.adapter(), config.width, config.height)
+                .ok_or("D3D12 surface unsupported")?, &host.surface.get_capabilities(gpu.adapter()));
+            if wanted.format != config.format {
+                config.format = wanted.format;
+                config.color_space = wanted.color_space;
+                config.view_formats = wanted.view_formats;
+                configure_surface(&host.surface, gpu.device(), config);
+                set_composition_viewport(&host.surface, host.native.session.state().camera.viewport, host.scale)?;
+            }
         }
         let pacing_start = host.frame_timing.map(|_| crate::frame_timing::now());
         let ready = host.pacing.ready(host.native.session.engine().backend().0.as_ref().unwrap().device()).map_err(err)?;

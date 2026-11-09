@@ -46,6 +46,15 @@ impl Default for Display {
     }
 }
 impl Display {
+    pub fn surface_config(&self, mut config: wgpu::SurfaceConfiguration, caps: &wgpu::SurfaceCapabilities) -> wgpu::SurfaceConfiguration {
+        if self.hdr && caps.format_capabilities.iter().any(|f| f.format == wgpu::TextureFormat::Rgba16Float
+            && f.color_spaces.contains(wgpu::SurfaceColorSpaces::EXTENDED_SRGB_LINEAR)) {
+            config.format = wgpu::TextureFormat::Rgba16Float;
+            config.color_space = wgpu::SurfaceColorSpace::ExtendedSrgbLinear;
+            config.view_formats.clear();
+        }
+        config
+    }
     pub(super) fn reported(hdr: bool, peak_nits: f32, name: String) -> Self {
         let valid_peak = peak_nits.is_finite() && peak_nits > 0.;
         Self {
@@ -163,6 +172,32 @@ impl DisplayProbe {
 mod tests {
     use super::*;
     use windows::Win32::{Foundation::POINT, Graphics::Gdi::{MONITOR_DEFAULTTOPRIMARY, MonitorFromPoint}};
+    #[test]
+    fn surface_format_follows_the_display_dynamic_range() {
+        let caps = wgpu::SurfaceCapabilities {
+            formats: vec![wgpu::TextureFormat::Bgra8UnormSrgb],
+            format_capabilities: vec![wgpu::SurfaceFormatCapabilities {
+                format: wgpu::TextureFormat::Rgba16Float,
+                color_spaces: wgpu::SurfaceColorSpaces::EXTENDED_SRGB_LINEAR,
+            }],
+            ..Default::default()
+        };
+        for (hdr, format, color_space) in [
+            (false, wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::SurfaceColorSpace::Auto),
+            (true, wgpu::TextureFormat::Rgba16Float, wgpu::SurfaceColorSpace::ExtendedSrgbLinear),
+        ] {
+            let display = Display::reported(hdr, 1015., String::new());
+            let config = display.surface_config(wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT, format: caps.formats[0],
+                color_space: wgpu::SurfaceColorSpace::Auto, width: 64, height: 48,
+                present_mode: wgpu::PresentMode::Fifo, desired_maximum_frame_latency: 2,
+                alpha_mode: wgpu::CompositeAlphaMode::Opaque, view_formats: vec![],
+            }, &caps);
+            assert_eq!(config.format, format);
+            assert_eq!(config.color_space, color_space);
+            assert!(config.view_formats.is_empty());
+        }
+    }
     #[test]
     fn live_output_changes_and_invalid_reports_fall_back_without_changing_artwork() {
         for (hdr, peak, expected) in [
