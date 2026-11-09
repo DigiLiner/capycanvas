@@ -217,33 +217,32 @@ fn pack(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
     var band_low=extent;var band_high=vec2<u32>(0);
     var count = 0u;
     if y < extent.y {
-        var original=0u;
-        if band_offset!=0u {original=original_interior(x,y);}
-        var support_bits=0u;
-        if band_offset!=0u && params.options.w>1.5 {
-            let column=i32(x/32u);var rows=0u;var left=0u;var right=0u;
-            for(var dy=-2;dy<=2;dy++) {
-                let row=i32(y)+dy;rows|=open_word(vec2(column,row));
-                if x%32u==0u {left|=open_word(vec2(column-1,row));}
-                if x%32u==24u {right|=open_word(vec2(column+1,row));}
-            }
-            support_bits=rows|(rows<<1u)|(rows<<2u)|(rows>>1u)|(rows>>2u)|(left>>30u)|(left>>31u)|(right<<30u)|(right<<31u);
+        let column=i32(x/32u);var rows=0u;var left=0u;var right=0u;
+        for(var dy=-2;dy<=2;dy++) {
+            let row=i32(y)+dy;rows|=open_word(vec2(column,row));
+            if x%32u==0u {left|=open_word(vec2(column-1,row));}
+            if x%32u==24u {right|=open_word(vec2(column+1,row));}
         }
-        for (var i = 0u; i < 8u && x+i < extent.x; i++) {
-            let p=vec2<i32>(i32(x+i),i32(y));
-            var value = refined_coverage(p);
-            var support=false;
-            if value==0. && (support_bits&(1u<<((x+i)%32u)))!=0u {value=.25;support=true;}
-            let samples = u32(round(value * brush_selection_at(vec2<f32>(f32(x+i)+.5, f32(y)+.5))*4.));
-            if samples != 0u {
-                packed |= samples << (i*4u);
-                if band_offset!=0u && (original&(1u<<((x+i)%32u)))==0u {
-                    band|=select(4u,1u,support)<<(i*4u);
-                    band_low=min(band_low,vec2<u32>(x+i,y));band_high=max(band_high,vec2<u32>(x+i+1u,y+1u));
+        let near=rows|(rows<<1u)|(rows<<2u)|(rows>>1u)|(rows>>2u)|(left>>30u)|(left>>31u)|(right<<30u)|(right<<31u);
+        if (near&(255u<<(x%32u)))!=0u {
+            var original=0u;if band_offset!=0u {original=original_interior(x,y);}
+            let support_bits=select(0u,near,band_offset!=0u && params.options.w>1.5);
+            for (var i = 0u; i < 8u && x+i < extent.x; i++) {
+                let p=vec2<i32>(i32(x+i),i32(y));
+                var value = refined_coverage(p);
+                var support=false;
+                if value==0. && (support_bits&(1u<<((x+i)%32u)))!=0u {value=.25;support=true;}
+                let samples = u32(round(value * brush_selection_at(vec2<f32>(f32(x+i)+.5, f32(y)+.5))*4.));
+                if samples != 0u {
+                    packed |= samples << (i*4u);
+                    if band_offset!=0u && (original&(1u<<((x+i)%32u)))==0u {
+                        band|=select(4u,1u,support)<<(i*4u);
+                        band_low=min(band_low,vec2<u32>(x+i,y));band_high=max(band_high,vec2<u32>(x+i+1u,y+1u));
+                    }
+                    low = min(low, vec2<u32>(x+i,y));
+                    high = max(high, vec2<u32>(x+i+1u,y+1u));
+                    count++;
                 }
-                low = min(low, vec2<u32>(x+i,y));
-                high = max(high, vec2<u32>(x+i+1u,y+1u));
-                count++;
             }
         }
         atomicStore(&coverage.values[word], packed);
