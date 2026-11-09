@@ -1,5 +1,5 @@
 use crate::app::App;
-use layer_workspace::{StoreWorker, WorkspaceController, WorkspaceInput};
+use layer_workspace::WorkspaceInput;
 use serde_json::{Value, json};
 
 fn now() -> u64 {
@@ -15,15 +15,8 @@ impl App {
                 let path = request["directory"]
                     .as_str()
                     .ok_or("Workspace storage directory is missing")?;
-                let store =
-                    StoreWorker::shared(std::path::Path::new(path)).map_err(|e| e.to_string())?;
-                self.host.session.set_workspace_read_only(true);
-                self.workspaces = Some(WorkspaceController::new_localized(
-                    store,
-                    layer_ui::Platform::Android,
-                    time,
-                    self.host.session.localization().clone(),
-                ));
+                let wake = self.workspace_wake.clone().ok_or("Workspace storage has no owner to wake")?;
+                self.workspaces = Some(crate::launch::start_workspaces(&mut self.host, std::path::Path::new(path), time, wake)?);
         }
         let Some(c) = &mut self.workspaces else {
             return Ok(Value::Null);

@@ -196,6 +196,8 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             worker.postDelayed(this, 100)
         }
     }
+    @androidx.annotation.Keep
+    private fun onWorkspaceWake() = post { updateWorkspaceManager(obj("type" to "tick")); publish(true) }
     private fun updateWorkspaceManager(request: JSONObject) {
         val result = JSONObject(Native.workspace(handle, request.toString()).takeUnless { it == "null" } ?: "{}")
         if (result.optBoolean("refresh")) refreshChrome()

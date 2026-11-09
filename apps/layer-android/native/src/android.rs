@@ -17,23 +17,33 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+fn owner_callback(vm:Arc<jni::JavaVM>,reference:Arc<jni::objects::GlobalRef>,method:&'static str)->Arc<dyn Fn()+Send+Sync> {
+    Arc::new(move || {
+        let Ok(mut env)=vm.attach_current_thread() else {return;};
+        let result=env.with_local_frame(4,|env| {
+            let owner=env.call_method(reference.as_obj(),"get","()Ljava/lang/Object;",&[])?.l()?;
+            if !owner.is_null() {env.call_method(owner,method,"()V",&[])?;}
+            Ok::<(),jni::errors::Error>(())
+        });
+        if result.is_err() {let _=env.exception_clear();}
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_setWake(mut env:JNIEnv,_:JClass,handle:jlong,owner:JObject) {
     crate::jni_entry!(env,handle,capy_app, {
-        if owner.is_null() {capy_app.host.close_wake();return Ok(());}
+        if owner.is_null() {
+            capy_app.host.close_wake();
+            capy_app.workspace_wake=None;
+            if let Some(controller)=&mut capy_app.workspaces {controller.stop();}
+            return Ok(());
+        }
         let result=(|| {
             let vm=Arc::new(env.get_java_vm().map_err(error)?);
             let reference=env.new_object("java/lang/ref/WeakReference","(Ljava/lang/Object;)V",&[jni::objects::JValue::Object(&owner)]).map_err(error)?;
-            let reference=env.new_global_ref(reference).map_err(error)?;
-            capy_app.host.set_wake(Arc::new(move || {
-                let Ok(mut env)=vm.attach_current_thread() else {return;};
-                let result=env.with_local_frame(4,|env| {
-                    let owner=env.call_method(reference.as_obj(),"get","()Ljava/lang/Object;",&[])?.l()?;
-                    if !owner.is_null() {env.call_method(owner,"onNativeWake","()V",&[])?;}
-                    Ok::<(),jni::errors::Error>(())
-                });
-                if result.is_err() {let _=env.exception_clear();}
-            }));
+            let reference=Arc::new(env.new_global_ref(reference).map_err(error)?);
+            capy_app.host.set_wake(owner_callback(vm.clone(),reference.clone(),"onNativeWake"));
+            capy_app.workspace_wake=Some(owner_callback(vm,reference,"onWorkspaceWake"));
             Ok(())
         })();
         fail(&mut env,result)

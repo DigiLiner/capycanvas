@@ -56,6 +56,17 @@ pub(crate) fn active_localization() -> Result<Arc<Localizer>, &'static str> {
     LOCALIZATION.lock().unwrap().context.clone().ok_or("android_launch_not_initialized")
 }
 
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn start_workspaces(host: &mut layer_host::NativeHost, directory: &std::path::Path, now: u64,
+    wake: Arc<dyn Fn() + Send + Sync>) -> Result<layer_workspace::WorkspaceController<layer_workspace::StoreWorker>, String> {
+    let store = layer_workspace::StoreWorker::shared(directory).map_err(|e| e.to_string())?;
+    host.session.set_workspace_read_only(true);
+    let mut controller = layer_workspace::WorkspaceController::new_localized(store, layer_ui::Platform::Android, now,
+        host.session.localization().clone());
+    controller.set_wake(wake);
+    Ok(controller)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

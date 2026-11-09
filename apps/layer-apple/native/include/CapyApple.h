@@ -22,6 +22,7 @@ void capy_apple_launch_free(CapyAppleLaunch prepared);
 uint64_t capy_session_checkpoint_interval_ms(void);
 void capy_session_set_background(bool background);
 int32_t capy_apple_set_wake(CapyApple app, void *context, void (*wake)(void *));
+int32_t capy_apple_set_workspace_wake(CapyApple app, void *context, void (*wake)(void *));
 typedef uint64_t CapyLanguageTask;
 CapyLanguageTask capy_apple_language_request(CapyApple app, const char *preferred_languages);
 void capy_language_prepare(CapyLanguageTask task);

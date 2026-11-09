@@ -73,3 +73,30 @@ fn jni_entry_writes_photo_failures_to_the_error_pipe() {
         assert_eq!(error, if panic { "Native operation panicked: decoder failed" } else { "decoder refused input" });
     }
 }
+
+#[test]
+fn android_workspace_startup_ticks_on_storage_replies_without_a_timer() {
+    struct Directory(std::path::PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    let directory = Directory(std::env::temp_dir().join(format!("capy-android-workspaces-{}", layer_workspace::new_id())));
+    std::fs::create_dir_all(&directory.0).unwrap();
+    let mut host = layer_host::NativeHost::launch(layer_ui::Platform::Android, "", &["en-US"]).unwrap();
+    let (sender, wakes) = std::sync::mpsc::channel();
+    let sender = std::sync::Mutex::new(sender);
+    let mut controller = crate::launch::start_workspaces(&mut host, &directory.0, 1_000,
+        std::sync::Arc::new(move || { let _ = sender.lock().unwrap().send(()); })).unwrap();
+    let mut ticks = 0;
+    while !controller.view.ready {
+        let before = host.session.state().revision;
+        let change = controller.tick(&mut host.session, 1_000);
+        host.apply_change(before, change);
+        ticks += 1;
+        if !controller.view.ready {
+            wakes.recv_timeout(std::time::Duration::from_secs(10)).expect("a storage reply must wake the workspace owner");
+        }
+    }
+    assert!(host.session.state().workspace_ready);
+    assert!(ticks > 1);
+}

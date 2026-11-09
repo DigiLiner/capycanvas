@@ -43,6 +43,7 @@ pub struct CapyApple {
     chrome_facts: layer_ui::ChromeFacts,
     dismissed_contacts: std::collections::BTreeSet<u64>,
     workspaces: Option<layer_workspace::WorkspaceController<layer_workspace::StoreWorker>>,
+    workspace_wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
     language: layer_ui::LanguageTransition,
     published_language: Option<u64>,
     scopes: scopes::Cache,
@@ -206,6 +207,7 @@ fn apple_launch_prepared(platform: u32, prepared: &CapyAppleLaunch) -> Result<u6
         chrome_facts: Default::default(),
         dismissed_contacts: Default::default(),
         workspaces: None,
+        workspace_wake: None,
     })
 }
 pub struct CapyLanguageTask {
@@ -273,6 +275,22 @@ pub unsafe extern "C" fn capy_apple_set_wake(app:u64,context:*mut std::ffi::c_vo
         let context=context as usize;
         owner.host.set_wake(std::sync::Arc::new(move ||wake(context as *mut std::ffi::c_void)));
     }else {owner.host.close_wake();}
+    0
+}
+/// # Safety
+/// Call on the serial owner. Storage replies call `wake` from their worker; its
+/// context remains valid until this registration is cleared on that owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_set_workspace_wake(app:u64,context:*mut std::ffi::c_void,wake:Option<extern "C" fn(*mut std::ffi::c_void)>)->i32 {
+    let Some(mut owner)=handles::app(app) else {return -1;};
+    let wake=wake.map(|wake| {
+        let context=context as usize;
+        std::sync::Arc::new(move ||wake(context as *mut std::ffi::c_void)) as std::sync::Arc<dyn Fn()+Send+Sync>
+    });
+    if let Some(controller)=&mut owner.workspaces {
+        match &wake {Some(wake)=>controller.set_wake(wake.clone()),None=>controller.stop()}
+    }
+    owner.workspace_wake=wake;
     0
 }
 /// # Safety

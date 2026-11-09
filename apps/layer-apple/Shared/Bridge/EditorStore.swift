@@ -168,6 +168,7 @@ import Darwin
     }
     private func receive(_ next: JSON?, _ error: String?) {
         if next?["display_poll"].bool == true { observeDisplayHeadroom?(); return }
+        if next?["workspace_wake"].bool == true { workspaces?.tick(); return }
         if let error {
             let changed = failure != error
             if changed { NSLog("Capy Canvas native diagnostic: %@", Self.diagnostic(error)) }

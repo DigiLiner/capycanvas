@@ -394,6 +394,40 @@ fn workspace_request_starts_resumes_scene_and_closes() {
 }
 
 #[test]
+fn workspace_startup_ticks_on_storage_replies_without_a_timer() {
+    struct Directory(std::path::PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    extern "C" fn woken(context: *mut c_void) {
+        let wakes = unsafe { &*(context as *const std::sync::Mutex<std::sync::mpsc::Sender<()>>) };
+        let _ = wakes.lock().unwrap().send(());
+    }
+    let directory = Directory(std::env::temp_dir().join(format!("capy-apple-workspace-wake-{}", layer_workspace::new_id())));
+    let (sender, wakes) = std::sync::mpsc::channel();
+    let sender = Box::new(std::sync::Mutex::new(sender));
+    let app = App::new(1);
+    let context = &*sender as *const std::sync::Mutex<std::sync::mpsc::Sender<()>> as *mut c_void;
+    assert_eq!(unsafe { capy_apple_set_workspace_wake(app.0, context, Some(woken)) }, 0);
+    let start = json!({"type":"start","directory":directory.0.to_str().unwrap(),"scene":"first"});
+    let mut view = app.request(6, start).unwrap()["view"].clone();
+    let mut ticks = 1;
+    while view["ready"] != true {
+        wakes.recv_timeout(std::time::Duration::from_secs(10)).expect("a storage reply must wake the workspace owner");
+        view = app.request(6, json!({"type":"tick"})).unwrap()["view"].clone();
+        ticks += 1;
+    }
+    assert!(ticks > 1);
+    assert_eq!(unsafe { capy_apple_set_workspace_wake(app.0, std::ptr::null_mut(), None) }, 0);
+    app.request(6, json!({"type":"close"})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while app.request(6, json!({"type":"tick"})).unwrap()["view"]["closed"] != true {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+#[test]
 fn color_raster_ffi_validates_buffer_and_matches_shared_spaces() {
     let mut bytes = [23; 16];
     unsafe {
