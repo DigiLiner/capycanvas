@@ -356,7 +356,6 @@ impl Lines {
         self.encode(input,encoder,Some(coverage),None,vec![("remember_thin",u64::from(self.offsets[0]),self.params([0;4],[0;4],[plane,0,0,0],[1.,1.,0.,0.]))]);
     }
 
-    pub fn window_state(&self)->&wgpu::Buffer {&self.scratch.as_ref().unwrap()[0]}
     pub fn barrier_plane(&self,input:&Input<'_>,encoder:&mut crate::submission::CommandEncoder,coverage:&wgpu::Buffer,parents:&wgpu::Buffer,bucket:u32,mode:u32) {
         let params=self.params([0;4],[0;4],[mode,bucket,0,0],[1.,1.,0.,0.]);
         self.encode(input,encoder,Some(coverage),Some(parents),vec![("barrier_plane",u64::from(self.offsets[0]),params)]);

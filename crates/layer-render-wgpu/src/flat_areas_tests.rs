@@ -59,6 +59,59 @@ fn partition(extent:[u32;2],same:impl Fn(usize,usize)->bool,present:impl Fn(usiz
     }
     labels
 }
+#[test]
+fn connected_word_runs_match_cpu_flood_across_window_and_canvas_edges() {
+    let extent=[1900;2];let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    for (plane,seeds) in [
+        [[31,32],[1855,1856]],[[1,2],[2,2]],[[32,1854],[1856,1856]],[[32,32],[32,31]],
+        [[0,1899],[1899,0]],[[1898,1],[1,1]],
+    ].into_iter().enumerate() {
+        let mut ink:Vec<_>=(0..1900*1900).map(|at| {
+            let (x,y)=(at%1900,at/1900);
+            match plane {
+                0=>(x/2+y/2)%2==0,
+                2=>y==1855 || x%64==31 && y<1880,
+                3=>x/(if y%4<2 {32}else{64})%2==y%2,
+                5=>x==0 || y==0 || x==1899 || y==1899,
+                _=>false,
+            }
+        }).collect();
+        if plane==1 {
+            let mut p=[1i32;2];let mut length=1897;
+            ink[1901]=true;
+            for (turn,[dx,dy]) in [[1,0],[0,1],[-1,0],[0,-1]].into_iter().cycle().enumerate() {
+                if length<=0 {break;}
+                for _ in 0..length {p[0]+=dx;p[1]+=dy;ink[(p[1]*1900+p[0])as usize]=true;}
+                if turn%2==1 {length-=2;}
+            }
+        }
+        assert!(ink.iter().enumerate().all(|(at,&solid)|solid || {
+            let (x,y)=(at%1900,at/1900);
+            ![(x>0).then(||at-1),(x<1899).then_some(at+1),(y>0).then(||at-1900),(y<1899).then_some(at+1900)]
+                .into_iter().all(|next|next.is_none_or(|next|ink[next]))
+        }),"plane={plane} has an open pixel surrounded by ink");
+        let labels=partition(extent,|_,_|true,|at|!ink[at]);
+        let document=source(extent,|x,y|ink[(y*1900+x)as usize]);frame(&mut r,&document,extent);
+        for position in seeds {
+            assert!(!ink[(position[1]*1900+position[0])as usize],"plane={plane} seed={position:?} is ink");
+            let result=crate::test_support::receive_request(&mut r,RegionRequest {request_id:plane as u64,source:RegionSource::Source(target(&document)),position,
+                tolerance:0.,contiguous:true,selection:None,limit:None,enclosure:None,reference_count:None,paper:None,fill:None,fill_areas:None,colour_mode:Default::default(),
+                refinement:RegionRefinement {close_gaps:false,edges:RegionEdges::Exact,smooth_edges:false}});
+            let selected=labels[(position[1]*1900+position[0])as usize];
+            let count=result.pixels.pixels_per_word();let bits=32/count;let stride=1900u32.div_ceil(count);
+            let mut bounds=[1900,1900,0,0];
+            for (index,&actual) in result.pixels.words().iter().enumerate() {
+                let [x,y]=[(index as u32%stride)*count,index as u32/stride];let mut expected=0;
+                for i in 0..count.min(1900-x) {if labels[(y*1900+x+i)as usize]==selected {
+                    expected|=(if count==4 {255}else{4})<<(i*bits);
+                    bounds[0]=bounds[0].min(x+i);bounds[1]=bounds[1].min(y);bounds[2]=bounds[2].max(x+i+1);bounds[3]=bounds[3].max(y+1);
+                }}
+                assert_eq!(actual,expected,"plane={plane} seed={position:?} word={index}");
+            }
+            assert_eq!(result.pixels.bounds(),bounds,"plane={plane} seed={position:?}");
+        }
+    }
+}
 fn border([x0,y0,x1,y1]:[u32;4],x:u32,y:u32)->bool {
     x>=x0 && x<x1 && y>=y0 && y<y1 && (x==x0 || x+1==x1 || y==y0 || y+1==y1)
 }

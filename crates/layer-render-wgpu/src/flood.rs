@@ -19,12 +19,11 @@ pub(super) struct Flood {
     lines: lines::Lines,
     trail:Option<(u64,[u32;2],wgpu::Buffer)>,
 }
-const STAGES: [&str; 14] = ["initialize", "merge", "mark_exterior", "export_border", "seam_merge", "propagate_flags", "resolve_seed", "component_mask", "finish_attempt", "save_base", "restore_base", "restore_components", "pack", "area_tokens"];
-fn stages(refinement: RegionRefinement, enclosed: bool, contiguous: bool) -> impl Iterator<Item = &'static str> {
+const STAGES: [&str; 12] = ["initialize", "merge", "mark_exterior", "export_border", "seam_merge", "propagate_flags", "resolve_seed", "component_mask", "finish_attempt", "restore_components", "pack", "area_tokens"];
+fn stages(enclosed: bool, contiguous: bool) -> impl Iterator<Item = &'static str> {
     STAGES.into_iter().filter(move |entry| match *entry {
         "area_tokens"=>false,
         "resolve_seed" | "finish_attempt" => contiguous && !enclosed,
-        "save_base" | "restore_base" => refinement.close_gaps && contiguous,
         "restore_components"=>enclosed,
         _=>true,
     })
@@ -141,7 +140,7 @@ impl Flood {
         compiler.require(self.request_pipelines(refinement,enclosed,contiguous,priority==startup::OTHER),priority)
     }
     pub fn request_pipelines(&self,refinement:RegionRefinement,enclosed:bool,contiguous:bool,prepare_ends:bool)->impl Iterator<Item=&Deferred<wgpu::ComputePipeline>> {
-        self.lines.pipelines(refinement,prepare_ends).chain(stages(refinement,enclosed,contiguous).map(|entry|&self.pipelines[entry]))
+        self.lines.pipelines(refinement,prepare_ends).chain(stages(enclosed,contiguous).map(|entry|&self.pipelines[entry]))
     }
     pub fn prepare_cache(&self,compiler:&startup::Compiler,priority:u8)->bool {self.lines.prepare_cache(compiler,priority)}
     pub fn build_lines(&mut self,input:&Input<'_>,encoder:&mut crate::submission::CommandEncoder,extent:[u32;2],paper:([f32;4],u32,bool),(budget,demand):(f64,bool),dirty:&std::collections::BTreeSet<[u32;2]>)->Result<(bool,f64),GpuRasterError> {
@@ -208,9 +207,7 @@ impl Flood {
         let [_,_,w,h]=window;
         for entry in entries {
             pass.set_pipeline(&self.pipelines[*entry]);
-            if *entry=="initialize" {pass.dispatch_workgroups(w.div_ceil(16),h.div_ceil(16),1);continue;}
             let count=match *entry {
-                "merge"=>u64::from(w)*u64::from((h-1)/16)+u64::from(h)*u64::from((w-1)/16),
                 "export_border"=>perimeter([w,h]),
                 "seam_merge"=>u64::from(labels.grid[0]-1)*u64::from(areas.extent[1])+u64::from(labels.grid[1]-1)*u64::from(areas.extent[0]),
                 "propagate_flags"=>labels.flags-labels.slots,
@@ -287,6 +284,9 @@ impl Flood {
         }
         let words = u64::from(w.div_ceil(8)) * u64::from(h);
         let attempts:u32=if multiple {5}else if refinement.close_gaps && contiguous {3}else{1};
+        let active=fill.and_then(|fill|fill.reach).map_or(u32::from(requested_close),|reach|reach/16);
+        let choose=!multiple || requested_close && fill.is_some_and(|fill|fill.reach.is_none());
+        let labeled=if enclosed || !multiple {0..attempts} else if choose {1..4} else {active..active+1};
         let scratch_words = words.max(mask_bytes/4*u64::from((attempts+1).max(4)));
         let band = matches!(refinement.edges,layer_render::RegionEdges::LineMiddle);
         let bounds_offset=32+scratch_words*4;
@@ -294,7 +294,6 @@ impl Flood {
             size:(bounds_offset+32+if band {32+words*4}else{0}).next_multiple_of(16),
             usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
         let mut region=Region {underfill:band.then(||(coverage.clone(),bounds_offset+64)),coverage,bounds_offset,gaps:None};
-        let active=fill.and_then(|fill|fill.reach).map_or(u32::from(requested_close),|reach|reach/16);
         let summary: Vec<u8> = [0,0,w,h,0,1,0,0,w,h,0,0,0,active,u32::MAX].into_iter().flat_map(u32::to_ne_bytes).collect();
         let summary = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("flood summary"),contents:&summary,usage:wgpu::BufferUsages::COPY_SRC,
@@ -305,7 +304,7 @@ impl Flood {
         if band {encoder.copy_buffer_to_buffer(&summary,32,&region.coverage,region.bounds_offset+32,20);}
         let stride = PARAMETER_BYTES.next_multiple_of(u64::from(limit.min_uniform_buffer_offset_alignment));
         let windows: Vec<_> = labels.windows(extent).collect();
-        let mut data = vec![0u8;(stride*windows.len() as u64*u64::from(attempts)*if multiple {5}else{4}) as usize];
+        let mut data = vec![0u8;(stride*windows.len() as u64*u64::from(attempts)*if multiple {4}else{3}) as usize];
         let offsets = [labels.slots, labels.flags, labels.marks, labels.seed].map(|v| v as u32);
         for (parameter,((index, window), entry)) in windows.iter().cycle().zip(data.chunks_mut(stride as usize)).enumerate() {
             let mode=(parameter/windows.len()/attempts as usize) as u32;
@@ -313,7 +312,7 @@ impl Flood {
             let params = [
                 w,h,seed[0],seed[1],
                 tolerance.to_bits(),if band {(scratch_words+16) as u32}else{0},
-                if mode==4 {scratch_words as u32}else{(attempts as f32).to_bits()},
+                if mode==3 {scratch_words as u32}else{(attempts as f32).to_bits()},
                 (f32::from(refinement.smooth_edges)*(1.+f32::from(fill.is_some()))).to_bits(),
                 mode,u32::from(!contiguous),u32::from(enclosed),attempt,
                 window[0],window[1],window[2],window[3],
@@ -342,8 +341,7 @@ impl Flood {
         });
         let group=make_group(selection.unwrap_or(&self.empty),&region.coverage);
         let pack_group=enclosed.then(||make_group(&self.empty,&region.coverage));
-        let base_group=(attempts>1).then(||make_group(&self.empty,self.lines.window_state()));
-        let enabled: Vec<_> = stages(refinement, enclosed, contiguous).collect();
+        let enabled: Vec<_> = stages(enclosed, contiguous).collect();
         let dimension = limit.max_compute_workgroups_per_dimension;
         let pipelines = &self.pipelines;
         let run = |encoder: &mut crate::submission::CommandEncoder, mode:usize, attempt:usize, at: usize, entries: &[&'static str]| {
@@ -353,16 +351,12 @@ impl Flood {
                 timestamp_writes: None,
             });
             for entry in entries.iter().filter(|entry| enabled.contains(entry)) {
-                let binding=match *entry {"pack"=>pack_group.as_ref().unwrap_or(&group),"save_base"|"restore_base"=>base_group.as_ref().unwrap(),_=>&group};
+                let binding=if *entry=="pack" {pack_group.as_ref().unwrap_or(&group)}else{&group};
                 pass.set_bind_group(0,binding,&[(stride*((mode*attempts as usize+attempt)*windows.len()+at) as u64) as u32]);
                 pass.set_pipeline(&pipelines[entry]);
                 let invocations = match *entry {
-                    "initialize" => { pass.dispatch_workgroups(ww.div_ceil(if mode==1 {512}else{16}), wh.div_ceil(16), 1); continue; }
                     "resolve_seed" | "finish_attempt" => { pass.dispatch_workgroups(1, 1, 1); continue; }
-                    "merge" if mode==1 => u64::from(ww.div_ceil(32))*u64::from(wh),
-                    "save_base"|"restore_base" => u64::from(ww)*u64::from(wh),
-                    "merge" => u64::from(ww) * u64::from((wh - 1) / 16) + u64::from(wh) * u64::from((ww - 1) / 16),
-                    "mark_exterior" | "component_mask" => u64::from(ww.div_ceil(32)) * u64::from(wh),
+                    "initialize" | "merge" | "mark_exterior" | "component_mask" => u64::from(ww.div_ceil(32)) * u64::from(wh),
                     "export_border" => perimeter([ww, wh]),
                     "seam_merge" => u64::from(labels.grid[0] - 1) * u64::from(h) + u64::from(labels.grid[1] - 1) * u64::from(w),
                     "propagate_flags" => labels.flags - labels.slots,
@@ -378,28 +372,26 @@ impl Flood {
         encoder.clear_buffer(store,labels.seed*4,Some(41*4));
         if multiple {encoder.copy_buffer_to_buffer(&summary,52,store,(labels.seed+40)*4,4);}
         encoder.clear_buffer(store,labels.flags*4,Some((labels.marks-labels.flags)*4));
-        for attempt in 0..attempts {
+        for attempt in labeled.clone() {
             self.lines.barriers(&input,encoder,refinement.close_gaps && (!multiple || attempt>0),16*(attempt+u32::from(!multiple)),[0,0,(labels.seed+8*u64::from(attempt)) as u32,u32::from(enclosed)],store);
             if let Some((stop,_))=stop {self.lines.intersect(&input,encoder,stop);}
             self.lines.snap_seed(&input,encoder,store,(labels.seed+8*u64::from(attempt)) as u32,seed);
             if attempts>1 {self.lines.barrier_plane(&input,encoder,&region.coverage,store,attempt,0);}
         }
         let last=windows.len()-1;
+        let mode=if attempts>1 {1}else{0};
         for at in 0..=last {
-            run(encoder,if attempts>1 {3}else{0},0,at,&["initialize","merge"]);
-            if attempts>1 {run(encoder,3,0,at,&["save_base"]);}
-            for attempt in 0..attempts as usize {
+            for attempt in labeled.clone() {
                 encoder.clear_buffer(store,labels.marks*4,Some((labels.seed-labels.marks)*4));
-                if attempts>1 {run(encoder,1,attempt,at,&["restore_base","initialize","merge"]);}
-                run(encoder,if attempts>1 {1}else{0},attempt,at,&["mark_exterior","export_border"]);
+                run(encoder,mode,attempt as usize,at,&["initialize","merge","mark_exterior","export_border"]);
             }
         }
-        for attempt in 0..attempts as usize {run(encoder,if attempts>1 {1}else{0},attempt,0,&["seam_merge"]);}
+        for attempt in labeled.clone() {run(encoder,mode,attempt as usize,0,&["seam_merge"]);}
         run(encoder,0,0,0,&["propagate_flags"]);
-        for attempt in (0..attempts as usize).rev() {
-            run(encoder,if attempts>1 {1}else{0},attempt,0,&["resolve_seed"]);
-            if !multiple || requested_close && fill.is_some_and(|fill|fill.reach.is_none()) && (1..=3).contains(&attempt) {
-                run(encoder,if attempts>1 {1}else{0},attempt,0,&["finish_attempt"]);
+        for attempt in labeled.rev() {
+            run(encoder,mode,attempt as usize,0,&["resolve_seed"]);
+            if choose {
+                run(encoder,mode,attempt as usize,0,&["finish_attempt"]);
             }
         }
         if attempts>1 && !enclosed && !multiple {self.lines.barrier_plane(&input,encoder,&region.coverage,store,(labels.seed+8*u64::from(attempts)) as u32,1);}
@@ -426,7 +418,7 @@ impl Flood {
         }
         if let layer_render::RegionEdges::GrowShrink(value)=refinement.edges && value!=0 {self.lines.grow(&input,encoder,value);}
         if let Some((stop,clip))=stop && (clip || !band) {self.lines.intersect(&input,encoder,stop);}
-        run(encoder,if multiple {4}else{0},0,0,&["pack"]);
+        run(encoder,if multiple {3}else{0},0,0,&["pack"]);
         if band && fill.is_some() {self.lines.copy_colour(encoder,&region.coverage,region.bounds_offset+28);}
         if fill.is_some() {
             if multiple {encoder.copy_buffer_to_buffer(store,(labels.seed+40)*4,&region.coverage,24,4);}

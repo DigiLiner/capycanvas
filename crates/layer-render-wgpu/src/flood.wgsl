@@ -13,7 +13,7 @@ struct Coverage { rect: vec4<u32>, info: vec4<u32>, values: array<atomic<u32>> }
 
 const NONE = 0xffffffffu;
 fn summary_index(field: u32) -> u32 {
-    if params.input.x==4u {return bitcast<u32>(params.options.z)+field;}
+    if params.input.x==3u {return bitcast<u32>(params.options.z)+field;}
     return max(((params.extent_seed.x+7u)/8u)*params.extent_seed.y,4u*mask_stride()*params.extent_seed.y) + field;
 }
 fn tap_position()->vec2<u32>{return vec2(atomicLoad(&parents[seed()+6u])&65535u,atomicLoad(&parents[seed()+7u]));}
@@ -62,71 +62,19 @@ fn bit_set(base: u32, index: u32) -> bool {
 fn set_bit(base: u32, index: u32) { if !bit_set(base,index) {atomicOr(&parents[base + index/32u], 1u << (index%32u));} }
 fn wide_flags()->u32{return flags()+(marks()-flags())/2u;}
 fn wide_marks()->u32{return marks()+side()*side()/32u;}
-var<workgroup> local_parent: array<atomic<u32>, 256>;
-var<workgroup> local_minimum: array<atomic<u32>, 256>;
-
-fn local_root(start: u32) -> u32 {
-    var node = start;
-    loop {
-        let parent = atomicLoad(&local_parent[node]);
-        if parent == node { return node; }
-        let grand = atomicLoad(&local_parent[parent]);
-        if grand==parent {return parent;}
-        atomicMin(&local_parent[node], grand);
-        node = grand;
-    }
-    return node;
-}
-fn join_local(first: u32, second: u32) {
-    var a = first;
-    var b = second;
-    loop {
-        a = local_root(a);
-        b = local_root(b);
-        if a == b { return; }
-        let low = min(a,b);
-        let high = max(a,b);
-        let previous = atomicMin(&local_parent[high], low);
-        if previous == high { return; }
-        a = low;
-        b = previous;
-    }
-}
-
-@compute @workgroup_size(16,16)
-fn initialize(@builtin(global_invocation_id) id: vec3<u32>,
-              @builtin(local_invocation_index) lane: u32) {
-    if params.input.x==1u {
-        let p=id.xy*vec2<u32>(32u,1u);
-        if all(p<size()) {
-            let bits=freed_word(p);
-            for(var i=0u;i<32u && p.x+i<size().x;i++) {
-                if (bits&(1u<<i))!=0u {let index=local_index(p+vec2(i,0u),size());atomicStore(&parents[index],index);}
-            }
+@compute @workgroup_size(64)
+fn initialize(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
+    let p=window_word(id,groups);let s=size();
+    if p.y>=s.y {return;}
+    let bits=open_word(vec2<i32>(i32((origin().x+p.x)/32u),i32(origin().y+p.y)));
+    var label=NONE;
+    for(var i=0u;i<min(32u,s.x-p.x);i++) {
+        if (bits&(1u<<i))==0u {label=NONE;}
+        else if label==NONE {
+            let end=i+countTrailingZeros(~(bits>>i))-1u;
+            label=min(local_index(p+vec2(i,0u),s),local_index(p+vec2(end,0u),s));
         }
-    } else {
-    let inside = all(id.xy < size());
-    var eligible = false;
-    if inside { eligible = mask_bit(vec2<i32>(origin() + id.xy)); }
-    atomicStore(&local_parent[lane], select(NONE, lane, eligible));
-    atomicStore(&local_minimum[lane], NONE);
-    workgroupBarrier();
-    if eligible {
-        if lane % 16u != 0u && atomicLoad(&local_parent[lane-1u]) != NONE { join_local(lane,lane-1u); }
-        if lane >= 16u && atomicLoad(&local_parent[lane-16u]) != NONE { join_local(lane,lane-16u); }
-    }
-    workgroupBarrier();
-    var index = NONE;
-    if eligible {
-        index = local_index(id.xy, size());
-        atomicMin(&local_minimum[local_root(lane)], index);
-    }
-    workgroupBarrier();
-    if inside {
-        var label = NONE;
-        if eligible { label = atomicLoad(&local_minimum[local_root(lane)]); }
-        atomicStore(&parents[local_index(id.xy, size())], label);
-    }
+        atomicStore(&parents[local_index(p+vec2(i,0u),s)],label);
     }
 }
 
@@ -161,28 +109,20 @@ fn join(first: u32, second: u32) {
 
 @compute @workgroup_size(64)
 fn merge(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
-    let s = size();
-    if params.input.x==1u {
-        let p=window_word(id,groups);if p.y>=s.y{return;}let bits=freed_word(p);
-        for(var j=0u;j<32u && p.x+j<s.x;j++) {
-            if (bits&(1u<<j))==0u {continue;}let q=p+vec2(j,0u);let index=local_index(q,s);
-            if q.x>0u {join(index,local_index(q-vec2(1u,0u),s));}
-            if q.y>0u {join(index,local_index(q-vec2(0u,1u),s));}
-            if q.x+1u<s.x {join(index,local_index(q+vec2(1u,0u),s));}
-            if q.y+1u<s.y {join(index,local_index(q+vec2(0u,1u),s));}
-        }
-        return;
+    let p=window_word(id,groups);let s=size();
+    if p.y>=s.y {return;}
+    let word=vec2<i32>(i32((origin().x+p.x)/32u),i32(origin().y+p.y));
+    let row=open_word(word);
+    if p.x>0u && (row&1u)!=0u && (open_word(word-vec2(1,0))&0x80000000u)!=0u {
+        join(local_index(p,s),local_index(p-vec2(1u,0u),s));
     }
-    let horizontal = s.x * ((s.y-1u)/16u);
-    let vertical = s.y * ((s.x-1u)/16u);
-    let i = id.x + id.y * groups.x * 64u;
-    if i < horizontal {
-        let p = vec2<u32>(i%s.x, (i/s.x+1u)*16u);
-        join(local_index(p, s), local_index(p - vec2<u32>(0u, 1u), s));
-    } else if i < horizontal+vertical {
-        let j = i-horizontal;
-        let p = vec2<u32>((j/s.y+1u)*16u, j%s.y);
-        join(local_index(p, s), local_index(p - vec2<u32>(1u, 0u), s));
+    if p.y>0u {
+        var overlap=row&open_word(word-vec2(0,1));
+        while overlap!=0u {
+            let i=countTrailingZeros(overlap);let q=p+vec2(i,0u);
+            join(local_index(q,s),local_index(q-vec2(0u,1u),s));
+            overlap&=overlap+(1u<<i);
+        }
     }
 }
 
@@ -343,17 +283,6 @@ fn finish_attempt(){
 fn restore_components(@builtin(global_invocation_id) id:vec3<u32>,@builtin(num_workgroups) groups:vec3<u32>){
     let index=mask_word_id(id,groups);let words=mask_stride()*params.extent_seed.y;
     if index<words {region_mask[index]=atomicLoad(&coverage.values[select(1u,attempt_count(),params.input.x==2u)*words+index]);}
-}
-
-@compute @workgroup_size(64)
-fn save_base(@builtin(global_invocation_id) id:vec3<u32>,@builtin(num_workgroups) groups:vec3<u32>){
-    let index=mask_word_id(id,groups);
-    if index<size().x*size().y {atomicStore(&coverage.values[index],atomicLoad(&parents[index]));}
-}
-@compute @workgroup_size(64)
-fn restore_base(@builtin(global_invocation_id) id:vec3<u32>,@builtin(num_workgroups) groups:vec3<u32>){
-    let index=mask_word_id(id,groups);
-    if index<size().x*size().y {atomicStore(&parents[index],atomicLoad(&coverage.values[index]));}
 }
 
 fn local_pixel(index:u32,s:vec2<u32>)->vec2<u32> {
