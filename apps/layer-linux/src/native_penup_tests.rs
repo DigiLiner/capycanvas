@@ -133,6 +133,7 @@ fn native_penup_and_following_strokes() {
     };
     let count: usize = std::env::var("LAYER_PENUP_STROKES").map_or(12, |v| v.parse().unwrap());
     assert!((4..=100).contains(&count));
+    let mut brush_mismatch = 0usize;
     let mut expected = ui_session(&w)
         .engine()
         .metrics()
@@ -167,6 +168,15 @@ fn native_penup_and_following_strokes() {
             while !due.replace(false) {
                 context.iteration(true);
             }
+            {
+                let gpu = w.gpu.borrow();
+                let engine = gpu.as_ref().unwrap().session.engine();
+                let backend = engine.backend();
+                if engine.has_active_stroke()
+                    && backend.startup_needs_update(engine.document(), engine.brush(), false)
+                        != backend.startup_needs_update(engine.document(), engine.configured_brush(), false)
+                { brush_mismatch += 1; }
+            }
             observe(&mut pending, &mut backed);
             if sdr { assert_eq!(w.local_tone.preview_count(), guide, "illumination must not change during contact"); }
         }
@@ -188,6 +198,11 @@ fn native_penup_and_following_strokes() {
             context.iteration(true);
             let gpu = w.gpu.borrow();
             let engine = gpu.as_ref().unwrap().session.engine();
+            let backend = engine.backend();
+            if engine.has_active_stroke()
+                && backend.startup_needs_update(engine.document(), engine.brush(), false)
+                    != backend.startup_needs_update(engine.document(), engine.configured_brush(), false)
+            { brush_mismatch += 1; }
             if engine.metrics().committed_strokes == expected {
                 let root = active_raster(engine.document()).clone();
                 assert!(!root.is_empty(), "contact must create raster paint");
@@ -252,6 +267,7 @@ fn native_penup_and_following_strokes() {
     drop(stats);
     let path = std::env::var("LAYER_PACING_REPORT").unwrap();
     std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    assert_eq!(brush_mismatch, 0, "a stroke brush must not invalidate prepared GTK brush pipelines");
     // Keep diagnostics from failed performance gates as well as successful runs.
     assert_eq!(commit_count, count, "each pen-up must render once");
     assert_eq!(backed.len(), count);

@@ -604,7 +604,7 @@ pub struct RenderWorker {
     settling_view: Option<Presentation>,
     pub(super) startup: layer_render_wgpu::StartupProgress,
     startup_generation: u64,
-    startup_key: Option<(layer_render_wgpu::ShaderDocument, layer_core::BrushSnapshot, bool)>,
+    startup_key: Option<(layer_render_wgpu::ShaderDocument, layer_render_wgpu::ShaderBrushKey, bool)>,
     region: Option<Result<layer_render::RegionOutput, String>>,
     region_pending: bool,
     region_generation: u64,
@@ -955,7 +955,7 @@ impl RenderWorker {
         transform: bool,
     ) -> bool {
         self.startup_key.as_ref().is_none_or(|(key, old, previous)| {
-            !key.matches(document) || old != brush || *previous != transform
+            !key.matches(document) || *old != layer_render_wgpu::ShaderBrushKey::new(document, brush) || *previous != transform
         })
     }
     pub(super) fn prepare_startup(
@@ -982,7 +982,7 @@ impl RenderWorker {
     ) -> Result<(), String> {
         self.present_frames=matches!(mode,StartupMode::VisibleFirst);
         self.startup_generation += 1;
-        self.startup_key = Some((layer_render_wgpu::ShaderDocument::new(&document), brush.clone(), transform));
+        self.startup_key = Some((layer_render_wgpu::ShaderDocument::new(&document), layer_render_wgpu::ShaderBrushKey::new(&document, &brush), transform));
         self.startup = Default::default();
         self.send(Command::Startup(
             self.startup_generation,

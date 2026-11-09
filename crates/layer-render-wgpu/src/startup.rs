@@ -301,7 +301,7 @@ pub(super) struct Startup {
     pub(super) brush_ready: bool,
 }
 #[derive(PartialEq, Eq)]
-struct ShaderBrushKey {
+pub struct ShaderBrushKey {
     textures: TextureSetKey,
     mask_tip: bool,
     execution: BrushExecution,
@@ -323,7 +323,7 @@ fn brush_style(document: &Document, brush: &BrushSnapshot, tool: StrokeTool) -> 
     style
 }
 impl ShaderBrushKey {
-    fn new(document: &Document, brush: &BrushSnapshot) -> Self {
+    pub fn new(document: &Document, brush: &BrushSnapshot) -> Self {
         let mut style = brush_style(document, brush, StrokeTool::Brush);
         let paint = BrushPassPlan::for_style(&style);
         style.mode = DabMode::Erase;
@@ -868,6 +868,8 @@ mod tests {
         let key = ShaderBrushKey::new(&document, &brush);
         brush.color_rgba_linear = [8., 0.25, 0.5, 1.];
         brush.diameter *= 2.;
+        brush.stabilization.input_scale *= 0.5;
+        brush.stabilization.pressure_fall_micros += 1;
         assert!(key == ShaderBrushKey::new(&document, &brush));
         brush.rendering.accumulation = if brush.rendering.accumulation == BrushAccumulation::Uniform {
             BrushAccumulation::Flow
