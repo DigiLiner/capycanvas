@@ -82,6 +82,9 @@ and how parity is checked.
   to the view instead of the document: one process-wide memory budget with a
   Memory limit setting, a disk-backed session store, edit-ready residency, a
   per-frame work arbiter and composition pivoted on the edit target.
+- [Windows UI rebuild plan](windows-ui-rebuild-plan.md) replaces the WinUI 3
+  client's UI with a retained Rust UI layer that works like the GTK, Android and
+  iPad clients, so every Windows motion can hold 120 Hz.
 - [Photo editing roadmap](photo-editing-roadmap.md) collects deferred inspection,
   presets, export, masking, retouching and host qualification work. Current
   measurements and remaining targets belong in the
