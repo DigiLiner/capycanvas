@@ -78,7 +78,12 @@ impl Lines {
             ||STAGES[..8].contains(entry) || **entry=="reset_ends",
             |work|work.steps.iter().any(|(pending,_,_)|pending==*entry))).map(|entry|&self.pipelines[entry])
     }
-    pub fn prepare_cache(&self,compiler:&startup::Compiler,priority:u8)->bool {compiler.require(self.cache_pipelines(),priority)}
+    pub fn prepare_cache(&self,compiler:&startup::Compiler,priority:u8)->bool {
+        if self.building.as_ref().is_none_or(|work|!work.ranked) {
+            for entry in ["refine_ends","seal_candidates"] {compiler.pipeline(&self.pipelines[entry],priority);}
+        }
+        compiler.require(self.cache_pipelines(),priority)
+    }
     pub fn pipelines(&self,refinement:RegionRefinement,prepare_ends:bool)->impl Iterator<Item=&Deferred<wgpu::ComputePipeline>> {
         self.cache_pipelines().chain(STAGES[8..].iter().filter(move |entry|match **entry {
             "assign_tokens"=>false,
@@ -443,6 +448,32 @@ fn storage_layout(extent:[u32;2],limits:&wgpu::Limits)->Option<([u32;4],u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch="wasm32"))]
+    #[test]
+    fn cache_build_requests_tail_pipelines_before_reading_the_end_count() {
+        let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        for before_build in [true,false] {
+            let compiler=startup::Compiler::new().unwrap();
+            let mut lines=Lines::new(&r.device);
+            for pipeline in lines.cache_pipelines() {pipeline.compile();}
+            lines.allocate(&r.device,[64;2],64,&[(0,[0,0,64,64])]).unwrap();
+            let mask=r.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label:Some("open reference"),contents:&[255;512],usage:wgpu::BufferUsages::STORAGE,
+            });
+            let input=Input {device:&r.device,mask:&mask,paper:&r.empty_paper_view};
+            let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+            if before_build {assert!(lines.prepare_cache(&compiler,startup::BRUSH));}
+            assert!(!lines.build(&input,&mut encoder,([1.,1.,0.,0.],1,false),1.,true,&Default::default()).unwrap().0);
+            assert!(!lines.building.as_ref().unwrap().ranked);
+            assert!(lines.prepare_cache(&compiler,startup::BRUSH));
+            for entry in ["refine_ends","seal_candidates"] {
+                assert!(!lines.pipelines[entry].ready());
+                assert!(lines.pipelines[entry].promote(startup::BRUSH).is_none(),"{entry} was not requested");
+            }
+            r.uploads.finish(&encoder);encoder.submit(&r.queue);crate::test_support::complete(&r);
+        }
+    }
 
     #[test]
     fn end_storage_scales_with_canvas_area_and_fits_61mp() {
