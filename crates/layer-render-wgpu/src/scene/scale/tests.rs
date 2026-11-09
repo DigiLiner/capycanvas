@@ -69,12 +69,15 @@ fn assert_settled(mut r: &mut WgpuRasterizer, frame: FramePacket<'_>, reference:
     let revision = r.artwork_revision;
     let pages = page_coordinates(PixelRect::full(frame.document_extent)).count();
     let idle = FramePacket { composite_all: false, reset_layers: false, dabs: &[], dab_batches: &[], restore_rasters: &[], ..frame };
-    for step in 0..=pages + 1 {
+    let mut visits = 0;
+    for _ in 0..pages + 3 {
         if !r.has_pending_work() { break; }
-        assert!(step < pages + 1, "refinement must finish within one visit per native page");
+        assert!(visits < pages + 1, "refinement must finish within one visit per native page");
         r.wait_idle().unwrap();
         let work = r.metrics.composited_pixels;
+        let navigator = r.navigator.revision;
         crate::test_support::submit_ready(&mut r, idle).unwrap();
+        if r.navigator.revision == navigator { visits += 1; }
         let bounded = frame.scene.order().iter().any(|h|frame.scene.visible(*h)
             && frame.scene.effect(*h).is_some_and(|effect|effect.program.image_boundary()));
         let limit = if bounded {4 * u64::from(PAGE_SIZE).pow(2)} else {
@@ -86,6 +89,7 @@ fn assert_settled(mut r: &mut WgpuRasterizer, frame: FramePacket<'_>, reference:
         assert!(r.metrics.composited_pixels - work <= limit);
         assert_eq!(r.artwork_revision, revision, "idle refinement does not edit artwork");
     }
+    assert!(!r.has_pending_work(), "refinement and its Navigator refresh must settle");
     let cache = r.scale_display.as_ref().unwrap();
     let error = quality(&display_pixels(r), reference, cache.plan);
     assert!(error[2] < 2e-5, "settled display {error:?}");

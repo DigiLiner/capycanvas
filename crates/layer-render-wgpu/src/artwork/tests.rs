@@ -85,8 +85,11 @@ fn composite_queries_ignore_inspection_and_need_no_display_texture() {
         crate::tests::image_windows::set_mask(&mut doc, owner, mask);
         doc.working.inspect_mask = Some(owner);
         doc.artwork.occurrences.get_mut(owner).unwrap().opacity = 0.7;
-        let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
-        r.native_edit.as_mut().unwrap().color_cache_bytes = 0;
+        let mut r = crate::memory::memory_tests::renderer(color, layer_core::DeviceMemoryFacts {
+            budget_bytes: Some(4 << 30), unified: true, ..Default::default()
+        }).unwrap();
+        crate::memory::memory_tests::cold_color_pressure(&mut r);
+        assert_eq!(r.native_edit.as_ref().unwrap().color_cache_bytes, 0);
         submit_settled(&mut r, frame(&doc));
         let visible = r.scale_display.as_ref().unwrap().texture().clone();
         let before = crate::layer_tests::page_bytes(&r, &visible);
@@ -126,21 +129,16 @@ fn composite_queries_ignore_inspection_and_need_no_display_texture() {
                 );
             }
         }
-        assert!(
-            r.request_region(RegionRequest { fill_areas: None, colour_mode: Default::default(), fill: None, reference_count: None, paper: None,
-                enclosure: None, contiguous: true,
-                selection: None,
-                request_id: 2,
-                source: RegionSource::Composite,
-                position: [20, 20],
-                tolerance: 0.,
-                refinement: Default::default(),
-                limit: None
-            }.into())
-            .unwrap()
-        );
-        complete(&r);
-        let selected = crate::test_support::mask_result(r.take_region().unwrap().unwrap()).pixels;
+        let selected = crate::test_support::receive_request(&mut r, RegionRequest { fill_areas: None, colour_mode: Default::default(), fill: None, reference_count: None, paper: None,
+            enclosure: None, contiguous: true,
+            selection: None,
+            request_id: 2,
+            source: RegionSource::Composite,
+            position: [20, 20],
+            tolerance: 0.,
+            refinement: layer_render::RegionRefinement { close_gaps: false, edges: layer_core::RegionEdges::Exact, smooth_edges: false },
+            limit: None
+        }).pixels;
         assert_eq!(selected.bounds(), [0, 0, 256, 273]);
         assert_eq!(
             crate::layer_tests::page_bytes(&r, &visible),

@@ -175,12 +175,11 @@ fn idle_refinement_presents_completion_and_never_holds_new_input() {
         let mut frame = packet(doc.scene(), extent);
         frame.composite_all = false;
         frame.view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
-        if admitted {crate::memory::memory_tests::legacy_scene_frame(&mut r, frame);}
+        if admitted {r.begin_frame_memory(frame);}
         else {working_scene_frame(&mut r, frame);}
         submit_published(&mut r, frame);
         let cache=r.scale_display.as_ref().unwrap();
         assert!(cache.evaluation==Evaluation::Display);
-        assert_eq!(cache.hierarchy.is_some(),admitted);
         crate::test_support::submit_ready(&mut r, frame).unwrap();
         let mut presenter = ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba32Float,
             SdrSurfaceColor::ExtendedLinearSrgb).unwrap();
@@ -212,9 +211,10 @@ fn idle_refinement_presents_completion_and_never_holds_new_input() {
             if !r.has_pending_work() { break; }
             r.wait_idle().unwrap();
             crate::test_support::submit_ready(&mut r, frame).unwrap();
-            assert_eq!(presenter.needs_present(&r, frame.view, [0.; 4]), !r.has_pending_work());
+            assert_eq!(presenter.needs_present(&r, frame.view, [0.; 4]), !r.scale_display.as_ref().unwrap().has_pending_work(&r));
         }
         assert!(!r.has_pending_work());
+        assert_eq!(r.scale_display.as_ref().unwrap().hierarchy.is_some(),admitted);
         presenter.present(&r, &target, frame.view, [0.; 4]).unwrap();
         assert!(!presenter.needs_present(&r, frame.view, [0.; 4]));
         let retained = crate::layer_tests::page_bytes(&r, target.texture());
