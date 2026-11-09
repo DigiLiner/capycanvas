@@ -200,11 +200,11 @@ void LayerRow::init(){
     edgeTag(rename,L"edge_contact",S(L"input"));rename.MinWidth(0);rename.MinHeight(data->controlHeight());rename.Height(data->controlHeight());rename.Padding({2,0,2,0});rename.Margin({6,0,2,0});rename.FontSize(data->textSize());
     rename.MaxLength(128);fieldColors(data,rename);rename.Visibility(Visibility::Collapsed);
     copyName(data,rename,data->copyCaption(L"layers",L"name"));Grid::SetColumn(rename,9);body.Children().Append(rename);
-    rename.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
+    rename.AddHandler(UIElement::KeyDownEvent(),box_value(KeyEventHandler([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
         if(composingKey(e))return;
         if(e.Key()==Windows::System::VirtualKey::Enter){self->commit(false);e.Handled(true);}
         if(e.Key()==Windows::System::VirtualKey::Escape){self->commit(true);e.Handled(true);}
-    }});
+    }})),true);
     rename.TextChanging([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->data->updating)self->committing=false;});
     rename.LosingFocus([weak](auto&&,auto&&){if(auto self=weak.lock())self->commit(false);});
     rename.LostFocus([weak](auto&&,auto&&){if(auto self=weak.lock())self->commit(false);});
