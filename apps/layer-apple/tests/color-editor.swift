@@ -25,17 +25,19 @@ import SwiftUI
     @MainActor static func inputs(_ view: NSView) -> [ControlInput.InputView] {
         (view as? ControlInput.InputView).map { [$0] } ?? view.subviews.flatMap(inputs)
     }
-    @MainActor static func accessibilityFrames(_ node: Any) -> [(String, CGRect)] {
-        if let view = node as? NSView {
-            let identifier: String? = view.accessibilityIdentifier()
-            return [(identifier ?? "", view.accessibilityFrame())]
-                + (view.accessibilityChildren() ?? []).flatMap(accessibilityFrames)
+    @MainActor static func accessibilityFrames(_ node: NSObject, depth: Int = 0) -> [(String, CGRect)] {
+        guard depth < 32 else { return [] }
+        let identifier = NSSelectorFromString("accessibilityIdentifier")
+        let frame = NSSelectorFromString("accessibilityFrame")
+        let children = NSSelectorFromString("accessibilityChildren")
+        var result: [(String, CGRect)] = []
+        if node.responds(to: identifier), node.responds(to: frame) {
+            let bounds = unsafeBitCast(node.method(for: frame),
+                to: (@convention(c) (AnyObject, Selector) -> CGRect).self)(node, frame)
+            result.append((node.perform(identifier)?.takeUnretainedValue() as? String ?? "", bounds))
         }
-        if let element = node as? NSAccessibilityElement {
-            return [(element.accessibilityIdentifier() ?? "", element.accessibilityFrame())]
-                + (element.accessibilityChildren() ?? []).flatMap(accessibilityFrames)
-        }
-        return []
+        let values = node.responds(to: children) ? node.perform(children)?.takeUnretainedValue() as? [NSObject] ?? [] : []
+        return result + values.flatMap { accessibilityFrames($0, depth: depth + 1) }
     }
     @MainActor static func canceledScrub(_ host: NSView, session: ColorEditorSession, window: NSWindow) throws {
         guard let input = inputs(host).first(where: { $0.identity == "0-0" }) else { throw HostFailure(message: "Missing native color readout") }
@@ -61,16 +63,8 @@ import SwiftUI
     }
     @MainActor static func run() async throws {
         try unownedEscape()
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let prepared = #"{"saved":"","preferred_languages":["en"]}"#.withCString { capy_apple_prepare_launch($0, nil) }
-                if prepared != 0 {
-                    _ = capy_apple_launch(9, prepared, nil, nil)
-                    capy_apple_launch_free(prepared)
-                }
-                done.resume()
-            }
-        }
+        let store = EditorStore(platform: 1, persistence: EditorPersistence(root: nil))
+        try await wait("Color editor catalog", failure: { store.failure }) { !store.catalog["native_copy"].isNull }
         for space in ["Srgb", "DisplayP3", "AdobeRgb", "ProPhoto"] {
             let original = JSON(["space": space, "rgba": [0.12345678, 0.23456789, 0.34567891, 213.0 / 65535]])
             for mode in ["unchanged", "rgb", "invalid"] {
@@ -87,7 +81,8 @@ import SwiftUI
                 let window = NSWindow(contentRect: CGRect(x: 80, y: 80, width: 720, height: 520),
                     styleMask: [.titled, .closable], backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
-                let host = NSHostingView(rootView: ColorEditor(session: session))
+                let host = NSHostingView(rootView: ColorEditor(session: session)
+                    .environment(\.capyNativeCopy, store.catalog["native_copy"]))
                 host.sizingOptions.insert(.maxSize)
                 window.contentView = host; window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
                 defer { window.contentView = nil; window.close() }
