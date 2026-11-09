@@ -121,7 +121,11 @@ Dry documents omit watercolor composition until a wet backing or selected
 watercolor brush requires it. Native publication omits gray color variants until
 the document contains a gray paint source. Presentation prepares backdrop blur
 only when backdrop regions are configured.
-Surface creation declares viewport, surround, cursor and held-canvas recipes.
+Surface creation declares the bound viewport variant, surround, cursor and
+held-canvas recipes. Prediction and encoding share the display-source selector,
+including retained display backups. The first ready canvas frame declares the
+other viewport variants at Validation priority, which runs without idle admission
+behind required work. A later source change promotes only its bound variant.
 Shared native composition declares configured chrome before presentation. A visible
 Navigator joins that gate; hidden overview and picker recipes remain optional.
 Optional drawing skips cold recipes and repaints when they become ready.

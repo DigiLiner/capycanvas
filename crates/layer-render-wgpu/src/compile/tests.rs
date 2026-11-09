@@ -14,6 +14,14 @@ pub(crate) fn requested<T>(scope: &Scope, recipe: &Deferred<T>, class: Class) ->
     })
 }
 
+pub(crate) fn queued_recipes(scope: &Scope) -> usize {
+    scope.with_queue(|queue| {
+        queue.refresh();
+        queue.entries.iter().filter(|(key, entry)| matches!(key, Key::Recipe(_))
+            && entry.demands.iter().any(|demand| demand.owner == scope.0.id)).count()
+    })
+}
+
 #[test]
 fn startup_declares_stroke_kernels_before_eraser_helpers_and_document_work() {
     let color = Default::default();

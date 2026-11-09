@@ -6,6 +6,38 @@ fn picker() -> layer_render::ColorPickerOverlay {
 }
 
 #[test]
+fn first_ready_frame_requires_only_its_viewport_variant() {
+    let extent = [64; 2];
+    let document = crate::scene::scale::tests::document_at(extent);
+    let mut r = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
+    let all = layer_core::SceneScope::All;
+    crate::test_support::submit_settled(&mut r, crate::test_support::packet(document.scene().with_scope(&all), extent));
+    assert_eq!(r.display_placement()[13], 0.);
+    let batch = r.compilation.batch();
+    let mut presenter = ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8Unorm, SdrSurfaceColor::Srgb).unwrap();
+    let unused_required = presenter.pipeline[1..].iter().any(|pipeline|
+        crate::compile::tests::requested(&r.compilation, pipeline, crate::startup::DOCUMENT));
+    pollster::block_on(r.compilation.prepare_all([&presenter.pipeline[0], &presenter.surround_pipeline,
+        &presenter.cursor_pipeline, &presenter.recipes.transition.pipeline])).unwrap();
+    let ready = presenter.pipelines_ready(&r);
+    let (_, target) = crate::create_target(r.device(), extent, wgpu::TextureFormat::Rgba8Unorm, "first viewport variant");
+    let mut encoder = r.device().create_command_encoder(&Default::default());
+    presenter.encode(&r, &mut encoder, &target, crate::test_support::view(extent), [0.; 4]).unwrap();
+    let encoded = presenter.history.valid;
+    let anticipated = presenter.pipeline[1..].iter().all(|pipeline|
+        crate::compile::tests::requested(&r.compilation, pipeline, crate::startup::VALIDATION)
+            && !crate::compile::tests::requested(&r.compilation, pipeline, crate::startup::DOCUMENT));
+    drop(encoder);
+    drop(presenter);
+    drop(batch);
+    drop(r);
+    crate::finish_shader_compiler_shutdown();
+    assert!(!unused_required, "unused viewport variants do not enter the first frame gate");
+    assert!(ready && encoded, "the ready source draws while the other variants remain cold");
+    assert!(anticipated, "after the first ready frame, remaining variants run without idle admission");
+}
+
+#[test]
 fn presenter_creation_declares_each_output_before_first_presentation() {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let batch = r.compilation.batch();
@@ -51,9 +83,9 @@ fn hidden_overview_and_picker_stay_optional_while_visible_navigator_is_required(
     assert!(!presenter.overview_pipeline.as_ref().unwrap().ready());
     assert!(!presenter.picker.pipeline.ready());
     assert!(presenter.pipelines_ready(&r), "hidden overview and picker must not hold the canvas gate");
-    let queued = r.compilation.pending();
+    let queued = crate::compile::tests::queued_recipes(&r.compilation);
     for _ in 0..20 { assert!(presenter.pipelines_ready(&r)); }
-    assert_eq!(r.compilation.pending(), queued);
+    assert_eq!(crate::compile::tests::queued_recipes(&r.compilation), queued);
     r.presentation.navigator = true;
     assert!(presenter.pipelines_ready(&r), "an available image without a visible slot is not a visible Navigator");
     presenter.set_overviews(&r, &[crate::OverviewPlacement {bounds: [0., 0., 32., 32.], clip: None, work_area: [[0.; 2]; 4],

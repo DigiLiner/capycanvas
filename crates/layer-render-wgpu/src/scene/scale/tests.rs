@@ -107,7 +107,7 @@ fn assert_settled(mut r: &mut WgpuRasterizer, frame: FramePacket<'_>, reference:
 fn document() -> Document {
     document_at([517, 259])
 }
-pub(super) fn document_at(extent: [u32; 2]) -> Document {
+pub(crate) fn document_at(extent: [u32; 2]) -> Document {
     let mut doc = Document::new(PortableId::random(), extent[0], extent[1], layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
     let ink = doc.scene().order()[0];
     set_root_entries(&mut doc, vec![ink]);

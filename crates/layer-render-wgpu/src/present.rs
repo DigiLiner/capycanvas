@@ -649,9 +649,25 @@ impl ViewportPresenter {
         renderer.compilation.require(paper.iter(), crate::startup::OTHER)
     }
 
+    fn bound_viewport(&self, renderer: &WgpuRasterizer) -> ([f32; 20], bool, &crate::Deferred<wgpu::RenderPipeline>) {
+        let placement = if renderer.has_presentable_frame() { renderer.display_placement() } else { [0.; 20] };
+        let source = placement[13] as usize;
+        let showing = renderer.presentation.showing && !self.standalone_overview;
+        let lit = showing && renderer.paper_shade().is_some()
+            && self.paper_pipeline.as_ref().is_some_and(|paper|paper.iter().all(crate::Deferred::ready));
+        let pipeline = if !showing { &self.surround_pipeline }
+            else if lit { &self.paper_pipeline.as_ref().unwrap()[source] }
+            else { &self.pipeline[source] };
+        (placement, lit, pipeline)
+    }
+
     pub fn pipelines_ready(&self, renderer: &WgpuRasterizer) -> bool {
+        self.pipelines_ready_for(renderer, self.bound_viewport(renderer).2)
+    }
+
+    fn pipelines_ready_for(&self, renderer: &WgpuRasterizer, pipeline: &crate::Deferred<wgpu::RenderPipeline>) -> bool {
         let overview = self.standalone_overview || !self.overviews.is_empty();
-        let ready = renderer.compilation.require(self.pipeline.iter().chain([&self.surround_pipeline,&self.cursor_pipeline,&self.recipes.transition.pipeline])
+        let ready = renderer.compilation.require(std::iter::once(pipeline).chain([&self.surround_pipeline,&self.cursor_pipeline,&self.recipes.transition.pipeline])
             .chain(self.overview_pipeline.iter().filter(|_| overview))
             .chain(self.backdrop.iter().flat_map(|backdrop|backdrop.pipelines()))
             .chain(self.panels.iter().flat_map(|panels|[&panels.pipeline,&panels.mask_pipeline])),crate::startup::DOCUMENT);
@@ -1198,7 +1214,10 @@ impl ViewportPresenter {
         surround_linear: [f32; 4],
         overview_only: bool,
     ) -> Result<(), GpuRasterError> {
-        if !self.pipelines_ready(renderer) { return Ok(()); }
+        let (placement, lit, pipeline) = self.bound_viewport(renderer);
+        let source = placement[13] as usize;
+        if !self.pipelines_ready_for(renderer, pipeline) { return Ok(()); }
+        let pipeline = pipeline.clone();
         let size = [target.texture().width(),target.texture().height()];
         if self.presented_drawing.is_some_and(|old|old.showing && old.document!=renderer.presentation.document) {
             let held=self.capture_into(encoder);
@@ -1232,7 +1251,7 @@ impl ViewportPresenter {
             None => [&renderer.empty_view; 3],
         };
         if showing && renderer.display_backup.is_none() && let Some(cache) = renderer.selected_display_cache() { cache.refresh_half(renderer, encoder, &mut self.uploads)?; }
-        let lit = showing && self.prepare_paper_lighting(renderer);
+        if showing { self.prepare_paper_lighting(renderer); }
         let navigator = renderer.navigator.view().unwrap_or(&renderer.empty_view);
         let motion = renderer.display_motion();
         let motion_views = motion.map_or([&renderer.empty_view; 2], |(views, ..)| views);
@@ -1349,8 +1368,8 @@ impl ViewportPresenter {
             ca, cb, cc, cd,
             cx, cy, crop.map_or(0., |c| c.dim.clamp(0., 1.)), f32::from(crop.is_some()),
         ]);
+        data[40..60].copy_from_slice(&placement);
         if renderer.has_presentable_frame() {
-            data[40..60].copy_from_slice(&renderer.display_placement());
             for (value, bytes) in data[64..].iter_mut().zip(renderer.display_resample().as_chunks::<4>().0.iter()) {
                 *value = f32::from_le_bytes(*bytes);
             }
@@ -1541,7 +1560,7 @@ impl ViewportPresenter {
             })
         };
         let mut began = false;
-        let pipeline = if !showing { &self.surround_pipeline } else { match &self.paper_pipeline { Some(paper) if lit => &paper[data[53] as usize], _ => &self.pipeline[data[53] as usize] } };
+        let pipeline = &pipeline;
         let capture_before=renderer.fill_reveal.filter(|reveal|!overview_only && reveal.radius<0. && self.fill_before.as_ref().is_none_or(|(id,_)|*id!=reveal.transaction));
         if let Some(reveal)=capture_before {
             let texture=renderer.device.create_texture(&wgpu::TextureDescriptor {label:Some("fill reveal before"),
@@ -1718,6 +1737,10 @@ impl ViewportPresenter {
         if showing {self.last_artwork_pipeline=Some((**pipeline).clone());}
         self.held_alpha=fade;
         self.presented_overview_buffer=self.overview_buffer.clone();
+        if showing && !overview_only && self.presented_drawing.is_none_or(|drawing| !drawing.showing) {
+            renderer.compilation.require(self.pipeline.iter().enumerate().filter_map(|(index,pipeline)|
+                (index != source).then_some(pipeline)), crate::startup::VALIDATION);
+        }
         self.presented_drawing = Some(renderer.presentation);
         self.presented_selection_overlay = renderer.selection_overlay;
         self.presented_paper = Some(lit);
@@ -1778,6 +1801,9 @@ mod fill_tests;
 
 #[cfg(test)]
 mod readiness_tests;
+
+#[cfg(test)]
+mod variant_tests;
 
 #[cfg(test)]
 mod tests {
