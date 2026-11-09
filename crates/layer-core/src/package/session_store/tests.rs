@@ -537,7 +537,7 @@
         let mut store = open_store(&directory.0).wait().unwrap(); checkpoint(&mut store, &prepared, &cancel).unwrap();
         let owner = resource_owner(&store, tile_resource(&prepared).payload.resource_id(), tile_resource(&prepared).bytes);
         let permissions = fs::metadata(&owner.path).unwrap().permissions();
-        fs::set_permissions(&owner.path, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&owner.path, fs::Permissions::from_mode(0o000)).unwrap();
         assert!(fs::File::open(&owner.path).is_err());
         let mut operations = Vec::new(); let result = recorded_checkpoint(&mut store, &prepared, &cancel, &mut operations);
         fs::set_permissions(&owner.path, permissions).unwrap();
