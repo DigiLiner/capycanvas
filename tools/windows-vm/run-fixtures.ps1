@@ -135,7 +135,6 @@ function Restore-FixtureLocalDumps($Saved){
         }
     }
 }
-$runnerStarted = Get-Date
 $Executable = if($List){[IO.Path]::GetFullPath($Executable)}else{(Resolve-Path -LiteralPath $Executable).Path}
 $editorExecutable=$Executable
 $buildManifest=if($BuildRecord){Get-Content -LiteralPath $BuildRecord -Raw|ConvertFrom-Json}else{$null}
@@ -282,21 +281,53 @@ function Save-Screen([string]$Path) {
     }
 }
 
-function Reviews {
-    $owners=@(foreach($file in Get-ChildItem -LiteralPath $Output -Filter '*-context.json' -File){
-        $context=Get-Content -LiteralPath $file.FullName -Raw|ConvertFrom-Json
-        @($context.process_id)+@($context.windows|ForEach-Object {$_.process_id})
-    })|Where-Object {$_}|Select-Object -Unique
-    $paths=@($editorExecutable)+@($controlBuilds.Values)
-    foreach($owner in $owners){
-        $process=Get-Process -Id $owner -ErrorAction SilentlyContinue
-        if($process -and $process.Path -in $paths -and $process.StartTime -ge $runnerStarted){$process}
-    }
+function Reviews([string]$ContextPath) {
+    $files=if($ContextPath){Get-Item -LiteralPath $ContextPath}else{Get-ChildItem -LiteralPath $Output -Filter '*-context.json' -File}
+    $contexts=@($files|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
+    $closed=@($contexts|ForEach-Object {$_.closes}|Where-Object {$_.result -ceq 'pass' -and $_.window_only -is [bool] -and !$_.window_only -and $_.process_start_utc})
+    $owners=@($contexts|ForEach-Object {@($_)+@($_.windows)})|Where-Object {$_.process_id}|Group-Object process_id,process_start_utc|ForEach-Object {$_.Group[0]}
+    if($ContextPath -and !$owners){throw 'Timed-out fixture context has no recorded review identity'}
+    $matched=[Collections.Generic.List[object]]::new()
+    try{foreach($owner in $owners){
+        if($owner.process_start_utc){
+            $start=([DateTime]$owner.process_start_utc).ToUniversalTime()
+            if(@($closed|Where-Object {$_.process_id -eq $owner.process_id -and ([DateTime]$_.process_start_utc).ToUniversalTime() -eq $start}).Count){continue}
+        }
+        try{$process=Get-Process -Id $owner.process_id -ErrorAction Stop}
+        catch{if($_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId*'){continue};throw}
+        $retained=$false
+        try{
+            if(!$owner.process_start_utc){throw "Fixture review $($owner.process_id) has no recorded start time"}
+            $handle=$process.Handle
+            if($null -eq $handle -or [IntPtr]$handle -eq [IntPtr]::Zero){throw "Fixture review $($owner.process_id) process handle is unavailable"}
+            $exited=$process.HasExited
+            if($null -eq $exited){throw "Fixture review $($owner.process_id) exit state is unavailable"}
+            if(!$exited){
+                $actualStart=$process.StartTime
+                if($null -eq $actualStart){throw "Fixture review $($owner.process_id) creation time is unavailable"}
+                if($actualStart.ToUniversalTime() -eq $start){$retained=$true;$matched.Add($process)}
+            }
+        }finally{if(!$retained){$process.Dispose()}}
+    }}catch{foreach($process in $matched){$process.Dispose()};throw}
+    $matched.ToArray()
 }
 function Stop-Review {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
     $owned = @(Reviews)
-    $owned | Stop-Process -Force
-    $owned | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+    try{
+        $owned | Stop-Process -Force
+        foreach($process in $owned){$null=$process.WaitForExit([int][Math]::Max(0,30000-$watch.Elapsed.TotalMilliseconds))}
+    }finally{foreach($process in $owned){$process.Dispose()}}
+}
+function Wait-FixtureReviews([string]$Log) {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    $owned=@(Reviews "$Log-context.json")
+    try{
+        foreach($process in $owned){
+            $remaining=[int][Math]::Max(0,30000-$watch.Elapsed.TotalMilliseconds)
+            if(!$process.WaitForExit($remaining)){throw "Fixture review $($process.Id) did not exit within 30 seconds"}
+        }
+    }finally{foreach($process in $owned){$process.Dispose()}}
 }
 function Save-Evidence([string]$Log,[bool]$Renders=$true) {
     $rendered = $Renders -and $HardwareGpu -and !$controlFixture
@@ -307,7 +338,7 @@ function Save-Evidence([string]$Log,[bool]$Renders=$true) {
     $context = Get-Content "$Log-context.json" -Raw | ConvertFrom-Json
     $evidence = "$Log-evidence"
     New-Item -ItemType Directory -Force $evidence | Out-Null
-    $owners = @($context.process_id) + @($context.windows | ForEach-Object { $_.process_id }) + @(Reviews | ForEach-Object Id)
+    $owners = @($context.process_id) + @($context.windows | ForEach-Object { $_.process_id }) + @(Reviews | ForEach-Object {try{$_.Id}finally{$_.Dispose()}})
     $folders = @($context.trace_directory, $context.run, (Split-Path $Executable)) + @($context.windows | ForEach-Object { $_.trace_directory }) | Where-Object { $_ } | Select-Object -Unique
     foreach ($folder in $folders) {
         foreach ($owner in $owners | Where-Object { $_ } | Select-Object -Unique) {
@@ -341,7 +372,7 @@ function Start-Shortcuts {
     $env:CAPY_STORAGE_DIR = Join-Path $Output 'shortcuts-profile'
     try { $review = Start-Process $Executable -WorkingDirectory (Split-Path $Executable) -PassThru } finally { foreach ($entry in $saved.GetEnumerator()) { Restore-CapyEnvironmentValue $entry.Key $entry.Value } }
     $directory = Split-Path $Executable
-    @{process_id=$review.Id;trace_directory=$directory;profile=(Join-Path $Output 'shortcuts-profile')} | ConvertTo-Json | Set-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT
+    @{process_id=$review.Id;process_start_utc=$review.StartTime.ToUniversalTime().ToString('o');trace_directory=$directory;profile=(Join-Path $Output 'shortcuts-profile')} | ConvertTo-Json | Set-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT
     $deadline = (Get-Date).AddMinutes(2)
     while ($true) {
         $review.Refresh()

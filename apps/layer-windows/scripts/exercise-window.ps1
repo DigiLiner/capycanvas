@@ -49,6 +49,8 @@ $rect=New-Object CapyWindowApi+Rect
 [CapyWindowApi]::GetWindowRect($handle,[ref]$rect)|Out-Null
 if($Action -eq 'Close') {
     Assert-RendererHealthy $ProcessId $drawing
+    $processStart=$p.StartTime
+    if($null -eq $processStart){throw 'The owned review creation time is unavailable'}
     $dirty=$false
     $windowOnly=$false
     if($DiscardUnsaved){
@@ -90,14 +92,14 @@ if($Action -eq 'Close') {
     }
     if($windowOnly -and !$p.HasExited){
         if([CapyWindowExercise]::IsWindow($handle)){throw 'The owned drawing window did not close.'}
-        Record-CapyFixtureClose $ProcessId $handle.ToInt64() $true
+        Record-CapyFixtureClose $ProcessId $handle.ToInt64() $true -ProcessStartUtc $processStart
         'Completed Close';return
     }
     if(!$p.WaitForExit([int](5000*(Wait-Scale)))){throw 'Close exceeded five seconds after authorization.'}
     $code=$p.ExitCode
     if($null -eq $code){throw "Native review exit status is unavailable"}
     if($code -ne 0){throw ("Native review exit code: 0x{0:X8}" -f [uint32]($code -band 0xffffffffL))}
-    Record-CapyFixtureClose $ProcessId $handle.ToInt64() $false
+    Record-CapyFixtureClose $ProcessId $handle.ToInt64() $false -ProcessStartUtc $processStart
 } elseif($Action -eq 'Resize') {
     if(![CapyWindowExercise]::MoveWindow($handle,$rect.left,$rect.top,$Width,$Height,$true)){throw 'Resize failed.'}
     $review=$p

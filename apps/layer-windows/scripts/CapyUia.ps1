@@ -108,7 +108,7 @@ function Register-CapyFixtureWindow([Diagnostics.Process]$Process,[long]$WindowH
     $known=@($context.windows|Where-Object {$_.process_id -eq $Process.Id -and $_.hwnd -eq $WindowHandle})
     if($known.Count -gt 1 -or ($known.Count -eq 1 -and $known[0].executable -ne $executable)){throw 'Fixture census owner changed'}
     if(!$TraceDirectory){$TraceDirectory=if($known.Count){$known[0].trace_directory}elseif($script:CapyTraceDirectory){$script:CapyTraceDirectory}else{Split-Path -Parent $executable}}
-    $entry=[ordered]@{process_id=$Process.Id;hwnd=$WindowHandle;executable=$executable;trace_directory=$TraceDirectory;observed_utc=[DateTime]::UtcNow.ToString('o')}
+    $entry=[ordered]@{process_id=$Process.Id;process_start_utc=$Process.StartTime.ToUniversalTime().ToString('o');hwnd=$WindowHandle;executable=$executable;trace_directory=$TraceDirectory;observed_utc=[DateTime]::UtcNow.ToString('o')}
     $registryPath=Join-Path $TraceDirectory ("windows-$($Process.Id).json")
     if(!(Test-Path -LiteralPath $registryPath) -or [IO.File]::GetLastWriteTimeUtc($registryPath) -lt $Process.StartTime.ToUniversalTime()){throw 'Fixture census requires current process window registration'}
     $registry=Read-Snapshot $registryPath
@@ -124,9 +124,9 @@ function Register-CapyFixtureWindow([Diagnostics.Process]$Process,[long]$WindowH
         $context.windows=@($windows|Where-Object {!($_.process_id -eq $entry.process_id -and $_.hwnd -eq $entry.hwnd)})+@($entry)
     }
 }
-function Record-CapyFixtureClose([int]$ProcessId,[long]$WindowHandle,[bool]$WindowOnly,[ValidateSet('exercise-window original five-second authorization','image-rows original close_document exit30')][string]$Contract='exercise-window original five-second authorization'){
+function Record-CapyFixtureClose([int]$ProcessId,[long]$WindowHandle,[bool]$WindowOnly,[Parameter(Mandatory)][DateTime]$ProcessStartUtc,[ValidateSet('exercise-window original five-second authorization','image-rows original close_document exit30')][string]$Contract='exercise-window original five-second authorization'){
     if(!$env:CAPY_FIXTURE_CONTEXT){return}
-    $entry=[ordered]@{process_id=$ProcessId;hwnd=$WindowHandle;contract=$Contract;result='pass';window_only=$WindowOnly;completed_utc=[DateTime]::UtcNow.ToString('o')}
+    $entry=[ordered]@{process_id=$ProcessId;process_start_utc=$ProcessStartUtc.ToUniversalTime().ToString('o');hwnd=$WindowHandle;contract=$Contract;result='pass';window_only=$WindowOnly;completed_utc=[DateTime]::UtcNow.ToString('o')}
     Update-CapyFixtureContext {param($context);$context.closes=@($context.closes)+@($entry)}
 }
 function Owned-ProcessWindows([Diagnostics.Process]$Process,[long]$WindowHandle,[string]$TraceDirectory=$script:CapyTraceDirectory){
@@ -703,7 +703,7 @@ function Enter-CapyEnvironment([string[]]$Names=@()){
 function Exit-CapyEnvironment{
     if(!$script:CapyEnvironment){return}
     if($env:CAPY_FIXTURE_CONTEXT -and $run){
-        Update-CapyFixtureContext {param($context);$context.run=$run;$context.process_id=$review.Id;$context.trace_directory=$(if($script:CapyTraceDirectory){$script:CapyTraceDirectory}else{$directory});$context.profile=$env:CAPY_STORAGE_DIR}
+        Update-CapyFixtureContext {param($context);$context.run=$run;$context.process_id=$review.Id;$context.process_start_utc=$(if($review -and !$review.HasExited){$review.StartTime.ToUniversalTime().ToString('o')}elseif($review){@($context.windows|Where-Object {$_.process_id -eq $review.Id}|Select-Object -Last 1).process_start_utc});$context.trace_directory=$(if($script:CapyTraceDirectory){$script:CapyTraceDirectory}else{$directory});$context.profile=$env:CAPY_STORAGE_DIR}
     }
     foreach($entry in $script:CapyEnvironment.GetEnumerator()){
         Restore-CapyEnvironmentValue $entry.Key $entry.Value

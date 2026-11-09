@@ -15,7 +15,7 @@ try {
  $env:CAPY_POPUP_FIXTURE=Join-Path $run 'input.json';$env:CAPY_POPUP_THEME=$Theme
  $process=Start-Process -FilePath $Executable -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$process.Handle
- Update-CapyFixtureContext {param($context);$context.process_id=$process.Id;$context.trace_directory=$run}
+ Update-CapyFixtureContext {param($context);$context.process_id=$process.Id;$context.process_start_utc=$process.StartTime.ToUniversalTime().ToString('o');$context.trace_directory=$run}
  if(!$process.WaitForExit(30000)){throw 'Popup fixture timed out after 30 seconds'}
  if($process.ExitCode -ne 0){throw "Popup fixture exited $($process.ExitCode); see $run"}
  $result=Get-Content -LiteralPath (Join-Path $run 'popup-fixture-result.json') -Raw|ConvertFrom-Json

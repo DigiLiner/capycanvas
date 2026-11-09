@@ -310,10 +310,12 @@ try{
  $saved=Join-Path $run 'Object layers 日本語.capy';Save-ProjectAs $saved
  $savedIdentity=Identity (Package $saved)
  if($savedIdentity -ne (Identity $authored)){throw 'Clipboard and conversion history changed authored image identities, effective affines or stack order'}
+ $processStart=$review.StartTime
+ if($null -eq $processStart){throw 'The owned review creation time is unavailable'}
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File';Invoke-Id 'close_document'
  Wait-Until {$review.HasExited} 'Closing the sole edited drawing did not exit' 30 -Closing
  if($review.ExitCode -ne 0){throw 'The edited drawing did not close cleanly'}
- Record-CapyFixtureClose $review.Id $drawingWindow.ToInt64() $false -Contract 'image-rows original close_document exit30'
+ Record-CapyFixtureClose $review.Id $drawingWindow.ToInt64() $false -ProcessStartUtc $processStart -Contract 'image-rows original close_document exit30'
  [CapyRowPointer]::Dispose()
  $reopenStderr=Join-Path $run 'reopen-stderr.log';Start-Review $reopenStderr
  Open-Project $saved

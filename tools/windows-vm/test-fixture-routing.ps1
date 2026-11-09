@@ -92,7 +92,7 @@ foreach($name in 'Get-FixtureProcessArguments','Write-FixturePlan','Get-NextFixt
 & {
     $directory=Join-Path ([IO.Path]::GetTempPath()) ('capy-fixture-evidence-'+[guid]::NewGuid().ToString('N'))
     $HardwareGpu=$false
-    function Reviews{[pscustomobject]@{Id=42}}
+    function Reviews{$process=[pscustomobject]@{Id=42};$process|Add-Member ScriptMethod Dispose {};$process}
     function Stop-Review{}
     function Get-ChildItem($LiteralPath,[switch]$File){
         $files=@(Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -File:$File)
@@ -287,7 +287,10 @@ $runnerStarted=Get-Date;$editorExecutable='C:\owned\CapyCanvas.exe';$controlBuil
 $script:queried=[Collections.Generic.List[int]]::new()
 function Get-Process([int]$Id,[string]$ErrorAction){
     $script:queried.Add($Id)
-    [pscustomobject]@{Id=$Id;Path=$(if($Id -eq 41){$editorExecutable}else{'C:\other\CapyCanvas.exe'});StartTime=$runnerStarted.AddSeconds(1)}
+    $process=[pscustomobject]@{Id=$Id;Handle=1;HasExited=$false;StartTime=$runnerStarted.AddSeconds($(if($Id -eq 41){1}else{2}))}
+    $process|Add-Member NoteProperty Path $(if($Id -eq 41){$editorExecutable}else{'C:\other\CapyCanvas.exe'})
+    $process|Add-Member ScriptMethod Dispose {}
+    $process
 }
 try{
     $resultsFile=Join-Path $Output 'results.jsonl'
@@ -326,9 +329,9 @@ try{
         if($result.name -cne 'unicode' -or $result.message -cne $message){throw 'Fixture status changed Unicode result text through the legacy console'}
     }finally{$bytes.Dispose();$child.Dispose()}
     if(@(Reviews).Count -or $queried.Count){throw 'Missing ownership receipt searched for processes'}
-    @{process_id=41;windows=@(@{process_id=42},@{process_id=41})}|ConvertTo-Json|Set-Content (Join-Path $Output 'owned-context.json')
+    @{process_id=41;process_start_utc=$runnerStarted.AddSeconds(1).ToUniversalTime().ToString('o');windows=@(@{process_id=42;process_start_utc=$runnerStarted.AddSeconds(1).ToUniversalTime().ToString('o')},@{process_id=41;process_start_utc=$runnerStarted.AddSeconds(1).ToUniversalTime().ToString('o')})}|ConvertTo-Json|Set-Content (Join-Path $Output 'owned-context.json')
     $owned=@(Reviews)
-    if($owned.Count -ne 1 -or $owned[0].Id -ne 41 -or ($queried -join ',') -ne '41,42'){throw 'Cleanup escaped recorded owners or accepted another executable'}
+    if($owned.Count -ne 1 -or $owned[0].Id -ne 41 -or (($queried|Sort-Object) -join ',') -ne '41,42'){throw 'Cleanup escaped recorded process identities or accepted a reused PID'}
 }finally{Remove-Item Function:\Get-Process;Remove-Item -LiteralPath $Output -Recurse -Force}
 $cacheRun=Join-Path ([IO.Path]::GetTempPath()) ('capy-fixture-cache-'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($cacheRun)|Out-Null
@@ -677,4 +680,149 @@ namespace CapyLocalDumpsTest {
         if(!(Test-Path -LiteralPath ($log+'-evidence\ui-state-90-3.json'))){throw 'Evidence lost the trace of a recorded window whose app already exited'}
     }finally{Remove-Item -LiteralPath $directory -Recurse -Force}
     'Control and registered unrendered rows skip app adapter evidence; rendered rows require context and scale and keep traces of exited windows'
+}
+
+& {
+    foreach($name in 'Reviews','Stop-Review','Wait-FixtureReviews'){
+        $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    $helper=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../../apps/layer-windows/scripts/CapyUia.ps1'),[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw 'Fixture context helper did not parse'}
+    foreach($name in 'Update-CapyFixtureContext','Record-CapyFixtureClose'){
+        $node=$helper.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    Add-Type -TypeDefinition @'
+using System;using System.ComponentModel;using System.Runtime.InteropServices;using System.Security.AccessControl;
+public static class CapyReviewOwnershipTest {
+ [StructLayout(LayoutKind.Sequential)] struct Luid {public uint Low;public int High;}
+ [StructLayout(LayoutKind.Sequential)] struct Privilege {public Luid Id;public uint Attributes;}
+ [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+ [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
+ [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool LookupPrivilegeValue(string system,string name,out Luid id);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool CreateRestrictedToken(IntPtr token,uint flags,uint disableCount,IntPtr disable,uint deleteCount,ref Privilege delete,uint restrictCount,IntPtr restrict,out IntPtr result);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool ImpersonateLoggedOnUser(IntPtr token);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool RevertToSelf();
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool SetKernelObjectSecurity(IntPtr process,uint information,byte[] descriptor);
+ public static void Restrict(IntPtr process){
+  var descriptor=new RawSecurityDescriptor("D:(A;;0x100000;;;WD)");var bytes=new byte[descriptor.BinaryLength];descriptor.GetBinaryForm(bytes,0);
+  if(!SetKernelObjectSecurity(process,4,bytes))throw new Win32Exception(Marshal.GetLastWin32Error());
+ }
+ public static IntPtr WithoutDebug(){
+  IntPtr original,restricted;var privilege=new Privilege();
+  if(!OpenProcessToken(GetCurrentProcess(),10,out original))throw new Win32Exception(Marshal.GetLastWin32Error());
+  try{if(!LookupPrivilegeValue(null,"SeDebugPrivilege",out privilege.Id))throw new Win32Exception(Marshal.GetLastWin32Error());
+   if(!CreateRestrictedToken(original,0,0,IntPtr.Zero,1,ref privilege,0,IntPtr.Zero,out restricted))throw new Win32Exception(Marshal.GetLastWin32Error());
+  }finally{CloseHandle(original);}
+  if(!ImpersonateLoggedOnUser(restricted)){var error=Marshal.GetLastWin32Error();CloseHandle(restricted);throw new Win32Exception(error);}
+  return restricted;
+ }
+ public static void Restore(IntPtr token){try{if(!RevertToSelf())throw new Win32Exception(Marshal.GetLastWin32Error());}finally{CloseHandle(token);}}
+}
+'@
+    $directory=Join-Path ([IO.Path]::GetTempPath()) ('capy-review-close-'+[guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($directory)|Out-Null
+    $Output=$directory;$log=Join-Path $directory 'row';$priorContext=$env:CAPY_FIXTURE_CONTEXT
+    $owned=[Collections.Generic.List[object]]::new();$engine=(Get-Process -Id $PID).Path
+    function New-OwnershipChild {
+        $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$engine
+        $info.Arguments='-NoProfile -NonInteractive -Command "[Console]::In.ReadLine()|Out-Null"'
+        $info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardInput=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
+        $child=[Diagnostics.Process]::Start($info);$null=$child.Handle
+        $entry=@{process=$child;id=$child.Id;start=$child.StartTime.ToUniversalTime()};$owned.Add($entry);$entry
+    }
+    function Finish-OwnershipChild($Entry){
+        if(!$Entry.process.HasExited){$Entry.process.StandardInput.WriteLine('exit');$Entry.process.StandardInput.Flush();if(!$Entry.process.WaitForExit(30000)){throw 'The owned process identity child did not exit'}}
+    }
+    try{
+        foreach($case in 'closed','newer-owner','window-only','failed-close','missing-close-start'){
+            $entry=New-OwnershipChild;$old=$entry.start.AddSeconds(-1)
+            $ownerStart=if($case -eq 'newer-owner'){$entry.start}else{$old}
+            $close=@{process_id=$entry.id;process_start_utc=$old.ToString('o');window_only=($case -eq 'window-only');result=$(if($case -eq 'failed-close'){'fail'}else{'pass'})}
+            if($case -eq 'missing-close-start'){$close.Remove('process_start_utc')}
+            @{process_id=$entry.id;process_start_utc=$ownerStart.ToString('o');windows=@(@{process_id=$entry.id;process_start_utc=$ownerStart.ToString('o')});closes=@($close)}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath ($log+'-context.json')
+            [CapyReviewOwnershipTest]::Restrict($entry.process.Handle)
+            $token=[CapyReviewOwnershipTest]::WithoutDebug();$failure=$null
+            try{
+                try{
+                    if($case -eq 'closed'){
+                        if(@(Reviews ($log+'-context.json')).Count){throw 'A terminal closed identity remained owned'}
+                        Wait-FixtureReviews $log
+                    }
+                    Stop-Review
+                }catch{$failure=$_}
+            }finally{[CapyReviewOwnershipTest]::Restore($token)}
+            if($entry.process.HasExited){throw 'Cleanup stopped a newer process with a recycled recorded PID'}
+            if($case -eq 'closed'){
+                if($failure){throw $failure}
+            }elseif(!$failure -or $failure.Exception.Message -notlike 'Fixture review * process handle is unavailable'){throw "An unreadable pending owner lost its identity failure: $case ($failure)"}
+            Finish-OwnershipChild $entry
+        }
+        $entry=New-OwnershipChild;$env:CAPY_FIXTURE_CONTEXT=$log+'-context.json'
+        @{windows=@();closes=@()}|ConvertTo-Json|Set-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT
+        Finish-OwnershipChild $entry
+        Record-CapyFixtureClose $entry.id 7 $false -ProcessStartUtc $entry.start
+        $close=(Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json).closes[0]
+        if($close.process_id -ne $entry.id -or ([DateTime]$close.process_start_utc).ToUniversalTime() -ne $entry.start -or $close.window_only -ne $false -or $close.result -cne 'pass'){throw 'Terminal close receipt lost the original process creation identity'}
+        foreach($file in 'exercise-window.ps1','exercise-image-rows.ps1'){
+            $caller=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot ('../../apps/layer-windows/scripts/'+$file)),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw 'Close identity caller did not parse'}
+            $capture=@($caller.FindAll({param($n)$n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$processStart'},$true))
+            $closes=@($caller.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Record-CapyFixtureClose'},$true))
+            $begin=if($file -eq 'exercise-window.ps1'){$caller.Find({param($n)$n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Member.Value -eq 'PostMessage'},$true)}else{$caller.Find({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-Id' -and $n.Extent.Text -eq "Invoke-Id 'close_document'"},$true)}
+            if($capture.Count -ne 1 -or !$begin -or $capture[0].Extent.EndOffset -ge $begin.Extent.StartOffset -or $closes.Count -ne $(if($file -eq 'exercise-window.ps1'){2}else{1})){throw 'Close creation identity was not captured before closing began'}
+            foreach($close in $closes){if($close.Extent.Text -notlike '*-ProcessStartUtc $processStart*'){throw 'A close consumer omitted its original process creation identity'}}
+        }
+    }finally{
+        $env:CAPY_FIXTURE_CONTEXT=$priorContext
+        foreach($entry in $owned){try{if(!$entry.process.HasExited){$entry.process.Kill();$null=$entry.process.WaitForExit(5000)}}finally{$entry.process.Dispose()}}
+        Remove-Item -LiteralPath $directory -Recurse -Force
+    }
+    'Terminal close receipts discharge only their exact creation identities; unreadable pending owners fail closed'
+}
+
+& {
+    foreach($name in 'Reviews','Wait-FixtureReviews'){
+        $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$false)
+        if(!$definition){throw "Missing bounded review exit helper: $name"}
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    $start=[DateTime]::SpecifyKind([datetime]'2026-11-07 01:00:00',[DateTimeKind]::Utc)
+    function Get-Item($LiteralPath){if($LiteralPath -cne 'row-context.json'){throw 'Timeout cleanup escaped its row'};[pscustomobject]@{FullName=$LiteralPath}}
+    function Get-ChildItem{throw 'Timeout cleanup enumerated contexts from other rows'}
+    function Get-Content{
+        if($script:case -eq 'malformed'){return '{'}
+        if($script:case -eq 'empty'){return '{"windows":[]}'}
+        $owner=@{process_id=41;process_start_utc=$start.ToString('o')}
+        if($script:case -eq 'missing-start'){$owner.Remove('process_start_utc')}
+        if($script:case -eq 'window'){@{windows=@($owner)}|ConvertTo-Json -Depth 4}else{$owner|ConvertTo-Json}
+    }
+    function Get-Process{
+        [CmdletBinding()]param([int]$Id)
+        if($Id -ne 41){throw 'Timeout cleanup inspected an unrecorded PID'}
+        $script:queries++
+        if($script:case -eq 'absent'){$PSCmdlet.ThrowTerminatingError([Management.Automation.ErrorRecord]::new([ArgumentException]::new(),'NoProcessFoundForGivenId',[Management.Automation.ErrorCategory]::ObjectNotFound,$Id))}
+        if($script:case -eq 'query-error'){throw 'Process query denied'}
+        $process=[pscustomobject]@{Id=$Id;HasExited=($script:case -eq 'exited')}
+        if($script:case -eq 'exit-unavailable'){$process.HasExited=$null}
+        $process|Add-Member ScriptProperty Handle {if($script:case -eq 'handle-unavailable'){return $null};$script:retained=$true;[IntPtr]1}
+        $process|Add-Member ScriptProperty Path {throw 'A dying review path is unreadable'}
+        $process|Add-Member ScriptProperty StartTime {if(!$script:retained){throw 'Process identity checked before handle retention'};if($script:case -eq 'start-error'){throw 'Process start time denied'};if($script:case -eq 'creation-unavailable'){return $null};if($script:case -eq 'reused'){$start.AddTicks(1)}else{$start}}
+        $process|Add-Member ScriptMethod WaitForExit {param($milliseconds)$script:waits++;if($milliseconds -lt 0 -or $milliseconds -gt 30000){throw 'Review exit wait escaped its bound'};$script:case -ne 'lingering'}
+        $process|Add-Member ScriptMethod Dispose {$script:disposed++}
+        $process
+    }
+    function Stop-Process{throw 'Timeout cleanup must not kill a recorded or reused PID'}
+    foreach($case in 'lingering','exited','absent','reused','window','missing-start','query-error','start-error','handle-unavailable','exit-unavailable','creation-unavailable','malformed','empty'){
+        $script:case=$case;$script:queries=0;$script:waits=0;$script:disposed=0;$script:retained=$false
+        $failure=$null;try{Wait-FixtureReviews 'row'}catch{$failure=$_.Exception.Message}
+        $shouldFail=$case -in @('lingering','missing-start','query-error','start-error','handle-unavailable','exit-unavailable','creation-unavailable','malformed','empty')
+        if([bool]$failure -ne $shouldFail){throw "Review exit cleanup accepted an unsafe identity or rejected an exited owner: $case ($failure)"}
+        if($script:waits -ne $(if($case -in @('lingering','window')){1}else{0})){throw "Review exit cleanup waited for the wrong process identity: $case"}
+        if($script:disposed -ne $(if($case -in @('lingering','exited','reused','window','start-error','missing-start','handle-unavailable','exit-unavailable','creation-unavailable')){1}else{0})){throw "Review exit cleanup leaked a retained process: $case"}
+        if($case -eq 'missing-start' -and ($script:waits -or $script:retained)){throw 'Missing start time was recovered from a potentially reused PID'}
+    }
+    'Timed-out row cleanup uses only its recorded process identities and a bounded exit wait'
 }
