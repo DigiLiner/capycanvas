@@ -1723,10 +1723,21 @@ class RdpClients:
         self.record.unlink(missing_ok=True)
 
 
+SESSION_SHELLS_COMMAND = "$shells=@(Get-Process explorer -ErrorAction SilentlyContinue);" \
+    "@{shells=@($shells|ForEach-Object {$_.SessionId});sessions=@(quser.exe 2>$null)}|ConvertTo-Json -Compress"
+
+
 def session_shells(machine):
-    result = guest(machine, "@(Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue).UserName -join ','",
+    result = guest(machine, SESSION_SHELLS_COMMAND,
                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
-    return {name.rsplit("\\", 1)[-1].strip().lower() for name in result.stdout.split(",")}
+    listing = json.loads(result.stdout)
+    shells = set(listing["shells"])
+    accounts = set()
+    for line in listing["sessions"]:
+        match = re.match(r"\s*>?(\S+)\s+(?:\S+\s+)?(\d+)\s+", line)
+        if match and int(match[2]) in shells:
+            accounts.add(match[1].rsplit("\\", 1)[-1].lower())
+    return accounts
 
 
 def shared_host(args):
@@ -1759,10 +1770,25 @@ def shared_host(args):
         idle_since = time.monotonic()
         while running(machine):
             clients.keep_connected(accounts)
-            shells = session_shells(machine)
-            temporary = record.with_suffix(".tmp")
-            temporary.write_text(json.dumps([account for account in accounts if account in shells]))
-            temporary.replace(record)
+            polled = time.monotonic()
+            try:
+                shells = session_shells(machine)
+            except subprocess.TimeoutExpired as error:
+                elapsed = time.monotonic() - polled
+                try:
+                    guest(machine, "exit 0", stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+                except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+                    (machine.runtime / "startup-error").write_text(
+                        f"{machine.name} stopped responding to SSH health checks (timeout {error.timeout} s)")
+                    break
+                with (machine.runtime / "slow-health.jsonl").open("a") as output:
+                    output.write(json.dumps({"utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                             "command": SESSION_SHELLS_COMMAND, "elapsed": elapsed}) + "\n")
+                shells = None
+            if shells is not None:
+                temporary = record.with_suffix(".tmp")
+                temporary.write_text(json.dumps([account for account in accounts if account in shells]))
+                temporary.replace(record)
             if pool.holders(machine.name, accounts):
                 idle_since = time.monotonic()
             elif time.monotonic() - idle_since >= settings["idle_minutes"] * 60:

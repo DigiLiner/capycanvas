@@ -493,5 +493,120 @@ class FixtureRoutingTests(unittest.TestCase):
                 vm.shared_fixtures(args)
 
 
+class SharedHostTimeoutTests(unittest.TestCase):
+    def test_ssh_health_timeout_reports_and_exits_through_normal_cleanup(self):
+        with TemporaryDirectory() as directory:
+            machine = SimpleNamespace(name="shared-gpu-1", server=True, runtime=Path(directory))
+            clients = MagicMock()
+            cleanup = MagicMock()
+            cleanup.attach_mock(clients.close, "close")
+            with patch.object(vm, "selected", return_value=machine), \
+                    patch.object(vm.cpu_pool, "lock_file", return_value=MagicMock()), \
+                    patch.object(vm.signal, "signal"), patch.object(vm, "shared_pool"), \
+                    patch.object(vm, "shared_settings", return_value={"idle_minutes": 10}), \
+                    patch.object(vm, "shared_accounts", return_value=["capy01"]), \
+                    patch.object(vm, "RdpClients", return_value=clients), \
+                    patch.object(vm, "running", return_value=True), patch.object(vm, "boot") as boot, \
+                    patch.object(vm, "stop_machine") as stop, \
+                    patch.object(vm, "guest", side_effect=subprocess.TimeoutExpired("liveness", 20)), \
+                    patch.object(vm, "session_shells", side_effect=subprocess.TimeoutExpired("health", 60)) as shells:
+                cleanup.attach_mock(stop, "stop")
+                vm.shared_host(SimpleNamespace())
+            self.assertEqual((machine.runtime / "startup-error").read_text(),
+                             "shared-gpu-1 stopped responding to SSH health checks (timeout 60 s)")
+            self.assertEqual([call[0] for call in cleanup.mock_calls], ["close", "stop"])
+            stop.assert_called_once_with(machine)
+            boot.assert_called_once_with(machine, gui=False, gpu="auto")
+            shells.assert_called_once_with(machine)
+            self.assertFalse((machine.runtime / "sessions.json").exists())
+
+class SharedHostHealthTests(unittest.TestCase):
+    @contextmanager
+    def host(self, runtime, shells, running, probe):
+        machine = SimpleNamespace(name="shared-gpu-1", server=True, runtime=runtime)
+        with patch.object(vm, "selected", return_value=machine), \
+                patch.object(vm.cpu_pool, "lock_file", return_value=MagicMock()), \
+                patch.object(vm.signal, "signal"), patch.object(vm, "shared_pool") as pool, \
+                patch.object(vm, "shared_settings", return_value={"idle_minutes": 10}), \
+                patch.object(vm, "shared_accounts", return_value=["capy01"]), \
+                patch.object(vm, "RdpClients") as clients, \
+                patch.object(vm, "running", side_effect=running), patch.object(vm, "boot"), \
+                patch.object(vm, "stop_machine") as stop, \
+                patch.object(vm, "session_shells", side_effect=shells), \
+                patch.object(vm, "guest", side_effect=probe) as guest:
+            pool.return_value.holders.return_value = {"capy01": {}}
+            yield machine, clients.return_value, stop, guest
+
+    def test_readiness_timeout_with_live_transport_preserves_ready_record_and_logs_once(self):
+        with TemporaryDirectory() as directory:
+            runtime=Path(directory);clock=[0];calls=[];saved=[]
+            def readiness(machine):
+                calls.append(machine)
+                if len(calls)==1:
+                    return {"capy01"}
+                clock[0]+=60
+                raise subprocess.TimeoutExpired("explorer readiness",60)
+            def sleep(seconds):
+                record=runtime/"sessions.json"
+                identity=(record.read_bytes(),record.stat().st_ino,record.stat().st_mtime_ns)
+                if not saved:
+                    saved.append(identity)
+                else:
+                    self.assertEqual(identity,saved[0])
+                    clients.close.assert_not_called()
+                    stop.assert_not_called()
+                    self.assertFalse((runtime/"startup-error").exists())
+                    rows=[json.loads(line) for line in (runtime/"slow-health.jsonl").read_text().splitlines()]
+                    self.assertEqual(len(rows),1)
+                    self.assertEqual(rows[0]["command"],vm.SESSION_SHELLS_COMMAND)
+                    self.assertEqual(rows[0]["elapsed"],60)
+                    self.assertRegex(rows[0]["utc"],r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+                clock[0]+=seconds
+            probes=[]
+            def liveness(*args,**options):
+                probes.append(options)
+                if len(probes)==2:
+                    raise subprocess.TimeoutExpired("liveness",20)
+                clock[0]+=3
+                return SimpleNamespace(returncode=0)
+            with self.host(runtime,readiness,[True,True,True,True],liveness) as (machine,clients,stop,probe), \
+                    patch.object(vm.time,"monotonic",side_effect=lambda:clock[0]),patch.object(vm.time,"sleep",side_effect=sleep) as sleeps:
+                vm.shared_host(SimpleNamespace())
+                self.assertEqual(sleeps.call_count,2,"Readiness timeout stopped a VM whose SSH transport was alive")
+                self.assertEqual(probe.call_count,2)
+                for call in probe.call_args_list:
+                    self.assertEqual(call.args,(machine,"exit 0"))
+                    self.assertEqual(call.kwargs,dict(stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=20))
+                self.assertEqual((runtime/"startup-error").read_text(),"shared-gpu-1 stopped responding to SSH health checks (timeout 60 s)")
+                clients.close.assert_called_once()
+                stop.assert_called_once_with(machine)
+
+    def test_failed_liveness_transport_stops_with_original_dead_message(self):
+        with TemporaryDirectory() as directory:
+            runtime=Path(directory)
+            with self.host(runtime,subprocess.TimeoutExpired("readiness",60),[True,True],subprocess.CalledProcessError(255,"liveness")) as (machine,clients,stop,probe):
+                vm.shared_host(SimpleNamespace())
+                self.assertEqual((runtime/"startup-error").read_text(),"shared-gpu-1 stopped responding to SSH health checks (timeout 60 s)")
+                self.assertFalse((runtime/"slow-health.jsonl").exists())
+                clients.close.assert_called_once()
+                stop.assert_called_once_with(machine)
+                self.assertEqual(probe.call_count,1)
+
+    def test_readiness_maps_only_accounts_whose_own_session_has_explorer(self):
+        sessions=[" USERNAME SESSIONNAME ID STATE IDLE TIME LOGON TIME",">CaPy01 rdp-tcp#2 1 Active none 11/9/2026", " capy02 rdp-tcp#3 2 Active none 11/9/2026"," capy03 4 Disc 1:00 11/9/2026"," DOMAIN\\CAPY04 console 8 Active none 11/9/2026"," capy01 rdp-tcp#2 1 Active none 11/9/2026"]
+        for shells,rows,expected in [([1,4,8,9],sessions,{"capy01","capy03","capy04"}),([2],sessions,{"capy02"}),([],sessions,set()),([1],sessions[:1],set()),([1],[],set())]:
+            with self.subTest(shells=shells,rows=rows):
+                def query(machine,command,**options):
+                    if "-IncludeUserName" in command:
+                        return SimpleNamespace(stdout=",".join("DOMAIN\\"+name for name in expected))
+                    return SimpleNamespace(stdout=json.dumps({"shells":shells,"sessions":rows}))
+                with patch.object(vm,"guest",side_effect=query) as guest:
+                    self.assertEqual(vm.session_shells(SimpleNamespace()),expected)
+                command=guest.call_args.args[1]
+                self.assertNotIn("-IncludeUserName",command)
+                self.assertIn(".SessionId",command)
+                self.assertIn("quser",command)
+
+
 if __name__ == "__main__":
     unittest.main()
