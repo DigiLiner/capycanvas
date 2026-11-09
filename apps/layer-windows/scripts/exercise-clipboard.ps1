@@ -14,11 +14,6 @@ $run=Join-Path $repo ('artifacts/windows/clipboard/'+[Guid]::NewGuid().ToString(
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $CapyTraceDirectory=$run
 $checks=[ordered]@{theme=$Theme}
-function Sta([scriptblock]$Script,[object[]]$Arguments=@()){
- $shell=[powershell]::Create();$shell.Runspace=[runspacefactory]::CreateRunspace();$shell.Runspace.ApartmentState='STA';$shell.Runspace.Open()
- try{$null=$shell.AddScript('Add-Type -AssemblyName System.Windows.Forms,System.Drawing').AddStatement().AddScript($Script);foreach($a in $Arguments){$null=$shell.AddArgument($a)};$result=$shell.Invoke();if($shell.HadErrors){throw ($shell.Streams.Error|Out-String)};$result}
- finally{$shell.Runspace.Dispose();$shell.Dispose()}
-}
 function Formats{@(Sta {$data=[Windows.Forms.Clipboard]::GetDataObject();if($data){$data.GetFormats()}})}
 function Clip-Size{
  $size=Sta {$data=[Windows.Forms.Clipboard]::GetDataObject();$stream=$data.GetData('PNG');if($stream){$image=[Drawing.Image]::FromStream($stream);try{"$($image.Width)x$($image.Height)"}finally{$image.Dispose()}}}

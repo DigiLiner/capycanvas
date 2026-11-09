@@ -40,6 +40,12 @@ $CapyCaptureDelay=0
 $CapyTrace=$null
 $CapyEnvironment=$null
 
+function Sta([scriptblock]$Script,[object[]]$Arguments=@()){
+ $shell=[powershell]::Create();$shell.Runspace=[runspacefactory]::CreateRunspace();$shell.Runspace.ApartmentState='STA';$shell.Runspace.Open()
+ try{$null=$shell.AddScript('Add-Type -AssemblyName System.Windows.Forms,System.Drawing').AddStatement().AddScript($Script);foreach($a in $Arguments){$null=$shell.AddArgument($a)};$result=$shell.Invoke();if($shell.HadErrors){throw ($shell.Streams.Error|Out-String)};$result}
+ finally{$shell.Runspace.Dispose();$shell.Dispose()}
+}
+
 function Wait-Scale{if($env:CAPY_WAIT_SCALE){[double]$env:CAPY_WAIT_SCALE}else{1}}
 function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Seconds=$script:CapyWaitSeconds,[switch]$Closing){
     $watch=[Diagnostics.Stopwatch]::StartNew()

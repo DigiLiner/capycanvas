@@ -27,11 +27,6 @@ function Start-Review([string]$Log){
  $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
  [CapyRowPointer]::Initialize([uint32]$review.Id)
 }
-function Sta([scriptblock]$Script,[object[]]$Arguments=@()){
- $shell=[powershell]::Create();$shell.Runspace=[runspacefactory]::CreateRunspace();$shell.Runspace.ApartmentState='STA';$shell.Runspace.Open()
- try{$null=$shell.AddScript('Add-Type -AssemblyName System.Windows.Forms,System.Drawing').AddStatement().AddScript($Script);foreach($a in $Arguments){$null=$shell.AddArgument($a)};$result=$shell.Invoke();if($shell.HadErrors){throw ($shell.Streams.Error|Out-String)};$result}
- finally{$shell.Runspace.Dispose();$shell.Dispose()}
-}
 . (Join-Path $PSScriptRoot 'ObjectFixture.ps1')
 function Artwork-Pixels{
  $foreground=[CapyRowPointer]::GetForegroundWindow()
