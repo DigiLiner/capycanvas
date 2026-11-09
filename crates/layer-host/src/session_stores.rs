@@ -1,4 +1,4 @@
-use layer_core::{PortableId,ProjectLimits,package::session_store::{DrawingStore,StoreOpener},raster_storage::RetainedTiles};
+use layer_core::{PortableId,ProjectLimits,package::session_store::{CompactionActivity,DrawingStore,StoreOpener},raster_storage::RetainedTiles};
 use layer_ui::{SessionCapture,SessionStamp};
 #[cfg(not(target_arch="wasm32"))]
 use futures_util::FutureExt;
@@ -97,7 +97,7 @@ struct Drawing {
 }
 struct State {drawings:BTreeMap<String,Drawing>,aliases:BTreeMap<u64,String>,next_compaction:u64}
 struct Inner {
-    assets:layer_ui::AssetStore,resolver:std::sync::OnceLock<layer_ui::AssetResolver>,root:PathBuf,opener:Arc<dyn StoreOpener>,clock:fn()->u64,state:Mutex<State>,execute:StoreExecutor,wake:Mutex<Arc<dyn Fn()+Send+Sync>>,pressure:Mutex<Option<(layer_ui::StoragePressure,u64)>>,trims:Mutex<TrimRequests>,
+    assets:layer_ui::AssetStore,resolver:std::sync::OnceLock<layer_ui::AssetResolver>,root:PathBuf,opener:Arc<dyn StoreOpener>,clock:fn()->u64,activity:CompactionActivity,state:Mutex<State>,execute:StoreExecutor,wake:Mutex<Arc<dyn Fn()+Send+Sync>>,pressure:Mutex<Option<(layer_ui::StoragePressure,u64)>>,trims:Mutex<TrimRequests>,
 }
 #[derive(Clone)]
 pub struct SessionStores(Arc<Inner>);
@@ -106,10 +106,10 @@ impl SessionStores {
     pub fn native(root:PathBuf,wake:Arc<dyn Fn()+Send+Sync>)->Self {Self::new(root,Arc::new(native_worker),wake)}
     #[cfg(not(target_arch="wasm32"))]
     pub fn new(root:PathBuf,execute:StoreExecutor,wake:Arc<dyn Fn()+Send+Sync>)->Self {
-        Self::with_opener(root,Arc::new(layer_core::package::session_store::NativeStoreOpener),execute,wake,native_now_ms)
+        Self::with_opener(root,Arc::new(layer_core::package::session_store::NativeStoreOpener),execute,wake,native_now_ms,CompactionActivity::default())
     }
-    pub fn with_opener(root:PathBuf,opener:Arc<dyn StoreOpener>,execute:StoreExecutor,wake:Arc<dyn Fn()+Send+Sync>,clock:fn()->u64)->Self {
-        let stores=Self(Arc::new(Inner {assets:Default::default(),resolver:Default::default(),root,opener,clock,state:Mutex::new(State {drawings:BTreeMap::new(),aliases:BTreeMap::new(),next_compaction:0}),execute,wake:Mutex::new(wake),pressure:Mutex::new(None),trims:Mutex::new(TrimRequests::default())}));
+    pub fn with_opener(root:PathBuf,opener:Arc<dyn StoreOpener>,execute:StoreExecutor,wake:Arc<dyn Fn()+Send+Sync>,clock:fn()->u64,activity:CompactionActivity)->Self {
+        let stores=Self(Arc::new(Inner {assets:Default::default(),resolver:Default::default(),root,opener,clock,activity,state:Mutex::new(State {drawings:BTreeMap::new(),aliases:BTreeMap::new(),next_compaction:0}),execute,wake:Mutex::new(wake),pressure:Mutex::new(None),trims:Mutex::new(TrimRequests::default())}));
         stores.0.resolver.set(stores.create_asset_resolver()).unwrap_or_else(|_|unreachable!());
         stores.0.assets.attach(stores.asset_resolver()).expect("new store registration");stores
     }
@@ -203,7 +203,7 @@ impl SessionStores {
         let mut state=self.0.state.lock().unwrap();let Some(drawing)=state.drawings.get_mut(key) else {return false;};
         if drawing.running || drawing.retiring || drawing.storage_error.is_some() {return false;}
         let checkpoint=!drawing.package_replies.is_empty() || drawing.deferred_since.is_some_and(|since|(self.0.clock)().saturating_sub(since)>=5*Self::checkpoint_interval_ms());
-        if !layer_core::package::session_store::CompactionActivity::ready(checkpoint) {return false;}
+        if !self.0.activity.ready(checkpoint) {return false;}
         let Some(inventory)=drawing.memory.as_ref().and_then(layer_core::DocumentMemory::package_inventory) else {return false;};
         let copy=match drawing.package.take() {
             Some((current,copy)) if Arc::ptr_eq(&current,&inventory)=>match copy {
@@ -216,7 +216,7 @@ impl SessionStores {
     pub fn maintain(&self)->Result<(),String> {
         let keys=self.0.state.lock().unwrap().drawings.keys().cloned().collect::<Vec<_>>();
         for key in keys {if self.copy_package(&key) {return Ok(());}}
-        if !layer_core::package::session_store::CompactionActivity::idle() {return Ok(());}
+        if !self.0.activity.idle() {return Ok(());}
         let now=(self.0.clock)();let mut state=self.0.state.lock().unwrap();
         if now<state.next_compaction {return Ok(());}
         let key=state.drawings.iter().filter(|(_,drawing)|!drawing.running && !drawing.retiring && drawing.storage_error.is_none()
@@ -299,7 +299,7 @@ impl SessionStores {
         self.request_binding(key,None,work)
     }
     fn request_binding(&self,key:&str,binding:Option<DrawingStore>,work:Work)->Result<StoreReply,String> {
-        if !matches!(work,Work::Package {..}|Work::Compact|Work::SampleStorage|Work::Checkpoint {forced:false,..}) {layer_core::package::session_store::CompactionActivity::interrupt();}
+        if !matches!(work,Work::Package {..}|Work::Compact|Work::SampleStorage|Work::Checkpoint {forced:false,..}) {self.0.activity.touch();}
         let reply=StoreReply::default();let request=Request {work,replies:vec![reply.clone()]};
         let mut state=self.0.state.lock().unwrap();
         if let Some(binding)=binding {
@@ -418,7 +418,7 @@ impl DrawingWork {
             _=>true,
         };
         let blocked={let state=self.stores.0.state.lock().unwrap();state.drawings.get(&self.key).and_then(|drawing|drawing.storage_error.clone())};
-        let mut activity=layer_core::package::session_store::CompactionActivity::default();
+        let mut activity=self.stores.0.activity.clone();
         activity.set_busy(!matches!(request.work,Work::Package {..}|Work::Compact|Work::SampleStorage));
         let cancelled=AtomicBool::new(false);
         let rejected=blocked.is_some() && matches!(request.work,Work::Checkpoint {..}|Work::Pressure(_)|Work::Import {..}|Work::ImportTiles {..}|Work::Package {..});
@@ -430,7 +430,7 @@ impl DrawingWork {
             let operation=async |store:&mut layer_core::package::session_store::SessionStore|match &mut request.work {
                 Work::Package {inventory,copy,checkpoint}=>{
                     let mut copy=match copy.take() {Some(copy)=>copy,None=>layer_core::package::session_store::PackageCopy::new(inventory).await?};
-                    let before=copy.remaining();store.copy_package_step(&mut copy,&cancelled,*checkpoint).await?;
+                    let before=copy.remaining();store.copy_package_step(&mut copy,&cancelled,*checkpoint,&activity).await?;
                     let progress=before!=copy.remaining();
                     Ok(StoreResult::PackageCopy {inventory:inventory.clone(),copy:(!copy.complete()).then_some(copy),progress})
                 },
@@ -444,7 +444,7 @@ impl DrawingWork {
                     Err(layer_core::package::session_store::ImportFailure::Io(error))=>Err(error),result=>Ok(StoreResult::Imported(result)),
                 },
                 Work::ImportTiles {tiles,..}=>store.make_durable(tiles,&cancelled).await.map(StoreResult::Durable),
-                Work::Compact=>store.compact_step().await.map(|_|StoreResult::Durable(0)),
+                Work::Compact=>store.compact_step(&activity).await.map(|_|StoreResult::Durable(0)),
                 Work::SampleStorage=>unreachable!(),
                 Work::Restore(limits)=>{
                     let weak=Arc::downgrade(&self.stores.0);let key=self.key.clone();

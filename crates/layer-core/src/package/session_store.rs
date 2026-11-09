@@ -543,10 +543,10 @@ impl SessionStore {
         self.by_owner.insert(input.owner_key(),input.id);
         self.index.insert(input.id,IndexedResource {record:input.record,location,owner:Some(input.owner)});Ok(())
     }
-    pub async fn copy_package_step(&mut self,copy:&mut PackageCopy,cancelled:&AtomicBool,checkpoint:bool)->Result<(),String> {
-        let activity=CompactionActivity::default();let epoch=activity.revision();
+    pub async fn copy_package_step(&mut self,copy:&mut PackageCopy,cancelled:&AtomicBool,checkpoint:bool,activity:&CompactionActivity)->Result<(),String> {
+        let epoch=activity.revision();
         let Some(_permit)=activity.chunk(checkpoint) else {return Ok(());};
-        self.copy_package_ready(copy,cancelled,&activity,epoch).await
+        self.copy_package_ready(copy,cancelled,activity,epoch).await
     }
     async fn copy_package_ready(&mut self,copy:&mut PackageCopy,cancelled:&AtomicBool,activity:&CompactionActivity,epoch:u64)->Result<(),String> {
         let mut bytes=0;let mut next=copy.next;let mut inputs=Vec::new();

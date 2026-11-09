@@ -38,6 +38,17 @@ fn finish(store:&mut SessionStore)->Vec<u64> {
     }}panic!("bounded compaction did not finish")
 }
 #[test]
+fn activity_domains_keep_cloned_holds_until_the_last_marker_drops() {
+    let domain=CompactionActivity::new();
+    let other=CompactionActivity::new();
+    let mut active=domain.clone();active.set_busy(true);
+    let held=active.clone();drop(active);
+    assert!(!CompactionActivity::idle_at(&domain.state,u64::MAX,CHECKPOINT_QUIET_MS));
+    assert!(CompactionActivity::idle_at(&other.state,u64::MAX,CHECKPOINT_QUIET_MS));
+    drop(held);
+    assert!(CompactionActivity::idle_at(&domain.state,u64::MAX,CHECKPOINT_QUIET_MS));
+}
+#[test]
 fn qualification_trigger_ratio_and_idle_boundaries_are_exact() {
     let candidate=|live,dead|Candidate {id:PortableId::random(),live,dead};
     assert!(!candidate(0,DEAD_BYTES).qualifies());assert!(!candidate(DEAD_BYTES,DEAD_BYTES).qualifies());

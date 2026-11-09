@@ -11,6 +11,7 @@ fn heads(path: &std::path::Path) -> [Option<Vec<u8>>; 2] {
 
 struct Fixture {
     stores: SessionStores,
+    activity: CompactionActivity,
     queue: Arc<Mutex<VecDeque<StoreWork>>>,
     wakes: Arc<AtomicUsize>,
     root: PathBuf,
@@ -21,19 +22,31 @@ impl Fixture {
         let queue = Arc::new(Mutex::new(VecDeque::new()));
         let queued = queue.clone();
         let wakes = Arc::new(AtomicUsize::new(0)); let wake = wakes.clone();
-        let stores = SessionStores::new(root.clone(), Arc::new(move |work| queued.lock().unwrap().push_back(work)),
-            Arc::new(move || { wake.fetch_add(1, Ordering::SeqCst); }));
-        Self {stores, queue, wakes, root}
+        let activity = CompactionActivity::new();
+        let stores = SessionStores::with_opener(root.clone(), Arc::new(layer_core::package::session_store::NativeStoreOpener),
+            Arc::new(move |work| queued.lock().unwrap().push_back(work)),
+            Arc::new(move || { wake.fetch_add(1, Ordering::SeqCst); }), native_now_ms, activity.clone());
+        Self {stores, activity, queue, wakes, root}
     }
     fn pop(&self) -> StoreWork { self.queue.lock().unwrap().pop_front().unwrap() }
     fn run(&self) { self.pop().run(); }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let pending = std::mem::take(&mut *self.queue.lock().unwrap()); drop(pending);
-        { let mut state = self.stores.0.state.lock().unwrap(); state.drawings.clear(); state.aliases.clear(); }
+        let pending = std::mem::take(&mut *self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner)); drop(pending);
+        { let mut state = self.stores.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner); state.drawings.clear(); state.aliases.clear(); }
         let _ = std::fs::remove_dir_all(&self.root);
     }
+}
+#[test]
+fn fixture_cleanup_survives_poisoned_locks() {
+    let fixture=Fixture::new();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _queue=fixture.queue.lock().unwrap();
+        let _state=fixture.stores.0.state.lock().unwrap();
+        panic!("fixture lock failure");
+    })).is_err());
+    drop(fixture);
 }
 fn capture() -> (SessionCapture, SessionStamp, RetainedTiles, Arc<layer_core::raster::TileBlob>) {
     let mut document = layer_core::Document::new(PortableId::random(), 256, 256,
@@ -940,7 +953,7 @@ fn refusal_epoch_preserves_sampling_cleanup_and_ignores_rollback_and_reservation
     }
     let mut fixture=Fixture::new();let space=Arc::new(AtomicU64::new(1<<30));let queued=fixture.queue.clone();
     let opener=Arc::new(Opening {inner:quota_opener(space.clone(),Arc::new(AtomicBool::new(false)),Arc::new(AtomicUsize::new(0))),scope:fixture.root.display().to_string(),available:Mutex::new(Some(1<<30)),full:AtomicBool::new(false),hold:AtomicBool::new(false),wake:Default::default(),rollback:Default::default()});
-    fixture.stores=SessionStores::with_opener(fixture.root.clone(),opener.clone(),Arc::new(move |work|queued.lock().unwrap().push_back(work)),Arc::new(||{}),||0);
+    fixture.stores=SessionStores::with_opener(fixture.root.clone(),opener.clone(),Arc::new(move |work|queued.lock().unwrap().push_back(work)),Arc::new(||{}),||0,fixture.activity.clone());
     for id in 2..=6 {let (saved,stamp,_,_)=capture();let reply=fixture.stores.checkpoint(id,saved,stamp,true).unwrap();fixture.run();assert!(reply.try_take().unwrap().is_ok());}
     *opener.rollback.lock().unwrap()=Some(fixture.stores.bind(2,None).unwrap());fixture.stores.release_binding(2);
     opener.full.store(true,Ordering::SeqCst);let (saved,stamp,_,_)=capture();
@@ -985,7 +998,7 @@ fn failed_store_open_samples_without_creating_until_capacity_or_cleanup_changes(
     let mut fixture=Fixture::new();let space=Arc::new(AtomicU64::new(1<<30));let full=Arc::new(AtomicBool::new(false));
     let creates=Arc::new(AtomicUsize::new(0));let attempts=Arc::new(AtomicUsize::new(0));let queued=fixture.queue.clone();
     fixture.stores=SessionStores::with_opener(fixture.root.clone(),Arc::new(Opening {inner:quota_opener(space.clone(),Arc::new(AtomicBool::new(false)),creates.clone()),full:full.clone(),attempts:attempts.clone()}),
-        Arc::new(move |work|queued.lock().unwrap().push_back(work)),Arc::new(||{}),||0);
+        Arc::new(move |work|queued.lock().unwrap().push_back(work)),Arc::new(||{}),||0,fixture.activity.clone());
     for id in [2,3] {let (saved,stamp,_,_)=capture();let reply=fixture.stores.checkpoint(id,saved,stamp,true).unwrap();fixture.run();assert!(reply.try_take().unwrap().is_ok());}
     full.store(true,Ordering::SeqCst);let (saved,stamp,_,tile)=capture();
     let write=||fixture.stores.checkpoint(1,saved.clone(),stamp.clone(),true).unwrap();
@@ -1016,7 +1029,7 @@ fn disk_refusal_preserves_each_write_kind_and_waits_for_changed_space_without_re
     for kind in ["import","pressure","checkpoint","legacy-import","prepare-retirement"] {
         let constant=kind=="legacy-import" || kind=="prepare-retirement";
         let mut fixture=Fixture::new();let space=Arc::new(AtomicU64::new(1<<30));let quota=Arc::new(AtomicBool::new(false));let creates=Arc::new(AtomicUsize::new(0));let queued=fixture.queue.clone();let wakes=fixture.wakes.clone();
-        fixture.stores=SessionStores::with_opener(fixture.root.clone(),quota_opener(space.clone(),quota.clone(),creates.clone()),Arc::new(move |work|queued.lock().unwrap().push_back(work)),Arc::new(move ||{wakes.fetch_add(1,Ordering::SeqCst);}),||0);
+        fixture.stores=SessionStores::with_opener(fixture.root.clone(),quota_opener(space.clone(),quota.clone(),creates.clone()),Arc::new(move |work|queued.lock().unwrap().push_back(work)),Arc::new(move ||{wakes.fetch_add(1,Ordering::SeqCst);}),||0,fixture.activity.clone());
         let (saved,stamp,_,_)=capture();let committed_stamp=stamp.clone();let baseline=fixture.stores.checkpoint(1,saved,stamp,true).unwrap();fixture.run();assert!(baseline.try_take().unwrap().is_ok());
         let binding=fixture.stores.bind(1,None).unwrap();let before=heads(binding.path());
         if constant {for id in [2,3] {
@@ -1161,7 +1174,7 @@ fn save_over_copy_failure_keeps_package_owners_and_the_head_and_does_not_retry()
     }
     for error in [STORAGE_UNAVAILABLE,"Storage IO failed"] {
         let mut fixture=Fixture::new();let queue=fixture.queue.clone();
-        fixture.stores=SessionStores::with_opener(fixture.root.clone(),Arc::new(Opening(error)),Arc::new(move |work|queue.lock().unwrap().push_back(work)),Arc::new(||{}),||0);
+        fixture.stores=SessionStores::with_opener(fixture.root.clone(),Arc::new(Opening(error)),Arc::new(move |work|queue.lock().unwrap().push_back(work)),Arc::new(||{}),||0,fixture.activity.clone());
         let session=package_session(&fixture);let memory=session.engine().document().memory();memory.presented();
         let binding=fixture.stores.bind(1,None).unwrap();let before=heads(binding.path());let reply=fixture.stores.finish_package(1).unwrap();
         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
@@ -1191,16 +1204,36 @@ fn continuous_input_cannot_starve_package_durability_before_a_host_captures() {
     NOW.store(0,Ordering::SeqCst);
     let mut fixture=Fixture::new();let queue=fixture.queue.clone();
     fixture.stores=SessionStores::with_opener(fixture.root.clone(),Arc::new(layer_core::package::session_store::NativeStoreOpener),
-        Arc::new(move |work|queue.lock().unwrap().push_back(work)),Arc::new(||{}),now);
+        Arc::new(move |work|queue.lock().unwrap().push_back(work)),Arc::new(||{}),now,fixture.activity.clone());
     let session=package_session(&fixture);let memory=session.engine().document().memory();memory.presented();
     let binding=fixture.stores.bind(1,None).unwrap();let bound=5*SessionStores::checkpoint_interval_ms();
     for elapsed in (0..=bound).step_by(1000) {
-        NOW.store(elapsed,Ordering::SeqCst);CompactionActivity::interrupt();
+        NOW.store(elapsed,Ordering::SeqCst);fixture.activity.touch();
         let mut stamp=session.session_stamp();stamp.state.unsaved_name=Some(elapsed.to_string());
         assert!(!fixture.stores.checkpoint_due(1,stamp,false).unwrap());
         assert!(fixture.queue.lock().unwrap().is_empty());
         assert!(fixture.stores.0.state.lock().unwrap().drawings[binding.key()].pending.checkpoint.is_none());
     }
+    struct OtherInput {
+        stop: std::sync::mpsc::Sender<()>,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Drop for OtherInput {
+        fn drop(&mut self) {
+            let _ = self.stop.send(());
+            if let Some(worker) = self.worker.take() { let _ = worker.join(); }
+        }
+    }
+    let (stop, stopped) = std::sync::mpsc::channel();
+    let _other_input = OtherInput {
+        stop,
+        worker: Some(std::thread::spawn(move || {
+            while matches!(stopped.recv_timeout(std::time::Duration::from_millis(20)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)) {
+                CompactionActivity::interrupt();
+            }
+        })),
+    };
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
     while memory.package_pending() && std::time::Instant::now()<deadline {
         assert!(!fixture.stores.checkpoint_due(1,session.session_stamp(),false).unwrap());
@@ -1215,16 +1248,15 @@ fn continuous_input_cannot_starve_package_durability_before_a_host_captures() {
 
 #[test]
 fn forced_checkpoint_is_due_immediately_while_a_package_copy_is_pending() {
-    use layer_core::package::session_store::CompactionActivity;
     use std::sync::atomic::AtomicU64;
     static NOW:AtomicU64=AtomicU64::new(0);
     fn now()->u64 {NOW.load(Ordering::SeqCst)}
     NOW.store(0,Ordering::SeqCst);
     let mut fixture=Fixture::new();let queue=fixture.queue.clone();
     fixture.stores=SessionStores::with_opener(fixture.root.clone(),Arc::new(layer_core::package::session_store::NativeStoreOpener),
-        Arc::new(move |work|queue.lock().unwrap().push_back(work)),Arc::new(||{}),now);
+        Arc::new(move |work|queue.lock().unwrap().push_back(work)),Arc::new(||{}),now,fixture.activity.clone());
     let session=package_session(&fixture);session.engine().document().memory().presented();
-    CompactionActivity::interrupt();assert!(!fixture.stores.checkpoint_due(1,session.session_stamp(),false).unwrap());
+    fixture.activity.touch();assert!(!fixture.stores.checkpoint_due(1,session.session_stamp(),false).unwrap());
     NOW.store(5*SessionStores::checkpoint_interval_ms(),Ordering::SeqCst);
     queue_package_copy(&fixture,&session.session_stamp());
     assert!(session.engine().document().memory().package_pending());

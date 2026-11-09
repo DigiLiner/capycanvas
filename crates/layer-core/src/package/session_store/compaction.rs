@@ -11,10 +11,17 @@ pub(super) const CHECKPOINT_QUIET_MS:u64=250;
 #[derive(Default)]
 pub(super) struct Activity {pub last:AtomicU64,pub busy:AtomicUsize,pub background:AtomicBool,epoch:AtomicU64,copying:AtomicBool,next_chunk:AtomicU64}
 pub struct CompactionActivity {pub(super) state:Arc<Activity>,pub(super) busy:bool}
+impl Clone for CompactionActivity {
+    fn clone(&self)->Self {
+        let mut activity=Self {state:self.state.clone(),busy:false};
+        activity.set_busy(self.busy);activity
+    }
+}
 impl Default for CompactionActivity {
     fn default()->Self {Self {state:Self::process(),busy:false}}
 }
 impl CompactionActivity {
+    pub fn new()->Self {Self {state:Arc::new(Activity::default()),busy:false}}
     fn process()->Arc<Activity> {static STATE:OnceLock<Arc<Activity>>=OnceLock::new();STATE.get_or_init(Default::default).clone()}
     pub fn hold()->Self {let mut activity=Self::default();activity.set_busy(true);activity}
     pub fn revision(&self)->u64 {self.state.epoch.load(Ordering::Acquire)}
@@ -27,16 +34,16 @@ impl CompactionActivity {
         }
     }
     pub fn set_background(background:bool) {let state=Self::process();state.background.store(background,Ordering::Release);state.last.store(crate::MemoryBudget::now_ms(),Ordering::Release);state.epoch.fetch_add(1,Ordering::Release);}
-    pub fn ready(checkpoint:bool)->bool {
-        Self::idle_at(&Self::process(),crate::MemoryBudget::now_ms(),if checkpoint {CHECKPOINT_QUIET_MS}else {IDLE_MS})
+    pub fn ready(&self,checkpoint:bool)->bool {
+        Self::idle_at(&self.state,crate::MemoryBudget::now_ms(),if checkpoint {CHECKPOINT_QUIET_MS}else {IDLE_MS})
     }
     fn available(state:&Activity)->bool {state.busy.load(Ordering::Acquire)==0 && !state.background.load(Ordering::Acquire)}
     pub(super) fn chunk(&self,checkpoint:bool)->Option<ChunkLease> {
-        if !Self::ready(checkpoint) || self.state.copying.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err() {return None;}
+        if !self.ready(checkpoint) || self.state.copying.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err() {return None;}
         let permit=ChunkLease(self.state.clone());
-        Self::ready(checkpoint).then_some(permit)
+        self.ready(checkpoint).then_some(permit)
     }
-    pub fn idle()->bool {Self::ready(false)}
+    pub fn idle(&self)->bool {self.ready(false)}
     pub(super) fn idle_at(state:&Activity,now:u64,quiet_ms:u64)->bool {Self::available(state) && now.saturating_sub(state.last.load(Ordering::Acquire))>=quiet_ms}
 }
 impl Drop for CompactionActivity {fn drop(&mut self) {self.set_busy(false);}}
@@ -138,14 +145,14 @@ impl SessionStore {
         let output=self.pack(target,start).await?;
         Ok(Some(Copy {source:candidate.id,target,file,hot_output,input,_output:output,extent,records,next:0,offset:0,checksum:crc32fast::Hasher::new(),reservation}))
     }
-    pub async fn compact_step(&mut self)->Result<CompactionStep,String> {
-        let activity=CompactionActivity::default();let epoch=activity.revision();
-        if !CompactionActivity::idle() {return Ok(CompactionStep::Idle);}
-        let state=CompactionActivity::process();
+    pub async fn compact_step(&mut self,activity:&CompactionActivity)->Result<CompactionStep,String> {
+        let epoch=activity.revision();
+        if !activity.idle() {return Ok(CompactionStep::Idle);}
+        let state=activity.state.clone();
         if state.copying.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err() {return Ok(CompactionStep::Idle);}
         let permit=ChunkLease(state);let now=crate::MemoryBudget::now_ms();
         if now<permit.0.next_chunk.load(Ordering::Acquire) {return Ok(CompactionStep::Idle);}
-        let result=self.compact_ready_step(&activity,epoch).await;
+        let result=self.compact_ready_step(activity,epoch).await;
         if !matches!(result,Ok(CompactionStep::Idle)) {permit.0.next_chunk.store(crate::MemoryBudget::now_ms().saturating_add(IDLE_MS),Ordering::Release);}
         result
     }
