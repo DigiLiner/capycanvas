@@ -301,6 +301,8 @@ CAPY_APPLE_PHOTO_JPEG=/path/to/photo.jpg cargo test -p layer-apple --lib \
   --ignored --nocapture --test-threads=1
 ```
 
+The renderer's saved-pipeline fixture checks unsupported-cache rejection on Metal; its cache round-trip requires a hardware adapter with `PIPELINE_CACHE`.
+
 ### Swift fixtures
 
 The fixtures in `apps/layer-apple/tests` run the production Swift sources on the

@@ -188,9 +188,12 @@ fn compiled_cache_loads_on_a_second_device() {
     let instance = WgpuRasterizer::headless_instance();
     let adapter = pollster::block_on(wgpu::util::initialize_adapter_from_env_or_default(&instance, None)).unwrap();
     let info = adapter.get_info();
-    assert_eq!(info.backend, wgpu::Backend::Vulkan, "saved pipeline test requires headless Vulkan");
     assert_ne!(info.device_type, wgpu::DeviceType::Cpu, "saved pipeline test requires a hardware GPU");
-    assert!(adapter.features().contains(wgpu::Features::PIPELINE_CACHE), "Vulkan adapter must support PIPELINE_CACHE");
+    if !adapter.features().contains(wgpu::Features::PIPELINE_CACHE) {
+        let (device, _) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        assert!(SavedPipelines::open_at(&directory.0, &device, &info, None).is_none());
+        return;
+    }
     let descriptor = wgpu::DeviceDescriptor {
         required_features: wgpu::Features::PIPELINE_CACHE, ..Default::default()
     };
