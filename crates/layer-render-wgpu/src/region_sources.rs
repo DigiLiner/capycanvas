@@ -50,7 +50,6 @@ struct Classification {
     frame: Option<Arc<artwork::Frame>>,
     extent: [u32; 2],
     batch: usize,
-    batch_tiles:usize,
     source: usize,
 }
 // Full-precision luminance/alpha replace repeated color decoding/composition.
@@ -264,7 +263,7 @@ impl RawRegions {
             layer_render::RegionSource::Source(_) | layer_render::RegionSource::Coverage(_) => None,
             _ => return Err(GpuRasterError::InvalidExtent),
         };
-        self.progress = Some(Classification {frame, extent:r.document_extent, batch:0, batch_tiles:if self.batches_left.is_some(){1}else{BATCH_TILES}, source:0});
+        self.progress = Some(Classification {frame, extent:r.document_extent, batch:0, source:0});
         Ok(())
     }
     #[cfg(test)]
@@ -358,6 +357,42 @@ impl RawRegions {
             self.progress.as_mut().unwrap().source = index + 1;
             self.clear_parameters();
         }
+    }
+    fn prepare_batch(r:&mut WgpuRasterizer,frame:Option<&artwork::Frame>,layer:Option<SourceTarget>,tiles:&[[u32;2]])->Result<(),GpuRasterError> {
+        let fallback=r.artwork_frame.clone();
+        let Some(frame)=frame.or(fallback.as_deref()) else {return Ok(());};
+        let scene=frame.scene.view().with_scope(&frame.scope);
+        if layer.is_none() && scene.order().iter().any(|&owner|scene.includes(owner) && scene.visible(owner)
+            && (scene.effect(owner).is_some() || scene.object_layer(owner).is_some() || scene.mask(owner).is_some_and(|(mask,_)|mask.enabled))) {return Ok(());}
+        let targets=layer.map_or_else(||source_access::placed_targets(scene).filter(|target|scene.source_owner(*target).is_some_and(|owner|scene.visible(owner))).collect(),|target|vec![target]);
+        let limit=SOURCE_SLOTS.min(r.source_tiles.borrow().free_slots());
+        let mut images:Vec<scene::sources::RequiredSource>=Vec::new();
+        let mut rasters:Vec<Arc<layer_core::raster::TileBlob>>=Vec::new();
+        let mut bases=Vec::new();
+        for target in targets {
+            if !matches!(target,SourceTarget::Paint(_)) || scene.target_offset(target)!=[0;2]
+                || r.watercolor_style(target,&frame.previews).is_some() {return Ok(());}
+            for &coordinate in tiles {
+                if page_rect(coordinate).intersect(PixelRect::full(scene.target_extent(target))).is_empty()
+                    || r.paint_layers.iter().any(|layer|layer.id==target && layer.pages.iter().any(|page|page.coordinate==coordinate)) {continue;}
+                if let Some(blob)=r.native_color_tile(target,coordinate)? {
+                    if !rasters.iter().any(|stored|scene::sources::same_raster_samples(stored,&blob)) {rasters.push(blob);}
+                }else if let Some(base)=scene.paint_base(target) {
+                    for position in page_coordinates(source_access::paint_base_source_bounds(base,coordinate)) {
+                        if !images.iter().any(|(source,c)|Arc::ptr_eq(source,base.image.storage()) && *c==position) {images.push((base.image.storage().clone(),position));}
+                        if images.len()+rasters.len()>limit {return Ok(());}
+                    }
+                    bases.push((base.clone(),coordinate));
+                }
+                if images.len()+rasters.len()>limit {return Ok(());}
+            }
+        }
+        let mut ready=true;let space=r.document_color().space;
+        for blob in rasters {
+            if r.source_tiles.borrow().prepared_raster_any_view(&blob,space,space).is_none() {r.request_raster_decode(blob,space)?;ready=false;}
+        }
+        for (base,coordinate) in bases {ready &= source_access::prepare_paint_base(r,&base,coordinate)?;}
+        if ready {Ok(())}else {Err(GpuRasterError::DeferredObjectWork)}
     }
     fn encode_source(&mut self, r: &mut WgpuRasterizer, request: &layer_render::RegionRequest,
         encoder: &mut crate::submission::CommandEncoder, combine: bool, sampling:Sampling,
@@ -534,7 +569,7 @@ impl RawRegions {
         let batches: Vec<_> = (tone.is_none())
             .then_some(std::slice::from_ref(&seed_tile))
             .into_iter()
-            .chain((!matches!(sampling,Sampling::Seeds|Sampling::TargetSeed)).then_some(tiles.chunks(if placed { 1 } else { self.progress.as_ref().unwrap().batch_tiles })).into_iter().flatten())
+            .chain((!matches!(sampling,Sampling::Seeds|Sampling::TargetSeed)).then_some(tiles.chunks(if placed { 1 } else { BATCH_TILES })).into_iter().flatten())
             .collect();
         let stride =
             (PARAMETER_BYTES as u32).next_multiple_of(limit.min_uniform_buffer_offset_alignment);
@@ -619,6 +654,7 @@ impl RawRegions {
                 continue;
             }
             if i>0 && self.batches_left==Some(0) {return Err(GpuRasterError::DeferredObjectWork);}
+            Self::prepare_batch(r,frame.as_deref(),layer,tiles)?;
             let checkpoint=r.source_tiles.borrow().batch_checkpoint();
             let mut views: [wgpu::TextureView; BATCH_TILES] =
                 std::array::from_fn(|_| r.empty_view.clone());

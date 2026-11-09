@@ -995,6 +995,74 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn cold_reference_classification_prepares_source_decodes_by_batch() {
+        use layer_core::raster::{RasterData,RasterPlane,RasterRevision,RasterTile,TileBlob,TileKey};
+        let extent=[PAGE_SIZE*8,PAGE_SIZE*4];let pages=32usize;let mut counts=Vec::new();
+        for native in [false,true] {
+            let image=layer_core::color::source::rgba8_source(extent,|x,y|[(x/PAGE_SIZE+1)as u8,(y/PAGE_SIZE+1)as u8,37,255]);
+            assert_eq!(image.tiles.len(),pages);
+            let mut artwork=layer_core::Artwork::new(extent).unwrap();
+            let (owner,target)=test_support::add_paint(&mut artwork,"Cold reference",extent);
+            let SourceTarget::Paint(handle)=target else {unreachable!()};
+            if native {
+                let (_,second)=test_support::add_paint(&mut artwork,"Fill target",extent);
+                for (index,target) in [target,second].into_iter().enumerate() {
+                    let SourceTarget::Paint(handle)=target else {unreachable!()};
+                    let descriptor=layer_core::color::DocumentColor::default().paint_descriptor();
+                    let tiles=image.tiles.keys().map(|&coordinate| {
+                        let bytes=[coordinate[0]as u8+1,coordinate[1]as u8+1,137+index as u8,255].repeat((PAGE_SIZE*PAGE_SIZE)as usize);
+                        (TileKey {plane:RasterPlane::Color,coordinate},RasterTile::backed(TileBlob::encode(descriptor,&bytes).unwrap()))
+                    }).collect();
+                    artwork.paint.get_mut(handle).unwrap().raster=RasterRevision::backed(RasterData {tiles,..Default::default()});
+                }
+                assert!(artwork.paint.iter().all(|(_,_,paint)|paint.base.is_none()));
+            }else {artwork.paint.get_mut(handle).unwrap().base=Some(layer_core::authored::PaintBase::new(image.clone().into()));}
+            let document=layer_core::Document::from_artwork(artwork).unwrap();
+            let mut r=crate::memory::memory_tests::renderer_for_restore(&document);
+            r.ensure_document_metadata(extent,document.scene()).unwrap();
+            r.artwork_frame=Some(Arc::new(crate::artwork::Frame::new(test_support::packet(document.scene(),extent),document.scene().snapshot().context)));
+            if native {for target in document.scene().targets() {
+                let data=document.scene().raster(target).unwrap().try_data().unwrap().unwrap();
+                r.publish_cold_raster(target,&data).unwrap();
+            }}
+            assert!(r.paint_layers.iter().all(|layer|layer.pages.is_empty()));
+            if native {
+                assert_eq!(document.scene().targets().count(),2);
+                for target in document.scene().targets() {for &coordinate in image.tiles.keys() {
+                    let blob=r.native_color_tile(target,coordinate).unwrap().expect("cold native colour tile");
+                    let space=r.document_color().space;
+                    assert!(r.source_tiles.borrow().prepared_raster_any_view(&blob,space,space).is_none());
+                }}
+            }else {assert!(image.tiles.keys().all(|&coordinate|r.source_tiles.borrow().prepared_view(&image,coordinate).is_none()));}
+            assert!(r.moving_decode.is_none());
+            let before=r.device.source_samples.stats();
+            let source=RegionSource::reference(document.snapshot(),owner).unwrap();
+            let request=reference_query(source);r.set_refine_chunk(Some(1.));
+            let mut regions=r.regions.take().unwrap();
+            pollster::block_on(startup::Requirements::capture_scene(&r,document.scene(),false).prepare()).unwrap();
+            pollster::block_on(Deferred::prepare_all(regions.raw.pipelines())).unwrap();
+            pollster::block_on(Deferred::prepare_all([&r.scene_pipelines.source.pipeline])).unwrap();
+            let mut calls=0;let mut defers=0;
+            for call in 1..=pages+4 {
+                test_support::settle_decodes(&mut r);
+                let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+                r.drain_image_decodes(&mut encoder).unwrap();
+                let result=regions.build_cache(&mut r,&request,false,&mut encoder,true,false);
+                assert!(matches!(result,Ok(())|Err(GpuRasterError::DeferredObjectWork)),"{result:?}");
+                r.uploads.finish(&encoder);encoder.submit(&r.queue);test_support::complete(&r);
+                if regions.cache.as_ref().unwrap().classified {calls=call;break;}
+                defers+=1;
+            }
+            let decode_misses=r.device.source_samples.stats().misses-before.misses;
+            assert!(calls>0,"classification did not finish: native={native}, pages={pages}, defers={defers}, decode_misses={decode_misses}");
+            assert!(!regions.cache.as_ref().unwrap().ready);
+            assert!(decode_misses>=pages as u64,"native={native}, cold pages={pages}, decode_misses={decode_misses}");
+            r.regions=Some(regions);counts.push((native,calls,defers,decode_misses));
+        }
+        assert!(counts.iter().all(|(_,calls,_,_)|*calls<=pages.div_ceil(16)+1),"native, classification calls, defers, decode misses: {counts:?}");
+    }
+
+    #[test]
     fn reference_dirty_pages_keep_the_cache_with_unchanged_paper() {
         let (mut r,source)=prepared_reference();
         let RegionSource::Scene {snapshot,scope:SceneScope::Raw(target)}=source else {unreachable!()};

@@ -68,6 +68,16 @@ pub(super) fn paint_base_source_bounds(base:&PaintBase,coordinate:[u32;2])->Pixe
     if bounds.is_empty() {PixelRect::EMPTY}else {PixelRect::new(bounds.min_x()-base.offset[0],bounds.min_y()-base.offset[1],bounds.max_x()-base.offset[0],bounds.max_y()-base.offset[1])}
 }
 
+pub(super) fn prepare_paint_base(r:&mut WgpuRasterizer,base:&PaintBase,coordinate:[u32;2])->Result<bool,GpuRasterError> {
+    let mut ready=true;
+    for coordinate in page_coordinates(paint_base_source_bounds(base,coordinate)) {
+        if r.source_tiles.borrow().prepared_view(base.image.storage(),coordinate).is_none() {
+            ready=false;if !r.request_exact_image_decode(base.image.id(),base.image.storage().clone(),coordinate)? {break;}
+        }
+    }
+    Ok(ready)
+}
+
 pub(super) fn plan_paint_base(r: &WgpuRasterizer, base: &PaintBase, coordinate: [u32; 2]) -> Result<Option<PaintBaseRead>, GpuRasterError> {
     let bounds = paint_base_bounds(base).intersect(page_rect(coordinate));
     if bounds.is_empty() { return Ok(None); }

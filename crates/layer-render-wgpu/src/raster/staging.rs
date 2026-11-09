@@ -95,13 +95,13 @@ impl TargetRestore {
                         else {self.held(&blob).is_some() || r.request_scalar_decode(blob,space)?};
                     if !requested {break;}
                 },
-                SourcePage::Base(coordinate,base)=> {Self::prepare_base(r,base,*coordinate)?;break;},
+                SourcePage::Base(coordinate,base)=> {source_access::prepare_paint_base(r,base,*coordinate)?;break;},
             }
         }
         for _ in 0..UPLOADS {
             let Some(source)=self.pending.get(self.next) else {break;};
             if let SourcePage::Base(coordinate,base)=source {
-                if !Self::prepare_base(r,base,*coordinate)? {break;}
+                if !source_access::prepare_paint_base(r,base,*coordinate)? {break;}
                 let Some(tile)=r.paint_base_tile(base,*coordinate,encoder)? else {self.next+=1;continue;};
                 let mut page=r.create_page(*coordinate,"staged photo base");page.primary_needs_clear=false;
                 encoder.copy_texture_to_texture(tile.texture.as_image_copy(),page.primary.texture.as_image_copy(),page.primary.texture.size());
@@ -145,15 +145,7 @@ impl TargetRestore {
         self.scalars=scalars;
         Ok(())
     }
-    fn prepare_base(r:&mut WgpuRasterizer,base:&layer_core::authored::PaintBase,coordinate:[u32;2])->Result<bool,GpuRasterError> {
-        let mut ready=true;
-        for coordinate in page_coordinates(source_access::paint_base_source_bounds(base,coordinate)) {
-            if r.source_tiles.borrow().prepared_view(base.image.storage(),coordinate).is_none() {
-                ready=false;if !r.request_exact_image_decode(base.image.id(),base.image.storage().clone(),coordinate)? {break;}
-            }
-        }
-        Ok(ready)
-    }
+
 }
 pub(crate) struct RestorePreflight {
     key:Key,
