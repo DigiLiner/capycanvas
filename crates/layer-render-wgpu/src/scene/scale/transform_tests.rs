@@ -432,6 +432,31 @@ fn whole_image_selections_reserve_one_transform_input_pyramid() {
     r.set_transform_preview(Some(&preview)).unwrap();
     r.begin_frame_memory(frame);
     assert!(allocation(&r, plan, frame, None)[1] > no_selection[1]);
+
+    for (label, selection, kept) in [("none", None, false),
+        ("whole", Some(Selection::polygon([[0.,0.],[4248.,0.],[4248.,2832.],[0.,2832.]]
+            .map(|[x,y]| Point { x,y }).to_vec()).unwrap()), false),
+        ("partial", preview.selection.clone(), true)] {
+        let mut r = crate::memory::memory_tests::legacy_scene_renderer(doc.composition().color);
+        let mut transforms = crate::paint_transform::PaintTransforms::new(&r.device);
+        let preview = layer_render::TransformPreview { selection, ..preview.clone() };
+        let level = crate::paint_transform::input_level(plan.level, &preview, extent);
+        assert_eq!(transforms.input_requirements(&preview, level, extent), (level, kept), "{label}: transform input requirements");
+        let pyramid = display_mips::Plan::at(extent, level).pixel_bytes_through(display_mips::MAX_LEVEL);
+        crate::memory::memory_tests::scene_frame_with_budget(&mut r, frame, pyramid);
+        assert_eq!(r.projected_restore_bytes(), 0, "{label}: no pending raster restores");
+        let available = r.memory.preparation_limits().into_iter().sum::<u64>();
+        assert!(pyramid <= available && available < pyramid + pyramid,
+            "{label}: preparation must have headroom for exactly one input pyramid: {pyramid} <= {available} < {}", pyramid + pyramid);
+        let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        let result = transforms.prepare_preview(&mut r, &mut encoder, &preview, doc.scene(), plan.level, false);
+        if kept {
+            assert!(matches!(result, Err(GpuRasterError::DeferredObjectWork | GpuRasterError::SourceWorkingSetExceeded)),
+                "{label}: a partial selection needs a second input pyramid: {result:?}");
+        } else {
+            assert!(result.is_ok(), "{label}: one input pyramid must admit an entire-image preview: {result:?}");
+        }
+    }
 }
 
 #[test]
