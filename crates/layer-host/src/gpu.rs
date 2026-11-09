@@ -290,14 +290,12 @@ mod tests {
         host.resize(640, 480, 1.).unwrap();
         host.startup = Default::default();
         let mut host = std::thread::Builder::new()
-            .name("native-renderer-backdrop".into())
+            .name("native-renderer-preparation".into())
             .stack_size(384 * 1024)
             .spawn(move || {
-                let submitted = host.session.engine().backend().0.as_ref().unwrap().submitted_updates();
                 host.prepare_canvas_frame(0, 0, false).unwrap();
-                assert!(host.session.engine().backend().0.as_ref().unwrap().submitted_updates() > submitted);
-                host.session.submit_backdrop_frame().unwrap();
-                assert!(host.session.engine().backend().0.as_ref().unwrap().submitted_updates() > submitted);
+                let engine=host.session.engine();
+                assert!(!engine.backend().0.as_ref().unwrap().startup_needs_update(engine.document(),engine.brush(),false));
                 host
             })
             .unwrap()

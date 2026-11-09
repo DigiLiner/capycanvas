@@ -90,9 +90,8 @@ is not another document model and does not own native surfaces or widgets.
 The shared native GPU factory keeps renderers on the heap during construction
 and transfer to their owning sessions, leaving room on native thread stacks.
 Retained scene caches stay on the heap through frame encoding and capture too.
-Early backdrop frames admit their display recipes through the shader workers
-before composing. While preparation is pending, the host presents its startup
-surround and retries the backdrop without restoring document rasters.
+Renderer installation starts brush and document preparation before presentation.
+The first canvas frame follows normal full-document and raster admission.
 
 ## From a pen event to a frame
 

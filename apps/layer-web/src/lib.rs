@@ -489,6 +489,7 @@ impl WebApp {
         self.surface = Some(surface);
         self.session.set_hdr_display_available(false);
         self.startup = StartupProgress::default();
+        self.prepare_startup()?;
         Ok(())
     }
 }
@@ -583,9 +584,6 @@ impl WebApp {
         let Some(gpu) = &engine.backend().0 else {
             return Ok(());
         };
-        if !self.surface.as_ref().is_some_and(|s| s.blank_presented) {
-            return Ok(());
-        }
         let transform = engine.transform_preview().is_some();
         if gpu.startup_needs_update(engine.document(), engine.brush(), transform) {
             let (document, brush) = (engine.document().clone(), engine.brush().clone());
@@ -1161,23 +1159,11 @@ impl WebApp {
         if !self.gpu_ready() {
             return serialize(&layer_ui::UiChange::default());
         }
-        let first = !self.surface.as_ref().is_some_and(|s| s.blank_presented);
-        let mut change = layer_ui::UiChange::default();
-        if first {
-            self.session.submit_backdrop_frame().map_err(js)?;
-        } else {
-            self.prepare_startup()?;
-            self.startup = self.rasterizer()?.poll_startup().map_err(js)?;
-            if self.startup.canvas_ready {
-                change = self
-                    .session
-                    .frame(
-                        (now_ms * 1_000_000.) as u64,
-                        (presentation_ms * 1_000_000.) as u64,
-                    )
-                    .map_err(js)?;
-            }
-        }
+        self.prepare_startup()?;
+        self.startup = self.rasterizer()?.poll_startup().map_err(js)?;
+        let mut change = if self.startup.canvas_ready {
+            self.session.frame((now_ms * 1_000_000.) as u64,(presentation_ms * 1_000_000.) as u64).map_err(js)?
+        } else {layer_ui::UiChange::default()};
         // Compiler completions wake the browser explicitly. Once the brush is
         // usable, optional compilation does not require continuous redraws.
         change.canvas_wake |= !self.startup.brush_ready || self.session.holding_input();

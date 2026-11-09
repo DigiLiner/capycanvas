@@ -178,26 +178,52 @@ impl Needs {
         }
         required
     }
-    pub(super) fn style(
-        &mut self,
-        r: &WgpuRasterizer,
-        style: &layer_render::DabStyle,
-        reach: dry_material::Reach,
-        mask: bool,
-        preview: bool,
+    pub(super) fn stroke(
+        &mut self, r: &WgpuRasterizer, style: &layer_render::DabStyle,
+        reach: dry_material::Reach, mask: bool, preview: bool,
     ) {
-        self.styles.push(style.clone());
-        if style.selection.is_some() {
-            self.compute.extend(r.selection_clip.pipelines().map(Clone::clone));
-        }
         if mask {
-            let index = layer_masks::MaskRenderer::brush_index(style);
-            self.render.push(r.layer_masks.brush[index].clone());
+            self.render.push(r.layer_masks.brush[layer_masks::MaskRenderer::brush_index(style)].clone());
             return;
         }
         if style.execution == BrushExecution::Liquify {
             let pipelines = r.recipes.liquify.get_or_init(|| Arc::new(liquify::Pipelines::new(r)));
-            self.compute.extend([pipelines.update(style).clone(), pipelines.reconstruct.clone(), pipelines.mips.reduce.clone(), pipelines.mips.fused_reduce.clone()]);
+            self.compute.push(pipelines.update(style).clone());
+            return;
+        }
+        let plan = BrushPassPlan::for_device(style, &r.device);
+        if pointwise(style) && plan.direct.is_none() {
+            let pipelines = &r.pipelines.dry_material;
+            for extra in reach.required_variants(style) {
+                self.compute.push(pipelines.selected_kernel(style, plan.material, plan.state.coverage, extra).clone());
+                if preview && plan.state.coverage {
+                    self.compute.push(pipelines.selected_kernel(style, plan.material, false, extra).clone());
+                }
+            }
+        }
+        if let Some(kind) = plan.direct {
+            self.render.push(r.pipelines.direct[kind as usize].clone());
+        } else if destination_material::transported(style) {
+            self.compute.extend(destination_material::selected(plan, preview)
+                .map(|entry| r.pipelines.destination_material.kernel(style, entry).clone()));
+        }
+    }
+    pub(super) fn style(
+        &mut self, r: &WgpuRasterizer, style: &layer_render::DabStyle,
+        reach: dry_material::Reach, mask: bool, preview: bool,
+    ) {
+        self.stroke(r, style, reach, mask, preview);
+        self.style_helpers(r, style, mask, preview);
+    }
+    fn style_helpers(&mut self, r: &WgpuRasterizer, style: &layer_render::DabStyle, mask: bool, preview: bool) {
+        self.styles.push(style.clone());
+        if style.selection.is_some() {
+            self.compute.extend(r.selection_clip.pipelines().map(Clone::clone));
+        }
+        if mask { return; }
+        if style.execution == BrushExecution::Liquify {
+            let pipelines = r.recipes.liquify.get().unwrap();
+            self.compute.extend([pipelines.reconstruct.clone(), pipelines.mips.reduce.clone(), pipelines.mips.fused_reduce.clone()]);
             return;
         }
         let plan = BrushPassPlan::for_device(style, &r.device);
@@ -210,26 +236,14 @@ impl Needs {
                 && (preview || (!pipelines.in_place() && !plan.state.coverage)) {
                 self.compute.push(pipelines.copy_kernel(false).clone());
             }
-            if preview && style.rendering.blend_mode == BrushBlendMode::Normal { self.compute.push(pipelines.gather_kernel().clone()); }
-            for extra in reach.required_variants(style) {
-                let kernel = |coverage| pipelines.selected_kernel(style, plan.material, coverage, extra).clone();
-                self.compute.push(kernel(plan.state.coverage));
-                if preview && plan.state.coverage { self.compute.push(kernel(false)); }
+            if preview && style.rendering.blend_mode == BrushBlendMode::Normal {
+                self.compute.push(pipelines.gather_kernel().clone());
             }
         }
-        if let Some(kind) = plan.direct {
-            self.render.push(r.pipelines.direct[kind as usize].clone());
-        } else if destination_material::transported(style) {
-            let kernels = &r.pipelines.destination_material;
-            self.compute.extend(destination_material::selected(plan, preview).map(|entry| kernels.kernel(style, entry).clone()));
-        }
-        if plan.stroke_edge {
-            self.render.push(r.pipelines.stroke_edge.clone());
-        }
+        if plan.stroke_edge { self.render.push(r.pipelines.stroke_edge.clone()); }
         if plan.state.watercolor_wetness {
             self.compute.push(r.pipelines.watercolor_compute.1.clone());
-            self.compute
-                .extend(r.pipelines.watercolor_transport.iter().cloned());
+            self.compute.extend(r.pipelines.watercolor_transport.iter().cloned());
             self.render.push(r.pipelines.watercolor_composite.clone());
         }
     }
@@ -421,6 +435,60 @@ impl WgpuRasterizer {
         startup.finished = false;
         startup.brush_ready = false;
         startup.compiler.advance();
+        let styles = [StrokeTool::Brush, StrokeTool::Eraser].map(|tool| layer_render::DabStyle {
+            selection: document.working.selection.clone().map(Arc::new),
+            ..brush_style(document, brush, tool)
+        });
+        let mask = document.drawing_target().or(document.working.target).is_some_and(SourceTarget::is_coverage);
+        let reach = dry_material::Reach::of(brush);
+        let mut strokes = Needs::default();
+        for style in &styles {
+            strokes.stroke(self, style, reach, mask, true);
+            strokes.require(&startup.compiler, BRUSH);
+        }
+        let mut current = Needs::default();
+        let mut warming: Vec<&Deferred<wgpu::ComputePipeline>> = Vec::new();
+        // Native publication must be ready before accepting a brush contact,
+        // but blank paper does not depend on writeback/promotion/validation.
+        if let Some(native) = &self.native_edit {
+            let gray = document.scene().targets().any(|target|
+                document.scene().color_mode(target) != layer_core::color::LayerColorMode::FullColor);
+            current.compute.extend(native.required_pipelines(document.composition().color.depth, gray).cloned());
+        }
+        for style in &styles {
+            strokes.style_helpers(self, style, mask, true);
+            let plan = BrushPassPlan::for_device(style, &self.device);
+            if !mask && pointwise(style) && plan.direct.is_none() {
+                for extra in reach.any_size().batch_variants(style).filter(|&extra| !reach.required_variants(style).any(|required| required == extra)) {
+                    for coverage in [Some(plan.state.coverage), plan.state.coverage.then_some(false)].into_iter().flatten() {
+                        let pipeline = self.pipelines.dry_material.selected_kernel(style, plan.material, coverage, extra);
+                        if !warming.iter().any(|p| std::ptr::eq(*p, pipeline)) { warming.push(pipeline); }
+                    }
+                }
+            }
+        }
+        strokes.require(&startup.compiler, BRUSH);
+        startup.papers.clear();
+        for style in &styles {
+            startup.masks.style(&startup.compiler, style, BRUSH);
+            if let Some(binding) = style.grain.and(style.paper.as_ref()) {
+                startup.papers.push((binding.clone(),self.papers.require(&self.device, Some(&startup.compiler), binding, BRUSH)?));
+            }
+        }
+        // Live transforms do not change document revision or brush settings.
+        // They still need their own shaders before an interactive frame runs.
+        if transform {
+            current.render.extend(self.transforms.as_ref().unwrap().pipelines());
+            current.compute.extend(self.transforms.as_ref().unwrap().display_pipelines());
+            current.render.extend([4, 5].map(|i| self.scene_pipelines.resample.mesh[i].clone()));
+            current.compute.extend(self.selection_clip.pipelines().map(Clone::clone));
+        }
+        if let Some(retouch) = self.retouch.as_ref().filter(|r| r.prepared()) {
+            let (render, compute) = retouch.pipelines();
+            current.render.extend(render);
+            current.compute.extend(compute);
+        }
+        current.require(&startup.compiler, BRUSH);
         if startup.document_key.as_ref().is_none_or(|key| !key.matches(document)) {
             let shader = ShaderDocument::new(document);
             let mut required = Needs::default();
@@ -522,55 +590,6 @@ impl WgpuRasterizer {
                 startup.effects_ready = true;
             }
         }
-        let mut current = Needs::default();
-        let mut strokes = Needs::default();
-        let mut warming: Vec<&Deferred<wgpu::ComputePipeline>> = Vec::new();
-        // Native publication must be ready before accepting a brush contact,
-        // but blank paper does not depend on writeback/promotion/validation.
-        if let Some(native) = &self.native_edit {
-            current.compute.extend(native.required_pipelines(document.composition().color.depth,startup.document_key.as_ref().unwrap().key.gray).cloned());
-        }
-        // A physical eraser can select the erase variant without a UI change.
-        let styles = [StrokeTool::Brush, StrokeTool::Eraser].map(|tool| layer_render::DabStyle {
-            selection: document.working.selection.clone().map(Arc::new),
-            ..brush_style(document, brush, tool)
-        });
-        for style in &styles {
-            let mask = startup.document_key.as_ref().unwrap().key.mask;
-            let reach = dry_material::Reach::of(brush);
-            strokes.style(self, style, reach, mask, true);
-            let plan = BrushPassPlan::for_device(style, &self.device);
-            if !mask && pointwise(style) && plan.direct.is_none() {
-                for extra in reach.any_size().batch_variants(style).filter(|&extra| !reach.required_variants(style).any(|required| required == extra)) {
-                    for coverage in [Some(plan.state.coverage), plan.state.coverage.then_some(false)].into_iter().flatten() {
-                        let pipeline = self.pipelines.dry_material.selected_kernel(style, plan.material, coverage, extra);
-                        if !warming.iter().any(|p| std::ptr::eq(*p, pipeline)) { warming.push(pipeline); }
-                    }
-                }
-            }
-        }
-        strokes.require(&startup.compiler, BRUSH);
-        startup.papers.clear();
-        for style in &styles {
-            startup.masks.style(&startup.compiler, style, BRUSH);
-            if let Some(binding) = style.grain.and(style.paper.as_ref()) {
-                startup.papers.push((binding.clone(),self.papers.require(&self.device, Some(&startup.compiler), binding, BRUSH)?));
-            }
-        }
-        // Live transforms do not change document revision or brush settings.
-        // They still need their own shaders before an interactive frame runs.
-        if transform {
-            current.render.extend(self.transforms.as_ref().unwrap().pipelines());
-            current.compute.extend(self.transforms.as_ref().unwrap().display_pipelines());
-            current.render.extend([4, 5].map(|i| self.scene_pipelines.resample.mesh[i].clone()));
-            current.compute.extend(self.selection_clip.pipelines().map(Clone::clone));
-        }
-        if let Some(retouch) = self.retouch.as_ref().filter(|r| r.prepared()) {
-            let (render, compute) = retouch.pipelines();
-            current.render.extend(render);
-            current.compute.extend(compute);
-        }
-        current.require(&startup.compiler, BRUSH);
         startup.current = current;
         startup.strokes = strokes;
         startup.warming = warming.into_iter().cloned().collect();

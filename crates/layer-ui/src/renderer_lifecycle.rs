@@ -141,30 +141,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(tiles)
     }
 
-    /// Present constant fills before restoring the document's committed raster.
-    pub fn submit_backdrop_frame(&mut self) -> Result<(), String> {
-        let view = self.state.camera.view();
-        let document = self.engine.document();
-        let scene = document.scene();
-        let backdrop = scene.constant_backdrop();
-        let snapshot = document.snapshot().as_ref().clone().with_scope(layer_core::authored::SceneScope::Members(backdrop.to_vec().into()));
-        self.engine.backend_mut().submit(layer_render::FramePacket {
-            commit_rasters: true,
-            time_seconds: 0.,
-            view,
-            scene: snapshot.view(),
-            inspect_mask: None,
-            selection_overlays: None,
-            document_extent: snapshot.view().composition().size,
-            blend_space: snapshot.view().composition().blend,
-            dabs: &[],
-            dab_batches: &[],
-            restore_rasters: &[],
-            reset_layers: true,
-            composite_all: true,
-        }).map_err(error)
-    }
-
     pub fn retained_document_tiles(&self) -> layer_core::raster_storage::RetainedTiles {
         let mut tiles = self.engine.retained_tiles();
         // Include the fixed native input queue/session structures. This is

@@ -125,7 +125,6 @@ const startupTimes = { canvas: null, document: null, brush: null, complete: null
 installTooltips();
 installPenScrolling();
 let startupNotice;
-let firstCanvasRendered = false;
 const gpuDiagnostics=createGpuDiagnostics();
 let wasmMemory;
 let servicingRequests = false;
@@ -515,16 +514,6 @@ function scheduleCompiler() {
   // by a later frame, with input/UI opportunities between each GPU scope.
   setTimeout(async () => {
     try {
-      if(epoch!==compilerEpoch || document.hidden || state.settings_open)return;
-      if (!firstCanvasRendered) {
-        // A display callback alone does not mean the GPU has rendered paper.
-        // Starting document compilation sooner can hold up Chrome's GPU-process
-        // command batch, including the pending first canvas presentation.
-        await gpuOperation(() => app.wait_for_canvas());
-        if(epoch!==compilerEpoch)return;
-        firstCanvasRendered = true;
-        await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
-      }
       if(epoch!==compilerEpoch || document.hidden || state.settings_open)return;
       await gpuOperation(() => app.compile_startup_step(optionalCompilerReady()));
       if(epoch!==compilerEpoch)return;
@@ -2078,7 +2067,7 @@ function stopGpu(error) {
 setInterval(()=>{if(gpuReady){const error=app.gpu_failure();if(error)stopGpu(error);}},1000);
 async function restartGpu() {
   if(!stopGpu(bootstrap.restarting_canvas))return;
-  compilerFailed=false;firstCanvasRendered=false;
+  compilerFailed=false;
   for(const key of Object.keys(startupTimes))startupTimes[key]=null;
   await startGpu();
 }
@@ -2090,7 +2079,7 @@ function documentGpuCurrent(owner) {
 
 async function resumeDocumentCanvas() {
   compilerEpoch++;compilerScheduled=false;compilerFailed=false;
-  gpuReady=app.gpu_ready();firstCanvasRendered=false;pending.length=0;
+  gpuReady=app.gpu_ready();pending.length=0;
   for(const key of Object.keys(startupTimes))startupTimes[key]=null;
   if(!gpuReady){
     const owner=app.state().document_file;

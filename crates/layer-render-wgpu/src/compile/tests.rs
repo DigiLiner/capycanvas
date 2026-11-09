@@ -15,6 +15,69 @@ pub(crate) fn requested<T>(scope: &Scope, recipe: &Deferred<T>, class: Class) ->
 }
 
 #[test]
+fn startup_declares_stroke_kernels_before_eraser_helpers_and_document_work() {
+    let color = Default::default();
+    let reference = crate::WgpuRasterizer::new_native_headless(color).unwrap();
+    let mut renderer = crate::test_support::staged_renderer(&reference, color);
+    let document = layer_core::Document::new(
+        layer_core::PortableId::random(),
+        64,
+        64,
+        layer_core::DocumentNames {
+            paint: "Ink".into(),
+            paper: "Paper".into(),
+        },
+    );
+    let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+    let batch = renderer.compilation.batch();
+    renderer.prepare_startup(&document, &brush, false).unwrap();
+    let mut expected = Vec::new();
+    for tool in [
+        layer_core::StrokeTool::Brush,
+        layer_core::StrokeTool::Eraser,
+    ] {
+        let mut style = layer_render::DabStyle::for_brush(&brush, tool);
+        style.blend_space = document.composition().blend;
+        style.paper = style
+            .grain
+            .and(document.drawing_target())
+            .map(|target| document.paper_binding(target));
+        let plan = crate::BrushPassPlan::for_device(&style, &renderer.device);
+        for extra in crate::dry_material::Reach::of(&brush).required_variants(&style) {
+            for coverage in [
+                Some(plan.state.coverage),
+                plan.state.coverage.then_some(false),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let key = Key::Recipe(
+                    renderer
+                        .pipelines
+                        .dry_material
+                        .selected_kernel(&style, plan.material, coverage, extra)
+                        .identity(),
+                );
+                if !expected.contains(&key) {
+                    expected.push(key);
+                }
+            }
+        }
+    }
+    let actual = renderer.compilation.with_queue(|queue| {
+        let mut entries: Vec<_> = queue.entries.iter().collect();
+        entries.sort_by_key(|(_, entry)| (entry.class, entry.sequence));
+        entries.into_iter().map(|(key, _)| *key).collect::<Vec<_>>()
+    });
+    drop(batch);
+    drop(renderer);
+    drop(reference);
+    finish_shader_compiler_shutdown();
+    assert!(!expected.is_empty());
+    assert_eq!(&actual[..expected.len()], expected.as_slice());
+}
+
+#[test]
 fn a_panicking_wake_fails_its_owner_and_keeps_the_worker_running() {
     let compiler = scope(1);
     let healthy = compiler.0.coordinator.scope().unwrap();

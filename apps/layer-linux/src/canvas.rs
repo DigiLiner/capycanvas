@@ -28,6 +28,7 @@ impl GpuCanvas {
         let (previous, _) = self.session.replace_renderer(renderer)?;
         drop(previous);
         self.session.renderer_mut().finish_startup_catalog()?;
+        self.prepare_startup()?;
         self.needs_present = true;
         Ok(())
     }
@@ -96,13 +97,29 @@ impl GpuCanvas {
         session.dispatch(layer_ui::UiAction::RestoreSettings { settings: Box::new(settings) })?;
         let (theme, accent) = crate::workspace::system_appearance();
         session.dispatch(layer_ui::UiAction::SystemThemeChanged { theme, accent })?;
-        Ok(Self {
+        let mut canvas=Self {
             session,
             cursor: CanvasCursor::default(),
             view_color: Default::default(),
             needs_present: true,
             pending_regions: 0,
-        })
+        };
+        canvas.prepare_startup()?;
+        Ok(canvas)
+    }
+    fn prepare_startup(&mut self)->Result<(),String> {
+        let engine = self.session.engine();
+        let transform = engine.transform_preview().is_some();
+        if engine
+            .backend()
+            .startup_needs_update(engine.document(), engine.brush(), transform)
+        {
+            let (document, brush) = (engine.document().clone(), engine.brush().clone());
+            self.session
+                .renderer_mut()
+                .prepare_startup(document, brush, transform)?;
+        }
+        Ok(())
     }
     pub async fn prepare_import(&mut self, cancelled: impl Fn() -> bool) -> Result<(), String> {
         let document = self.session.engine().document().clone();
@@ -149,17 +166,7 @@ impl GpuCanvas {
         #[cfg(test)]
         let start = std::time::Instant::now();
         self.session.engine().backend().resize_transition(extent(area));
-        let engine = self.session.engine();
-        let transform = engine.transform_preview().is_some();
-        if engine
-            .backend()
-            .startup_needs_update(engine.document(), engine.brush(), transform)
-        {
-            let (document, brush) = (engine.document().clone(), engine.brush().clone());
-            self.session
-                .renderer_mut()
-                .prepare_startup(document, brush, transform)?;
-        }
+        self.prepare_startup()?;
         let renderer = self.session.renderer_mut();
         if !renderer.ready()? {
             renderer.present_chrome().map_err(|error| error.to_string())?;

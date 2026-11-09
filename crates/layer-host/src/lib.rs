@@ -232,6 +232,7 @@ impl NativeHost {
         self.preparation.retire();
         self.install_preparation_wake();
         self.apply_change(previous, change);
+        if self.session.engine().backend().0.is_some() {self.prepare_canvas_startup()?;}
         Ok(retired)
     }
 
@@ -403,50 +404,44 @@ impl NativeHost {
         self.dirty = true;
         Ok(())
     }
-    pub fn prepare_canvas_frame(
-        &mut self,
-        now: u64,
-        presentation: u64,
-        has_presented: bool,
-    ) -> Result<(), String> {
-        if has_presented {
-            let engine = self.session.engine();
-            let gpu = engine
-                .backend()
-                .0
-                .as_ref()
-                .ok_or("Missing native renderer")?;
-            let transform = engine.transform_preview().is_some();
-            if gpu.startup_needs_update(engine.document(), engine.brush(), transform) {
-                let (document, brush) = (engine.document().clone(), engine.brush().clone());
-                self.session
-                    .renderer_mut()
-                    .0
-                    .as_mut()
-                    .unwrap()
-                    .prepare_startup(&document, &brush, transform)
-                    .map_err(|e| e.to_string())?;
-            }
-            self.startup = self
-                .session
+    fn prepare_canvas_startup(&mut self)->Result<(),String> {
+        let engine = self.session.engine();
+        let gpu = engine
+            .backend()
+            .0
+            .as_ref()
+            .ok_or("Missing native renderer")?;
+        let transform = engine.transform_preview().is_some();
+        if gpu.startup_needs_update(engine.document(), engine.brush(), transform) {
+            let (document, brush) = (engine.document().clone(), engine.brush().clone());
+            self.session
                 .renderer_mut()
                 .0
                 .as_mut()
                 .unwrap()
-                .poll_startup()
+                .prepare_startup(&document, &brush, transform)
                 .map_err(|e| e.to_string())?;
-            if self.startup.canvas_ready {
-                let previous = self.session.state().revision;
-                let change = self.session.frame(now, presentation)?;
-                self.dirty = change.needs_present();
-                self.apply_change(previous, change);
-            }
-        } else {
-            let gpu = self.session.renderer_mut().0.as_mut().ok_or("Missing native renderer")?;
-            self.startup = gpu.poll_startup().map_err(|e| e.to_string())?;
-            if !gpu.has_presentable_frame() { self.session.submit_backdrop_frame()?; }
         }
-        self.dirty |= !self.startup.complete || self.session.holding_input();
+        self.startup = self
+            .session
+            .renderer_mut()
+            .0
+            .as_mut()
+            .unwrap()
+            .poll_startup()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    pub fn prepare_canvas_frame(&mut self,now:u64,presentation:u64,has_presented:bool)->Result<(),String> {
+        self.prepare_canvas_startup()?;
+        let presentable=self.session.engine().backend().0.as_ref().is_some_and(|gpu|gpu.has_presentable_frame());
+        if self.startup.canvas_ready && (has_presented || !presentable) {
+            let previous=self.session.state().revision;
+            let change=self.session.frame(now,presentation)?;
+            self.dirty=change.needs_present();
+            self.apply_change(previous,change);
+        }
+        self.dirty|=!self.startup.complete || self.session.holding_input();
         Ok(())
     }
     pub fn dispatch(&mut self, action: UiAction) -> Result<(), String> {self.dispatch_with(action,UiSession::dispatch)}
@@ -1631,6 +1626,21 @@ mod tests {
         assert!(host.session.command(CommandId::CanvasSize).enabled);
         host.dispatch(UiAction::Invoke { command: CommandId::CanvasSize }).unwrap();
         assert!(host.session.state().layer_tools.canvas_size.is_some());
+    }
+
+    #[test]
+    fn installing_a_native_renderer_prepares_the_current_brush_before_presentation() {
+        let reference=layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        for platform in [layer_ui::Platform::Android,layer_ui::Platform::Windows,layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
+            let mut host=NativeHost::new(platform).unwrap();
+            let color=host.session.engine().document().composition().color;
+            let renderer=GpuContext::of(&reference).rasterizer(color,&RendererOptions::default(),false).unwrap();
+            host.replace_renderer(Renderer(Some(renderer))).unwrap();
+            let engine=host.session.engine();
+            let gpu=engine.backend().0.as_ref().unwrap();
+            assert!(!gpu.startup_needs_update(engine.document(),engine.brush(),false),"{platform:?}: installation declares startup without a surface frame");
+            assert!(!gpu.has_presentable_frame());
+        }
     }
 
     #[test]

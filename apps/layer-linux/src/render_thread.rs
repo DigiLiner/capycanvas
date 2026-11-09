@@ -2,7 +2,7 @@
 //! Small dab/layer records cross threads; live canvas pixels remain on the GPU.
 use crate::wayland::{Child, Geometry, Parent};
 use gtk::prelude::WidgetExt;
-use layer_core::{AssetId, authored::{SceneSnapshot, SceneScope, OccurrenceHandle, SourceTarget, EvaluationContext, ArtworkCapture}};
+use layer_core::{AssetId, authored::{SceneSnapshot, OccurrenceHandle, SourceTarget, EvaluationContext, ArtworkCapture}};
 use layer_render::{
     BackendError, BrushSource, CanvasRenderer, CursorSegment, Dab, DabBatch, FramePacket, HostImage,
     ReadbackImage, TipOutline, ViewState,
@@ -306,10 +306,6 @@ impl Drop for Frame {
     }
 }
 impl Frame {
-    fn backdrop_packet<'a>(&'a self,scope:&'a SceneScope)->FramePacket<'a> {
-        FramePacket {scene:self.scene.view().with_scope(scope),inspect_mask:None,selection_overlays:None,dabs:&[],dab_batches:&[],restore_rasters:&[],
-            reset_layers:true,composite_all:true,..self.packet()}
-    }
     fn packet(&self) -> FramePacket<'_> {
         FramePacket {
             commit_rasters: self.commit_rasters,
@@ -328,8 +324,6 @@ impl Frame {
         }
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StartupMode { VisibleFirst, Unpresented }
 
 #[derive(Clone)]
 struct Presentation {
@@ -461,7 +455,6 @@ enum Command {
     RetireStrokeSources,
     Startup(
         u64,
-        StartupMode,
         Box<(layer_core::Document, layer_core::BrushSnapshot, bool)>,
     ),
     FinishStartupCatalog,
@@ -964,29 +957,28 @@ impl RenderWorker {
         brush: layer_core::BrushSnapshot,
         transform: bool,
     ) -> Result<(), String> {
-        self.prepare_startup_mode(document, brush, transform, StartupMode::VisibleFirst)
+        self.present_frames=true;
+        self.queue_startup(document, brush, transform)
     }
     pub(super) fn prepare_import(
         &mut self,
         document: layer_core::Document,
         brush: layer_core::BrushSnapshot,
     ) -> Result<(), String> {
-        self.prepare_startup_mode(document, brush, false, StartupMode::Unpresented)
+        self.present_frames=false;
+        self.queue_startup(document, brush, false)
     }
-    fn prepare_startup_mode(
+    fn queue_startup(
         &mut self,
         document: layer_core::Document,
         brush: layer_core::BrushSnapshot,
         transform: bool,
-        mode: StartupMode,
     ) -> Result<(), String> {
-        self.present_frames=matches!(mode,StartupMode::VisibleFirst);
         self.startup_generation += 1;
         self.startup_key = Some((layer_render_wgpu::ShaderDocument::new(&document), layer_render_wgpu::ShaderBrushKey::new(&document, &brush), transform));
         self.startup = Default::default();
         self.send(Command::Startup(
             self.startup_generation,
-            mode,
             Box::new((document, brush, transform)),
         ))
         .map_err(error)
@@ -1563,8 +1555,6 @@ struct Worker {
     preparation: Option<Arc<PreparationSignal>>,
     preparation_wake:Option<layer_host::PreparationWake>,
     watch: layer_host::DeviceWatch,
-    backdrop_submitted: bool,
-    paper_ready: Arc<AtomicBool>,
     overlays: Option<Arc<Overlays>>,
     // Drop Vulkan's surface before the wl_surface (field declaration order).
     surface: wgpu::Surface<'static>,
@@ -1732,8 +1722,7 @@ impl Worker {
                 self.report_display(reply)?;
             }
             let mut report_startup = None;
-            if let Some((generation, document, brush, transform, mode)) = &startup_input
-                && (*mode == StartupMode::Unpresented || self.paper_ready.load(Ordering::Acquire))
+            if let Some((generation, document, brush, transform)) = &startup_input
             {
                 if self
                     .renderer
@@ -2034,9 +2023,9 @@ impl Worker {
                 Command::Retouch(retouch) => self.renderer.prepare_retouch(retouch.as_ref()),
                 Command::Regions(regions)=>self.renderer.prepare_regions(regions.as_ref()),
                 Command::RetireStrokeSources => self.renderer.retire_stroke_sources(),
-                Command::Startup(generation, mode, inputs) => {
+                Command::Startup(generation, inputs) => {
                     let (document, brush, transform) = *inputs;
-                    startup_input = Some((generation, document, brush, transform, mode));
+                    startup_input = Some((generation, document, brush, transform));
                     startup_progress = Default::default();
                 }
                 Command::FinishStartupCatalog => self.renderer.finish_startup_catalog(),
@@ -2266,8 +2255,6 @@ impl Worker {
             watch: gpu.watch,
             preparation:None,preparation_wake:None,
             view_color,
-            backdrop_submitted: false,
-            paper_ready: Arc::new(AtomicBool::new(false)),
             overlays: None,
             surface,
             instance,
@@ -2364,8 +2351,8 @@ impl Worker {
         Ok(())
     }
     fn frame_readiness(&mut self, frame: &Frame, canvas_ready: bool, brush_ready: bool) -> FrameReadiness {
-        if self.initial_completion.is_some() || self.backdrop_submitted && !canvas_ready
-            || !self.renderer.can_submit() || self.backdrop_submitted && !frame.dabs.is_empty() && !brush_ready {
+        if self.initial_completion.is_some() || !canvas_ready
+            || !self.renderer.can_submit() || !frame.dabs.is_empty() && !brush_ready {
             FrameReadiness::Waiting
         } else if !self.dependencies_ready(frame) {
             FrameReadiness::Dependencies
@@ -2385,10 +2372,9 @@ impl Worker {
         }
         #[cfg(test)]
         timing.begin(frame.queued_ns);
-        let backdrop = !self.backdrop_submitted;
-        self.draw(frame, backdrop, #[cfg(test)] timing)?;
-        if !backdrop { self.report_frame(report); }
-        Ok(!backdrop)
+        self.draw(frame, #[cfg(test)] timing)?;
+        self.report_frame(report);
+        Ok(true)
     }
     fn apply_pending_chrome(&mut self) -> Result<(), String> {
         while let Some(chrome) = self.chrome_requests.take_ready() { self.set_chrome(&chrome)?; }
@@ -2452,13 +2438,8 @@ impl Worker {
         Ok(())
     }
     fn dependencies_ready(&mut self,frame:&Frame)->bool {
-        if self.backdrop_submitted {
-            self.renderer.set_fill_preview(frame.fill_preview.clone());
-            self.renderer.raster_dependencies_ready(frame.packet(),frame.transform_preview.as_ref())
-        }else {
-            let scope=SceneScope::Members(Arc::from(frame.scene.view().constant_backdrop()));
-            self.renderer.raster_dependencies_ready(frame.backdrop_packet(&scope),None)
-        }
+        self.renderer.set_fill_preview(frame.fill_preview.clone());
+        self.renderer.raster_dependencies_ready(frame.packet(),frame.transform_preview.as_ref())
     }
     fn apply_overlays(&mut self, state: &Arc<Overlays>, #[cfg(test)] timing: &mut crate::timing::Timing) -> Result<(), String> {
         if self.overlays.as_ref().is_some_and(|current| Arc::ptr_eq(current, state)) { return Ok(()); }
@@ -2477,7 +2458,6 @@ impl Worker {
     fn draw(
         &mut self,
         frame: &mut Frame,
-        backdrop: bool,
         #[cfg(test)] timing: &mut crate::timing::Timing,
     ) -> Result<(), String> {
         if let Some(failure) = self.watch.failure() {
@@ -2501,22 +2481,15 @@ impl Worker {
         self.apply_overlays(&frame.overlays, #[cfg(test)] timing)?;
         let _presentation = self.renderer.prioritize_raster_presentation();
         #[cfg(test)]
-        if !backdrop && frame.scene.view().targets().any(|t| frame.scene.view().raster(t).is_some_and(|r| r.try_data().is_none())) {
+        if frame.scene.view().targets().any(|t| frame.scene.view().raster(t).is_some_and(|r| r.try_data().is_none())) {
             timing.raster_commit();
         }
-        if backdrop {
-            let scene = frame.scene.view();
-            let scope = SceneScope::Members(Arc::from(scene.constant_backdrop()));
-            self.renderer.submit(frame.backdrop_packet(&scope))                .map_err(error)?;
-            self.backdrop_submitted = true;
-        } else {
-            self.renderer.set_transform_preview(frame.transform_preview.as_ref()).map_err(error)?;
-            self.renderer.set_fill_reveal(frame.fill_reveal);
-            self.renderer.submit(frame.packet()).map_err(error)?;
-            if self.renderer.has_pending_submission() { frame.pending_rasters.clear(); }
-            #[cfg(test)]
-            timing.photo_frame(frame.scene.view());
-        }
+        self.renderer.set_transform_preview(frame.transform_preview.as_ref()).map_err(error)?;
+        self.renderer.set_fill_reveal(frame.fill_reveal);
+        self.renderer.submit(frame.packet()).map_err(error)?;
+        if self.renderer.has_pending_submission() { frame.pending_rasters.clear(); }
+        #[cfg(test)]
+        timing.photo_frame(frame.scene.view());
         #[cfg(test)]
         timing.mark(0);
         if !frame.present {return Ok(());}
@@ -2532,7 +2505,7 @@ impl Worker {
         if let Some(target) = target {
             self.publish(
                 target,
-                frame.stroke_target.filter(|_| !backdrop),
+                frame.stroke_target,
                 #[cfg(test)]
                 Some(timing),
                 #[cfg(test)]
@@ -2666,12 +2639,6 @@ impl Worker {
         if let Some(revision) = self.chrome.publish() {
             if self.chrome.first == FirstChrome::Visible { self.presented_chrome.publish(revision); }
             if self.chrome.hold { canvas_action(&self.area, "canvas.chrome", &self.presented_chrome); }
-        }
-        if !self.paper_ready.load(Ordering::Acquire) {
-            let ready = self.paper_ready.clone();
-            self.renderer
-                .queue()
-                .on_submitted_work_done(move || ready.store(true, Ordering::Release));
         }
         #[cfg(test)]
         if let Some(timing) = timing {

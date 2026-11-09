@@ -17,8 +17,9 @@ pipelines requested by a later transform frame.
 
 ## Order
 
-Startup prepares paper/presentation, the actual document, then the selected
-brush and physical eraser. Native document dependencies include the display
+Renderer installation starts preparation with the selected brush's stroke
+kernels, then physical eraser kernels, helpers and document work. Required
+recipes share declaration order. Native document dependencies include the display
 hierarchy's reduction kernels. Transform, warp, region tools and other brushes
 prepare on first use. Unused filter programs retain recipes. Shared pipeline
 recipes deduplicate work and prepared handles survive tool changes; a first
@@ -126,9 +127,9 @@ Application controls such as Settings remain usable while required shaders and
 raster work prepare. Shared command classification keeps these controls outside
 the ordered drawing-edit queue; file commands still wait for preceding edits.
 
-The initial backdrop frame includes only constant fills. Raster reconciliation
-and pending bake dependencies follow that scene scope, so excluded paint stays
-in its immutable backing until the full document and its decoder are ready.
+The first frame follows normal document and raster admission with the full scene.
+An already prepared drawing supplies its first surface presentation without
+another document submission.
 
 Raster backing admits frames by pending captures and their byte budget. The
 native worker creates its staging spares before processing queued captures;

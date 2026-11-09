@@ -138,6 +138,24 @@ test('compiler input hooks wait for app publication and retain contact and resum
   wait=0;timers[1].callback();assert.equal(context.compilerResumeTimer,null);assert.equal(wakes,1);
 });
 
+test('required compilation starts before the first canvas while optional work is held', async () => {
+  const timers=[], calls=[];
+  const context={gpuReady:true,compilerFailed:false,compilerScheduled:false,compilerEpoch:1,firstCanvasRendered:false,
+    state:{settings_open:false},document:{hidden:false},optionalCompilerReady:()=>false,
+    app:{shader_wait_ms:()=>0,shader_work_pending:optional=>{assert.equal(optional,false);return true;},
+      wait_for_canvas:()=>{calls.push('canvas wait');return Promise.resolve();},
+      compile_startup_step:optional=>{assert.equal(optional,false);calls.push('compile');return Promise.resolve();}},
+    setTimeout:callback=>{timers.push(callback);},requestAnimationFrame:()=>{},gpuOperation:work=>work(),
+    refreshStartup:()=>calls.push('progress'),wake:()=>calls.push('wake'),stopGpu:assert.fail};
+  runInNewContext(source.slice(source.indexOf('function scheduleCompiler()'),source.indexOf('function place(')),context);
+  context.scheduleCompiler();
+  const running=timers.shift()();
+  assert.equal(calls[0],'compile');
+  await running;
+  assert.deepEqual(calls,['compile','progress','wake']);
+  assert.equal(context.compilerScheduled,false);
+});
+
 test('live preferences publish while document dialogs retain exclusive editing input', () => {
   let busy=true;
   const received=[],published=[],change={regions:128};
