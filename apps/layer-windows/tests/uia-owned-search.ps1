@@ -510,8 +510,8 @@ Write-Output 'Slider cap geometry uses native arranged bounds and retains its or
 
 $scopesAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-scopes.ps1'),[ref]$tokens,[ref]$errors)
 if(@($errors).Count){throw ($errors|Out-String)}
-$scopesReveal=@($scopesAst.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reveal'},$true))
-if($scopesReveal.Count -ne 1){throw 'Missing actual scopes Reveal helper'}
+$scopesReveal=@($scopesAst.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reveal-Chart'},$true))
+if($scopesReveal.Count -ne 1){throw 'Missing actual scopes Reveal-Chart helper'}
 & {
     . ([scriptblock]::Create($scopesReveal[0].Extent.Text.Replace('System.Windows.Automation.','CapyOwnedSearchTest.').Replace('[CapyRowPointer]','[CapyOwnedSearchTest.Driver]')))
     $drawingWindow=[IntPtr]1
@@ -525,15 +525,15 @@ if($scopesReveal.Count -ne 1){throw 'Missing actual scopes Reveal helper'}
     function Start-Sleep([int]$Milliseconds){if($Milliseconds -ne 200){throw 'Unexpected scopes sleep'}}
     function Wait-Until([scriptblock]$Condition,[string]$Message){
         $state.waits++
-        if(& $Condition){throw 'Scopes Reveal accepted clipped UIA bounds as its scroll acknowledgment'}
+        if(& $Condition){throw 'Scopes Reveal-Chart accepted clipped UIA bounds as its scroll acknowledgment'}
         $state.arranged=[CapyOwnedSearchTest.Rect]::new(0,16,80,80)
         if(!(& $Condition)){throw $Message}
     }
-    $visible=Reveal 'histogram-chart'
-    if($viewport.Provider.VerticalScrollPercent -le 0){throw 'Scopes Reveal did not scroll the full native chart hidden below its clipped UIA rectangle'}
-    if($state.waits -ne 1 -or $visible.Bottom -ne 100 -or $visible.Height -ne 100){throw 'Scopes Reveal did not acknowledge native chart bounds within its viewport'}
+    $visible=Reveal-Chart 'histogram-chart'
+    if($viewport.Provider.VerticalScrollPercent -le 0){throw 'Scopes Reveal-Chart did not scroll the full native chart hidden below its clipped UIA rectangle'}
+    if($state.waits -ne 1 -or $visible.Bottom -ne 100 -or $visible.Height -ne 100){throw 'Scopes Reveal-Chart did not acknowledge native chart bounds within its viewport'}
 }
-Write-Output 'Scopes Reveal scrolls the full native chart despite clipped UIA bounds and acknowledges its native arranged position.'
+Write-Output 'Scopes Reveal-Chart scrolls the full native chart despite clipped UIA bounds and acknowledges its native arranged position.'
 $scopePlot=@($scopesAst.FindAll({param($n)$n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$plot' -and $n.Right.Extent.Text.Contains("'-chart'")},$true))
 if($scopePlot.Count -ne 1){throw 'Missing actual scope plot geometry'}
 $statements=@($scopePlot[0].Parent.Statements);$start=[array]::IndexOf($statements,$scopePlot[0]);if($start -gt 0 -and $statements[$start-1].Extent.Text.Contains("'-chart'")){$start--}
