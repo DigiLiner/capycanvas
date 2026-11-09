@@ -359,7 +359,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Marquee, Lasso or Polygon drag | 60 | | |
 | Enclose and Fill: loop drag and navigation during completion | 60 | Motion unmeasured; completion latency does not qualify moving-frame cadence | [Reference Fill completion](#reference-fill-completion) |
 | G-Pen and pan while Fill prepares eight references | 60 | **M4a.1 partial AB:** G-Pen 32.50 → 32.40 completed updates/s, a shared 60 Hz miss; pan 60.02 on both. Full ABBA pending | [Reference Fill completion](#reference-fill-completion) |
-| Reference Fill completion, 12 MP | Cold and warm response | Prepared stroke 5.5 → 3.6–3.8 s. **First-open cold regression:** 5.6–5.8 → 7.6–7.8 s | [Reference Fill completion](#reference-fill-completion) |
+| Reference Fill completion, 12 MP | Cold and warm response | Cold 10.939–11.083 → 4.315–4.487 s; relaunch 8.229–8.373 → 1.449–1.622 s; warm small face 3.123–3.253 → 0.725–0.853 s. One instrumented diagnostic cycle per arm; not qualification | [Reference Fill completion](#reference-fill-completion) |
 | Reference Fill opaque-edge warm completion, 12 MP | Within 5% of M5 | **Not met:** 3.695–3.883 → 4.112–4.278 s, **+10.7%** at bracket midpoints | [Reference Fill completion](#reference-fill-completion) |
 | Reference Fill M4b.1 warm completion, 12 MP | Within 5% of M4b | 4.083–4.275 → 4.127–4.300 s, **+0.83%** at bracket midpoints; screenshot upper bound **+5.32%**, qualification uncertified | [Reference Fill completion](#reference-fill-completion) |
 | Reference Fill warm regression check (M6), 12 MP | Scoped reference Fill response check | 4.062–4.291 → 4.113–4.292 s, **+0.63%** at bracket midpoints; screenshot upper bound **+5.673%**, qualification uncertified | [Reference Fill completion](#reference-fill-completion) |
@@ -418,6 +418,19 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Interface language change | 60 | Current lifecycle binary unmeasured. Earlier German checkpoint: cold publication 169.2–195.5 ms; warm 144.4–194.4 ms; preparation-only maximum 4.095 ms | Matched Web language checkpoint below; no tier qualification |
 
 ## Reference Fill completion
+
+2026-11-09: one instrumented diagnostic cycle per arm on TCL at 12 MP,
+not a matched qualification block. The control capture in `results.md` is
+`030866ca2`, immediately before the shutdown-only baseline `0ac19d24d`;
+final main is `fc15604e5`. Values are visible-fill brackets
+([artifacts JSON](../../artifacts/fill-tools/fill-speed/final-cycle/results.json)).
+
+| Scenario | Control | Final main |
+| --- | ---: | ---: |
+| S1 cold | 10.939–11.083 s | 4.315–4.487 s |
+| S2 relaunch | 8.229–8.373 s | 1.449–1.622 s |
+| S3 warm small face | 3.123–3.253 s | 0.725–0.853 s |
+| S3 background | 4.402–4.560 s | 2.030–2.197 s |
 
 The 2026-11-06 opaque-fragment split uses the same 12 MP cold protocol,
 with `009e858f8` as control. Each row is a separate matched four-run block;
