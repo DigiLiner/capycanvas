@@ -151,7 +151,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     std::set<uint32_t> handledColorRequests;
     std::array<std::shared_ptr<PreviewPanel>,2> previewPanels{std::make_shared<PreviewPanel>(),std::make_shared<PreviewPanel>()};
     std::shared_ptr<ResponseCalibration> pressure=std::make_shared<ResponseCalibration>();
-    hstring previousTheme,previousPalette,paintedTheme;std::vector<uint32_t> publishedBridgeGroups,publishedBridgeColumns;
+    hstring previousTheme,previousPalette,paintedTheme;std::vector<uint32_t> publishedBridgeGroups,publishedColumns;
     Flyout popup{nullptr};
     std::wstring popupControl;
     std::shared_ptr<uint64_t> popupGeneration=std::make_shared<uint64_t>(0);
@@ -559,7 +559,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         layoutInput=std::move(preparedInput);
         if(full){
         if(previousGpu>0&&num(model,L"windows_gpu_generation")!=previousGpu){
-            data->chromeFrames->Reset();publishedBridgeGroups.clear();publishedBridgeColumns.clear();
+            data->chromeFrames->Reset();publishedBridgeGroups.clear();publishedColumns.clear();
             data->thumbnails=CreateLayerThumbnailCache(data->query);
             data->previews=CreateFilterPreviewCache(data->query);
         }
@@ -823,7 +823,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             {L"shaders_ready",B(flag(data->model,L"shaders_ready"))},{L"checkpoint_camera",object(object(data->model,L"windows_recovery"),L"camera")},
             {L"color_field_pixels",N(double(data->colorFieldPixels))},
             {L"color_preview",object(data->colorPreview,L"picker").GetNamedValue(L"preview",JsonValue::CreateNullValue())},
-            {L"workspace_update",workspaceUpdate},{L"groups",positions},{L"handles",grips},{L"elements",elements},
+            {L"workspace_update",workspaceUpdate},{L"groups",positions},{L"columns",collapsed->Presentation()},{L"handles",grips},{L"elements",elements},
             {L"window_resizing",B(windowResizing)},{L"native_resize_pending",B(resizeHandback)},
             {L"snapshot_qpc",N(double(snapshotQpc.QuadPart))},{L"native_sizing_start_qpc",N(double(nativeSizingStartQpc))},{L"native_sizing_end_qpc",N(double(nativeSizingEndQpc))},
             {L"resize_layout_frames",O({{L"count",N(double(resizeFrames.size()+resizeFrameOverflow))},{L"overflow",N(double(resizeFrameOverflow))},{L"tolerance",N(.01)},{L"samples",resizeSamples}})},
@@ -1069,7 +1069,11 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         return tiles.Size()&&!flag(geometry,L"tabs_visible")?float(num(tiles,L"tile_corner_radius",SurfaceRadius)):SurfaceRadius;
     }
     bool chromeReady()const{return data->chromeFrames->sentRevision&&data->chromeFrames->revision==data->chromeFrames->sentRevision;}
-    bool panelBridgeGroup(uint32_t id)const{return data->chromeFrames->Group(id);}
+    bool columnReceiver(uint32_t id)const{
+        for(auto value:array(panelBridgeFrame,L"bridges"))
+            for(auto receiver:array(value.GetArray().GetObjectAt(2),L"receivers"))if(num(receiver.GetObject(),L"group")==id)return true;
+        return false;
+    }
     void measurePanelBridges(){
         if(!layoutInput||!root.IsLoaded()||viewportWidth<=0||viewportHeight<=0)return;
         A allocated;
@@ -1098,14 +1102,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         A result;for(auto value:{color.R/255.,color.G/255.,color.B/255.,color.A/255.*opacity})result.Append(N(value));return result;
     }
     A panelSurfaces(UIElement const& reference){
-        publishedBridgeGroups.clear();publishedBridgeColumns.clear();publishedBridgeGroups.reserve(groups.size());publishedBridgeColumns.reserve(array(panelBridgeFrame,L"columns").Size());
+        publishedBridgeGroups.clear();publishedColumns.clear();publishedBridgeGroups.reserve(groups.size());publishedColumns.reserve(array(panelBridgeFrame,L"columns").Size());
         A surfaces;auto offset=root.TransformToVisual(reference).TransformPoint({0,0});
         for(auto value:array(panelBridgeFrame,L"columns")){
             auto column=value.GetObject();double id=num(column,L"column");A bridges;
             for(auto bridgeValue:array(panelBridgeFrame,L"bridges")){auto bridge=bridgeValue.GetArray();if(bridge.GetNumberAt(0)==id)bridges.Append(bridge.GetObjectAt(2));}
-            if(!bridges.Size())continue;
             A receivers;
-            auto expected=array(bridges.GetObjectAt(0),L"receivers");
+            auto expected=bridges.Size()?array(bridges.GetObjectAt(0),L"receivers"):A{};
             for(auto receiverValue:expected){auto receiver=receiverValue.GetObject();auto found=groups.find(uint32_t(num(receiver,L"group")));if(found==groups.end())continue;
                 auto const& group=found->second;if(group.hidden||group.presented.Size()||!group.frame.IsLoaded()||group.frame.Visibility()!=Visibility::Visible||group.frame.Opacity()<=0)continue;
                 auto rect=[](Rect bounds){A values;for(auto v:{bounds.X,bounds.Y,bounds.Width,bounds.Height})values.Append(N(v));return values;};
@@ -1121,8 +1124,8 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                     {L"color",panelColor(data->glass(L"panel").Color(),group.frame.Opacity())},
                     {L"strip_color",panelColor(data->glass(L"strip").Color(),group.frame.Opacity())}}));
             }
-            if(receivers.Size()!=expected.Size())continue;
-            publishedBridgeColumns.push_back(uint32_t(id));for(auto item:receivers)publishedBridgeGroups.push_back(uint32_t(num(item.GetObject(),L"group")));
+            if(receivers.Size()!=expected.Size()){bridges.Clear();receivers.Clear();}
+            publishedColumns.push_back(uint32_t(id));for(auto item:receivers)publishedBridgeGroups.push_back(uint32_t(num(item.GetObject(),L"group")));
             auto b=rectangle(object(column,L"bounds"));A sidebar,translation;
             for(auto v:{b.X,b.Y,b.Width,b.Height})sidebar.Append(N(v));translation.Append(N(offset.X));translation.Append(N(offset.Y));
             surfaces.Append(O({{L"offset",translation},{L"sidebar",sidebar},{L"radii",array(column,L"radii")},
@@ -1203,9 +1206,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 if(num(value.GetObject(),L"group")==id){path=value.GetObject();break;}
             auto key=path.Stringify();
             if(key!=group.bridgeKey){group.bridgeKey=key;group.bridge=bridgeCommands(array(path,L"commands"));group.backgroundKey=L"";}
-            group.gpu=!nativeResize()&&!group.presented.Size()&&panelBridgeGroup(id);
-            group.background.Root().Opacity(group.gpu?0:1);group.strip.Root().Opacity(group.gpu?0:1);
-            group.shadow.Root().Opacity(group.gpu||!group.bridge.empty()?0:group.frame.Opacity());
+            auto const& chrome=*data->chromeFrames;
+            bool connected=!nativeResize()&&!group.presented.Size()&&columnReceiver(id);
+            group.gpu=connected&&chrome.Group(id)&&chrome.presented.elements.contains(ChromeFrames::Id(group.frame));
+            bool pending=connected&&!group.gpu;
+            group.background.Root().Opacity(connected?0:1);group.strip.Root().Opacity(connected?0:1);
+            group.content.Opacity(pending?0:1);group.content.IsHitTestVisible(!pending);
+            group.shadow.Root().Opacity(connected||!group.bridge.empty()?0:group.frame.Opacity());
         }
     }
     void hoverTabs(Group& group,UIElement const& hovered){for(auto const& [id,shell]:group.tabs)hoverPanelTabShell(shell,shell.Children().GetAt(1)==hovered);}
@@ -1274,11 +1281,11 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             }overviews.Append(copy);
         }
         panels=panelSurfaces(reference);
-        if(!windowResizing||resizeTintFrame){frame.groups.insert(publishedBridgeGroups.begin(),publishedBridgeGroups.end());frame.columns.insert(publishedBridgeColumns.begin(),publishedBridgeColumns.end());}
+        if(!windowResizing||resizeTintFrame){frame.groups.insert(publishedBridgeGroups.begin(),publishedBridgeGroups.end());frame.columns.insert(publishedColumns.begin(),publishedColumns.end());}
         presentPanelBridges();
         A regions;
         for(auto const& [id,group]:groups)if(std::find(publishedBridgeGroups.begin(),publishedBridgeGroups.end(),id)==publishedBridgeGroups.end()&&group.frame.Visibility()==Visibility::Visible&&!group.presented.Size())appendGlass(regions,group.frame,reference,{group.corners[0],group.corners[1],group.corners[2],group.corners[3]},true);
-        collapsed->AppendGlass(regions,reference,publishedBridgeColumns);drawers->AppendGlass(regions,connections,reference);
+        collapsed->AppendGlass(regions,reference,publishedColumns);drawers->AppendGlass(regions,connections,reference);
         appendGlass(regions,cameraSurface,reference,cornerRadii(cameraSurface.CornerRadius()));
         canvasBar->AppendGlass(regions,reference);notice->AppendGlass(regions,reference);commandSearch->AppendGlass(regions,reference);
         bubbles->Glass(regions,arcs,colors,reference);

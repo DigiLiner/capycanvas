@@ -93,8 +93,9 @@ radii. The shared `ViewportPresenter` blurs its own artwork beneath them:
   geometry; scaling applies to positions and lengths once, not angles or
   strength. Movement and strength changes redraw without publishing a full UI
   model; a changed region count still publishes the glass diagnostics.
-  Joined panels retain GPU tint during in-app drags. During native window
-  sizing, native contours draw tint over GPU blur and shadows; GPU tint stays
+  Collapsed columns retain GPU tint with or without bridges; new receiver controls
+  appear after their GPU tint is acknowledged. Joined panels retain GPU tint during
+  in-app drags. During native window sizing, native contours draw tint over GPU blur and shadows; GPU tint stays
   until XAML has rendered the native tint, and returns after the
   final tinted GPU revision is presented.
 - Drawer and column connectors add their rectangle and concave feet from the

@@ -186,6 +186,7 @@ CollapsedColumns::CollapsedColumns(std::shared_ptr<WorkspaceData> data,Canvas ro
 CollapsedColumns::~CollapsedColumns(){impl->reset();}
 void CollapsedColumns::Apply(){impl->apply();}
 A CollapsedColumns::Geometry()const{A result;for(auto const& [id,column]:impl->columns){auto value=column->geometryMeasure();if(value.Size())result.Append(value);}return result;}
+A CollapsedColumns::Presentation()const{A result;for(auto const& [id,column]:impl->columns)result.Append(O({{L"id",N(id)},{L"gpu_background",B(column->gpu)}}));return result;}
 void CollapsedColumns::ForEachBounds(UIElement const& reference,std::function<void(uint32_t,Rect)> const& visit)const{
     for(auto const& [id,column]:impl->columns){
         if(!column->background.IsLoaded()||column->background.Visibility()!=Visibility::Visible||column->background.Opacity()<=0)continue;

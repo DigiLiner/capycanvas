@@ -78,7 +78,7 @@ function Check-ScrollRollback {
 }
 function Check-ColumnInteractions {
     foreach($operation in @('menu','double-click','resize')){
-        if((Column 12).open){Tap 'column-icon-layers';Wait-Until {!(Column 12).open} 'Column did not close'}
+        if((Column 12).open){Tap 'column-icon-layers';Wait-Until {!(Column 12).open} 'Column did not close';Check-ColumnGpu 12}
         if($operation -eq 'menu'){
             if($Device -eq 'mouse'){Context 'collapsed-column-12'}
             else{
@@ -138,6 +138,15 @@ function Check-DockTargets {
         if(!(Column 12).open){Tap 'column-icon-layers'}
         Check-Open 12
     }
+}
+function Check-ColumnGpu([int]$Id){
+    Wait-Until {
+        $presentation=Presentation
+        $bridges=@($presentation.panel_bridge_frame.bridges|Where-Object {$_[0] -eq $Id})
+        $presentation.chrome_revision -and $presentation.chrome_revision -eq $presentation.presented_chrome_revision -and (($bridges.Count -gt 0) -eq [bool](Column $Id).open)
+    } "Column $Id tint revision did not settle"
+    $column=(Presentation).columns|Where-Object id -eq $Id|Select-Object -First 1
+    if(!$column -or !$column.gpu_background){throw "Collapsed column $Id lost GPU tint ownership across a bridge transition"}
 }
 function Check-Open([int]$Id){
     Wait-Until {
@@ -258,8 +267,9 @@ try {
     [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$theme}|ConvertTo-Json -Compress))
     Start-Review 'initial'
     if($Journey -like 'scroll-*'){Check-Open 12;Check-ScrollRollback;& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close;return}
-    Check-Open 12;Capture 'default-paint';Check-ColumnInteractions;Check-DockTargets
+    Check-Open 12;Check-ColumnGpu 12;Capture 'default-paint';Check-ColumnInteractions;Check-DockTargets
     Tap 'column-icon-layers';Wait-Until {!(Column 12).open} 'Clicking the selected member did not close it'
+    Check-ColumnGpu 12
     foreach($group in (Column 12).groups){foreach($icon in $group.icons){if((Control ('column-icon-'+$icon.panel)).Current.ItemStatus -eq 'Selected'){throw 'Closed strip retained a selected tile'}}}
     Tap 'column-icon-layers';Check-Open 12
     Context 'panel-tab-brushes';Invoke 'Collapse column' -Name
@@ -273,6 +283,7 @@ try {
     Tap 'column-icon-brushes';Check-Open 4
     Tap 'column-icon-layers';Check-Open 12
     if((Column 4).open){throw 'Two members remained open in one stack'}
+    Check-ColumnGpu 12
     Capture 'stacked-open'
     # Native tab bodies and handles are immediate; icon bodies retain their hold.
     foreach($source in @(
@@ -312,6 +323,7 @@ try {
         WindowCommand 'undo_workspace';Wait-Until {(Layout) -eq $nudged} 'Undo did not restore the nudged divider'
     }
     Tap 'column-icon-layers';Wait-Until {!(Column 12).open} 'Stack member did not close'
+    Check-ColumnGpu 12
     foreach($divider in (Model).layout.dividers|Where-Object fixed){if(Find ('divider-'+$divider.id)){throw 'Closed stack exposed a fixed resize handle'}}
     Context 'column-grip-12';Toggle 'Open individual panels'
     Tap 'column-icon-layers';Wait-Until {@((Model).state.customization.column_drawers).Count -eq 1} 'Individual-panels mode did not open a tabbed drawer'

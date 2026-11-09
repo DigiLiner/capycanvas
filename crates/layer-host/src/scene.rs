@@ -141,14 +141,14 @@ struct GlassPanel {
 }
 
 impl GlassPanel {
-    fn surface(&self) -> Option<layer_render_wgpu::PanelSurface> {
-        let bridge=self.bridges.first()?;
+    fn surface(&self) -> layer_render_wgpu::PanelSurface {
+        let bridge=self.bridges.first();
         let rect=|mut b:[f32;4]|{b[0]+=self.offset[0];b[1]+=self.offset[1];b};
-        Some(layer_render_wgpu::PanelSurface { opacity:1.,
-            sidebar:rect(self.sidebar),sidebar_radii:self.radii,color:self.color,scale:1.,plane:bridge.plane+self.offset[0],
-            bridge_width:bridge.width(),direction:if bridge.direction==layer_ui::Edge::Right {1.} else {-1.},
+        layer_render_wgpu::PanelSurface { opacity:1.,
+            sidebar:rect(self.sidebar),sidebar_radii:self.radii,color:self.color,scale:1.,plane:bridge.map_or(0.,|b|b.plane+self.offset[0]),
+            bridge_width:bridge.map_or(0.,layer_ui::PanelBridge::width),direction:if bridge.is_some_and(|b|b.direction==layer_ui::Edge::Left) {-1.} else {1.},
             anchors:self.bridges.iter().map(|b|rect([b.anchor.x,b.anchor.y,b.anchor.width,b.anchor.height])).collect(),
-            groups:bridge.receivers.iter().filter_map(|receiver| {
+            groups:bridge.into_iter().flat_map(|b|&b.receivers).filter_map(|receiver| {
                 let native=self.groups.iter().find(|g|g.group==receiver.group)?;
                 let b=receiver.bounds;
                 Some(layer_render_wgpu::PanelSurfaceGroup { opacity:1.,
@@ -156,22 +156,21 @@ impl GlassPanel {
                     active_tab:rect(native.active_tab),tab_clip:rect(native.tab_clip),color:native.color,strip_color:native.strip_color,
                 })
             }).collect(),
-        })
+        }
     }
     fn valid(&self) -> bool {
         let rect=|b:[f32;4]|b.into_iter().all(f32::is_finite) && b[2]>=0. && b[3]>=0.;
         let radii=|r:[f32;4]|r.into_iter().all(|v|v.is_finite() && v>=0.);
         let color=|c:[f32;4]|c.into_iter().all(|v|v.is_finite() && (0.0..=1.).contains(&v));
-        let Some(first)=self.bridges.first() else {return false;};
         let mut groups=std::collections::HashSet::new();
         self.offset.into_iter().all(f32::is_finite) && rect(self.sidebar) && radii(self.radii) && color(self.color)
             && self.groups.iter().all(|g|groups.insert(g.group) && rect(g.tab_bar) && rect(g.active_tab) && rect(g.tab_clip) && color(g.color) && color(g.strip_color))
-            && !first.receivers.is_empty() && first.receivers.len()==self.groups.len()
+            && self.bridges.first().map_or(self.groups.is_empty(),|first| !first.receivers.is_empty() && first.receivers.len()==self.groups.len()
             && {let mut receivers=std::collections::HashSet::new();first.receivers.iter().all(|r|receivers.insert(r.group) && groups.contains(&r.group)
                 && rect([r.bounds.x,r.bounds.y,r.bounds.width,r.bounds.height]) && r.bounds.width>0. && r.bounds.height>0. && radii(r.radii))}
             && self.bridges.iter().all(|b| b.plane.is_finite() && matches!(b.direction,layer_ui::Edge::Left|layer_ui::Edge::Right)
                 && b.direction==first.direction && b.plane==first.plane && b.receivers==first.receivers
-                && rect([b.anchor.x,b.anchor.y,b.anchor.width,b.anchor.height]) && b.anchor.width>0. && b.anchor.height>0. && b.width()>0.)
+                && rect([b.anchor.x,b.anchor.y,b.anchor.width,b.anchor.height]) && b.anchor.width>0. && b.anchor.height>0. && b.width()>0.))
     }
 }
 
@@ -255,7 +254,7 @@ impl Glass {
             let color_bubbles = self.layout.color_bubbles.iter().map(|c| BackdropRegion::color_bubble(
                 [c[0] * scale, c[1] * scale], c[2] * scale, c[3] * scale, c[4] * scale, c[5],
             ).with_strength(c[6]));
-            self.panels=self.layout.panels.iter().filter_map(GlassPanel::surface).map(|p|p.scaled(scale)).collect();
+            self.panels=self.layout.panels.iter().map(GlassPanel::surface).map(|p|p.scaled(scale)).collect();
             let panels=self.panels.iter().map(|p|BackdropRegion::rounded(p.bounds(),[0.;4],BackdropRegion::SQUIRCLE).with_strength(0.));
             self.scaled = boxes.chain(connections).chain(arcs).chain(color_bubbles).chain(panels).collect();
         }
@@ -434,6 +433,41 @@ mod tests {
         }
         layer.set(glass(serde_json::json!({"regions":[],"connections":[],"panel_revision":8})).unwrap()).unwrap();
         assert!(layer.panels(1.5).is_empty());assert_eq!(layer.panel_revision(),8);
+    }
+
+    #[test]
+    fn sidebar_only_glass_scales_and_retains_live_layout_after_invalid_packets() {
+        let packet=serde_json::json!({"regions":[],"connections":[],"panel_revision":9,"panels":[{
+            "offset":[-2.,3.],"sidebar":[10.,20.,36.,200.],"radii":[18.,0.,6.,12.],"color":[0.2,0.3,0.4,0.8],
+            "bridges":[],"groups":[]
+        }]});
+        let mut layer=Glass::default();
+        assert!(layer.set(glass(packet.clone()).unwrap()).unwrap());
+        assert_eq!(layer.panel_revision(),9);
+        let expected=layer.panels(1.5).to_vec();
+        assert_eq!(expected.len(),1);
+        assert_eq!(expected[0].sidebar,[12.,34.5,54.,300.]);
+        assert_eq!(expected[0].sidebar_radii,[27.,0.,9.,18.]);
+        assert_eq!(expected[0].color,[0.2,0.3,0.4,0.8]);
+        assert!(expected[0].anchors.is_empty() && expected[0].groups.is_empty());
+        assert_eq!(expected[0].bridge_width,0.);
+        assert_eq!(layer.panels(1.5),expected);
+        assert!(!layer.set(glass(packet.clone()).unwrap()).unwrap());
+        for case in 0..4 {
+            let mut invalid=packet.clone();
+            invalid["panel_revision"]=10.into();
+            match case {
+                0=>invalid["panels"][0]["groups"]=serde_json::json!([{"group":5,"tab_bar":[52.,20.,200.,36.],
+                    "active_tab":[58.,20.,80.,36.],"tab_clip":[58.,20.,188.,36.],
+                    "color":[0.2,0.3,0.4,0.8],"strip_color":[0.1,0.2,0.3,0.8]}]),
+                1=>invalid["panels"][0]["sidebar"][2]=(-1).into(),
+                2=>invalid["panels"][0]["radii"][0]=(-1).into(),
+                _=>invalid["panels"][0]["color"][3]=2.into(),
+            }
+            assert!(layer.set(glass(invalid).unwrap()).is_err(),"case {case}");
+            assert_eq!(layer.panels(1.5),expected,"case {case}");
+            assert_eq!(layer.panel_revision(),9);
+        }
     }
 
     #[test]

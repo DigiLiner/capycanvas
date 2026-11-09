@@ -8,6 +8,7 @@ public:
     ~CollapsedColumns();
     void Apply();
     CapyUi::A Geometry()const;
+    CapyUi::A Presentation()const;
     void ForEachBounds(winrt::Microsoft::UI::Xaml::UIElement const& reference,std::function<void(uint32_t,winrt::Windows::Foundation::Rect)> const& visit)const;
     void PresentBridges(CapyUi::J const& frame,bool resizing);
     double Opacity(uint32_t column)const;
