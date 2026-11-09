@@ -85,6 +85,25 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $run=Join-Path $repo ('artifacts/windows/hdr-ui/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory((Join-Path $run 'profile'))|Out-Null
 $directory=$run;$CapyTraceDirectory=$run
+function Assert-HdrOutputFormat($Model,[ValidateSet('Observed','HDR','SDR')][string]$Phase='Observed'){
+ $invalid='HDR output state is incomplete or invalid'
+ if($Model -isnot [pscustomobject] -or $Model.windows_display -isnot [pscustomobject]){throw $invalid}
+ $display=$Model.windows_display;$output=$display.output
+ if($output -isnot [pscustomobject] -or $output.hdr -isnot [bool] -or $null -eq $output.PSObject.Properties['error'] -or $null -ne $output.error -or
+    $display.format -isnot [string] -or @('Bgra8UnormSrgb','Rgba16Float') -cnotcontains $display.format){throw $invalid}
+ foreach($value in @($display.headroom,$output.headroom,$output.peak_nits)){
+  if(($value -isnot [int] -and $value -isnot [long] -and $value -isnot [single] -and $value -isnot [double] -and $value -isnot [decimal]) -or
+     [double]::IsNaN([double]$value) -or [double]::IsInfinity([double]$value)){throw $invalid}
+ }
+ if($display.headroom -lt 1 -or $display.headroom -gt 100 -or $output.headroom -lt 1 -or $output.headroom -gt 100 -or $output.peak_nits -lt 0 -or
+    ($output.hdr -and ($output.peak_nits -le 0 -or $display.headroom -ne $output.headroom)) -or
+    (!$output.hdr -and ($display.headroom -ne 1 -or $output.headroom -ne 1)) -or
+    ($Phase -eq 'HDR' -and (!$output.hdr -or $display.headroom -ne 5 -or $output.headroom -ne 5)) -or
+    ($Phase -eq 'SDR' -and $output.hdr)){throw $invalid}
+ if($output.hdr){
+  if($display.format -cne 'Rgba16Float'){throw 'Expected native floating-point swap chain'}
+ }elseif($display.format -cne 'Bgra8UnormSrgb'){throw 'Expected native 8-bit sRGB swap chain'}
+}
 function New-ArcHelper([string]$Directory,[string]$Dll){
  $architecture=if(Test-WindowsBinaryArchitecture $Dll arm64){'arm64'}elseif(Test-WindowsBinaryArchitecture $Dll x64){'x64'}else{throw 'HDR geometry DLL has an unsupported architecture'}
  $build=Resolve-WindowsArchitecture $architecture
@@ -417,7 +436,7 @@ try {
  if(!$DrawingTabsOnly){Select-Choice 'document-depth' $(if($Depth -eq 'F32'){'32-bit float HDR'}else{'16-bit float HDR'})}
  Button 'Create';Idle
  Wait-Until {(Model).brush_ready -and ($DrawingTabsOnly -or ((Model).color_panel.hdr -and (Model).color_panel.document_depth -eq $Depth -and (Model).windows_display.analysis.ready))} 'Drawing creation did not settle' 60
- if(!$DrawingTabsOnly -and (Model).windows_display.format -ne 'Rgba16Float'){throw 'Expected native floating-point swap chain'}
+ if(!$DrawingTabsOnly){Assert-HdrOutputFormat (Model)}
  if(@((Model).windows_tabs.tabs).Count -ne 2 -or (!$DrawingTabsOnly -and !$ControlsOnly -and !(Model).windows_tabs.tabs[0].modified)){throw 'New did not retain the first drawing'}
  if(!$DrawingTabsOnly){& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Resize -Width 1800 -Height 1300}
  Wait-Until {(Find 'drawing-tab-1') -and (Find 'drawing-tab-2') -and (Model).windows_tabs.available} 'Full native drawing strip did not appear'
@@ -691,7 +710,10 @@ try {
  Wait-Until {@((Model).windows_tabs.tabs).Count -eq 2 -and (Model).windows_tabs.selected -eq 2 -and (Model).windows_tabs.available} 'Closing the clean selector fixture drawing failed' 60
  }
  $display=(Model).windows_display
- Button 'Test SDR output';Wait-Until {(Model).windows_display.headroom -eq 1} 'Synthetic SDR fallback did not apply'
+ Button 'Test SDR output';Wait-Until {
+  $m=Model;if($m.windows_display.headroom -ne 1){return $false}
+  try{Assert-HdrOutputFormat $m 'SDR';$true}catch{$false}
+ } 'Synthetic SDR fallback did not apply'
  if(!$ArcContextOnly){
  Sdr
  $before=(Model).state.document_file|ConvertTo-Json -Compress
@@ -938,9 +960,15 @@ try {
  if((Delivery 'redo-paint.exr' 'OpenEXR · 32-bit float') -ne $exr){throw 'Float painting redo did not restore exact export'}
 
  $file=(Model).state.document_file|ConvertTo-Json -Compress
- Button 'Test HDR output';Wait-Until {(Model).windows_display.headroom -eq 5 -and (Model).state.hdr_display_available} 'Synthetic HDR switch did not apply'
+ Button 'Test HDR output';Wait-Until {
+  $m=Model;if($m.windows_display.headroom -ne 5 -or !$m.state.hdr_display_available){return $false}
+  try{Assert-HdrOutputFormat $m 'HDR';$true}catch{$false}
+ } 'Synthetic HDR switch did not apply'
  Invoke 'proof-panel-mode-sdr';Wait-Until {(Model).state.preview_sdr} 'SDR preview did not enable'
- Invoke 'proof-panel-mode-off';Button 'Test SDR output';Wait-Until {!(Model).state.hdr_display_available} 'Synthetic return to SDR failed'
+ Invoke 'proof-panel-mode-off';Button 'Test SDR output';Wait-Until {
+  $m=Model;if($m.state.hdr_display_available){return $false}
+  try{Assert-HdrOutputFormat $m 'SDR';$true}catch{$false}
+ } 'Synthetic return to SDR failed'
  if(((Model).state.document_file|ConvertTo-Json -Compress) -ne $file){throw 'Display switching modified artwork/history'}
  if((Delivery 'SDR-after-switch.png' 'PNG') -ne $plain){throw 'Display switching changed SDR export'}
  Setup;Button 'Apply';Idle;Wait-Until {(Model).windows_proof.bytes -gt 0} 'HDR print proof failed' 60

@@ -24,6 +24,8 @@ foreach($shell in @((Get-Process -Id $PID).Path,(Join-Path $env:SystemRoot 'Syst
     if($LASTEXITCODE -ne 0){throw 'Registered fixture discovery regression failed.'}
     & $shell -NoProfile -File (Join-Path $PSScriptRoot '../tests/model-snapshot-reader.ps1')
     if($LASTEXITCODE -ne 0){throw 'Atomic snapshot reader regression failed.'}
+    & $shell -NoProfile -File (Join-Path $PSScriptRoot '../tests/hdr-output-format.ps1')
+    if($LASTEXITCODE -ne 0){throw 'HDR output format regression failed.'}
 }
 & (Join-Path $PSScriptRoot '../tests/uia-projection-snapshot.ps1')
 & (Join-Path $PSScriptRoot '../tests/canvas-editing-pixels.ps1')
