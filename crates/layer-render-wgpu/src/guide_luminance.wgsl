@@ -1,6 +1,6 @@
 fn guide_normalized(value:FloatNumber,exponent:i32)->f32{
     if value.mantissa==0u{return 0.;}
-    return select(1.,-1.,value.negative)*(f32(value.mantissa)/8388608.)*exp2(f32(value.exponent-exponent));
+    return select(1.,-1.,value.negative)*ldexp(f32(value.mantissa)/8388608.,value.exponent-exponent);
 }
 fn guide_mean(sum:vec3<f32>,sample:vec3<f32>,weight:f32)->vec3<f32>{
     if sample.y<=0. || weight<=0. {return sum;}
