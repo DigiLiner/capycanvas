@@ -97,7 +97,7 @@ function Window-Capture{
     try{if(![CapyScopeControls]::PrintWindow($drawingWindow,$dc,2)){$bitmap.Dispose();throw 'App capture failed'}}finally{$graphics.ReleaseHdc($dc);$graphics.Dispose()}
     @{bitmap=$bitmap;window=$window}
 }
-function Reveal([string]$Id){
+function Reveal-Chart([string]$Id){
     $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$node=$walker.GetParent((Control $Id));$scroll=$null
     while($node -and !($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$scroll) -and $scroll.Current.VerticallyScrollable)){$node=$walker.GetParent($node);$scroll=$null}
     if(!$node){return $null}
@@ -112,7 +112,7 @@ function Reveal([string]$Id){
     $view
 }
 function Chart-Shades([string]$Id){
-    $view=Reveal $Id
+    $view=Reveal-Chart $Id
     $r=(Control $Id).Current.BoundingRectangle
     if($view){$r=[System.Windows.Rect]::Intersect($r,$view)}
     if($r.IsEmpty -or $r.Height -lt 24){throw "$Id is not visible"}
