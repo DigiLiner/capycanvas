@@ -350,7 +350,7 @@ fn native_graph_admits_a_full_4k_view_with_bounded_scratch() {
     let mut doc = document_at([65, 33]);
     composition_mut(&mut doc).size[0] = 4096;
     composition_mut(&mut doc).size[1] = 4096;
-    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut r = crate::memory::memory_tests::legacy_scene_renderer(doc.composition().color);
     for count in [1, 32] {
         while doc.scene().order().len() <= count {
             let layer = copy_paint(&mut doc,0);
@@ -360,7 +360,7 @@ fn native_graph_admits_a_full_4k_view_with_bounded_scratch() {
         let mut frame = packet(doc.scene(), doc.composition().size);
         frame.view.width_px = doc.composition().size[0];
         frame.view.height_px = doc.composition().size[1];
-        r.begin_frame_memory(frame);
+        crate::memory::memory_tests::legacy_scene_frame(&mut r, frame);
         assert_eq!(request(&r, frame).ok().map(|q| q.plan.level), Some(0));
         crate::test_support::submit_ready(&mut r, frame).unwrap();
         let cache = r.scale_display.as_ref().unwrap();
@@ -2109,7 +2109,8 @@ fn first_tiled_transform_draw_waits_for_its_fine_resample_entries() {
         layer_core::DocumentNames { paint: "Fine transform".into(), paper: "Paper".into() });
     crate::layer_tests::placement::set_source(&mut doc, rgba8_source(extent, |_, _| [127, 63, 191, 255]));
     let reference = crate::memory::memory_tests::legacy_scene_renderer(Default::default());
-    let mut r = crate::test_support::staged_renderer(&reference, Default::default());
+    let mut r = *reference.factory.rasterizer(Default::default()).unwrap();
+    r.finish_startup_catalog();
     let brush = layer_core::default_brush(DefaultBrushPreset::GPen);
     r.prepare_startup(&doc, &brush, true).unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(60);

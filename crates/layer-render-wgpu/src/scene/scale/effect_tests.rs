@@ -477,12 +477,12 @@ fn finite_radius_default_tablet_view_admits_reduced_composition_with_reserved_sc
     set_effect_value(&mut doc,blur,"sigma", EffectValue::Number(3.));
     insert_occurrence(&mut doc,blur,0);
     assert_eq!(doc.scene().order().len(), 3);
-    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut r = crate::memory::memory_tests::legacy_scene_renderer(doc.composition().color);
     let mut frame = packet(doc.scene(), doc.composition().size);
     frame.view.width_px = 2200;
     frame.view.height_px = 1440;
     frame.view.document_to_surface = [0.5, 0., 0., 0.5, -341., -207.];
-    r.begin_frame_memory(frame);
+    crate::memory::memory_tests::legacy_scene_frame(&mut r, frame);
     let request = request(&r, frame).unwrap();
     assert!(request.evaluation == Evaluation::Display);
     assert_eq!(request.plan.level, 1);
@@ -604,7 +604,7 @@ fn finite_radius_effects_admit_large_reduced_windows_and_global_effects_keep_ful
     let mut doc = document_at([65, 33]);
     let paint = primary_paint(&doc);
     blur_chain(&mut doc);
-    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut r = crate::memory::memory_tests::legacy_scene_renderer(doc.composition().color);
     for extent in [[6000, 4000], [9504, 6336]] {
         composition_mut(&mut doc).size=extent;
         doc.artwork.paint.get_mut(paint).unwrap().domain=extent;
@@ -614,7 +614,7 @@ fn finite_radius_effects_admit_large_reduced_windows_and_global_effects_keep_ful
         frame.view.document_to_surface = [0.5, 0., 0., 0.5, -1200., -800.];
         let plan = view_plan(frame, 1, Evaluation::Display).unwrap();
         assert!(plan.bounds.area() < PixelRect::full(extent).area() / 2);
-        r.begin_frame_memory(frame);
+        crate::memory::memory_tests::legacy_scene_frame(&mut r, frame);
         let request = request(&r, frame).unwrap();
         assert_eq!(request.plan.level, 1);
         assert!(request.evaluation == Evaluation::Display, "{extent:?} finite-radius windows stay reduced");
@@ -1038,8 +1038,8 @@ fn pointwise_curve_edits_reuse_sources_and_bound_window_passes_with_masked_coord
             layer_core::Point{x:1680.,y:1310.},layer_core::Point{x:270.,y:1240.},
         ]).unwrap()));
         insert_occurrence(&mut doc,curves,0);
-        let mut window=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
-        let mut full=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        let mut window=crate::memory::memory_tests::legacy_scene_renderer(doc.composition().color);
+        let mut full=crate::memory::memory_tests::legacy_scene_renderer(doc.composition().color);
         let extent=doc.composition().size;
         for (step,y) in [0.2,0.7,0.4].into_iter().enumerate() {
             set_effect_at(&mut doc,0,"rgb",EffectValue::Curve(vec![[0.,0.],[0.4,y],[1.,1.]]));
