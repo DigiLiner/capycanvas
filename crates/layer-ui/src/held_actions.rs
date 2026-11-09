@@ -119,6 +119,25 @@ impl<R: CanvasRenderer> UiSession<R> {
         else { self.changed(0, false) }
     }
 
+    pub(super) fn release_keys(&mut self) -> Result<UiChange, String> {
+        let previous_modifiers = self.interaction.modifiers;
+        if self.interaction.navigation.as_ref().is_some_and(|(key, _)| self.interaction.pressed.contains(key)) {
+            self.interaction.navigation = None;
+        }
+        self.interaction.navigation_tap = false;
+        self.interaction.keys.clear();
+        self.interaction.pressed.clear();
+        self.interaction.modifiers = Modifiers::default();
+        let (mut change, _) = self.sync_modifier_keys(false)?;
+        if let Some(key) = self.interaction.spring.as_ref().map(|spring| spring.key.clone()) {
+            change = merge_change(change, self.release_spring(&key));
+        }
+        if self.finish_transform_nudge(true)? {
+            change = merge_change(change, self.changed(regions::BRUSH | regions::DOCUMENT | regions::COMMANDS, true));
+        }
+        Ok(merge_change(change, self.refresh_selection_modifiers(previous_modifiers)))
+    }
+
     /// Put the modifier keys that are fully held into effect; more specific
     /// combinations replace the keys they contain.
     pub(super) fn in_modifier_hold(&self, name: &str) -> bool {

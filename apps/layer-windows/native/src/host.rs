@@ -1059,7 +1059,7 @@ pub unsafe extern "C" fn capy_input(host: u64, json: *const c_char) -> i32 {
         if !host.accepts_workspace_input()?
             && !matches!(
                 &input,
-                layer_ui::UiInput::Blur | layer_ui::UiInput::Chrome { .. }
+                layer_ui::UiInput::Blur | layer_ui::UiInput::ReleaseKeys | layer_ui::UiInput::Chrome { .. }
             )
         {
             return Ok(0);

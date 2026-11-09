@@ -189,6 +189,108 @@ fn holds_wait_for_an_active_stroke_to_finish() {
 }
 
 #[test]
+fn releasing_keys_restores_every_keyboard_hold_and_rearms_suppressed_keys() {
+    for target in ["command.Eyedropper", "brush.3", "command.Hand", "command.Zoom", "command.ZoomOut", "command.RotateView", "color.transparent", "command.SnapRulers"] {
+        let mut s = session(Platform::Windows);
+        let baseline = (s.layer_interaction.tool, s.state.brush.preset, s.state.colors.slot, s.command(CommandId::SnapRulers).selected);
+        let mut holds = s.state.settings.hold_keys(Platform::Windows);
+        for action in holds.iter_mut().find(|hold| hold.key.key == "alt").unwrap().actions.values_mut() { *action = target.into(); }
+        s.state.settings.hold_keys = Some(holds);
+        held_key(&mut s, "Alt_L", true, Modifiers::default());
+        assert!(!s.interaction.modifier_holds.is_empty(), "{target}");
+        for _ in 0..2 {
+            assert!(!s.input(UiInput::ReleaseKeys).unwrap().cancel_paint);
+            assert_eq!((s.layer_interaction.tool, s.state.brush.preset, s.state.colors.slot, s.command(CommandId::SnapRulers).selected), baseline, "{target}");
+            assert!(s.interaction.keys.is_empty() && s.interaction.pressed.is_empty() && s.interaction.modifier_holds.is_empty());
+            assert!(s.interaction.holds.is_empty() && s.interaction.momentary.is_empty() && s.interaction.suppressed.is_empty());
+            assert!(s.interaction.navigation.is_none() && !s.interaction.navigation_tap && s.interaction.modifiers == Modifiers::default());
+        }
+    }
+    let mut s = session(Platform::Windows);
+    held_key(&mut s, "Alt_L", true, Modifiers::default());
+    invoke(&mut s, CommandId::Move);
+    assert!(!s.interaction.suppressed.is_empty());
+    s.workspace_transition = true;
+    s.input(UiInput::ReleaseKeys).unwrap();
+    s.workspace_transition = false;
+    assert!(s.interaction.suppressed.is_empty() && s.interaction.keys.is_empty());
+    invoke(&mut s, CommandId::Pen);
+    held_key(&mut s, "Alt_L", true, Modifiers::default());
+    assert!(sampling(&s));
+}
+
+#[test]
+fn releasing_keys_preserves_contacts_and_settles_used_springs_after_the_stroke() {
+    for key in ["e", "t"] {
+        let mut s = session(Platform::Windows);
+        s.state.settings.shortcuts.insert("color.transparent".into(), vec![KeyChord::new("t", Modifiers::default())]);
+        let preset = s.state.brush.preset;
+        held_key(&mut s, key, true, Modifiers::default());
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
+        s.pen(event(&s, 2, PenPhase::Move, 1.));
+        assert!(!s.input(UiInput::ReleaseKeys).unwrap().cancel_paint);
+        assert!(s.interaction.spring.is_none() && !s.interaction.restores.is_empty());
+        s.pen(event(&s, 3, PenPhase::Up, 1.));
+        s.frame(4, 4).unwrap();
+        assert!(painting_with(&s, preset) && !s.state.colors.transparent());
+        assert!(s.interaction.restores.is_empty());
+        held_key(&mut s, key, true, Modifiers::default());
+        s.input(UiInput::ReleaseKeys).unwrap();
+        assert!(s.interaction.spring.is_none());
+        assert!(if key == "e" { s.state.brush.tool == Tool::Eraser } else { s.state.colors.transparent() });
+    }
+    for key in [" ", "r", "z"] {
+        let mut s = session(Platform::Windows);
+        let preset = s.state.brush.preset;
+        held_key(&mut s, key, true, Modifiers::default());
+        assert!(s.interaction.navigation.is_some());
+        s.input(UiInput::ReleaseKeys).unwrap();
+        assert!(s.interaction.navigation.is_none() && painting_with(&s, preset));
+    }
+    let mut s = session(Platform::Windows);
+    held_key(&mut s, "Alt_L", true, Modifiers::default());
+    assert!(!picker_pointer(&mut s, 9, ContactPhase::Down, PointerKind::Pen, [100., 100.]).paint);
+    s.input(UiInput::ReleaseKeys).unwrap();
+    assert!(!sampling(&s));
+    assert!(!picker_pointer(&mut s, 9, ContactPhase::Up, PointerKind::Pen, [110., 100.]).paint);
+    assert!(!s.engine.can_undo());
+}
+
+#[test]
+fn releasing_keys_defers_momentary_restoration_until_an_operation_ends() {
+    let mut s = UiSession::new(Recorder { tiled_sources: true, ..Default::default() }, snapping_document(), [1600, 1000], Platform::Windows).unwrap();
+    s.frame(1, 1).unwrap();
+    let mut holds = s.state.settings.hold_keys(Platform::Windows);
+    for action in holds.iter_mut().find(|hold| hold.key.key == "alt").unwrap().actions.values_mut() { *action = "color.transparent".into(); }
+    s.state.settings.hold_keys = Some(holds);
+    held_key(&mut s, "Alt_L", true, Modifiers::default());
+    assert!(s.state.colors.transparent());
+    s.begin_transform().unwrap();
+    if s.content_bounds.busy() { reply_bounds(&mut s, [0., 0., 100., 80.]); }
+    assert!(s.operation.transforming());
+    s.input(UiInput::ReleaseKeys).unwrap();
+    assert!(s.interaction.momentary.is_empty() && !s.interaction.restores.is_empty());
+    assert!(s.state.colors.transparent());
+    s.cancel_transform().unwrap();
+    s.frame(2, 2).unwrap();
+    assert!(!s.state.colors.transparent() && s.interaction.restores.is_empty());
+}
+
+#[test]
+fn releasing_keys_preserves_pen_button_holds_and_navigation() {
+    for target in ["brush.3", "command.Hand", "color.transparent"] {
+        let mut s = session(Platform::Windows);
+        bind(&mut s, "pen.button.primary", target);
+        s.input(UiInput::PenButton { button: PenButton::Primary, pressed: true }).unwrap();
+        let held = (s.state.brush.preset, s.state.colors.slot, s.interaction.navigation.clone());
+        s.input(UiInput::ReleaseKeys).unwrap();
+        assert_eq!((s.state.brush.preset, s.state.colors.slot, s.interaction.navigation.clone()), held);
+        s.input(UiInput::Blur).unwrap();
+        assert!(s.interaction.holds.is_empty() && s.interaction.momentary.is_empty() && s.interaction.navigation.is_none());
+    }
+}
+
+#[test]
 fn explicit_tool_choice_ends_the_hold() {
     let mut s = session(Platform::Gtk);
     held_key(&mut s, "Alt_L", true, Modifiers::default());

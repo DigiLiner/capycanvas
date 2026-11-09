@@ -2,6 +2,8 @@ param([Parameter(Mandatory)][int]$ProcessId,[Parameter(Mandatory)][string]$State
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+Add-Type -Path (Join-Path $PSScriptRoot '../tests/HeldKeyWindow.cs') -ReferencedAssemblies @('System.dll','System.Core.dll','System.Windows.Forms.dll','System.Drawing.dll')
 $review=Get-Process -Id $ProcessId
 if($review.ProcessName -ne 'CapyCanvas'){throw 'Expected an owned CapyCanvas review'}
 $CapyStateFile=$StateFile;$CapyTraceDirectory=Split-Path -Parent $StateFile
@@ -32,6 +34,51 @@ function Check-Undo([string]$Button){
   if(((Control $Button).GetRuntimeId() -join ':') -ne $identity -or !(Control $Button).Current.HasKeyboardFocus){throw 'Undo/Redo replaced the focused button or stole focus'}
  }
 }
+function Check-HeldFocus {
+ [CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)
+ $window=$native.window.Handle;$canvas=Control 'drawing-canvas' -Arranged
+ $baseline=Model
+ if($baseline.state.layer_tools.tool -ne 'paint' -or $baseline.state.document_file.modified){throw 'Held-key focus acceptance requires a clean paint tool'}
+ $preset=$baseline.state.brush.preset;$bounds=$canvas.Current.BoundingRectangle;$camera=$baseline.state.camera
+ $x=[int]($bounds.X+($camera.work_area[0]+$camera.work_area[2]/2)*$bounds.Width/$camera.viewport[0])-24
+ $y=[int]($bounds.Y+($camera.work_area[1]+$camera.work_area[3]/2)*$bounds.Height/$camera.viewport[1])
+ if(!$bounds.Contains([double]$x,[double]$y) -or !$bounds.Contains([double]($x+48),[double]$y)){throw 'Held-key stroke exceeds the owned canvas'}
+ $altHeld=$false;$penHeld=$false
+ try{
+  [CapyHeldKeyWindow]::Start($window,[uint32]$ProcessId,$env:CAPY_PRIVATE_DESKTOP)
+  [CapyRowPointer]::SetForegroundWindow($window)|Out-Null;$canvas.SetFocus()
+  Wait-Until {[CapyRowPointer]::GetForegroundWindow() -eq $window -and $canvas.Current.HasKeyboardFocus} 'Held-key canvas did not receive focus'
+  [CapyRowPointer]::Hover($x,$y)
+  [CapyRowPointer]::Hold(0x12,$true);$altHeld=$true
+  [CapyRowPointer]::Hover(($x+1),$y)
+  Wait-Until {(Model).state.layer_tools.tool -in @('pick_visible','pick_layer')} 'Alt did not start the eyedropper hold'
+  [CapyHeldKeyWindow]::Check($window,[uint32]$ProcessId,$env:CAPY_PRIVATE_DESKTOP)
+  [CapyRowPointer]::SetForegroundWindow([CapyHeldKeyWindow]::Window)|Out-Null
+  Wait-Until {[CapyRowPointer]::GetForegroundWindow() -eq [CapyHeldKeyWindow]::Window} 'Owned-root peer did not receive focus'
+  [CapyHeldKeyWindow]::Focus()
+  Wait-Until {[System.Windows.Automation.AutomationElement]::FocusedElement.Current.ProcessId -eq $PID} 'Owned-root peer did not own keyboard focus'
+  Wait-Until {$model=Model;$model.state.layer_tools.tool -eq 'paint' -and !@($model.state.commands|Where-Object {$_.id -eq 'eyedropper' -and $_.selected}).Count} 'Deactivation left the eyedropper hold active before Alt-up'
+  [CapyHeldKeyWindow]::Check($window,[uint32]$ProcessId,$env:CAPY_PRIVATE_DESKTOP)
+  [CapyRowPointer]::Hold(0x12,$false);$altHeld=$false
+  [CapyRowPointer]::SetForegroundWindow($window)|Out-Null
+  Wait-Until {[CapyRowPointer]::GetForegroundWindow() -eq $window} 'Held-key canvas did not reactivate'
+  Wait-Until {$model=Model;$model.state.layer_tools.tool -eq 'paint' -and $model.state.brush.preset -eq $preset -and !@($model.state.commands|Where-Object {$_.id -eq 'eyedropper' -and $_.selected}).Count} 'Deactivation left the eyedropper hold active'
+  $revision=(Model).state.document_file.revision
+  [CapyRowPointer]::Down('pen',$x,$y);$penHeld=$true
+  foreach($step in 1..8){[CapyRowPointer]::Move(($x+$step*6),$y);Start-Sleep -Milliseconds 8}
+  [CapyRowPointer]::Up();$penHeld=$false
+  Wait-Until {$model=Model;$model.state.document_file.revision -gt $revision -and $model.state.document_file.modified -and $model.state.layer_tools.tool -eq 'paint'} 'Pen after focus return did not paint with the restored tool'
+  [CapyRowPointer]::Chord([uint32]$ProcessId,[uint16[]]@(0x11),0x5A)
+  Wait-Until {!(Model).state.document_file.modified} 'Undo did not remove the focus-return pen stroke'
+ }finally{
+  try{
+   [CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)
+   if($altHeld){[CapyRowPointer]::Hold(0x12,$false)}
+   if($penHeld){[CapyRowPointer]::SetForegroundWindow($window)|Out-Null;Wait-Until {[CapyRowPointer]::GetForegroundWindow() -eq $window} 'Pen cleanup did not reacquire the owned window';[CapyRowPointer]::Up()}
+  }finally{[CapyHeldKeyWindow]::Stop($env:CAPY_PRIVATE_DESKTOP)}
+ }
+}
+
 [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
 [CapyRowPointer]::SetForegroundWindow($native.window.Handle)|Out-Null
 [CapyRowPointer]::Initialize([uint32]$ProcessId)
@@ -77,6 +124,7 @@ try{
  Wait-Until {$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem)).Count -eq 0} 'Escape did not close the native menu'
  Key 0x5A -Ctrl
  Wait-Until {!(Model).state.document_file.modified} 'Undo after closing the native menu did not restore the clean drawing'
+ Check-HeldFocus
  [CapyRowPointer]::Verify()
- @{button_shortcuts='Tool Set and toolbar Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, retained native focus';tool_shortcuts='B/E/P from toolbar focus';native_controls='text editing, slider arrows, Space/Enter activation, Tab traversal, menu Escape';drawing='one seed stroke, clean after final Undo';scope='owned native mouse and keyboard input; physical pen and performance remain separate'}|ConvertTo-Json
+ @{button_shortcuts='Tool Set and toolbar Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, retained native focus';tool_shortcuts='B/E/P from toolbar focus';native_controls='text editing, slider arrows, Space/Enter activation, Tab traversal, menu Escape';drawing='seed and focus-return strokes, clean after Undo';focus_loss='owned-root peer, Alt released away, restored pen paints';scope='owned native mouse and keyboard input; physical pen and performance remain separate'}|ConvertTo-Json
 }finally{[CapyRowPointer]::Dispose()}

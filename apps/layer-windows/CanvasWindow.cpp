@@ -297,6 +297,8 @@ void CanvasWindow::Open() {
         if(auto self=weak.lock()){
             if(self->gamepad)self->gamepad->Active(e.WindowActivationState()!=WindowActivationState::Deactivated);
             if(e.WindowActivationState()==WindowActivationState::Deactivated){
+                self->heldKeys.clear();self->sentModifiers.store(0);
+                self->Send(R"({"type":"release_keys"})",CanvasCommandKind::Input);
                 // A WinUI submenu can deactivate the main HWND while focus
                 // stays inside its owned popup tree. Check after activation
                 // settles before retiring the workspace contact or menu.
@@ -309,7 +311,7 @@ void CanvasWindow::Open() {
                     if(IsIconic(owner)||(IsWindowVisible(foreground)&&GetAncestor(foreground,GA_ROOTOWNER)!=owner)){
                         if(self->header)self->header->CancelNativeContacts();
                         if(self->workspace)self->workspace->CancelNativeContacts();
-                        self->CancelGesture();self->heldKeys.clear();self->sentModifiers.store(0);
+                        self->CancelGesture();
                         self->Send(R"({"type":"blur"})",CanvasCommandKind::Input);
                     }
                 }});

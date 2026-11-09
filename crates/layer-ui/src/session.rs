@@ -1266,7 +1266,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.finger_input(&input, &mut reply)? { return Ok(reply); }
         let gesture = self.recognize_touch_gesture(&input);
         let mut contact = None;
-        if self.workspace_transition {
+        if self.workspace_transition && !matches!(input, UiInput::ReleaseKeys) {
             reply.handled = true;
             return Ok(reply);
         }
@@ -1806,13 +1806,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                     }
                 }
             }
+            UiInput::ReleaseKeys => reply.change = self.release_keys()?,
             UiInput::Blur => {
                 self.state.phone.capy_drag = false;
-                let previous_modifiers = self.interaction.modifiers;
                 self.pen_input.clear();
-                if self.finish_transform_nudge(true)? {
-                    reply.change = self.changed(regions::BRUSH | regions::DOCUMENT | regions::COMMANDS, true);
-                }
                 if self.cancel_picker() {
                     reply.change = self.changed(regions::BRUSH | regions::COMMANDS | regions::CUSTOMIZATION | regions::COLOR_PREVIEW, true);
                 }
@@ -1825,17 +1822,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 reply.cancel_paint |= self.interaction.pointer.take().is_some_and(|p| p.paint)
                     || self.input_pending
                     || self.engine.has_active_stroke();
-                self.interaction.keys.clear();
-                self.interaction.modifiers = Modifiers::default();
+                reply.change = merge_change(reply.change, self.release_keys()?);
                 self.interaction.navigation = None;
-                self.interaction.navigation_tap = false;
                 self.interaction.holds.clear();
-                self.interaction.pressed.clear();
-                self.interaction.modifier_holds.clear();
-                self.interaction.suppressed.clear();
-                if let Some(key) = self.interaction.spring.as_ref().map(|spring| spring.key.clone()) {
-                    reply.change = merge_change(reply.change, self.release_spring(&key));
-                }
                 let released: Vec<_> = self.interaction.momentary.drain(..).map(|(_, restore)| restore).collect();
                 self.interaction.restores.extend(released);
                 self.interaction.axes.clear();
@@ -1856,7 +1845,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                     reply.change = self.changed(regions::LAYOUT | regions::COMMANDS, false);
                 }
                 self.touch.clear();
-                reply.change = merge_change(reply.change, self.refresh_selection_modifiers(previous_modifiers));
             }
         }
         if let Some(gesture) = gesture {

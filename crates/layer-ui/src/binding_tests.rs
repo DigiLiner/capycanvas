@@ -239,6 +239,8 @@ fn the_eraser_end_uses_its_own_tool_while_near_the_tablet() {
     s.cursor_input(Some(eraser(&s, 1, PenPhase::Hover)));
     s.frame(1, 1).unwrap();
     assert_eq!(Some(s.state.brush.tool), CommandId::Airbrush.paint_tool(), "the eraser end switches tools on approach");
+    s.input(UiInput::ReleaseKeys).unwrap();
+    assert!(s.interaction.eraser_end && s.interaction.holds.iter().any(|(token, _)| token == ERASER_END));
     s.cursor_input(None);
     s.frame(2, 2).unwrap();
     assert!(painting_with(&s, preset), "and returns when it leaves");

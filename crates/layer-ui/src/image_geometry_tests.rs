@@ -405,20 +405,22 @@ fn failed_background_query_does_not_refuse_snapping_toggle() {
 }
 
 #[test]
-fn blurring_held_transform_nudge_publishes_document_and_command_changes() {
-    let doc = snapping_document();
-    let mut s = UiSession::new(Recorder { tiled_sources: true, ..Default::default() }, doc, [1600, 1000], Platform::Gtk).unwrap();
-    s.frame(1, 1).unwrap();
-    s.begin_transform().unwrap();
-    if s.content_bounds.busy() { reply_bounds(&mut s, [0., 0., 100., 80.]); }
-    assert!(s.operation.transforming());
-    assert!(s.transform_nudge("arrowright", true, true, Modifiers::default()).unwrap());
-    assert!(s.localization_input_busy());
-    let changed = s.input(UiInput::Blur).unwrap().change;
-    assert_ne!(changed.regions & regions::DOCUMENT, 0);
-    assert_ne!(changed.regions & regions::COMMANDS, 0);
-    assert!(!s.operation.nudging());
-    assert!(!s.localization_input_busy());
+fn releasing_held_transform_nudge_publishes_document_and_command_changes() {
+    for input in [UiInput::Blur, UiInput::ReleaseKeys] {
+        let doc = snapping_document();
+        let mut s = UiSession::new(Recorder { tiled_sources: true, ..Default::default() }, doc, [1600, 1000], Platform::Gtk).unwrap();
+        s.frame(1, 1).unwrap();
+        s.begin_transform().unwrap();
+        if s.content_bounds.busy() { reply_bounds(&mut s, [0., 0., 100., 80.]); }
+        assert!(s.operation.transforming());
+        assert!(s.transform_nudge("arrowright", true, true, Modifiers::default()).unwrap());
+        assert!(s.localization_input_busy());
+        let changed = s.input(input).unwrap().change;
+        assert_ne!(changed.regions & regions::DOCUMENT, 0);
+        assert_ne!(changed.regions & regions::COMMANDS, 0);
+        assert!(!s.operation.nudging());
+        assert!(!s.localization_input_busy());
+    }
 }
 
 #[test]
