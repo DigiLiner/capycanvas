@@ -90,7 +90,9 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionWatchPressure(mut env:J
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_sessionCheckpointInterval(_:JNIEnv,_:JClass)->jlong {SessionStores::checkpoint_interval_ms() as jlong}
+pub extern "system" fn Java_art_capycanvas_Native_sessionCheckpointInterval(mut env:JNIEnv,_:JClass)->jlong {
+    crate::jni_entry!(env, {SessionStores::checkpoint_interval_ms() as jlong})
+}
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCheckpointNeeded(mut env:JNIEnv,_:JClass,stores:jlong,id:jlong,stamp:JString,force:jboolean)->jboolean {
