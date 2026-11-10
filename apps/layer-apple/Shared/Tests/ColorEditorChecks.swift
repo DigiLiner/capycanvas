@@ -89,7 +89,7 @@ extension XCTestCase {
         expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
         waitForExpectations(timeout: 30)
         editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
-        let originalPixels = editorPixels(in: app)
+        let originalPixels = settledEditorPixels(in: app)
         func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
         func expectHex(_ hex: String, _ message: String) {
             let match = NSPredicate { _, _ in self.colorValueText("hex", in: app).uppercased() == hex }
@@ -437,7 +437,7 @@ extension XCTestCase {
             waitForExpectations(timeout: 10)
         }
         expectTexture("Cold press")
-        let white = editorPixels(in: app)
+        let white = settledEditorPixels(in: app)
         let dialog = app.descendants(matching: .any)["texture-dialog"].firstMatch
         let coldPress = app.buttons["texture-tile-2"], rough = app.buttons["texture-tile-3"]
         workspaceActivate(texture)

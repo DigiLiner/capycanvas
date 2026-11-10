@@ -19,7 +19,7 @@ extension XCTestCase {
             let pixel = self.editorPixels(in: app); return Int(pixel[2]) > Int(pixel[0]) + 20
         }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
-        let painted = editorPixels(in: app)
+        let painted = settledEditorPixels(in: app)
         let scene = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "editor-scene-")).firstMatch
         let sceneID = scene.identifier

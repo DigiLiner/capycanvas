@@ -93,7 +93,7 @@ extension XCTestCase {
         let card = app.descendants(matching: .any)["command-bar"].firstMatch.frame, area = canvas.frame
         let outside = CGPoint(x: (card.minX - 24 - area.minX) / area.width, y: (card.midY - area.minY) / area.height)
         dismissCommandSearch(field, in: app)
-        let before = editorPixels(in: app, at: outside, size: 16)
+        let before = settledEditorPixels(in: app, at: outside, size: 16)
         open()
         #if os(macOS)
         canvas.coordinate(withNormalizedOffset: CGVector(dx: outside.x, dy: outside.y)).click()

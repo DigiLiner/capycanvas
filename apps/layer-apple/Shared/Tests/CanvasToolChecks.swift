@@ -316,21 +316,32 @@ extension XCTestCase {
         editorPixelSamples(in: app, at: [point], size: size)[0]
     }
 
-    @MainActor private func settledEditorPixels(in app: XCUIApplication, at point: CGPoint, size: Int) -> Data {
-        var previous = editorPixels(in: app, at: point, size: size), unchanged = 0
+    @MainActor func settledEditorPixels(in app: XCUIApplication, at point: CGPoint = CGPoint(x: 0.5, y: 0.6), size: Int = 8) -> Data {
+        settledEditorPixelSamples(in: app, at: [point], size: size)[0]
+    }
+
+    @MainActor func settledEditorPixelSamples(in app: XCUIApplication, at points: [CGPoint], size: Int = 8) -> [Data] {
+        settledEditorPixels(capturing: { editorPixelSamples(in: app, at: points, size: size) })
+    }
+
+    @MainActor func settledEditorPixels<Sample: Equatable>(capturing capture: @MainActor () -> Sample) -> Sample {
+        var previous = capture(), unchanged = 0
         for _ in 0..<40 {
             Thread.sleep(forTimeInterval: 0.25)
-            let next = editorPixels(in: app, at: point, size: size)
+            let next = capture()
             unchanged = next == previous ? unchanged + 1 : 0
             if unchanged == 4 { return next }
             previous = next
         }
-        XCTFail("The finished stroke must stop changing"); return previous
+        XCTFail("The editor pixels must stop changing"); return previous
     }
 
     @MainActor func expectPixels(_ expected: Data, in app: XCUIApplication, at point: CGPoint = CGPoint(x: 0.5, y: 0.6)) {
-        expectation(for: NSPredicate { _, _ in self.editorPixels(in: app, at: point) == expected }, evaluatedWith: app)
-        waitForExpectations(timeout: 15)
+        let comparison = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.editorPixels(in: app, at: point) == expected
+        }, object: app)
+        let matched = XCTWaiter.wait(for: [comparison], timeout: 15) == .completed
+        XCTAssertTrue(matched, "Expected \(Array(expected)); actual \(Array(editorPixels(in: app, at: point)))")
     }
 
     @MainActor func editorPixelSamples(in app: XCUIApplication, at points: [CGPoint], size: Int) -> [Data] {
@@ -524,7 +535,7 @@ extension XCTestCase {
         ]
         #if os(macOS)
         func pixels() -> Data { editorPixels(in: app, at: CGPoint(x: 0.5, y: 0.52), size: 96) }
-        let paper = pixels()
+        let paper = settledEditorPixels(in: app, at: CGPoint(x: 0.5, y: 0.52), size: 96)
         func expectPixels(_ value: Data, _ message: String) {
             let match = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in pixels() == value }, object: app)
             if XCTWaiter.wait(for: [match], timeout: 10) != .completed {
@@ -546,7 +557,7 @@ extension XCTestCase {
                 XCTAssertTrue(app.buttons["number-value-tool-opacity"].exists)
                 if tool == "Pencil" {
                     let history = ["Undo", "Redo"].map { app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-tile-commands-", $0)).firstMatch }
-                    let historyBefore = history.map(\.isEnabled), paperBefore = editorPixels(in: app)
+                    let historyBefore = history.map(\.isEnabled), paperBefore = settledEditorPixels(in: app)
                     let primary = ["size", "flow", "grain_depth", "material_hardness"].map { app.buttons["number-value-tool-" + $0] }
                     XCTAssertTrue(primary.allSatisfy { $0.exists && $0.frame.height > 0 })
                     let y = primary.map { $0.frame.midY }
@@ -584,7 +595,7 @@ extension XCTestCase {
                     }, evaluatedWith: app)
                     waitForExpectations(timeout: 10)
                 } else { expectPixels(paper, "\(preset) starts on blank paper") }
-                let before = pixels()
+                let before = settledEditorPixels(in: app, at: CGPoint(x: 0.5, y: 0.52), size: 96)
                 viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.44, dy: 0.55)).click(forDuration: 0.05,
                     thenDragTo: viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.55)))
                 editorDocumentTitle(in: app).hover()
@@ -593,7 +604,7 @@ extension XCTestCase {
                     guard sample != before else { return false }
                     for i in stride(from: 0, to: sample.count, by: 4) {
                         if tool == "Eraser" {
-                            if sample[i] > 250 && sample[i + 1] > 250 && sample[i + 2] > 250 { return true }
+                            if sample[i..<i + 3] == paper[i..<i + 3] { return true }
                         } else if Int(sample[i + 2]) > Int(sample[i]) + 10 { return true }
                     }
                     return false
@@ -635,9 +646,9 @@ extension XCTestCase {
         waitForExpectations(timeout: 10)
         attachEditor(in: app, name: "blend-two-color-fixture-" + theme)
         func pixels() -> Data { editorPixels(in: app, at: CGPoint(x: 0.5, y: 0.5), size: 128) }
-        let baseline = pixels()
+        let baseline = settledEditorPixels(in: app, at: CGPoint(x: 0.5, y: 0.5), size: 128)
         let outside = [CGPoint(x: 0.4, y: 0.45), CGPoint(x: 0.65, y: 0.68)]
-        let untouched = editorPixelSamples(in: app, at: outside, size: 8)
+        let untouched = settledEditorPixelSamples(in: app, at: outside, size: 8)
         func expectPixels(_ expected: Data) {
             expectation(for: NSPredicate { _, _ in pixels() == expected }, evaluatedWith: app)
             waitForExpectations(timeout: 10)
@@ -658,7 +669,7 @@ extension XCTestCase {
                 editorDocumentTitle(in: app).hover()
                 expectation(for: NSPredicate { _, _ in pixels() != baseline }, evaluatedWith: app)
                 waitForExpectations(timeout: 10)
-                let changed = pixels()
+                let changed = settledEditorPixels(in: app, at: CGPoint(x: 0.5, y: 0.5), size: 128)
                 XCTAssertEqual(editorPixelSamples(in: app, at: outside, size: 8), untouched,
                     "A local stroke must preserve artwork outside its footprint")
                 attachEditor(in: app, name: "paint-\(preset)-\(theme)")
@@ -703,7 +714,7 @@ extension XCTestCase {
             waitForExpectations(timeout: 10)
         }
         func history(_ points: [CGPoint], blank: [Data], name: String) {
-            let painted = samples(points)
+            let painted = settledEditorPixelSamples(in: app, at: points, size: 4)
             XCTAssertNotEqual(painted, blank, "\(name) must render artwork")
             attachEditor(in: app, name: name)
             for (command, expected) in [("Undo", blank), ("Redo", painted), ("Undo", blank)] {
@@ -730,11 +741,11 @@ extension XCTestCase {
                 let center = paper.point(0.425, 0.5)
                 let edge = shape == "Line" ? center : paper.point(0.425, 0.2)
                 let points = [edge, center, paper.point(0.85, 0.5)]
-                let blank = samples(points)
+                let blank = settledEditorPixelSamples(in: app, at: points, size: 4)
                 drag(paper.point(0.25, 0.2), paper.point(0.6, 0.8))
                 expectation(for: NSPredicate { _, _ in hasColor(samples(points)[0], red: false) }, evaluatedWith: app)
                 waitForExpectations(timeout: 10)
-                let painted = samples(points)
+                let painted = settledEditorPixelSamples(in: app, at: points, size: 4)
                 if shape != "Line" && paint == "Outline" { XCTAssertEqual(painted[1], blank[1]) }
                 else { XCTAssertTrue(hasColor(painted[1], red: paint == "Outline + fill"), "\(shape) \(paint) center color") }
                 XCTAssertEqual(painted[2], blank[2], "A figure must leave outside pixels unchanged")
@@ -754,11 +765,11 @@ extension XCTestCase {
                 XCTAssertTrue(app.buttons["number-value-tool-opacity"].exists)
                 #if os(macOS)
                 let points = [paper.point(0.27, 0.5), paper.point(0.425, 0.5), paper.point(0.85, 0.5)]
-                let blank = samples(points)
+                let blank = settledEditorPixelSamples(in: app, at: points, size: 4)
                 drag(paper.point(0.25, 0.5), paper.point(0.6, 0.5))
                 expectation(for: NSPredicate { _, _ in hasColor(samples(points)[0], red: false) }, evaluatedWith: app)
                 waitForExpectations(timeout: 10)
-                let painted = samples(points)
+                let painted = settledEditorPixelSamples(in: app, at: points, size: 4)
                 XCTAssertNotEqual(painted[0], painted[1], "The gradient must vary across the canvas")
                 if transparent { XCTAssertEqual(painted[2], blank[2]) }
                 else { XCTAssertTrue(hasColor(painted[2], red: true), "Color-to-color must reach the background color") }
@@ -805,7 +816,7 @@ extension XCTestCase {
             // A radial ruler's single center follows the creation drag to its release.
             let handle = kind == "Radial" ? end : start
             func samples() -> [Data] { editorPixelSamples(in: app, at: [handle, moved], size: 16) }
-            let blank = samples()
+            let blank = settledEditorPixelSamples(in: app, at: [handle, moved], size: 16)
             func waitGuides(_ visible: Bool) {
                 expectation(for: NSPredicate { _, _ in (samples() != blank) == visible }, evaluatedWith: app)
                 waitForExpectations(timeout: 10)
@@ -821,7 +832,7 @@ extension XCTestCase {
             waitGuides(false)
             toggle(show, to: "1"); XCTAssertTrue(snap.isEnabled)
             waitGuides(true)
-            let original = samples()
+            let original = settledEditorPixelSamples(in: app, at: [handle, moved], size: 16)
             drag(handle, moved)
             expectation(for: NSPredicate { _, _ in samples() != original }, evaluatedWith: app)
             waitForExpectations(timeout: 10)
@@ -854,7 +865,7 @@ extension XCTestCase {
             _ = editPaintSetting(id, text: text, in: app)
             expect(id, text + (id == "smoothing_strength" ? "" : " %"))
         }
-        let paper = editorPixels(in: app)
+        let paper = settledEditorPixels(in: app)
         XCTAssertTrue(undo.exists && redo.exists)
         XCTAssertFalse(undo.isEnabled); XCTAssertFalse(redo.isEnabled)
         for (tool, group, preset, id) in [("Pencil", "Pencil", "Pencil", "flow"),
@@ -898,7 +909,7 @@ extension XCTestCase {
             #if os(macOS)
             editPaintSize("120", in: app)
             let point = CGPoint(x: 0.5, y: 0.52), outside = CGPoint(x: 0.5, y: 0.35)
-            let before = editorPixels(in: app, at: point, size: 96), untouched = editorPixels(in: app, at: outside, size: 16)
+            let before = settledEditorPixels(in: app, at: point, size: 96), untouched = settledEditorPixels(in: app, at: outside, size: 16)
             viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.44, dy: 0.55)).click(forDuration: 0.05,
                 thenDragTo: viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.55)))
             editorDocumentTitle(in: app).hover()

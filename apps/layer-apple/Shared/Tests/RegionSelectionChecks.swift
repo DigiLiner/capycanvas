@@ -181,11 +181,11 @@ extension XCTestCase {
         editorDocumentTitle(in: app).hover()
         workspaceActivate(app.buttons["layer-New layer"])
         workspaceActivate(app.buttons["color-swap"])
-        let blank = samples()
+        let blank = settledEditorPixelSamples(in: app, at: points, size: 4)
         func fillResult(_ source: String, inverted: Bool = false, name: String) {
             expectation(for: NSPredicate { _, _ in red(samples()[inverted ? 1 : 0]) }, evaluatedWith: app)
             waitForExpectations(timeout: 15)
-            let painted = samples()
+            let painted = settledEditorPixelSamples(in: app, at: points, size: 4)
             let coverage = source == "Editing layer" ? [true, true, true]
                 : source == "Reference layers" ? [true, true, false] : [true, false, false]
             for index in points.indices {
@@ -278,14 +278,14 @@ extension XCTestCase {
         fill()
         expectation(for: NSPredicate { _, _ in let p = pixels(); return Int(p[2]) > Int(p[0]) + 50 }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
-        let blue = pixels()
+        let blue = settledEditorPixels(in: app)
         workspaceActivate(app.buttons["color-swap"])
         invert(); fill(); expectPixels(blue, in: app)
         attachEditor(in: app, name: "selection-inverted-empty")
         invert(); fill()
         expectation(for: NSPredicate { _, _ in let p = pixels(); return Int(p[0]) > Int(p[2]) + 50 }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
-        let red = pixels()
+        let red = settledEditorPixels(in: app)
         attachEditor(in: app, name: "selection-inverted-full")
         editorHistory("Undo", in: app); expectPixels(blue, in: app)
         editorHistory("Redo", in: app); expectPixels(red, in: app)

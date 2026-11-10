@@ -78,7 +78,7 @@ extension XCTestCase {
         workspaceActivate(paint)
         expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: paint)
         waitForExpectations(timeout: 10)
-        let untouched = editorPixels(in: app)
+        let untouched = settledEditorPixels(in: app)
         #if os(macOS)
         let canvas = workspaceViewport(in: app)
         let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6))
@@ -90,7 +90,7 @@ extension XCTestCase {
         #endif
         expectation(for: NSPredicate { _, _ in self.editorPixels(in: app) != untouched }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
-        let painted = editorPixels(in: app)
+        let painted = settledEditorPixels(in: app)
         for (label, doneLabel, title, help, previewLabel, chooseFile, cancel, save, discard, fileMenu, export, close, closeTitle, undo, redo, tag) in [
             ("日本語", "完了", "画像を書き出す", "プロファイル付きのコピーを書き出します。編集可能な作品は変わりません。", "出力をプレビュー", "ファイルを選択…", "キャンセル", "保存", "変更を破棄", "ファイル", "書き出し…", "閉じる", "「無題」の変更を保存しますか？", "元に戻す", "やり直す", "ja"),
             ("English", "Done", "Export image", "Export a profiled copy. The editable drawing stays unchanged.", "Preview Output", "Choose File…", "Cancel", "Save", "Discard Changes", "File", "Export…", "Close", "Save changes to “Untitled”?", "Undo", "Redo", "en")

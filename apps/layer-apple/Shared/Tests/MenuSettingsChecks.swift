@@ -408,14 +408,14 @@ extension XCTestCase {
         app.launch(); capturePaintEditor(in: app)
         let above = CGPoint(x: 0.5, y: 0.42)
         func pixels() -> Data { editorPixels(in: app, at: above) }
-        let paper = pixels()
+        let paper = settledEditorPixels(in: app, at: above)
         editorMenu(in: app, menu: "Select", id: "select_all", label: "Select all pixels")
         editorMenu(in: app, menu: "Edit", id: "fill_selection", label: "Fill selection")
         expectation(for: NSPredicate { _, _ in
             let sample = pixels(); return Int(sample[2]) > Int(sample[0]) + 50
         }, evaluatedWith: app)
         waitForExpectations(timeout: 10)
-        let painted = pixels()
+        let painted = settledEditorPixels(in: app, at: above)
         let value = app.buttons["number-value-tool-size"], entry = app.textFields["number-entry-tool-size"]
         revealEditorControl(value, in: app.scrollViews.containing(.button, identifier: value.identifier).firstMatch)
         workspaceActivate(value); XCTAssertTrue(entry.waitForExistence(timeout: 5))

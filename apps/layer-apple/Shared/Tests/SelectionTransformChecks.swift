@@ -94,8 +94,9 @@ extension XCTestCase {
     @MainActor func bluePaperBounds(in app: XCUIApplication) -> CGRect {
         // Locate the visible blue paper, without reading document geometry.
         let scan = stride(from: 0.2, through: 0.8, by: 0.001).map { CGFloat($0) }
-        let horizontal = editorPixelSamples(in: app, at: scan.map { CGPoint(x: $0, y: 0.55) }, size: 1)
-        let vertical = editorPixelSamples(in: app, at: scan.map { CGPoint(x: 0.5, y: $0) }, size: 1)
+        let screenshot = editorScreenshot(in: app)
+        let horizontal = editorPixelSamples(from: screenshot, at: scan.map { CGPoint(x: $0, y: 0.55) }, size: 1)
+        let vertical = editorPixelSamples(from: screenshot, at: scan.map { CGPoint(x: 0.5, y: $0) }, size: 1)
         func blue(_ p: Data) -> Bool { Int(p[2]) > Int(p[0]) + 50 }
         let xs = zip(scan, horizontal).filter { blue($0.1) }.map { $0.0 }
         let ys = zip(scan, vertical).filter { blue($0.1) }.map { $0.0 }
@@ -148,12 +149,12 @@ extension XCTestCase {
         func edit(_ id: String, _ expression: String) { editTransform(id, expression, in: app) }
         func expectField(_ id: String, _ value: String) { expectTransform(id, value, in: app) }
 
-        let paper = pixels()
+        let paper = settledEditorPixels(in: app)
         menu("Select", "select_all", "Select all pixels")
         menu("Edit", "fill_selection", "Fill selection")
         expectation(for: NSPredicate { _, _ in let sample = pixels(); return Int(sample[2]) > Int(sample[0]) + 50 }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
-        let painted = pixels()
+        let painted = settledEditorPixels(in: app)
         XCTAssertNotEqual(painted, paper)
         attach("selection-filled")
         command("Undo"); expectPixels(paper, in: app)
