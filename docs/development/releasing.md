@@ -226,7 +226,7 @@ this a stable GitHub Release: Flatpak updates deploy only from the latest
 published release that is neither a draft nor a prerelease, even while mobile
 distribution remains in beta.
 
-Wait for `flatpak-publish.yml`, verify the public reference and repository
+Run `bash packaging/flatpak/publish.sh`, verify the public reference and repository
 signatures, and test installation and updates from the preceding Flatpak release
 in an isolated environment ([Linux Flatpak](#linux-flatpak)). Then deploy the
 [website and online editor](#website-and-online-editor). Website deployment is
@@ -275,21 +275,27 @@ published signed installer is a separate delivery channel.
 
 ## Website and online editor
 
-The marketing site reads published GitHub Releases when it builds. After the
-release is public, dispatch its workflow:
+Cloudflare serves the site, release downloads, the editor and the Flatpak
+repository; each is deployed with `wrangler` from a maintainer's machine logged
+in to the account that owns `capycanvas.art`. After the release is public, copy
+it to `downloads.capycanvas.art` and rebuild the marketing site from a current
+`capyatelier/capycanvas-web` checkout:
 
 ```bash
-gh workflow run deploy.yml --repo capyatelier/capycanvas-web
+npm run publish:downloads
+npm run deploy
 ```
 
-The editor is deployed separately from the tested source tag:
+The editor is built separately from the tested source tag, then deployed from a
+current `capyatelier/capycanvas-release` checkout:
 
 ```bash
 gh workflow run deploy.yml --repo capyatelier/capycanvas-release -f ref="$CAPY_RELEASE_TAG"
+node release/cloudflare/deploy.mjs
 ```
 
-Wait for the site's build, browser checks and Pages deployment, and for both
-the editor's `deploy.yml` and triggered `pages.yml`. Verify the public
+Wait for the site's checks and deployment, and for the editor's `deploy.yml`
+before pulling and deploying its commit. Verify the public
 [downloads](https://capycanvas.art/download/) and
 [release notes](https://capycanvas.art/download/past-versions/), including any
 compatibility warning. Verify [the editor](https://editor.capycanvas.art/)
@@ -299,8 +305,7 @@ paths. Their `commit` and `source.commit`, respectively, must match
 `CAPY_RELEASE_COMMIT`. Compare the live `index.html`, `sw.js`, application JS and
 Wasm sizes and SHA-256 hashes with that manifest. The editor rebuilds the source
 and prepares it for its domain, so its bytes can differ from the downloadable
-Web ZIP. Pages caches can temporarily serve an older deployment after Actions
-succeeds; check the live content before reporting the update complete.
+Web ZIP. Check the live content before reporting the update complete.
 
 Run the [Web journeys](web.md#tests) against the public origin separately from
 the ZIP. The deployment does not run browser journeys. On a private Wayland
@@ -318,10 +323,9 @@ start a local server and override the public target. Headless screenshots may
 omit WebGPU pixels. File-picker mocks verify application handling, not native
 save dialogs. A release asset alone does not update either site.
 
-If the editor's source commit is already deployed, `deploy.yml` makes no new
-commit and does not trigger Pages. Retry a failed Pages delivery directly with
-`gh workflow run pages.yml --repo capyatelier/capycanvas-release`, then recheck
-the public content.
+If the editor's source commit is already built, `deploy.yml` makes no new
+commit. Retry a failed delivery with `node release/cloudflare/deploy.mjs`, then
+recheck the public content.
 
 ## Recovering a failed release
 
@@ -336,8 +340,7 @@ version/build upload, and the workflow has no duplicate-upload recovery for it.
 Rerun only failed jobs when safe, rather than the whole release workflow.
 
 For a published release, repeat delivery with the unchanged assets: use
-`gh workflow run flatpak-publish.yml --repo capyatelier/capycanvas -f tag=<tag>`
-for the latest stable release, or repeat the
+`bash packaging/flatpak/publish.sh` for the latest stable release, or repeat the
 [website/editor deployment](#website-and-online-editor).
 These retries do not require a new application version. Recheck live results and
 record any channel still blocked; never replace immutable assets or move the tag.
@@ -597,7 +600,7 @@ For local unsigned builds and runtime requirements, use the
 
 Open the release's `capycanvas.flatpakref` in Fedora Software and choose Install,
 or use `flatpak install capycanvas.flatpakref`, to download the application from
-`https://capyatelier.github.io/capycanvas/flatpak/`. The standalone
+`https://flatpak.capycanvas.art`. The standalone
 signed `capycanvas-<version>-linux-x86_64.flatpak` bundle installs the same
 application and records that repository as its update source. Both include the
 public key so Flatpak can verify repository signatures. Software manages later
@@ -610,13 +613,15 @@ references their public HTTPS URLs.
 
 The repository archive contains the OSTree objects and metadata needed to serve
 updates. The bundle and reference alone cannot supply a Flatpak repository.
-`.github/workflows/flatpak-publish.yml` runs when a GitHub Release is published,
-downloads its repository archive and deploys its contents under `flatpak/` on
-GitHub Pages. It also accepts a tag through `workflow_dispatch` to repeat a
-deployment. Only the latest published release that is neither a draft nor a
-prerelease can deploy, so an older release cannot replace the update source.
-Repository settings must select GitHub Actions as the Pages source and allow
-`main` and `v*` tags in the `github-pages` environment's deployment policies.
+After a GitHub Release is published, `bash packaging/flatpak/publish.sh` downloads
+its repository archive, checks it against `SHA256SUMS`, writes the hosted
+`capycanvas.flatpakref` and deploys the Worker `capycanvas-flatpak` from
+`packaging/flatpak/cloudflare/`. Files over Cloudflare's 25 MiB static-asset
+limit go to the R2 bucket `capycanvas-flatpak`. Only the latest published release
+that is neither a draft nor a prerelease can deploy, so an older release cannot
+replace the update source. Installations from 1.0.15 or earlier recorded
+`https://capyatelier.github.io/capycanvas/flatpak`; they update again after
+`flatpak remote-modify --url=https://flatpak.capycanvas.art capycanvas`.
 
 ### Signing credentials
 
