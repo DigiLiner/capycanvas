@@ -1305,8 +1305,8 @@ function Retention-State([string]$FieldId) {
     @{request=$workflow.id;serial=$workflow.serial;kind=$workflow.kind;stage=$workflow.stage;preset_index=$workflow.details.presets.index;recipe_format=$workflow.details.recipe.format;dialog=($dialog.GetRuntimeId() -join ':');field=($name.GetRuntimeId() -join ':');value=$value;focus=$name.Current.HasKeyboardFocus;focused=(Retention-Focus);scroll=$scroll}
 }
 function Retention-Frames([string]$Name,[scriptblock]$Operation,[string]$FieldId='export-preset-name',[string]$PixelId='export-preset-name',[scriptblock]$Acknowledged,$FocusTarget){
-    $field=Owned $FieldId;$field.SetFocus()
-    Wait-Until {$field.Current.HasKeyboardFocus} 'Export preset draft did not receive focus'
+    $focus=if($FocusTarget){$FocusTarget}else{Owned $FieldId};$focus.SetFocus()
+    Wait-Until {$focus.Current.HasKeyboardFocus} 'Export preset draft did not receive focus'
     $before=Retention-State $FieldId;$allowedFocus=if($FocusTarget){$FocusTarget.GetRuntimeId() -join ':'}else{$null};$bounds=(Owned $PixelId).Current.BoundingRectangle
     $area=[Drawing.Rectangle]::FromLTRB([int][Math]::Floor($bounds.Left),[int][Math]::Floor($bounds.Top),[int][Math]::Ceiling([Math]::Min($bounds.Right,$bounds.Left+90)),[int][Math]::Ceiling($bounds.Bottom))
     $folder=Join-Path $run ('retention-'+$Name);[IO.Directory]::CreateDirectory($folder)|Out-Null
