@@ -400,6 +400,7 @@ private struct ColorClipboardKeys: UIViewRepresentable {
             guard let window, window.isKeyWindow, !editing, !isFirstResponder, copyColor != nil, !NativeTextContext.composing else { return }
             let responder = firstResponder(in: window)
             guard !(responder is UITextInput) else { return }
+            guard !((responder as? ControlInput.InputView)?.transacting ?? false) else { return }
             becomeFirstResponder()
         }
         override var keyCommands: [UIKeyCommand]? {
