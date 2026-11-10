@@ -191,9 +191,27 @@ function Check-ReachSweep([string]$Theme){
                 $claimed=$false
                 if($eligible){
                     $scale=[CapyRowPointer]::GetDpiForWindow($window)/96.
-                    for($i=1;$i -le 10;$i++){[CapyRowPointer]::Move([int]($at.x+$sample.dx*$i*$scale),[int]($at.y+$sample.dy*$i*$scale));Start-Sleep -Milliseconds 16}
-                    Start-Sleep -Milliseconds 180
-                    $mid=Gesture;$claimed=[bool]$mid.edge.claimed
+                    $origin=$at
+                    if($Device -eq 'mouse'){$cursor=[CapyRowPointer+Point]::new();if(![CapyRowPointer]::GetCursorPos([ref]$cursor)){throw 'Native edge sweep Down cursor is unavailable'};$origin=@{x=$cursor.x;y=$cursor.y}}
+                    for($i=1;$i -le 10;$i++){$move=@{x=[int]($at.x+$sample.dx*$i*$scale);y=[int]($at.y+$sample.dy*$i*$scale)};[CapyRowPointer]::Move($move.x,$move.y);Start-Sleep -Milliseconds 16}
+                    if($Device -eq 'mouse'){$cursor=[CapyRowPointer+Point]::new();if(![CapyRowPointer]::GetCursorPos([ref]$cursor)){throw 'Native edge sweep Move cursor is unavailable'};$move=@{x=$cursor.x;y=$cursor.y}}
+                    $ack=@{time=$null;gesture=$null}
+                    Wait-Until {
+                        $g=Gesture;$reply=$g.edge_reply
+                        if($reply.serial -ne $down.edge.serial){return $false}
+                        if(!$g.edge){
+                            if($reply.phase -in 'down','move' -and $reply.time -ge $down.edge_contact.time -and ($reply.bits -lt 0 -or ($reply.bits -band 9) -eq 0)){$ack.gesture=$g;return $true}
+                            return $false
+                        }
+                        if($g.edge.serial -ne $down.edge.serial){return $false}
+                        if($null -eq $ack.time -and $g.edge_input.pointer -eq $down.edge_contact.pointer -and $g.edge_input.time -gt $down.edge_contact.time -and
+                            [Math]::Round(($g.edge.position[0]-$down.edge_contact.position[0])*$scale) -eq $move.x-$origin.x -and
+                            [Math]::Round(($g.edge.position[1]-$down.edge_contact.position[1])*$scale) -eq $move.y-$origin.y){$ack.time=$g.edge_input.time}
+                        $ready=$null -ne $ack.time -and $reply.phase -eq 'move' -and $reply.time -ge $ack.time
+                        if($ready){$ack.gesture=$g;return $true}
+                        $false
+                    } 'Native edge sweep request was not acknowledged'
+                    $claimed=[bool]$ack.gesture.edge.claimed
                 }
                 $release=Gesture
                 $terminalGeneration=[Math]::Max([long]$release.last_release.generation,[long]$release.last_cancel.generation)

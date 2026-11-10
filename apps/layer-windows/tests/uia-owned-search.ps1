@@ -1611,12 +1611,14 @@ public static class CapyEdgeReleaseTest {
 & {
  Add-Type -TypeDefinition @'
 public static class CapyEdgeSweepTest {
- public static int Phase,Downs,Cancels,Escapes;public static bool Active;
- public static void Down(string device,int x,int y){Phase=1;Active=true;Downs++;}
- public static void Move(int x,int y){}
- public static void Cancel(){Phase=2;Active=false;Cancels++;}
+ public struct Point {public int x,y;}
+ public static bool GetCursorPos(out Point point){point=new Point{x=X,y=Y};return true;}
+ public static int Phase,Downs,Cancels,Escapes,Moves,X,Y,StartX;public static bool Active,SharedClaimed,Committed;public static string Device;
+ public static void Down(string device,int x,int y){Phase=1;Active=true;Downs++;Device=device;X=device=="mouse"?x-1:x;StartX=X;Y=y;}
+ public static void Move(int x,int y){Moves++;X=Device=="mouse"?x+1:x;Y=y;}
+ public static void Cancel(){Committed=Device=="mouse"&&SharedClaimed&&Escapes==0;Phase=2;Active=false;Cancels++;}
  public static void Key(int key){if(key!=27)throw new System.Exception("Unexpected sweep key");Phase=2;Escapes++;}
- public static int GetDpiForWindow(object window){return 96;}
+ public static int GetDpiForWindow(object window){return 144;}
  public static bool Exists(string path){return true;}
 }
 '@
@@ -1636,24 +1638,47 @@ public static class CapyEdgeSweepTest {
   . ([scriptblock]::Create($fn.Extent.Text.Replace('[CapyRowPointer]','[CapyEdgeSweepTest]')))
  }
  $sweep=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Check-ReachSweep'},$true)
- $geometryCheck=$sweep.Body.FindAll({param($n)$n-is[Management.Automation.Language.IfStatementAst]-and$n.Extent.Text.Contains("throw 'Canceled edge sweep changed the arranged divider geometry'")},$true)|Sort-Object {$_.Extent.StartOffset}|Select-Object -First 1
- if(!$geometryCheck){throw 'Missing actual first sweep geometry assertion'}
- $statements=@($geometryCheck.Parent.Statements);$last=[array]::IndexOf($statements,$geometryCheck)
+ $geometryChecks=@($sweep.Body.FindAll({param($n)$n-is[Management.Automation.Language.IfStatementAst]-and$n.Extent.Text.Contains("throw 'Canceled edge sweep changed the arranged divider geometry'")},$true)|Sort-Object {$_.Extent.StartOffset})
+ if($geometryChecks.Count-ne2){throw 'Missing actual sweep geometry assertions'}
+ $statements=@($geometryChecks[1].Parent.Statements);$last=[array]::IndexOf($statements,$geometryChecks[1])
  $sequence=($statements[0..$last]|ForEach-Object {$_.Extent.Text})-join"`n"
- $sequence=$sequence.Replace('[CapyRowPointer]','[CapyEdgeSweepTest]')
+ $sequence=$sequence.Replace('[CapyRowPointer]','[CapyEdgeSweepTest]').Replace('[CapyRowPointer+Point]','[CapyEdgeSweepTest+Point]')
  function Start-Sleep([int]$Milliseconds){}
  function Wait-Until([scriptblock]$Condition,[string]$Message){for($poll=0;$poll-lt12;$poll++){if(& $Condition){return}};throw $Message}
  function Gesture{
-  $ended=[CapyEdgeSweepTest]::Phase-eq2
+  $phase=[CapyEdgeSweepTest]::Phase;$ended=$phase-eq2;$moved=[CapyEdgeSweepTest]::Moves-gt0
   if($ended){$script:sweepTerminalReads++}
   $script:sweepAcknowledged=$ended-and$script:sweepMode-ne'stale-terminal'-and$script:sweepTerminalReads-ge4
-  @{edge=$(if(!$ended){@{serial=21;claimed=$true;contact='free';vertical=$false}});pointer_id=$null;edge_reply=@{serial=$(if($script:sweepAcknowledged){21}else{20});phase='cancel'};last_edge=@{phase='cancel';claimed=$true};last_release=@{generation=1};last_cancel=@{generation=2}}
+  if($phase-eq1-and$moved){$script:sweepMotionReads++}
+  $settled=$phase-eq1-and(($moved-and$script:sweepMode-in'settled','settled-error')-or(!$moved-and$script:sweepMode-eq'settled-ineligible'-and$script:sweepDownReads-ge1))
+  if($phase-eq1-and!$moved){$script:sweepDownReads++}
+  $edge=if($phase-eq1-and!$settled-and$script:sweepMode-ne'denied'){
+   @{serial=21;claimed=($moved-and$script:sweepMotionReads-ge4-and$script:sweepMode-ne'unclaimed');contact=$(if($script:sweepMode-like'*ineligible*'){'pickup'}else{'free'});vertical=$false;position=@((510+([CapyEdgeSweepTest]::X-[CapyEdgeSweepTest]::StartX)/1.5),(720+([CapyEdgeSweepTest]::Y-200)/1.5))}
+  }
+  if($edge-and$script:sweepMode-eq'wrong-edge-serial'){$edge.serial=22}
+  if($edge-and$script:sweepMode-eq'wrong-position'){$edge.position[0]+=1/1.5}
+  $reply=@{serial=21;phase='down';time=100;bits=8}
+  if($moved){
+   $reply.phase=if($script:sweepMotionReads-eq1-or$script:sweepMode-eq'old-down'){'down'}else{'move'}
+   $reply.time=if($reply.phase-eq'down'){100}elseif($script:sweepMotionReads-lt4-or$script:sweepMode-eq'earlier-move'){109}else{110}
+   $reply.bits=if($edge.claimed){33}else{10}
+  }
+  if($settled){$reply.phase=if($moved){'move'}else{'down'};$reply.time=if($moved){102}else{100};$reply.bits=if($script:sweepMode-eq'settled-error'){-1}else{0}}
+  if($script:sweepMode-eq'wrong-serial'){$reply.serial=20}
+  if($script:sweepMode-eq'ineligible-wrong-down'){$reply.time=99}
+  if($ended){$reply=@{serial=$(if($script:sweepAcknowledged){21}else{20});phase=$(if([CapyEdgeSweepTest]::Escapes){'cancel'}else{'up'});time=111;bits=0}}
+  $contact=@{pointer=1;time=$(if($phase-eq0-or$script:sweepMode-eq'stale-down'){99}else{100});primary=$true;position=@(510,720)}
+  @{edge=$edge;pointer_id=$null;edge_reply=$reply;edge_contact=$contact;edge_input=@{pointer=$(if($script:sweepMode-eq'wrong-pointer'){2}else{1});time=$(if($script:sweepMode-eq'stale-move-input'){100}else{110});position=@(210,320)};last_edge=@{phase=$(if([CapyEdgeSweepTest]::Escapes){'cancel'}else{'up'});claimed=([CapyEdgeSweepTest]::Escapes-gt0)};last_release=@{generation=1};last_cancel=@{generation=2}}
  }
  function Model{
+  if($script:sweepMode-in'denied','settled','settled-error','settled-ineligible'-and[CapyEdgeSweepTest]::Phase-eq2){$script:sweepAcknowledged=$true}
+  if($script:sweepMode-in'ineligible','settled-ineligible','ineligible-wrong-down','denied'-and[CapyEdgeSweepTest]::Phase-eq2){$script:sweepAcknowledged=$true;$script:sweepPublished=101}
   if(!$script:sweepAcknowledged){$script:sweepEarlyModelReads++}else{$script:sweepModelReads++}
-  if($script:sweepAcknowledged-and$script:sweepModelReads-ge6-and$script:sweepMode-ne'missing-layout'){$script:sweepPublished=101}
+  if($script:sweepAcknowledged-and$script:sweepModelReads-ge6-and$script:sweepMode-ne'missing-layout'-and![CapyEdgeSweepTest]::Committed){$script:sweepPublished=101}
   @{state=@{workspace=@{layout=$(if($script:sweepPublished-eq101){'restored'}else{'preview'})}}}
  }
+ function Layout{@{groups=@()}}
+ function Append-SweepRow($Row){$script:sweepRows.Add($Row)}
  function State-File{'owned/ui-state-7-8.json'}
  function Read-Snapshot([string]$Path){
   if((Split-Path -Leaf $Path)-like'presentation-state-*'){
@@ -1667,18 +1692,25 @@ public static class CapyEdgeSweepTest {
   $script:sweepGeometryReads++
   if($script:sweepDisplayed-eq101-and$script:sweepMode-ne'wrong-geometry'){'restored-divider'}else{'changed-divider'}
  }
- $Device='touch';$review=@{Id=7};$window=8;$at=@{x=10;y=20};$sample=@{axis='horizontal';dx=-6;dy=0};$baseline='"restored"';$geometry='restored-divider'
- foreach($mode in 'delayed','stale-terminal','missing-layout','missing-presentation','wrong-geometry'){
-  $script:sweepMode=$mode;$script:sweepTerminalReads=0;$script:sweepAcknowledged=$false;$script:sweepEarlyModelReads=0;$script:sweepModelReads=0;$script:sweepPresentationReads=0;$script:sweepGeometryReads=0;$script:sweepPublished=100;$script:sweepDisplayed=100
-  [CapyEdgeSweepTest]::Phase=0;[CapyEdgeSweepTest]::Downs=0;[CapyEdgeSweepTest]::Cancels=0;[CapyEdgeSweepTest]::Escapes=0;[CapyEdgeSweepTest]::Active=$false
+ $review=@{Id=7};$window=8;$at=@{x=100;y=200};$sample=@{axis='horizontal';x=509.9;y=720.1;dx=-6;dy=0};$baseline='"restored"';$geometry='restored-divider';$active=@{}
+ foreach($Device in 'mouse','touch'){
+ $modes=if($Device-eq'mouse'){@('delayed','wrong-serial','wrong-edge-serial','wrong-position','stale-move-input','old-down','earlier-move','wrong-pointer','stale-down','unclaimed','settled','settled-error','ineligible','settled-ineligible','ineligible-wrong-down','denied','stale-terminal','missing-layout','missing-presentation','wrong-geometry')}else{@('delayed','stale-terminal','missing-layout','missing-presentation','wrong-geometry')}
+ foreach($mode in $modes){
+  $script:sweepMode=$mode;$script:sweepTerminalReads=0;$script:sweepMotionReads=0;$script:sweepDownReads=0;$script:sweepAcknowledged=$false;$script:sweepEarlyModelReads=0;$script:sweepModelReads=0;$script:sweepPresentationReads=0;$script:sweepGeometryReads=0;$script:sweepPublished=100;$script:sweepDisplayed=100
+  $rows=[Collections.Generic.List[object]]::new();$script:sweepRows=[Collections.Generic.List[object]]::new()
+  [CapyEdgeSweepTest]::Phase=0;[CapyEdgeSweepTest]::Downs=0;[CapyEdgeSweepTest]::Cancels=0;[CapyEdgeSweepTest]::Escapes=0;[CapyEdgeSweepTest]::Moves=0;[CapyEdgeSweepTest]::Active=$false;[CapyEdgeSweepTest]::Committed=$false;[CapyEdgeSweepTest]::SharedClaimed=$mode-notin'unclaimed','settled','settled-error','ineligible','settled-ineligible','ineligible-wrong-down','denied'
   $failure=$null;try{. ([scriptblock]::Create($sequence))}catch{$failure=$_}
-  if([CapyEdgeSweepTest]::Downs-ne1-or[CapyEdgeSweepTest]::Cancels-ne1-or[CapyEdgeSweepTest]::Escapes-ne1){throw 'Sweep repeated or skipped native contact cancellation'}
-  $expected=switch($mode){'stale-terminal'{'Native gesture release was not acknowledged'}'missing-layout'{'Canceled edge sweep did not acknowledge its exact workspace layout'}'missing-presentation'{'The display did not show the latest canvas frame'}'wrong-geometry'{'Canceled edge sweep changed the arranged divider geometry'}}
-  if($mode-eq'delayed'){
-   if($failure-or$script:sweepEarlyModelReads-ne0-or$script:sweepGeometryReads-ne1-or$script:sweepDisplayed-ne101){throw "Actual edge sweep checked geometry before acknowledged rollback presentation: $failure"}
-  }elseif(!$failure-or$failure.Exception.Message-cne$expected-or($mode-ne'wrong-geometry'-and$script:sweepGeometryReads-ne0)){throw "Actual edge sweep accepted an unacknowledged or incorrect cancellation: $mode; $failure"}
+  if([CapyEdgeSweepTest]::Committed){throw 'Actual mouse sweep skipped cancellation and committed the delayed shared claim with ordinary Up'}
+  $expected=switch($mode){{$_-in'wrong-serial','wrong-edge-serial','wrong-position','stale-move-input','old-down','earlier-move','wrong-pointer'}{'Native edge sweep request was not acknowledged'}'stale-terminal'{'Native gesture release was not acknowledged'}'missing-layout'{'Canceled edge sweep did not acknowledge its exact workspace layout'}'missing-presentation'{'The display did not show the latest canvas frame'}'wrong-geometry'{'Canceled edge sweep changed the arranged divider geometry'}{$_-in'unclaimed','settled','settled-error'}{'Edge sweep lost or retained a contact:'}}
+  $early=$expected-eq'Native edge sweep request was not acknowledged'
+  $escapes=if($early-or$mode-in'unclaimed','settled','settled-error','ineligible','settled-ineligible','ineligible-wrong-down','denied'){0}else{1}
+  if([CapyEdgeSweepTest]::Downs-ne1-or[CapyEdgeSweepTest]::Cancels-ne[int](!$early)-or[CapyEdgeSweepTest]::Escapes-ne$escapes){throw "Sweep repeated or skipped native contact cancellation: $mode; $failure"}
+  if(!$expected){
+   if($failure-or$script:sweepEarlyModelReads-ne0-or$script:sweepGeometryReads-ne2-or$script:sweepDisplayed-ne101-or$script:sweepRows.Count-ne1){throw "Actual edge sweep checked geometry before acknowledged rollback presentation: $mode; $failure"}
+  }elseif(!$failure-or!$failure.Exception.Message.StartsWith($expected)-or($mode-notin'wrong-geometry','unclaimed','settled','settled-error'-and$script:sweepGeometryReads-ne0)){throw "Actual edge sweep accepted an unacknowledged or incorrect cancellation: $mode; $failure"}
  }
- 'Actual edge sweep: stale terminal and layout cannot satisfy cancellation; restored model epoch must display before exact geometry, which still rejects changed bounds.'
+ }
+ 'Actual edge sweep: 20 mouse cases and the original five touch rollback cases retain original Down and ineligible handling, acknowledged eligible claims and exact geometry.'
 }
 
 & {
