@@ -372,23 +372,25 @@ function Set-Text([string]$Id,[string]$Text){
  if(!$entry -or $entry.Current.ProcessId -ne $review.Id){throw "No owned numeric editor: $Id"}
  $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Text)
 }
-function Delivery([string]$Name,[string]$Format){
+function Delivery([string]$Name,[ValidateSet('format_png','format_pq','format_exr','format_jpeg_hdr','format_avif_hdr','format_jpeg_hdr_clipped','format_avif_hdr_clipped')][string]$FormatCopyKey){
  Command 'export_document' 'File'
  Wait-Until {(Model).windows_document.stage -eq 'options'} 'Export options did not open' 30
- $serial=(Model).windows_document.serial
+ $copy=(Model).windows_document.details.form.copy;$serial=(Model).windows_document.serial
  $reset=@{item=$null};Wait-Until {
   $reset.item=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.AndCondition]::new(
-   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'Reset'),
+   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$copy.common.reset),
    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button)))
   $null -ne $reset.item
  } 'Export destination reset is missing'
  $reset.item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {$document=(Model).windows_document;$document.serial -gt $serial -and $document.stage -eq 'options'} 'Export destination did not reset' 30
- Select-Choice 'export-format' $Format
- if($Format.StartsWith('HDR JPEG')){Select-Choice 'export-background' 'White'}
- Button 'Preview Output'
+ Select-Choice 'export-format' $copy.$FormatCopyKey
+ if($FormatCopyKey -in @('format_jpeg_hdr','format_jpeg_hdr_clipped')){Select-Choice 'export-background' $copy.white_background}
+ Button $copy.preview
  Wait-Until {(Model).windows_document.stage -eq 'preview'} 'HDR export preparation failed' 60
- Button 'Export';Picker 'Save As';$path=Join-Path $run $Name;Path-In-Picker $path;Idle
+ $expected=@{format_png='Png';format_pq='PngHdr';format_exr='Exr';format_jpeg_hdr='JpegHdr';format_avif_hdr='AvifHdr';format_jpeg_hdr_clipped='JpegHdrMapped';format_avif_hdr_clipped='AvifHdrMapped'}[$FormatCopyKey]
+ if((Model).windows_document.details.recipe.format -cne $expected){throw 'HDR export preview selected another format'}
+ Button $copy.export;Picker 'Save As';$path=Join-Path $run $Name;Path-In-Picker $path;Idle
  Wait-Until {Test-Path -LiteralPath $path} 'HDR export missing'
  (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
 }
@@ -947,17 +949,17 @@ try {
   @{theme=$Theme;numeric_hdr_color='passed';arc_context_mouse_touch_pen=$arcCases;transparent_wheel_mouse_touch_pen=$wheelCases;proof_numeric_modes_history='passed';proof_dial_contacts_keys_cancel_history='passed';scope='Native controls functional validation; physical HDR and performance unverified'}|ConvertTo-Json -Depth 8|Tee-Object -FilePath (Join-Path $run 'results.json')
   return
  }
- $plain=Delivery 'SDR.png' 'PNG'
- $pq=Delivery 'HDR.png' 'HDR PNG · BT.2020 PQ'
- $exr=Delivery 'HDR.exr' 'OpenEXR · 32-bit float'
- $jpeg=Delivery 'gain-map.jpg' 'HDR JPEG · gain map'
- $avif=Delivery 'gain-map.avif' 'HDR AVIF · gain map'
- $null=Delivery 'gain-map-clipped.jpg' 'HDR JPEG · clip to gain-map range'
- $null=Delivery 'gain-map-clipped.avif' 'HDR AVIF · clip to gain-map range'
+ $plain=Delivery 'SDR.png' 'format_png'
+ $pq=Delivery 'HDR.png' 'format_pq'
+ $exr=Delivery 'HDR.exr' 'format_exr'
+ $jpeg=Delivery 'gain-map.jpg' 'format_jpeg_hdr'
+ $avif=Delivery 'gain-map.avif' 'format_avif_hdr'
+ $null=Delivery 'gain-map-clipped.jpg' 'format_jpeg_hdr_clipped'
+ $null=Delivery 'gain-map-clipped.avif' 'format_avif_hdr_clipped'
  Command 'undo' 'Edit'
- if((Delivery 'undo-paint.exr' 'OpenEXR · 32-bit float') -eq $exr){throw 'Float painting undo did not remove the stroke'}
+ if((Delivery 'undo-paint.exr' 'format_exr') -eq $exr){throw 'Float painting undo did not remove the stroke'}
  Command 'redo' 'Edit'
- if((Delivery 'redo-paint.exr' 'OpenEXR · 32-bit float') -ne $exr){throw 'Float painting redo did not restore exact export'}
+ if((Delivery 'redo-paint.exr' 'format_exr') -ne $exr){throw 'Float painting redo did not restore exact export'}
 
  $file=(Model).state.document_file|ConvertTo-Json -Compress
  Button 'Test HDR output';Wait-Until {
@@ -970,20 +972,20 @@ try {
   try{Assert-HdrOutputFormat $m 'SDR';$true}catch{$false}
  } 'Synthetic return to SDR failed'
  if(((Model).state.document_file|ConvertTo-Json -Compress) -ne $file){throw 'Display switching modified artwork/history'}
- if((Delivery 'SDR-after-switch.png' 'PNG') -ne $plain){throw 'Display switching changed SDR export'}
+ if((Delivery 'SDR-after-switch.png' 'format_png') -ne $plain){throw 'Display switching changed SDR export'}
  Setup;Button 'Apply';Idle;Wait-Until {(Model).windows_proof.bytes -gt 0} 'HDR print proof failed' 60
- if((Delivery 'proof-on.png' 'PNG') -ne $plain){throw 'Proof changed SDR export'}
+ if((Delivery 'proof-on.png' 'format_png') -ne $plain){throw 'Proof changed SDR export'}
  Command 'soft_proof'
  Command 'save_document_as' 'File';Picker 'Save As';$master=Join-Path $run 'HDR 日本語.capy';Path-In-Picker $master;Idle
  Write-Output 'HDR device recovery and master reopen'
  $generation=(Model).windows_gpu_generation
  Button 'Test GPU loss'
  Wait-Until {(Model).windows_gpu_generation -gt $generation -and (Model).brush_ready -and (Model).windows_display.analysis.ready} 'HDR device recovery failed' 60
- if((Delivery 'recovered.exr' 'OpenEXR · 32-bit float') -ne $exr){throw 'GPU replacement changed float export'}
+ if((Delivery 'recovered.exr' 'format_exr') -ne $exr){throw 'GPU replacement changed float export'}
  Command 'open_document' 'File';Picker 'Open';Path-In-Picker $master;Idle
  Wait-Until {(Model).windows_display.analysis.ready} 'Reopened HDR analysis failed' 60
  if((Model).color_panel.document_depth -ne $Depth -or (Model).state.soft_proof){throw 'Reopen lost precision or retained proof viewing'}
- if((Delivery 'reopened.exr' 'OpenEXR · 32-bit float') -ne $exr){throw 'Reopen changed float export'}
+ if((Delivery 'reopened.exr' 'format_exr') -ne $exr){throw 'Reopen changed float export'}
  Assert-CanvasInk 'reopened-master'
  Sdr;if((Model).windows_proof_form.rendition.exposure -ne -1){throw 'Reopen lost saved SDR appearance'};Idle
  Command 'export_document' 'File';Button 'Cancel';Idle
