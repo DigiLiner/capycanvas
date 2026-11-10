@@ -106,6 +106,21 @@ public:
     }
 };
 
+struct CanvasModelSource {
+    using J=winrt::Windows::Data::Json::JsonObject;
+    J state,catalog,model,colorPreview;
+    CanvasModelChanges changes{true};
+    CanvasModelInputs::Capture inputs(CanvasModelInputs& reads,bool force=false)const{
+        return CanvasModelInputs::Capture(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},&changes,force);
+    }
+    CanvasModelInputs::Presentation presentation(CanvasModelInputs& reads,bool force=false,CanvasModelChanges const* changed=nullptr)const{
+        return CanvasModelInputs::Presentation(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},changed?changed:CanvasModelInputs::Capture::Changes(),force);
+    }
+    template<class Update> void apply(CanvasModelInputs& inputs,Update update,bool force=false){
+        auto scope=presentation(inputs,force,&changes);if(scope)update();
+    }
+};
+
 class CanvasModelBinding {
     std::function<void()> update;
     mutable CanvasModelInputs inputs;

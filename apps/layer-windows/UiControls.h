@@ -255,18 +255,7 @@ struct LocalizedCopy : hstring {
     std::function<hstring()> current;
     LocalizedCopy(hstring value,std::function<hstring()> resolve):hstring(value),current(std::move(resolve)){}
 };
-struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
-    CanvasModelChanges changes{true};
-    CanvasModelInputs::Capture inputs(CanvasModelInputs& reads,bool force=false)const{
-        return CanvasModelInputs::Capture(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},&changes,force);
-    }
-    CanvasModelInputs::Presentation presentation(CanvasModelInputs& reads,bool force=false)const{
-        return CanvasModelInputs::Presentation(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},CanvasModelInputs::Capture::Changes(),force);
-    }
-    template<class Update> void apply(CanvasModelInputs& inputs,Update update,bool force=false){
-        if(!force&&!inputs.Changed(changes))return;
-        auto capture=this->inputs(inputs,force);update();
-    }
+struct WorkspaceData : CanvasModelSource,std::enable_shared_from_this<WorkspaceData> {
     NativeLocalization localization;
     uint64_t localizationGeneration=uint64_t(-1);
     std::vector<std::function<bool()>> copyViews;
@@ -289,7 +278,6 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         std::erase_if(copyViews,[](auto const& update){return !update();});
         return true;
     }
-    J state,catalog,model;
     std::shared_ptr<FilterPreviewCache> previews;
     std::shared_ptr<LayerThumbnailCache> thumbnails;
     std::shared_ptr<PaperPreviewCache> papers;
@@ -320,7 +308,6 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         for(auto& [id,close]:current)closed=close()||closed;
         return closed;
     }
-    J colorPreview;
     CanvasModelInputs colorInputs;
     std::map<uint64_t,std::function<void()>> colorViews;uint64_t nextColorView=0,colorFieldPixels=0;bool colorQueued=false;
     std::function<void()> colorsPresented;

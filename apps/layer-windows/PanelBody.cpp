@@ -263,8 +263,8 @@ void PanelBody::Apply(bool visible,bool refresh){
     bool force=refresh||!appliedState||appliedCatalog!=data->catalog||wasVisible!=visible||(changed&&(data->changes.Touches({L"state",L"document_file",L"epoch"})||data->changes.Touches({L"windows_gpu_generation"})));
     refresh=force||(changed&&inputs.Changed(data->changes));
     appliedState=data->state;appliedCatalog=data->catalog;wasVisible=visible;
-    if(!refresh)return;
-    auto capture=data->inputs(inputs,force);
+    auto capture=data->presentation(inputs,force,&data->changes);
+    if(!refresh||!capture)return;
     if(navigator)navigator->Apply(visible);
     for(auto const& binding:bindings)binding.Apply();
     if(iconTheme!=data->theme()){iconTheme=data->theme();std::set<void*> seen;refreshAssetIconTheme(root,iconTheme,seen);}
