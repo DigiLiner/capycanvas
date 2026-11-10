@@ -65,7 +65,7 @@ impl WgpuRasterizer {
             }));
             for program in programs {
                 let gpu = effects::Context {
-                    device: self.device.clone(),
+                    device: self.device.for_compilation(),
                     queue: self.queue.clone(),
                 };
                 let state = state.clone();

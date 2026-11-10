@@ -2736,7 +2736,7 @@ impl Pipelines {
         ]);
         let edges=fill_edges::layout(device);
         let shader = Deferred::new({
-            let device = device.clone();
+            let device = device.for_recipe();
             move || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some("layer scene"),
@@ -2756,7 +2756,7 @@ impl Pipelines {
                 continue;
             }
             let (device, pipeline_layout, shader) =
-                (device.clone(), pipeline_layout.clone(), shader.clone());
+                (device.for_recipe(), pipeline_layout.clone(), shader.clone());
             pipeline.push(Deferred::pipeline(move |mode| {
                 fullscreen_pipeline_recipe(mode, &device, &pipeline_layout, &shader, entry,
                     (i == 1 || i == FILL_LINES_PIPELINE).then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),

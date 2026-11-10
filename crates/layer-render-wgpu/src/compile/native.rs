@@ -30,11 +30,14 @@ pub fn finish_shader_compiler_shutdown() {
             .iter()
             .filter_map(Weak::upgrade)
             .collect();
+        let mut joined = false;
         for coordinator in live {
-            coordinator.retire(false);
+            if coordinator.stop(false) {
+                joined |= coordinator.join();
+            }
         }
         let threads = std::mem::take(&mut *RETIRED.lock().unwrap());
-        if threads.is_empty() {
+        if threads.is_empty() && !joined {
             break;
         }
         for thread in threads {
@@ -87,7 +90,7 @@ impl Coordinator {
         live.push(Arc::downgrade(&coordinator));
         Ok(coordinator)
     }
-    fn retire(&self, force: bool) -> bool {
+    fn stop(&self, force: bool) -> bool {
         let mut queue = self.shared.queue.lock().unwrap();
         if !force && (!queue.owners.is_empty() || queue.sequence == 0) {
             return false;
@@ -96,8 +99,15 @@ impl Coordinator {
         queue.entries.clear();
         drop(queue);
         self.notify();
-        retire(self.threads.lock().unwrap().drain(..));
         true
+    }
+    fn join(&self) -> bool {
+        let threads = std::mem::take(&mut *self.threads.lock().unwrap());
+        let joined = !threads.is_empty();
+        for thread in threads {
+            let _ = thread.join();
+        }
+        joined
     }
     pub(super) fn with_queue<T>(&self, work: impl FnOnce(&mut Queue<Work>) -> T) -> T {
         work(&mut self.shared.queue.lock().unwrap())
@@ -231,6 +241,7 @@ fn compile(shared: Arc<Shared>) {
 }
 impl Drop for Coordinator {
     fn drop(&mut self) {
-        self.retire(true);
+        self.stop(true);
+        self.join();
     }
 }

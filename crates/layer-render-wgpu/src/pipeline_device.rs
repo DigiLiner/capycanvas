@@ -147,6 +147,9 @@ impl PipelineDevice {
             saved_pipelines: self.saved_pipelines.clone(),
             ..Self::from(self.device.clone()) }
     }
+    pub(crate) fn for_compilation(&self) -> Self {
+        Self { compilation: Default::default(), ..self.clone() }
+    }
     pub(crate) fn compilation(&self) -> Result<crate::compile::Scope, crate::GpuRasterError> {
         let mut shared = self.compilation.lock().unwrap();
         if let Some(scope)=shared.as_ref().and_then(|coordinator|coordinator.scope()) {return Ok(scope);}

@@ -46,7 +46,7 @@ impl PreviewPipeline {
         let draw = shader(include_str!("selection_thumbnail.wgsl"));
         let merge = Deferred::compute(&r.device, "saved mask overlays", &pl, &compute, "merge");
         let thumbnail = {
-            let (device, layout) = (r.device.clone(), pl);
+            let (device, layout) = (r.device.for_recipe(), pl);
             Deferred::pipeline(move |mode| {
                 mode.render(
                     &device,

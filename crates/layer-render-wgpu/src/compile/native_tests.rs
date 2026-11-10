@@ -63,6 +63,78 @@ fn worker_counts_follow_parallelism() {
     }
 }
 
+#[test]
+fn device_teardown_joins_inflight_recipes_before_releasing_the_device() {
+    let renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let scope = renderer.device.compilation().unwrap();
+    let coordinator = scope.0.coordinator.clone();
+    let device = renderer.device.for_compilation();
+    let pipeline = renderer.pipelines.stroke_edge.clone();
+    let held = Arc::new(());
+    let weak = Arc::downgrade(&held);
+    let (entered, started) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let recipe = Deferred::pipeline(move |_| {
+        entered.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(60)).unwrap();
+        pipeline.compile();
+        drop((device, held));
+        Compilation::Ready(())
+    });
+    scope.require([&recipe], DOCUMENT);
+    started.recv_timeout(Duration::from_secs(60)).unwrap();
+    drop(recipe);
+    let (dropped, done) = mpsc::channel();
+    let teardown = std::thread::spawn(move || {
+        drop(renderer);
+        drop(scope);
+        drop(coordinator);
+        dropped.send(weak.upgrade().is_none()).unwrap();
+    });
+    let early = done.recv_timeout(Duration::from_millis(250)).ok();
+    release.send(()).unwrap();
+    teardown.join().unwrap();
+    assert_eq!(early, None, "device teardown detached a running recipe");
+    assert!(done.recv_timeout(Duration::from_secs(60)).unwrap());
+}
+
+#[test]
+fn final_shutdown_joins_pools_created_while_another_pool_is_finishing() {
+    let blocked = || {
+        let compiler = Compiler::with_workers(1).unwrap();
+        let owner = compiler.scope.0.coordinator.clone();
+        let (entered, started) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        compiler.enqueue(DOCUMENT, move || {
+            entered.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(60)).unwrap();
+            Ok(())
+        });
+        compiler.start();
+        started.recv_timeout(Duration::from_secs(60)).unwrap();
+        drop(compiler);
+        (owner, release)
+    };
+    let (first, release_first) = blocked();
+    let (finished, done) = mpsc::channel();
+    let shutdown = std::thread::spawn(move || {
+        finish_shader_compiler_shutdown();
+        finished.send(()).unwrap();
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !first.with_queue(|queue| queue.stopped) {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let (second, release_second) = blocked();
+    release_first.send(()).unwrap();
+    let early = done.recv_timeout(Duration::from_millis(250)).is_ok();
+    release_second.send(()).unwrap();
+    shutdown.join().unwrap();
+    assert!(!early, "shutdown missed a newly eligible device pool");
+    assert!(second.with_queue(|queue| queue.stopped));
+}
+
 fn finish_jobs(compiler: &Compiler) {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while compiler.with_queue(|q| {
@@ -371,6 +443,7 @@ fn required_completion_leaves_a_quiet_interval_before_speculation() {
 #[test]
 fn surface_teardown_cancels_queue_and_final_shutdown_joins_inflight_work() {
     let compiler = Compiler::new().unwrap();
+    let device_owner = compiler.scope.0.coordinator.clone();
     let (entered, wait_entered) = mpsc::channel();
     let (release, wait_release) = mpsc::channel();
     let (finished, wait_finished) = mpsc::channel();
@@ -392,6 +465,7 @@ fn surface_teardown_cancels_queue_and_final_shutdown_joins_inflight_work() {
     assert!(wait_finished.try_recv().is_err());
     release.send(()).unwrap();
     finish_shader_compiler_shutdown();
+    drop(device_owner);
     wait_finished.try_recv().unwrap();
     assert_eq!(canceled.load(Ordering::Relaxed), 0);
 }
@@ -556,8 +630,9 @@ fn generic_data_and_optional_pipeline_jobs_stay_serial() {
 }
 
 #[test]
-fn surface_teardown_retires_both_required_workers_and_cancels_queued_work() {
+fn surface_teardown_cancels_queued_work_without_joining_required_workers() {
     let compiler = Compiler::with_workers(2).unwrap();
+    let device_owner = compiler.scope.0.coordinator.clone();
     let (entered, entered_rx) = mpsc::channel();
     let (finished, finished_rx) = mpsc::channel();
     let mut releases = Vec::new();
@@ -598,6 +673,7 @@ fn surface_teardown_retires_both_required_workers_and_cancels_queued_work() {
     }
     teardown.join().unwrap();
     finish_shader_compiler_shutdown();
+    drop(device_owner);
     assert_eq!(
         second,
         Some(1 - first),

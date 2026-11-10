@@ -78,7 +78,7 @@ impl Resample {
             label: Some("mesh resample"), bind_group_layouts: &[Some(&mesh_layout)], immediate_size: 0,
         });
         let mesh = ["background_color", "background_color_kept", "mesh_color", "mesh_color_kept", "resample_projective", "resample_projective_kept"].map(|entry| {
-            let (device, layout, shader) = (device.clone(), mesh_pipeline_layout.clone(), shader.clone());
+            let (device, layout, shader) = (device.for_recipe(), mesh_pipeline_layout.clone(), shader.clone());
             Deferred::pipeline(move |mode| {
                 let buffers = [Some(wgpu::VertexBufferLayout {
                     array_stride: 20, step_mode: wgpu::VertexStepMode::Vertex,

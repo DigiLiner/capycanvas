@@ -69,7 +69,7 @@ fn blend_source_from(source: &str, mode: u32) -> Cow<'_, str> {
 
 /// A destination-material module for one operation and contact specialization.
 pub(super) fn material_shader(device: &PipelineDevice, entries: Entries, flags: u32, operation: MaterialOperation) -> Deferred<wgpu::ShaderModule> {
-    let device = device.clone();
+    let device = device.for_recipe();
     Deferred::new(move || {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("layer destination brush shader"),

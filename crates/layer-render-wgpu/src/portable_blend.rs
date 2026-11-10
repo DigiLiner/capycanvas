@@ -30,7 +30,7 @@ impl Pipelines {
             ])
         });
         let pipelines = std::array::from_fn(|i| {
-            let device = device.clone();
+            let device = device.for_recipe();
             let bind = layouts[i].clone();
             Deferred::pipeline(move |mode| {
                 let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

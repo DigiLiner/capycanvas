@@ -511,7 +511,7 @@ impl Positions {
             false,
             wgpu::BufferSize::new(WINDOW_BYTES),
         )]);
-        let (compile_device, parameters) = (device.clone(), layout.clone());
+        let (compile_device, parameters) = (device.for_recipe(), layout.clone());
         let pipeline = Deferred::pipeline(move |mode| {
             let device = &compile_device;
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

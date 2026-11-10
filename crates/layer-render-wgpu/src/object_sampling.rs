@@ -320,7 +320,7 @@ impl ObjectSampler {
             crate::bindings::storage_texture(3,stage,wgpu::TextureFormat::Rgba32Float,wgpu::StorageTextureAccess::WriteOnly),
             crate::bindings::buffer(4,stage,wgpu::BufferBindingType::Storage {read_only:true},false,wgpu::BufferSize::new(8)),
         ]);
-        let shader = { let device=device.clone(); Deferred::new(move || device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let shader = { let device=device.for_recipe(); Deferred::new(move || device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:Some("image-object stretched tent"),source:wgpu::ShaderSource::Wgsl(include_str!("object_sampling.wgsl").into()),
         })) };
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

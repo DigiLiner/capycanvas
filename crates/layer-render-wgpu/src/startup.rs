@@ -548,7 +548,7 @@ impl WgpuRasterizer {
                     .or_else(|| self.validated_effects.as_ref().map(effects::Effects::fork))
                     .unwrap_or_else(|| self.scene_pipelines.effects(self));
                 let gpu = effects::Context {
-                    device: self.device.clone(),
+                    device: self.device.for_compilation(),
                     queue: self.queue.clone(),
                 };
                 let (tx, rx) = mpsc::channel();

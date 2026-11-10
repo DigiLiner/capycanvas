@@ -85,7 +85,7 @@ impl Pipelines {
     pub fn new(device: &PipelineDevice, style: &wgpu::BindGroupLayout, target: &wgpu::BindGroupLayout,
         texture: &wgpu::BindGroupLayout, advanced_texture: &wgpu::BindGroupLayout) -> Self {
         let shader = {
-            let device = device.clone();
+            let device = device.for_recipe();
             Deferred::new(move || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some("mask coverage brush"),
@@ -124,7 +124,7 @@ impl Pipelines {
                 operation: wgpu::BlendOperation::Add,
             };
             let (device, analytic, tip, shader) = (
-                device.clone(),
+                device.for_recipe(),
                 analytic.clone(),
                 tip.clone(),
                 if i < 4 { shader.clone() } else { contact_shader.clone() },
@@ -169,7 +169,7 @@ impl Pipelines {
             ),
         ]);
         let init_shader = {
-            let device = device.clone();
+            let device = device.for_recipe();
             Deferred::new(move || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some("polygon selection coverage"),
@@ -187,7 +187,7 @@ impl Pipelines {
         });
         let initialize = {
             let (device, layout, init_shader) =
-                (device.clone(), layout.clone(), init_shader.clone());
+                (device.for_recipe(), layout.clone(), init_shader.clone());
             Deferred::pipeline(move |mode| {
                 fullscreen_pipeline_recipe(
                     mode,

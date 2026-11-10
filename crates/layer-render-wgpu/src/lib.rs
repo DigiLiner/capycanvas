@@ -6219,7 +6219,7 @@ fn texture_switch(group: u32, count: usize, function: &str) -> String {
 }
 
 fn advanced_brush_shader(device: &PipelineDevice) -> Deferred<wgpu::ShaderModule> {
-        let device = device.clone();
+        let device = device.for_recipe();
         Deferred::new(move || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("layer textured dry brush shader"),
@@ -6245,7 +6245,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES), &outputs);
     let destination_material = destination_material::Pipelines::new(device, material_layouts, outputs);
     let stroke_edge_shader = {
-        let device = device.clone();
+        let device = device.for_recipe();
         Deferred::new(move || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("layer post-stroke edge shader"),
@@ -6258,7 +6258,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         })
     };
     let watercolor_shader = {
-        let device = device.clone();
+        let device = device.for_recipe();
         Deferred::new(move || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("layer live watercolor composite shader"),
@@ -6267,7 +6267,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         })
     };
     let watercolor_transport_shader = {
-        let device = device.clone();
+        let device = device.for_recipe();
         Deferred::new(move || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("layer watercolor capillary transport shader"),
@@ -6281,7 +6281,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         })
     };
     let export_shader = {
-        let device = device.clone();
+        let device = device.for_recipe();
         Deferred::new(move || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("layer export shader"),
@@ -6362,14 +6362,14 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         (erase_blend, "layer textured erase"),
     ]
     .map(|(blend, label)| {
-        let (device, layout, shader) = (device.clone(), advanced_layout.clone(), advanced_brush.clone());
+        let (device, layout, shader) = (device.for_recipe(), advanced_layout.clone(), advanced_brush.clone());
         Deferred::pipeline(move |mode| {
             brush_pipeline_format_recipe(mode, &device, &layout, &shader, "fragment_main", blend, device.working_format(), label)
         })
     });
     let watercolor_transport = std::array::from_fn(|step| {
         let (device, layout, shader) = (
-            device.clone(),
+            device.for_recipe(),
             watercolor_transport_layout.clone(),
             watercolor_transport_shader.clone(),
         );
@@ -6386,7 +6386,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     });
     let stroke_edge = {
         let (device, layout, shader) = (
-            device.clone(),
+            device.for_recipe(),
             edge_pipeline_layout.clone(),
             stroke_edge_shader.clone(),
         );
@@ -6405,7 +6405,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     };
     let watercolor_composite = {
         let (device, layout, shader) = (
-            device.clone(),
+            device.for_recipe(),
             watercolor_pipeline_layout.clone(),
             watercolor_shader.clone(),
         );
@@ -6435,7 +6435,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     };
     let export = {
         let (device, layout, shader) =
-            (device.clone(), export_layout.clone(), export_shader.clone());
+            (device.for_recipe(), export_layout.clone(), export_shader.clone());
         Deferred::pipeline(move |mode| {
             fullscreen_pipeline_recipe(
                 mode,
