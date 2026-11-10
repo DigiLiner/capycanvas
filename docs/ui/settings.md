@@ -307,12 +307,12 @@ Releasing a repeated hold does not also invoke a tap. Other tap bindings do not
 repeat. Indirect trackpad contacts support these holds and quick pinches while
 leaving taps with the operating system.
 
-A quick inward pinch followed by lifting both fingers fits the canvas upright.
-An outward quick pinch from that fitted view restores the preceding view,
-including zoom, rotation and reflection. Other navigation leaves outward pinches
-as ordinary zoom. Both fingers must move, finish the pinch within 300 ms and
-lift within 100 ms of each other; pans, cancellation and extra contacts cannot
-reset the view. Slow pinches retain ordinary navigation.
+A quick inward pinch followed by lifting both fingers fits the canvas upright and
+keeps its reflection. An outward quick pinch from that fitted view restores the
+preceding view, including zoom, rotation and reflection. Other navigation leaves
+outward pinches as ordinary zoom. Both fingers must move, finish the pinch within
+300 ms and lift within 100 ms of each other; pans, cancellation and extra contacts
+cannot reset the view. Slow pinches retain ordinary navigation.
 
 Canvas → Navigation includes separate **Quick pinch to fit** and
 **Reverse pinch to restore view** switches. Both start on and are saved with the

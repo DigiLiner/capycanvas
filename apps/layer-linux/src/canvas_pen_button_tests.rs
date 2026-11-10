@@ -283,11 +283,13 @@ fn native_canvas_quick_pinch_and_held_history() {
         preferences(&mut d, true, true);
         d.w.dispatch(UiAction::SetZoom { zoom: 2. });
         d.w.dispatch(UiAction::SetRotation { rotation: 0.7 });
+        if !state(&d.w).camera.flipped[0] { d.w.dispatch(UiAction::Invoke { command: CommandId::FlipHorizontal }); }
         pump(150);
         let before = state(&d.w).camera.view();
         let revision = ui_session(&d.w).engine().document().revision;
         pinch(&mut d, false);
         let mut fitted = state(&d.w).camera;
+        assert_eq!(fitted.flipped, [true, false], "{theme:?}: quick pinch keeps reflection");
         assert_eq!(fitted.rotation, 0., "{theme:?}: quick pinch straightens; camera={fitted:?}, settings=({}, {})", state(&d.w).settings.quick_pinch_fit, state(&d.w).settings.quick_pinch_restore);
         fitted.fit(ui_session(&d.w).engine().document().composition().size);
         assert_eq!(state(&d.w).camera.view(), fitted.view(), "{theme:?}: quick pinch fits");
