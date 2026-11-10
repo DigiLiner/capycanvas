@@ -1921,7 +1921,7 @@ impl WgpuRasterizer {
             separated,
         }));
         if let Some(lighting) = &lighting {
-            self.require_paper_slope(&lighting.binding, startup::OTHER)?;
+            self.require_paper_slope(&lighting.binding, startup::DOCUMENT)?;
         }
         self.paper_lighting = lighting;
         Ok(())

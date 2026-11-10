@@ -96,7 +96,6 @@ pub struct ViewportPresenter {
     recipes: std::sync::Arc<Recipes>,
     timing: Option<crate::frame_timing::GpuFrameTimer>,
     pipeline: [crate::Deferred<wgpu::RenderPipeline>; 3],
-    pub(super) paper_pipeline: Option<[crate::Deferred<wgpu::RenderPipeline>; 3]>,
     presented_paper: Option<bool>,
     fill_reveal: Option<layer_render::FillReveal>,
     fill_before: Option<(u64,wgpu::TextureView)>,
@@ -588,11 +587,12 @@ impl ViewportPresenter {
 
     /// Shares the renderer's optional startup cache with presentation shaders.
     pub fn for_renderer(renderer: &WgpuRasterizer, format: wgpu::TextureFormat) -> Self {
-        Self::with_device(renderer, format, SdrSurfaceColor::Srgb)
+        Self::with_device(renderer, format, SdrSurfaceColor::Srgb, false)
     }
 
     pub async fn prepare(&mut self, renderer: &WgpuRasterizer) -> Result<(), GpuRasterError> {
-        renderer.compilation.prepare_all(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline, &self.recipes.transition.pipeline]).chain(self.overview_pipeline.iter()).chain(self.recipes.overviews[1].get()).chain([&self.picker.pipeline]).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
+        self.prepare_paper_lighting(renderer);
+        renderer.compilation.prepare_all(self.pipeline.iter().chain(self.recipes.paper.get().into_iter().flatten()).chain([&self.surround_pipeline, &self.cursor_pipeline, &self.recipes.transition.pipeline]).chain(self.overview_pipeline.iter()).chain(self.recipes.overviews[1].get()).chain([&self.picker.pipeline]).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
             .await.map_err(GpuRasterError::Effect)?;
         if let Some(panels) = &self.panels {
             renderer.compilation.prepare_all([&panels.pipeline,&panels.mask_pipeline]).await.map_err(GpuRasterError::Effect)?;
@@ -639,44 +639,47 @@ impl ViewportPresenter {
     }
 
     pub fn prepare_paper_lighting(&mut self, renderer: &WgpuRasterizer) -> bool {
-        if renderer.paper_shade().is_none() { return false; }
+        let (_, lit, pipeline) = self.bound_viewport(renderer);
+        lit && renderer.compilation.require([pipeline], crate::startup::DOCUMENT) && renderer.paper_shade().is_some()
+    }
+
+    fn paper_pipelines(&self, renderer: &WgpuRasterizer) -> &[crate::Deferred<wgpu::RenderPipeline>; 3] {
         let (device, format, color) = (&renderer.device, self.format, self.color);
         let layout = &self.pipeline_layout;
-        let paper = self.paper_pipeline.get_or_insert_with(|| self.recipes.paper.get_or_init(|| {
+        self.recipes.paper.get_or_init(|| {
             let shader = viewport_shader(device, format, color, true);
             ["fs_main", "fs_placed", "fs_mapped"].map(|entry| surface_pipeline(device, "viewport presentation with paper lighting", layout, &shader, ["vs_main", entry], None, format, None))
-        }).clone());
-        renderer.compilation.require(paper.iter(), crate::startup::OTHER)
+        })
     }
 
     fn bound_viewport(&self, renderer: &WgpuRasterizer) -> ([f32; 20], bool, &crate::Deferred<wgpu::RenderPipeline>) {
         let placement = if renderer.has_presentable_frame() { renderer.display_placement() } else { [0.; 20] };
         let source = placement[13] as usize;
         let showing = renderer.presentation.showing && !self.standalone_overview;
-        let lit = showing && renderer.paper_shade().is_some()
-            && self.paper_pipeline.as_ref().is_some_and(|paper|paper.iter().all(crate::Deferred::ready));
+        let lit = showing && (renderer.paper_lighting.is_some() || renderer.paper_overlay.is_some());
         let pipeline = if !showing { &self.surround_pipeline }
-            else if lit { &self.paper_pipeline.as_ref().unwrap()[source] }
+            else if lit { &self.paper_pipelines(renderer)[source] }
             else { &self.pipeline[source] };
         (placement, lit, pipeline)
     }
 
     pub fn pipelines_ready(&self, renderer: &WgpuRasterizer) -> bool {
-        self.pipelines_ready_for(renderer, self.bound_viewport(renderer).2)
+        let (_, lit, pipeline) = self.bound_viewport(renderer);
+        self.pipelines_ready_for(renderer, pipeline, lit)
     }
 
-    fn pipelines_ready_for(&self, renderer: &WgpuRasterizer, pipeline: &crate::Deferred<wgpu::RenderPipeline>) -> bool {
+    fn pipelines_ready_for(&self, renderer: &WgpuRasterizer, pipeline: &crate::Deferred<wgpu::RenderPipeline>, lit: bool) -> bool {
         let overview = self.standalone_overview || !self.overviews.is_empty();
         let ready = renderer.compilation.require(std::iter::once(pipeline).chain([&self.surround_pipeline,&self.cursor_pipeline,&self.recipes.transition.pipeline])
             .chain(self.overview_pipeline.iter().filter(|_| overview))
             .chain(self.backdrop.iter().flat_map(|backdrop|backdrop.pipelines()))
             .chain(self.panels.iter().flat_map(|panels|[&panels.pipeline,&panels.mask_pipeline])),crate::startup::DOCUMENT);
         for pipeline in self.overview_pipeline.iter().filter(|_| !overview)
-            .chain(self.recipes.overviews[1].get().filter(|_| !self.standalone_overview))
-            .chain([&self.picker.pipeline]) {
+            .chain(self.recipes.overviews[1].get().filter(|_| !self.standalone_overview)) {
             renderer.compilation.warm(pipeline, crate::startup::OTHER, renderer.compilation.generation());
         }
-        ready
+        self.picker.prepare(&renderer.compilation);
+        ready && (!lit || renderer.paper_shade().is_some())
     }
 
     /// The host configures its surface with the matching, advertised color space.
@@ -686,8 +689,12 @@ impl ViewportPresenter {
         format: wgpu::TextureFormat,
         color: SdrSurfaceColor,
     ) -> Result<Self, GpuRasterError> {
+        Self::for_output(renderer, format, color, false)
+    }
+
+    fn for_output(renderer: &WgpuRasterizer, format: wgpu::TextureFormat, color: SdrSurfaceColor, standalone_overview: bool) -> Result<Self, GpuRasterError> {
         color.shader_encoding(format)?;
-        let mut presenter = Self::with_device(renderer, format, color);
+        let mut presenter = Self::with_device(renderer, format, color, standalone_overview);
         presenter.set_hdr_view(
             renderer,
             renderer
@@ -706,14 +713,10 @@ impl ViewportPresenter {
         format: wgpu::TextureFormat,
         color: SdrSurfaceColor,
     ) -> Result<Self, GpuRasterError> {
-        let mut presenter = Self::for_surface(renderer, format, color)?;
-        presenter.standalone_overview = true;
-        presenter.overview_pipeline = presenter.recipes.overviews[1].get().cloned();
-        presenter.pipelines_ready(renderer);
-        Ok(presenter)
+        Self::for_output(renderer, format, color, true)
     }
 
-    fn with_device(renderer: &WgpuRasterizer, format: wgpu::TextureFormat, color: SdrSurfaceColor) -> Self {
+    fn with_device(renderer: &WgpuRasterizer, format: wgpu::TextureFormat, color: SdrSurfaceColor, standalone_overview: bool) -> Self {
         let (device, queue) = (&renderer.device, &renderer.queue);
         let recipes = renderer.recipes.presentation(device, queue, format, color);
         let pipeline = recipes.pipeline.clone();
@@ -746,7 +749,6 @@ impl ViewportPresenter {
         let mut presenter = Self {
             recipes,
             pipeline,
-            paper_pipeline: None,
             presented_paper: None,
             fill_reveal: None,
             fill_before: None,
@@ -839,7 +841,7 @@ impl ViewportPresenter {
             overview_buffer: None,
             overviews: Vec::new(),
             overviews_changed: false,
-            standalone_overview: false,
+            standalone_overview,
         };
         presenter.prepare_overviews(renderer);
         presenter.pipelines_ready(renderer);
@@ -856,7 +858,7 @@ impl ViewportPresenter {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32, 5 => Float32x4],
         };
-        for standalone in [self.standalone_overview,true] {
+        for standalone in [false,true] {
             let blend = wgpu::BlendState {
                 color: wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING.color,
                 alpha: if standalone { wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING.alpha }
@@ -1011,8 +1013,7 @@ impl ViewportPresenter {
             || self.presented_view != Some((view, surround_linear, self.quarter_turns, self.corner_radius))
             || self.presented_selection_overlay != renderer.selection_overlay
             || self.presented_motion != renderer.display_motion().map(|(_, values, moved, revision)| (values, moved, revision))
-            || (renderer.presentation.showing && self.presented_paper == Some(false) && renderer.paper_shade().is_some()
-                && self.paper_pipeline.as_ref().is_some_and(|paper| paper.iter().all(crate::Deferred::ready)))
+            || (renderer.presentation.showing && self.presented_paper != Some(self.bound_viewport(renderer).1))
             || (previous.revision != renderer.composite_revision
                 && (previous.artwork_revision != renderer.artwork_revision || renderer.scale_display.as_ref().is_none_or(|cache|!cache.has_pending_work(renderer))))
             || previous.selection_revision != renderer.selection_paint_revision
@@ -1216,7 +1217,7 @@ impl ViewportPresenter {
     ) -> Result<(), GpuRasterError> {
         let (placement, lit, pipeline) = self.bound_viewport(renderer);
         let source = placement[13] as usize;
-        if !self.pipelines_ready_for(renderer, pipeline) { return Ok(()); }
+        if !self.pipelines_ready_for(renderer, pipeline, lit) { return Ok(()); }
         let pipeline = pipeline.clone();
         let size = [target.texture().width(),target.texture().height()];
         if self.presented_drawing.is_some_and(|old|old.showing && old.document!=renderer.presentation.document) {
@@ -1251,7 +1252,6 @@ impl ViewportPresenter {
             None => [&renderer.empty_view; 3],
         };
         if showing && renderer.display_backup.is_none() && let Some(cache) = renderer.selected_display_cache() { cache.refresh_half(renderer, encoder, &mut self.uploads)?; }
-        if showing { self.prepare_paper_lighting(renderer); }
         let navigator = renderer.navigator.view().unwrap_or(&renderer.empty_view);
         let motion = renderer.display_motion();
         let motion_views = motion.map_or([&renderer.empty_view; 2], |(views, ..)| views);
@@ -1738,8 +1738,14 @@ impl ViewportPresenter {
         self.held_alpha=fade;
         self.presented_overview_buffer=self.overview_buffer.clone();
         if showing && !overview_only && self.presented_drawing.is_none_or(|drawing| !drawing.showing) {
-            renderer.compilation.require(self.pipeline.iter().enumerate().filter_map(|(index,pipeline)|
-                (index != source).then_some(pipeline)), crate::startup::VALIDATION);
+            for pipeline in self.pipeline.iter().enumerate().filter_map(|(index, pipeline)| (index != source).then_some(pipeline)) {
+                renderer.compilation.warm(pipeline, crate::startup::VALIDATION, renderer.compilation.generation());
+            }
+        }
+        if lit && self.presented_paper != Some(true) {
+            for pipeline in self.paper_pipelines(renderer).iter().enumerate().filter_map(|(index, pipeline)| (index != source).then_some(pipeline)) {
+                renderer.compilation.warm(pipeline, crate::startup::VALIDATION, renderer.compilation.generation());
+            }
         }
         self.presented_drawing = Some(renderer.presentation);
         self.presented_selection_overlay = renderer.selection_overlay;

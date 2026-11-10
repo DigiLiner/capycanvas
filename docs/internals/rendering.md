@@ -228,12 +228,11 @@ and starts its own 150 ms fade on a full-scope refresh. Until then it holds the
 old image, or shows the panel when no compatible image exists. Both parts share
 one transient charge and release independently when their fades finish.
 
-The artwork pipelines leave out the paper lighting code; a second set with it
-compiles the first time paper lighting shows, in the background where a startup
-compiler runs, and the plain set draws until it is ready.
-Waiting for optional paper shaders does not mark renderer work pending, keeps
-canvas and brush readiness, and does not block layer thumbnail readbacks.
-Prepared bake steps resume when the compiler wakes the host.
+The presenter's bound paper-lighting variant and its slope programs run at
+Required before a lit canvas can present. The other two lit variants run at
+Validation after the first lit frame. Unlit canvases and standalone Navigators
+do not require lit viewport pipelines. Paper bake steps resume when the compiler
+wakes the host.
 
 Viewport and backdrop uniforms are encoded into the frame that consumes them.
 An unchanged layer-style table reuses its uploaded bytes; buffer replacement or

@@ -666,7 +666,7 @@ impl WgpuRasterizer {
         }
         if self.startup.is_some() {
             let shaded: Vec<_> = self.paper_overlay.iter().map(|o| (o.paper.clone(), VALIDATION))
-                .chain(self.paper_lighting.iter().map(|lit| (lit.binding.clone(), OTHER))).collect();
+                .chain(self.paper_lighting.iter().map(|lit| (lit.binding.clone(), DOCUMENT))).collect();
             for (binding, priority) in shaded {
                 self.require_paper_slope(&binding, priority)?;
             }
@@ -1842,9 +1842,8 @@ mod gpu_tests {
             .filter(|extra| !Reach::of(&brush).required_variants(&style).any(|required| required == *extra)).map(|extra|
             r.pipelines.dry_material.selected_kernel(&style,MaterialOperation::Deposit,false,extra).clone()).collect::<Vec<_>>();
         assert!(!exact.is_empty());
+        crate::test_support::submit_published(&mut r,crate::test_support::packet(doc.scene(),[128;2]));
         let mut presenter=crate::ViewportPresenter::for_surface(&r,wgpu::TextureFormat::Rgba8UnormSrgb,crate::SdrSurfaceColor::Srgb).unwrap();
-        presenter.pipelines_ready(&r);
-        r.update_paper_lighting(doc.scene()).unwrap();
         while !presenter.prepare_paper_lighting(&r) {
             r.poll_startup().unwrap();
             assert!(std::time::Instant::now() < deadline,"visible paper lighting prepares without speculative idle");

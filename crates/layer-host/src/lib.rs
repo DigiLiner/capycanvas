@@ -1715,72 +1715,80 @@ mod tests {
     }
 
     #[test]
-    fn idle_paper_lighting_wakes_one_presentation_without_input() {
-        let mut document = layer_ui::new_drawing(128, 128, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
-        document.set_paper_texture(layer_core::paper::built_in_paper("rough").unwrap().texture.clone());
-        document.set_paper_relief(150.);
-        let (_reference, mut host) = gpu_document_host(layer_ui::Platform::Windows, document);
-        let clock = std::cell::Cell::new(0);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        while !host.startup.complete || host.session.wants_continuous_frames() { frame_step(&mut host, &clock, deadline); }
-        let gpu = host.session.engine().backend().0.as_ref().unwrap();
-        gpu.shader_idle(false, false);
-        let view = host.session.state().camera.view();
-        let surround = host.session.state().palette.surround_linear;
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-        let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
-            label: Some("idle paper presentation"), size: wgpu::Extent3d { width: view.width_px, height: view.height_px, depth_or_array_layers: 1 },
-            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
-        });
-        let target = texture.create_view(&Default::default());
-        let mut presenter = layer_render_wgpu::ViewportPresenter::for_surface(gpu, format, layer_render_wgpu::SdrSurfaceColor::Srgb).unwrap();
-        pollster::block_on(presenter.prepare(gpu)).unwrap();
-        presenter.present(gpu, &target, view, surround).unwrap();
-        assert!(!presenter.paper_lighting_drawn());
-        let pixels = |host: &NativeHost| {
+    fn first_ready_paper_presentation_is_lit_without_an_idle_transition() {
+        let mut unlit: Option<Vec<u8>> = None;
+        for lit in [false, true] {
+            let mut document = layer_ui::new_drawing(128, 128, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
+            document.set_paper_texture(layer_core::paper::built_in_paper("rough").unwrap().texture.clone());
+            document.set_paper_color(layer_core::color::RgbColor::new(layer_core::color::RgbSpace::Srgb, [0.5, 0.5, 0.5, 1.]).unwrap());
+            document.set_paper_relief(if lit { 150. } else { 0. });
+            let (_reference, mut host) = gpu_document_host(layer_ui::Platform::Windows, document);
             let gpu = host.session.engine().backend().0.as_ref().unwrap();
-            let row = (view.width_px * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-            let buffer = gpu.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("idle paper readback"), size: u64::from(row * view.height_px),
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false,
-            });
-            let mut encoder = gpu.device().create_command_encoder(&Default::default());
-            encoder.copy_texture_to_buffer(texture.as_image_copy(), wgpu::TexelCopyBufferInfo {
-                buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(view.height_px) },
-            }, texture.size());
-            gpu.queue().submit([encoder.finish()]);
-            buffer.slice(..).map_async(wgpu::MapMode::Read, |result| result.unwrap());
-            gpu.device().poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(30)) }).unwrap();
-            buffer.slice(..).get_mapped_range().unwrap().to_vec()
-        };
-        let plain = pixels(&host);
-        let revision = host.session.engine().document().revision;
-        host.dirty = false;
-        host.poll_canvas_presentation(&mut presenter).unwrap();
-        assert!(!host.dirty, "parked optional pipelines do not pump frames");
-        assert!(host.startup.complete, "optional lighting does not hold startup completion");
-        host.session.engine().backend().0.as_ref().unwrap().shader_idle(true, false);
-        let mut frames = 0;
-        while !presenter.paper_lighting_drawn() {
-            host.poll_canvas_presentation(&mut presenter).unwrap();
-            if host.dirty {
-                let gpu = host.session.engine().backend().0.as_ref().unwrap();
-                presenter.present(gpu, &target, view, surround).unwrap();
-                host.dirty = false;
-                frames += 1;
+            gpu.shader_idle(false, false);
+            let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+            let mut presenter = layer_render_wgpu::ViewportPresenter::for_surface(gpu, format, layer_render_wgpu::SdrSurfaceColor::Srgb).unwrap();
+            assert!(!host.startup.complete);
+            let clock = std::cell::Cell::new(0);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                frame_step(&mut host, &clock, deadline);
+                host.session.engine().backend().0.as_ref().unwrap().shader_idle(false, false);
+                host.poll_canvas_presentation(&mut presenter).unwrap();
+                let ready = host.prepare_canvas_presentation(&presenter);
+                if host.startup.complete && ready && !host.session.wants_continuous_frames()
+                    && host.session.engine().backend().0.as_ref().unwrap().has_presentable_frame() { break; }
             }
-            assert!(std::time::Instant::now() < deadline, "idle paper lighting never requested a presentation");
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            let gpu = host.session.engine().backend().0.as_ref().unwrap();
+            let view = host.session.state().camera.view();
+            let surround = host.session.state().palette.surround_linear;
+            let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
+                label: Some("first ready paper presentation"), size: wgpu::Extent3d { width: view.width_px, height: view.height_px, depth_or_array_layers: 1 },
+                mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
+            });
+            let target = texture.create_view(&Default::default());
+            presenter.present(gpu, &target, view, surround).unwrap();
+            assert_eq!(presenter.paper_lighting_drawn(), lit, "the first ready canvas must use its configured lighting");
+            let pixels = |host: &NativeHost| {
+                let gpu = host.session.engine().backend().0.as_ref().unwrap();
+                let row = (view.width_px * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+                let buffer = gpu.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("idle paper readback"), size: u64::from(row * view.height_px),
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false,
+                });
+                let mut encoder = gpu.device().create_command_encoder(&Default::default());
+                encoder.copy_texture_to_buffer(texture.as_image_copy(), wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(view.height_px) },
+                }, texture.size());
+                gpu.queue().submit([encoder.finish()]);
+                buffer.slice(..).map_async(wgpu::MapMode::Read, |result| result.unwrap());
+                gpu.device().poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(30)) }).unwrap();
+                buffer.slice(..).get_mapped_range().unwrap().to_vec()
+            };
+            let first = pixels(&host);
+            if lit { assert_ne!(&first, unlit.as_ref().unwrap(), "rough gray paper must visibly receive lighting"); }
+            else { unlit = Some(first.clone()); }
+            let revision = host.session.engine().document().revision;
+            host.session.engine().backend().0.as_ref().unwrap().shader_idle(true, false);
+            loop {
+                host.poll_canvas_presentation(&mut presenter).unwrap();
+                let gpu = host.session.engine().backend().0.as_ref().unwrap();
+                if !lit || presenter.prepare_paper_lighting(gpu) { break; }
+                assert!(std::time::Instant::now() < deadline, "paper lighting did not settle");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            let gpu = host.session.engine().backend().0.as_ref().unwrap();
+            pollster::block_on(presenter.prepare(gpu)).unwrap();
+            presenter.present(gpu, &target, view, surround).unwrap();
+            assert_eq!(first, pixels(&host), "first ready paper pixels must equal settled paper pixels");
+            host.dirty = false;
+            for _ in 0..4 {
+                host.poll_canvas_presentation(&mut presenter).unwrap();
+                assert!(!host.dirty, "paper lighting must not request a late idle presentation");
+                assert_eq!(host.session.engine().document().revision, revision);
+            }
+            assert!(host.startup.complete);
         }
-        assert_eq!(frames, 1, "only the completed lighting transition draws");
-        assert_ne!(plain, pixels(&host), "lighting changes the displayed paper");
-        assert_eq!(host.session.engine().document().revision, revision);
-        for _ in 0..4 {
-            host.poll_canvas_presentation(&mut presenter).unwrap();
-            assert!(!host.dirty, "settled paper does not pump idle frames");
-        }
-        assert!(host.startup.complete);
     }
 
     fn visible_layer_thumbnails(host: &mut NativeHost, pending: impl Fn(&NativeHost)) -> std::collections::BTreeMap<u64, Vec<u8>> {

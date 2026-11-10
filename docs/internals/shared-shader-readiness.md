@@ -89,6 +89,8 @@ never take, costs Adreno and Mali tablets up to a third of their painting rate.
 
 The native compiler workers and browser task runner share the registry and
 admission policy in `compile/`. Renderer scopes cancel their queued demand when dropped.
+Only real dependency requests hold readiness and wake their owner on completion;
+warming keeps its scheduling class without requesting another frame.
 Native hosts run three eighths of `available_parallelism()`, rounded up and
 clamped to one through six, required jobs at once, plus one thread for an
 optional pipeline compile. Only independent required pipeline recipes compile
@@ -183,7 +185,7 @@ image keeps shared frame demand active until the choice is applied or rejected.
 Waiting for disk I/O and suspended painting do not request polling. Once Paper
 applies, its relief preview finishes before frame demand returns to idle.
 Paper shading is part of the presenter's own pipeline. The slope pipelines
-that turn a bake into its slope tile compile as optional work for a lit paper
+that turn a bake into its slope tile compile at Required for a drawing's lit paper
 and at preview priority, with the relief's own bake, while the Scale preview is
 shown. Paper bakes advance one at a time,
 most urgent first, one step per completed GPU submission, and a newer request

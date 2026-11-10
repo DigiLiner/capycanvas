@@ -313,6 +313,7 @@ pub(crate) fn submit_settled(r: &mut WgpuRasterizer, frame: FramePacket<'_>) {
         reset_layers: false, composite_all: false, ..frame };
     let mut first = true;
     loop {
+        r.poll_startup().unwrap();
         r.poll_pending(frame.view).unwrap();
         let next = if first { frame } else { idle };
         let preview = r.transform_preview.clone();
@@ -561,6 +562,4 @@ fn canonical_pixels(r: &mut WgpuRasterizer) -> Vec<[f32; 4]> {
 
 pub(crate) fn prepare_lit_presenter(r: &WgpuRasterizer, presenter: &mut crate::ViewportPresenter) {
     pollster::block_on(presenter.prepare(r)).unwrap();
-    presenter.prepare_paper_lighting(r);
-    if let Some(pipelines)=&presenter.paper_pipeline {pollster::block_on(r.compilation.prepare_all(pipelines)).unwrap();}
 }

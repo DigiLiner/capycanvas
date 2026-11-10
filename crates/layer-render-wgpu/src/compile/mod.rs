@@ -593,7 +593,7 @@ impl<W> Queue<W> {
                 if let Some(error) = &error {
                     owner.error.get_or_insert(error.clone());
                 }
-                if demand.class <= Class::Visible
+                if demand.generation.is_none()
                     && let Some(wake) = &owner.wake
                 {
                     wakes.push((demand.owner, wake.clone()));
@@ -610,7 +610,12 @@ impl<W> Queue<W> {
                 (e.work.is_some() || e.running)
                     && e.demands
                         .iter()
-                        .any(|d| d.owner == owner && d.class.required() && self.live(d))
+                        .any(|d| {
+                            d.owner == owner
+                                && d.generation.is_none()
+                                && d.class.required()
+                                && self.live(d)
+                        })
             })
             .count()
     }
