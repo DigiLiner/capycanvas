@@ -24,7 +24,17 @@ $script:imeSequence=0
 function Value($Control){$Control.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value}
 function Key([uint16]$Code){[CapyRowPointer]::Key([uint32]$review.Id,$Code);Start-Sleep -Milliseconds 100}
 function Focus($Control){$Control.SetFocus();Wait-Until {$Control.Current.HasKeyboardFocus} 'The owned editor did not receive focus'}
-function Select-All{[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),65)}
+function Select-All($Control){
+ [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),65)
+ Wait-Until {$selection=@($Control.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).GetSelection());$selection.Count -eq 1 -and $selection[0].GetText(-1) -ceq (Value $Control)} 'The owned editor did not select its full text before IME input'
+}
+function Initialize-IME{
+ Focus (Control 'drawing-canvas')
+ if([CapyIme]::Language($registeredWindow.Handle,[uint32]$review.Id) -ne 0x411){[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(91),32)}
+ Wait-Until {[CapyIme]::Language($registeredWindow.Handle,[uint32]$review.Id) -eq 0x411} 'The owned editor did not activate the Japanese input profile'
+ [CapyIme]::Open($registeredWindow.Handle,[uint32]$review.Id)
+ [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),20)
+}
 function Capture-Desktop([string]$Name){
  $bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
  $bitmap=[Drawing.Bitmap]::new($bounds.Width,$bounds.Height);$graphics=[Drawing.Graphics]::FromImage($bitmap)
@@ -35,9 +45,7 @@ function Compose($Control,[string]$Romaji,[string]$Preedit){
  $script:imeSequence++
  Focus $Control
  Start-Sleep -Milliseconds 250
- [CapyIme]::Open($registeredWindow.Handle,[uint32]$review.Id)
- [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),20)
- Select-All
+ Select-All $Control
  foreach($letter in $Romaji.ToUpperInvariant().ToCharArray()){Key ([uint16]$letter)}
  try{Wait-Until {(Value $Control) -eq $Preedit} 'The installed Japanese IME did not produce genuine Hiragana preedit' 15}catch{
   @{romaji=$Romaji;expected=$Preedit;actual=(Value $Control);text=($Control.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).DocumentRange.GetText(-1));control=$Control.Current.AutomationId}|ConvertTo-Json|Set-Content (Join-Path $run 'preedit-failure.json') -Encoding UTF8
@@ -67,11 +75,8 @@ try{
  $root=$registeredWindow.Root
  Wait-Until {[CapyRowPointer]::SetForegroundWindow($registeredWindow.Handle)|Out-Null;[CapyRowPointer]::GetForegroundWindow() -eq $registeredWindow.Handle} 'IME review did not own foreground input'
  $initial=Model;$layer=$initial.state.layer_tools.editing_layer.id;$original=$initial.state.layer_tools.editing_layer.label;$gpu=$initial.windows_gpu_generation
+ Initialize-IME
  $entry=Begin-Rename
- if([CapyIme]::Language($registeredWindow.Handle,[uint32]$review.Id) -ne 0x411){[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(91),32)}
- Wait-Until {[CapyIme]::Language($registeredWindow.Handle,[uint32]$review.Id) -eq 0x411} 'The owned editor did not activate the Japanese input profile'
- [CapyIme]::Open($registeredWindow.Handle,[uint32]$review.Id)
- [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),20)
  Compose $entry 'nihonn' 'にほん';Assert-Renaming $original
  $candidate=Value $entry;Key 13
  Wait-Until {(Value $entry) -eq $candidate} 'Candidate Enter changed the converted text'
