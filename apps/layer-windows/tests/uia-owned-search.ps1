@@ -1215,6 +1215,66 @@ namespace CapyBubbleOverlayTest {
 Write-Output 'Actual bubble overlay sequence waits for applied Fill before composed pixels, rejects missing and wrong owned phase, and retains its pressed pixel assertion.'
 
 & {
+    foreach($name in 'Bubble-VisualBounds','Assert-BubbleVisualOrbitReturn'){
+        $definition=$bubbleAst.Find({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-eq$name}.GetNewClosure(),$true)
+        if(!$definition){throw "Missing actual $name fixture function"}
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    function Orbit-Peer($Values,[bool]$Empty=$false){
+        [pscustomobject]@{Current=[pscustomobject]@{BoundingRectangle=[pscustomobject]@{X=$Values[0];Y=$Values[1];Width=$Values[2];Height=$Values[3];IsEmpty=$Empty}}}
+    }
+    $transition=$bubbleAst.Find({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-eq'Assert-BubbleVisualBeadTransitions'},$true)
+    $outward=$transition.Find({param($node)$node-is[Management.Automation.Language.CommandAst]-and$node.GetCommandName()-eq'Wait-Until'-and@($node.CommandElements|Where-Object {$_.Value-eq'Held palette orbit did not move beyond its original position'}).Count-eq1},$true)
+    $turnedBounds=$transition.Find({param($node)$node-is[Management.Automation.Language.AssignmentStatementAst]-and$node.Left.Extent.Text-eq'$evidence.orbit.turned_bounds'},$true)
+    $sampling=$transition.Find({param($node)$node-is[Management.Automation.Language.DoWhileStatementAst]-and$node.Extent.Text.Contains('Bubble-VisualBounds $peer')},$true)
+    if(!$outward-or!$turnedBounds-or!$sampling){throw 'Missing actual native orbit return observation sequence'}
+    $observe=$bubbleAst.Extent.Text.Substring($outward.Extent.EndOffset,$turnedBounds.Extent.EndOffset-$outward.Extent.EndOffset)
+    $Id=27;$script:orbitLookups=0;$evidence=@{orbit=@{}}
+    $peer=Orbit-Peer @([double]::PositiveInfinity,[double]::PositiveInfinity,[double]::NegativeInfinity,[double]::NegativeInfinity) -Empty $true
+    $live=Orbit-Peer @(100.,0.,36.,36.)
+    $bead=[pscustomobject]@{label='Swatch 6';placement=@{bead=@{kind='swatch';index=6};center=@(100,0);size=36}}
+    function View([long]$Bubble){if($Bubble-ne27){throw 'Orbit observed another bubble'};@{beads=@($bead)}}
+    function Bubble-VisualBead([long]$Bubble,$Bead){
+        if($Bubble-ne27-or$Bead.label-ne'Swatch 6'-or$Bead.placement.bead.kind-ne'swatch'-or$Bead.placement.bead.index-ne6){throw 'Orbit reacquired another logical bead'}
+        $script:orbitLookups++;$live
+    }
+    function Start-Sleep([int]$Milliseconds){}
+    . ([scriptblock]::Create($observe))
+    if($script:orbitLookups-ne1-or$peer-ne$live-or($evidence.orbit.turned_bounds-join',')-ne'100,0,36,36'){throw 'Orbit retained the retired outward peer instead of acquiring its current logical bead before return'}
+    $live.Current.BoundingRectangle.X=20.
+    $returnClock=[pscustomobject]@{Elapsed=[pscustomobject]@{TotalMilliseconds=10.};ElapsedMilliseconds=300}
+    $samples=[Collections.Generic.List[object]]::new()
+    . ([scriptblock]::Create($sampling.Extent.Text))
+    if($samples.Count-ne1-or($samples[0].bounds-join',')-ne'20,0,36,36'-or$script:orbitLookups-ne1){throw 'Actual return sampling did not observe the acquired live bead'}
+    foreach($invalid in @(
+        (Orbit-Peer @(0.,0.,36.,36.) -Empty $true),
+        (Orbit-Peer @(0.,0.,0.,36.)),
+        (Orbit-Peer @(0.,0.,36.,-1.)),
+        (Orbit-Peer @([double]::NaN,0.,36.,36.)),
+        (Orbit-Peer @(0.,[double]::PositiveInfinity,36.,36.)),
+        (Orbit-Peer @(0.,0.,[double]::NegativeInfinity,36.))
+    )){
+        $failure=$null;try{$null=Bubble-VisualBounds $invalid}catch{$failure=$_}
+        if(!$failure-or$failure.Exception.Message-notlike'Native bubble visual *'){throw 'Native visual geometry accepted empty, nonpositive or non-finite bounds'}
+    }
+    foreach($case in 'snap','stationary','late','gap','short','tween'){
+        $turned=@(100.,0.,36.,36.)
+        $samples=@(@{ms=10.;bounds=@(20.,0.,36.,36.)},@{ms=20.;bounds=@(20.,0.,36.,36.)},@{ms=30.;bounds=@(20.,0.,36.,36.)})
+        $message=switch($case){
+            'stationary'{foreach($sample in $samples){$sample.bounds=$turned};'Native orbit return did not acknowledge movement'}
+            'late'{$samples[0].ms=220.;'Native orbit samples did not resolve movement before a 220 ms tween could complete'}
+            'gap'{$samples[0].ms=76.;'Native orbit samples did not resolve movement before a 220 ms tween could complete'}
+            'short'{$samples=$samples[0..1];'Native orbit return needs at least two samples after its first movement'}
+            'tween'{$samples[0].bounds=@(50.,0.,36.,36.);'Returning inside press slop animated native bead bounds instead of snapping:*'}
+        }
+        $failure=$null;try{$result=Assert-BubbleVisualOrbitReturn $samples $turned}catch{$failure=$_}
+        if($case-eq'snap'){if($failure){throw $failure};if($result.maximum_post_change_error_px-ne0-or$result.post_change_samples-ne2){throw 'Native orbit snap control lost its original geometry assertions'}}
+        elseif(!$failure-or$failure.Exception.Message-notlike$message){throw "Native orbit accepted $case return geometry: $failure"}
+    }
+    'Actual bead return acquires its live logical peer before measurement, rejects empty/non-finite geometry and retains movement, 220 ms/75 ms timing, sample-count and no-tween assertions.'
+}
+
+& {
     $tokens=$null;$errors=$null
     $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-zoom-readout.ps1'),[ref]$tokens,[ref]$errors)
     if($errors.Count){throw ($errors|Out-String)}

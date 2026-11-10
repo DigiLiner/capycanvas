@@ -546,7 +546,10 @@ function Measure-BubbleVisualOverlay($Baseline,$Actual,$Ink,[double]$Alpha){
 }
 function Bubble-VisualBounds($Element){
     $bounds=$Element.Current.BoundingRectangle
-    return ,@([double]$bounds.X,[double]$bounds.Y,[double]$bounds.Width,[double]$bounds.Height)
+    if($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){throw 'Native bubble visual bounds are empty or not arranged'}
+    $values=@([double]$bounds.X,[double]$bounds.Y,[double]$bounds.Width,[double]$bounds.Height)
+    foreach($value in $values){if([double]::IsNaN($value) -or [double]::IsInfinity($value)){throw 'Native bubble visual bounds are not finite'}}
+    return ,$values
 }
 function Bubble-VisualState([long]$Id){
     $model=Model
@@ -760,6 +763,8 @@ function Assert-BubbleVisualBeadTransitions([long]$Id){
             $moved -and [Math]::Abs($moved.placement.center[0]-$bead.placement.center[0]) -gt 8
         } 'Held palette orbit did not move beyond its original position'
         Start-Sleep -Milliseconds 300
+        $turned=@((View $Id).beads|Where-Object {$_.placement.bead.kind -eq 'swatch' -and $_.placement.bead.index -eq 6})[0]
+        $peer=Bubble-VisualBead $Id $turned
         $evidence.orbit.turned_bounds=Bubble-VisualBounds $peer
         $returnClock=[Diagnostics.Stopwatch]::StartNew();[CapyRowPointer]::Move($back.x,$back.y)
         $samples=[Collections.Generic.List[object]]::new()
