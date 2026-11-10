@@ -18438,8 +18438,8 @@ mod tests {
                     ("Website", "capycanvas.art", "https://capycanvas.art/"),
                     (
                         "Source code",
-                        "github.com/capyatelier/capycanvas",
-                        "https://github.com/capyatelier/capycanvas"
+                        "github.com/babymastodon/capycanvas",
+                        "https://github.com/babymastodon/capycanvas"
                     ),
                 ]
             );

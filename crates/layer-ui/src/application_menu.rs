@@ -31,13 +31,13 @@ impl ApplicationLink {
     pub fn display(self) -> &'static str {
         match self {
             Self::Website => "capycanvas.art",
-            Self::SourceCode => "github.com/capyatelier/capycanvas",
+            Self::SourceCode => "github.com/babymastodon/capycanvas",
         }
     }
     pub fn url(self) -> &'static str {
         match self {
             Self::Website => "https://capycanvas.art/",
-            Self::SourceCode => "https://github.com/capyatelier/capycanvas",
+            Self::SourceCode => "https://github.com/babymastodon/capycanvas",
         }
     }
 }
