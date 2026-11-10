@@ -1,6 +1,7 @@
 Add-Type -AssemblyName System.Drawing
 if(!('TabFrames' -as [type])){
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+$references=@([Drawing.Bitmap],[Drawing.Color],[Drawing.Graphics])|ForEach-Object {$_.Assembly;$_.GetInterfaces()|ForEach-Object Assembly}|Where-Object {$_ -ne [object].Assembly}|ForEach-Object Location|Select-Object -Unique
+Add-Type -ReferencedAssemblies $references -TypeDefinition @'
 using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
