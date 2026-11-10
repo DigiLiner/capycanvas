@@ -722,6 +722,12 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         ++surfaceFrames;
         for(auto const& [id,group]:groups){
             if(group.hidden||!group.frame.IsLoaded()||group.frame.Visibility()!=Visibility::Visible||group.frame.Opacity()<=0)continue;
+            bool visible=true;
+            for(auto node=group.frame.as<DependencyObject>();node;node=VisualTreeHelper::GetParent(node)){
+                if(auto item=node.try_as<UIElement>();item&&(item.Visibility()!=Visibility::Visible||item.Opacity()<=0)){visible=false;break;}
+                if(auto item=node.try_as<FrameworkElement>();item&&!item.IsLoaded()){visible=false;break;}
+            }
+            if(!visible)continue;
             auto bounds=allocatedBounds(group.frame,root);
             if(bounds.Width<=0||bounds.Height<=0)continue;
             auto size=group.background.Size();

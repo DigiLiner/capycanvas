@@ -619,6 +619,28 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         for(auto const& command:*actions){auto action=command.HasKey(L"windows_epoch")?object(command,L"action"):command;if(str(action,L"type")==L"layer"){
             auto operation=str(object(action,L"action"),L"op");require(operation!=L"rename"&&operation!=L"cancel_rename",L"Language publication dispatched an authored rename or cancellation");
         }}
+        phase=L"workspace-surface-eligibility";
+        {
+            auto counters=[&]{view->MeasureChrome();return object(J::Parse(AutomationProperties::GetItemStatus(surface)),L"surface_frames");};
+            co_await wait([&]{return num(counters(),L"groups")>0;},L"Surface eligibility fixture did not observe visible native groups");
+            auto host=surface.Parent().as<UIElement>();auto opacity=host.Opacity();auto visibility=host.Visibility();
+            auto frames=std::make_shared<uint32_t>(0);
+            auto rendered=CompositionTarget::Rendering(auto_revoke,[frames](auto&&,auto&&){++*frames;});
+            for(bool collapsed:{false,true}){
+                if(collapsed)host.Visibility(Visibility::Collapsed);else host.Opacity(0);
+                auto before=counters();auto frame=*frames;
+                co_await wait([frames,frame]{return *frames>frame;},L"Surface eligibility fixture did not receive native Rendering");
+                auto after=counters();
+                require(num(after,L"frames")>num(before,L"frames"),L"Hidden surface eligibility did not sample an actual Rendering tick");
+                require(num(after,L"groups")==num(before,L"groups"),L"Native panel fill counter admitted an effectively hidden ancestor");
+                require(num(after,L"mismatched_frames")==num(before,L"mismatched_frames")&&num(after,L"maximum_offset_px")==num(before,L"maximum_offset_px")&&num(after,L"tab_frames")==num(before,L"tab_frames")&&num(after,L"escaped_label_frames")==num(before,L"escaped_label_frames"),L"Hidden native panels changed visible fill or tab evidence");
+                host.Visibility(visibility);host.Opacity(opacity);
+            }
+            auto before=counters();auto frame=*frames;
+            co_await wait([frames,frame]{return *frames>frame;},L"Revealed surface eligibility fixture did not receive native Rendering");
+            require(num(counters(),L"groups")>num(before,L"groups"),L"Native panel fill counter omitted revealed groups");
+            rendered.revoke();++checks;
+        }
         root.Children().RemoveAt(0);view.reset();root.Width(400);root.Height(240);++imeChecks;
         phase=L"canvas-bar-language";co_await canvasBarLanguage(model,locale);
         phase=L"palette-name-draft";co_await paletteNameDraft(model,locale,J::Parse(to_hstring(paletteChanged)),J::Parse(to_hstring(paletteRemoved)),J::Parse(to_hstring(paletteSwitched)));
