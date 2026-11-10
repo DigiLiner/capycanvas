@@ -95,6 +95,7 @@ extension XCTestCase {
     @MainActor func checkSettingsTextState(in app: XCUIApplication, theme: String = "light", keyboardSelection: Bool = true) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"invoke","command":"settings"}]"#
         app.launch()
+        waitForEditorInteraction(in: app)
         assertEditorSettingsRoot(in: app, phone: false)
         func reopen() {
             workspaceActivate(app.buttons["settings-done"])

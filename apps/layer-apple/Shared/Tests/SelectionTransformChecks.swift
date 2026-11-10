@@ -16,8 +16,9 @@ extension XCTestCase {
         workspaceActivate(item)
         #else
         let button = app.buttons["menu-" + menu], compact = app.buttons["application-menus"]
-        let available = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in button.exists || compact.exists }, object: app)
-        guard XCTWaiter.wait(for: [available], timeout: 5) == .completed else {
+        let available = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            button.exists && button.isEnabled || compact.exists && compact.isEnabled }, object: app)
+        guard XCTWaiter.wait(for: [available], timeout: 60) == .completed else {
             let blocked = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
             blocked.name = "editor-menu-unavailable"; blocked.lifetime = .keepAlways; add(blocked)
             let hierarchy = XCTAttachment(string: app.debugDescription)

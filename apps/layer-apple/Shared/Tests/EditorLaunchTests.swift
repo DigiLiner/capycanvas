@@ -337,6 +337,7 @@ final class EditorLaunchTests: XCTestCase {
         let app = ignoringSavedWindows(editorTestApplication())
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:illustrator"}},{"type":"move_panel","panel":"toolbar","target":{"kind":"tab","group":6},"viewport":[1376,1032]},{"type":"customize","action":{"type":"set_column_collapsed","group":6,"collapsed":true}}]"#
         app.launch()
+        waitForEditorInteraction(in: app)
         checkCollapsedColumnsDrawersAndZen(in: app)
     }
 
