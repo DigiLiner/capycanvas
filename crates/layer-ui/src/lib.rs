@@ -244,6 +244,10 @@ pub const UI_TEXT_PT: u8 = 11;
 use serde::{Deserialize, Serialize};
 
 pub const BRUSH_SIZE_TILE: [f32; 2] = [TILE_SIZE, 44.];
+pub const BRUSH_SIZE_LABEL_INSET: f32 = 2.;
+pub fn brush_size_tile(label: [f32; 2]) -> [f32; 2] {
+    [BRUSH_SIZE_TILE[0].max(label[0] + 2. * BRUSH_SIZE_LABEL_INSET), BRUSH_SIZE_TILE[1].max(label[1] + BRUSH_SIZE_LABEL_INSET)]
+}
 pub const BRUSH_SIZES: &[f32] = &[
     0.7, 1., 1.5, 2., 2.5, 3., 4., 5., 6., 7., 8., 10., 12., 15., 17., 20., 25.,
     30., 40., 50., 60., 70., 80., 100., 120., 150., 170., 200., 250., 300., 400.,

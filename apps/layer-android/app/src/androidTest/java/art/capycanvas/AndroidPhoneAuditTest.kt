@@ -1620,7 +1620,12 @@ class AndroidPhoneAuditTest {
         }
         for (panel in listOf("navigator","histogram","waveform","stats","sizes","brushes","adjustments","filter_types","proof")) {
             host.drain(obj("type" to "phone","action" to obj("kind" to "panel","panel" to panel)));ready()
-            state("inventory-window-$panel") {}
+            state("inventory-window-$panel") {
+                if (panel == "sizes") {
+                    assertBrushSizeLabelsAtFontScales(activity, host, compose)
+                    compose.onNodeWithTag("size-preset-2000",useUnmergedTree = true).performScrollTo()
+                }
+            }
             close()
         }
         host.drain(obj("type" to "phone","action" to obj("kind" to "panel","panel" to "brushes")));ready()

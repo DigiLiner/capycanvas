@@ -1462,6 +1462,7 @@ class AndroidInteractionTest {
                 assertNull(host.actionError)
                 val before = workspace()
                 if (panel == "sizes") {
+                    if (pointer == MotionEvent.TOOL_TYPE_MOUSE) assertBrushSizeLabelsAtFontScales(activity, host)
                     assertEquals(bounds("size-preset-0.7").top, bounds("size-preset-3").top, 1.1f)
                     assertEquals(44 * density, bounds("size-preset-0.7").height, 1.1f)
                     tap(bounds("size-preset-1.5").center); settle(); assertEquals(1.5f, state().getJSONObject("brush").number("diameter"), .001f)
