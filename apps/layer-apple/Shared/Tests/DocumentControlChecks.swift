@@ -385,7 +385,7 @@ extension XCTestCase {
         chooseOpen(invalid)
         let failure = dialog
         XCTAssertTrue(failure.waitForExistence(timeout: 20), "An invalid project must report its error")
-        XCTAssertTrue(failure.staticTexts["Document"].exists)
+        XCTAssertTrue(failure.staticTexts["Cannot open file"].exists)
         XCTAssertGreaterThan(failure.staticTexts.count, 1, "The error must explain why the project could not open")
         workspaceActivate(failure.buttons["OK"])
         XCTAssertTrue(failure.waitForNonExistence(timeout: 10))
