@@ -376,3 +376,13 @@ no regression. If a physical iPhone is available, record the same rows there.
   `PhoneBarInput.swift` consumes Menu at arm instead of finish and dismisses
   it on drag. Mouse holds only arm pickup. Verify menu visibility before Up,
   retained menu after Up, same-contact reorder, cancellation and mouse pickup.
+
+- **Keep phone drawers above the keyboard.** Shared phone metrics now carry the
+  final keyboard height in dp. Drawer and menu placement and the Color wheel
+  budget use it while bars, canvas work area and contact keys remain unchanged.
+  iOS must send `keyboard` from the keyboard layout guide's final frame
+  (`keyboardWillChangeFrame` end frame), once per show, hide or frame change,
+  rather than per animation frame. Verify Palette search with a complete result
+  row and Tool Settings' Size entry above the real keyboard in portrait and both
+  landscapes, in light and dark.
+  If `PhoneBarInput.swift` keys Capy on the whole layout, key it on `capy_target`.

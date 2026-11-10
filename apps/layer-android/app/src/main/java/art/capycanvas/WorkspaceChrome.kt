@@ -230,7 +230,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             host.awaitQuery(obj("type" to "tool_panel", "panel" to panel, "anchor" to anchor))?.let { toolPanels[panel] = it }
         }
     }
-    val sizingContext = listOf(anchor, source, model.array("columns"), tabs, layout.getJSONArray("viewport"),
+    val sizingContext = listOf(anchor, source, model.array("columns"), tabs, layout.getJSONArray("viewport"), phone?.opt("keyboard"),
         snapshot.opt("header_presentation_height"), snapshot.opt("workspace_bottom_inset"), tileOrigins, toolbarInputs).toString()
     var lastAnchor by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(placementKey, sizingContext) {

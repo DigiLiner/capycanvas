@@ -148,6 +148,203 @@ class AndroidPhoneAuditTest {
         }
     }
 
+    @Test fun phoneDrawerFieldsAndPaletteResultsStayAboveTheKeyboard() {
+        val scenario = launchCapy(180_000,compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val decor = activity.window.decorView
+        val original = activity.requestedOrientation
+        val rotationFilter = InstrumentationRegistry.getArguments().getString("phoneRotation")
+        require(rotationFilter == null || rotationFilter in listOf("portrait","landscape","reverse-landscape"))
+        val animations = mutableSetOf<android.view.WindowInsetsAnimation>()
+        fun guard() {
+            instrumentation.runOnMainSync {
+                assertTrue("Only the private focused app receives input",decor.isAttachedToWindow && decor.hasWindowFocus())
+                assertEquals(instrumentation.targetContext.packageName,decor.context.packageName)
+                assertFalse(instrumentation.targetContext.packageName in listOf("art.capycanvas","art.capycanvas.editor","art.capycanvas.capycanvas9"))
+            }
+        }
+        fun bars() = jsonValue(host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONArray("bars"))
+        fun tap(tag: String) {
+            compose.waitForIdle()
+            val (root,node) = checkNotNull(findTag(tag))
+            assertSame("The drawer field belongs to the Activity window",decor,root.view.rootView)
+            val origin = IntArray(2)
+            instrumentation.runOnMainSync { root.view.getLocationOnScreen(origin) }
+            val point = node.boundsInRoot.center+Offset(origin[0].toFloat(),origin[1].toFloat())
+            assertTrue("The contact stays inside the private window",node.boundsInRoot.width>0 && node.boundsInRoot.height>0 && point.x>=0 && point.y>=0 && point.x<decor.width && point.y<decor.height)
+            val down = SystemClock.uptimeMillis()
+            for (phase in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                guard()
+                val event = motion(MotionEvent.TOOL_TYPE_FINGER,phase,point,down)
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event,true)) } finally { event.recycle() }
+            }
+            compose.waitForIdle()
+        }
+        fun settled(visible: Boolean) {
+            host.awaitFrame("The native IME animation completes") { animations.isEmpty() && decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()) == visible }
+            compose.waitForIdle()
+            val committed = java.util.concurrent.CountDownLatch(1)
+            instrumentation.runOnMainSync { decor.viewTreeObserver.registerFrameCommitCallback { committed.countDown() };decor.invalidate() }
+            assertTrue("The native keyboard frame commits",committed.await(5,java.util.concurrent.TimeUnit.SECONDS))
+        }
+        fun fullyVisible(tag: String) {
+            var geometry = ""
+            host.awaitFrame("$tag has its complete allocation above the keyboard",diagnostics={geometry}) {
+                val node = findTag(tag)?.second ?: return@awaitFrame false
+                val origin = IntArray(2)
+                findTag(tag)!!.first.view.getLocationOnScreen(origin)
+                val bounds = node.boundsInRoot.translate(Offset(origin[0].toFloat(),origin[1].toFloat()))
+                val blocked = decor.rootWindowInsets.getInsets(WindowInsets.Type.ime() or WindowInsets.Type.navigationBars())
+                val visible = Rect(blocked.left.toFloat(),blocked.top.toFloat(),(decor.width-blocked.right).toFloat(),(decor.height-blocked.bottom).toFloat())
+                geometry = "$tag $bounds natural=${node.size} visible=$visible"
+                node.size.width>0 && node.size.height>0 && kotlin.math.abs(bounds.width-node.size.width)<=1f && kotlin.math.abs(bounds.height-node.size.height)<=1f &&
+                    bounds.left>=visible.left-1 && bounds.top>=visible.top-1 && bounds.right<=visible.right+1 && bounds.bottom<=visible.bottom+1
+            }
+        }
+        fun finish(tag: String) {
+            val view = checkNotNull(findTag(tag)).first.view
+            guard()
+            instrumentation.runOnMainSync { assertTrue(checkNotNull(view.onCreateInputConnection(android.view.inputmethod.EditorInfo())).performEditorAction(android.view.inputmethod.EditorInfo.IME_ACTION_DONE)) }
+            settled(false)
+            if(tag == "palette-search") {
+                compose.onNodeWithTag("palette-chooser",useUnmergedTree=true).performScrollTo()
+                tap("palette-chooser")
+                host.awaitFrame("The palette chooser closes before the next case") { findTag("palette-search") == null }
+            }
+            host.drain(obj("type" to "customize","action" to obj("type" to "close_expanded")))
+            host.awaitFrame("The drawer closes after Done") { findTag("tool-drawer") == null }
+        }
+        instrumentation.runOnMainSync {
+            decor.setWindowInsetsAnimationCallback(object: android.view.WindowInsetsAnimation.Callback(android.view.WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                override fun onPrepare(animation: android.view.WindowInsetsAnimation) { if(animation.typeMask and WindowInsets.Type.ime()!=0)animations.add(animation) }
+                override fun onProgress(insets: WindowInsets,running: MutableList<android.view.WindowInsetsAnimation>): WindowInsets {
+                    animations.addAll(running.filter { it.typeMask and WindowInsets.Type.ime()!=0 });return insets
+                }
+                override fun onEnd(animation: android.view.WindowInsetsAnimation) { animations.remove(animation) }
+            })
+        }
+        try {
+            host.awaitFrame("The launch cover releases the private canvas") { findTag("launch-splash") == null }
+            for((name,orientation,rotation) in listOf(Triple("portrait",android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,0),
+                Triple("landscape",android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,1),
+                Triple("reverse-landscape",android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,3))) {
+                if(rotationFilter != null && rotationFilter != name)continue
+                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+                host.awaitFrame("$name uses its native viewport and sensor insets") {
+                    val cutout = decor.rootWindowInsets.displayCutout
+                    val sideReady = cutout == null || when(rotation) { 1 -> cutout.safeInsetLeft>0;3 -> cutout.safeInsetRight>0;else -> cutout.safeInsetTop>0 }
+                    val native = decor.rootWindowInsets.getInsets(WindowInsets.Type.displayCutout())
+                    val waterfall = cutout?.waterfallInsets ?: android.graphics.Insets.NONE
+                    val expected = listOf(maxOf(native.left,waterfall.left),maxOf(native.top,waterfall.top),maxOf(native.right,waterfall.right),maxOf(native.bottom,waterfall.bottom))
+                    val reported = host.snapshot!!.getJSONObject("state").getJSONObject("phone").getJSONArray("insets")
+                    val viewport=host.snapshot!!.getJSONObject("layout").getJSONArray("viewport")
+                    val density=activity.resources.displayMetrics.density
+                    activity.display!!.rotation == rotation && (decor.width>decor.height) == (rotation!=0) && sideReady &&
+                        kotlin.math.abs(viewport.getDouble(0)-decor.width/density)<.01 && kotlin.math.abs(viewport.getDouble(1)-decor.height/density)<.01 &&
+                        expected.indices.all { kotlin.math.abs(reported.getDouble(it)-expected[it]/activity.resources.displayMetrics.density)<.001 }
+                }
+                for(theme in listOf("light","dark")) {
+                    host.drain(obj("type" to "set_theme","theme" to theme))
+                    val color = host.snapshot!!.getJSONObject("state").getJSONObject("workspace").getJSONObject("layout").array("phone").objects()
+                        .single { it.getJSONObject("control").getString("kind") == "color" }.getInt("id")
+                    tap("phone-tool-$color")
+                    host.awaitFrame("Color and Palettes are presented",diagnostics={
+                        val dock=host.workspaceInteraction
+                        "drawer=${host.snapshot?.getJSONObject("state")?.getJSONObject("customization")?.opt("drawer")}; enabled=${dock?.enabled}; focused=${dock?.focused}; popup=${dock?.popupOpen}; phone=${dock?.phone?.preview}; windowFocus=${decor.hasWindowFocus()}"
+                    }) { findTag("palette-chooser") != null }
+                    compose.onNodeWithTag("palette-chooser",useUnmergedTree=true).performScrollTo()
+                    tap("palette-chooser")
+                    host.awaitFrame("Palette search is presented") { findTag("palette-search") != null }
+                    val palette = host.palettes.view()!!.array("palettes").objects().first { it.getString("name").isNotEmpty() }
+                    val before = bars()
+                    compose.onNodeWithTag("palette-search",useUnmergedTree=true).performScrollTo()
+                    tap("palette-search")
+                    settled(true)
+                    fullyVisible("palette-search")
+                    fullyVisible("palette-choice-${palette.getLong("id")}")
+                    assertEquals("Keyboard placement keeps both bars fixed",before,bars())
+                    assertNotNull(findTag("tool-drawer"))
+                    guard();screenshot("fix4d-$name-$theme-palette.png")
+                    finish("palette-search")
+                    host.drain(obj("type" to "invoke","command" to "drawing_brush"))
+                    tap("phone-tool-settings")
+                    host.awaitFrame("Brush settings are presented") { findTag("number-value-size") != null }
+                    val field = host.snapshot!!.getJSONObject("state").array("tool_settings").objects().single { it.getString("id") == "size" }
+                    val value = field.getDouble("value")
+                    val sizeBars = bars()
+                    compose.onNodeWithTag("number-value-size",useUnmergedTree=true).performScrollTo()
+                    tap("number-value-size")
+                    val tag = "number-${field.getString("label")}"
+                    host.awaitFrame("Brush Size is editable") { findTag(tag) != null }
+                    settled(true)
+                    fullyVisible(tag)
+                    assertEquals("Keyboard placement keeps both bars fixed",sizeBars,bars())
+                    guard();screenshot("fix4d-$name-$theme-size.png")
+                    finish(tag)
+                    assertEquals(value,host.snapshot!!.getJSONObject("state").array("tool_settings").objects().single { it.getString("id")=="size" }.getDouble("value"),.0001)
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { decor.setWindowInsetsAnimationCallback(null);activity.requestedOrientation=original }
+            scenario.close()
+        }
+    }
+
+    @Test fun phoneCapyHoldKeepsItsDropAcrossKeyboardMetrics() {
+        val scenario=launchCapy(180_000,compose)
+        val activity=scenario.activity()
+        val host=activity.host
+        val decor=activity.window.decorView
+        fun phone()=host.snapshot!!.getJSONObject("state").getJSONObject("phone")
+        fun event(phase: Int,point: Offset,down: Long) {
+            instrumentation.runOnMainSync {
+                assertTrue("Only the private focused window receives the Capy contact",decor.isAttachedToWindow && decor.hasWindowFocus())
+                assertEquals(instrumentation.targetContext.packageName,decor.context.packageName)
+                assertFalse(instrumentation.targetContext.packageName in listOf("art.capycanvas","art.capycanvas.editor","art.capycanvas.capycanvas9"))
+            }
+            val input=motion(MotionEvent.TOOL_TYPE_FINGER,phase,point,down)
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(input,true)) } finally { input.recycle() }
+        }
+        try {
+            host.awaitFrame("The private canvas releases launch input") { findTag("launch-splash")==null }
+            host.awaitFrame("The phone viewport and hidden keyboard match the native window",diagnostics={"layout=${host.snapshot?.opt("layout")}; keyboard=${phone().opt("keyboard")}"}) {
+                val viewport=host.snapshot!!.getJSONObject("layout").getJSONArray("viewport")
+                val density=activity.resources.displayMetrics.density
+                !decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()) && phone().getDouble("keyboard")==0.0 &&
+                    kotlin.math.abs(viewport.getDouble(0)-decor.width/density)<.01 && kotlin.math.abs(viewport.getDouble(1)-decor.height/density)<.01
+            }
+            compose.waitForIdle()
+            val (root,node)=checkNotNull(findTag("phone-capy"))
+            val origin=IntArray(2)
+            instrumentation.runOnMainSync { root.view.getLocationOnScreen(origin) }
+            val start=node.boundsInRoot.center+Offset(origin[0].toFloat(),origin[1].toFloat())
+            assertTrue("The Capy contact is inside the private window",start.x>=0 && start.y>=0 && start.x<decor.width && start.y<decor.height)
+            assertTrue("The contact targets Capy's shared hit bounds",host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONObject("capy_target").rect().contains(start/activity.resources.displayMetrics.density))
+            val down=SystemClock.uptimeMillis()
+            event(MotionEvent.ACTION_DOWN,start,down)
+            host.awaitFrame("Capy is held before keyboard metrics change",diagnostics={
+                val input=host.workspaceInteraction?.phone
+                "capy=${input?.capy}; held=${input?.held}; down=${input?.pointerDown}; enabled=${host.workspaceInteraction?.enabled}; focus=${decor.hasWindowFocus()}; keyboard=${phone().opt("keyboard")}; target=${input?.layout?.opt("capy_target")}; point=$start"
+            }) { host.workspaceInteraction?.phone?.let { it.capy && it.held } == true }
+            val before=JSONObject(phone().toString())
+            val target=host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONObject("capy_target").toString()
+            instrumentation.runOnMainSync { host.reportPhoneMetrics(before.getJSONArray("insets"),before.getJSONArray("corners"),120f) }
+            host.awaitFrame("The keyboard metric publishes during the Capy hold") { phone().getDouble("keyboard")==120.0 }
+            compose.waitForIdle()
+            host.drain()
+            assertTrue("Keyboard metrics keep the original Capy hold",host.workspaceInteraction?.phone?.let { it.capy && it.held } == true)
+            assertEquals(target,host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONObject("capy_target").toString())
+            val bar=host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONArray("bars").getJSONObject(0).rect()
+            val point=bar.center*activity.resources.displayMetrics.density
+            event(MotionEvent.ACTION_MOVE,point,down)
+            event(MotionEvent.ACTION_UP,point,down)
+            host.awaitFrame("The original held Capy drop swaps sides") { !phone().getBoolean("capy_drag") && phone().getBoolean("swapped") != before.getBoolean("swapped") }
+        } finally {
+            scenario.close()
+        }
+    }
+
     @Test fun phoneHeldMenusPreserveTouchPenAndMouseContacts() {
         val scenario = launchCapy(180_000,compose)
         val activity = scenario.activity()
@@ -1093,11 +1290,11 @@ class AndroidPhoneAuditTest {
         val blocked = host.documentInputBlocked
         try {
             runBlocking { host.withNative { host.documentInputBlocked = true } }
-            instrumentation.runOnMainSync { host.reportPhoneMetrics(JSONArray(listOf(19,7,13,5)), originalCorners) }
+            instrumentation.runOnMainSync { host.reportPhoneMetrics(JSONArray(listOf(19,7,13,5)), originalCorners, 0f) }
             host.awaitFrame("Metrics arrive during a document interaction") { phone().getJSONArray("insets").getInt(0) == 19 }
         } finally {
             host.documentInputBlocked = blocked
-            instrumentation.runOnMainSync { host.reportPhoneMetrics(originalInsets, originalCorners) }
+            instrumentation.runOnMainSync { host.reportPhoneMetrics(originalInsets, originalCorners, 0f) }
             host.awaitFrame("Restore native inset metrics") { phone().getJSONArray("insets").toString() == originalInsets.toString() }
         }
         instrumentation.runOnMainSync {

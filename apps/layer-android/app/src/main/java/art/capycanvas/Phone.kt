@@ -76,7 +76,7 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
         contact = value.getJSONObject("contact")
         return value.getJSONObject("reply").also { preview = it }
     }
-    fun valid() = (!capy || geometryKey == layout.toString()) &&
+    fun valid() = (!capy || geometryKey == layout.getJSONObject("capy_target").toString()) &&
         (contact?.let { phoneUi(obj("kind" to "bar_valid", "layout" to layout, "tiles" to tiles, "contact" to it)) == true } ?: true)
     fun cancel() {
         generation++
@@ -109,7 +109,7 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
         input.generation++
         input.suppressed = false
         input.capy = input.layout.getJSONObject("capy_target").rect().contains(start)
-        input.geometryKey = input.layout.toString()
+        input.geometryKey = input.layout.getJSONObject("capy_target").toString()
         input.contact = if (input.capy) null else phoneUi(obj("kind" to "bar_begin", "layout" to input.layout,
             "tiles" to input.tiles, "point" to JSONArray(listOf(start.x, start.y)))) as? JSONObject
         if (!input.capy && input.contact == null) return@awaitEachGesture
@@ -297,10 +297,12 @@ private fun Modifier.phoneFocus(host: CanvasHost,focus: FocusRequester) = focusR
     else if(host.workspaceOpener === focus)host.workspaceOpener = null
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable private fun PhoneMetrics(host: CanvasHost, state: JSONObject) {
     val density = LocalDensity.current
     val view = LocalView.current
     val safe = WindowInsets.displayCutout.union(WindowInsets.waterfall)
+    val keyboard = WindowInsets.imeAnimationTarget.getBottom(density) / density.density
     val insets = listOf(safe.getLeft(density, androidx.compose.ui.unit.LayoutDirection.Ltr), safe.getTop(density),
         safe.getRight(density, androidx.compose.ui.unit.LayoutDirection.Ltr), safe.getBottom(density)).map { it / density.density }
     val report by rememberUpdatedState(newValue = {
@@ -317,12 +319,12 @@ private fun Modifier.phoneFocus(host: CanvasHost,focus: FocusRequester) = focusR
         } else List(4) { 0f }
         val currentInsets = listOf(safe.getLeft(density, androidx.compose.ui.unit.LayoutDirection.Ltr), safe.getTop(density),
             safe.getRight(density, androidx.compose.ui.unit.LayoutDirection.Ltr), safe.getBottom(density)).map { it / density.density }
-        if (state.optBoolean("workspace_ready")) host.reportPhoneMetrics(JSONArray(currentInsets), JSONArray(corners))
+        if (state.optBoolean("workspace_ready")) host.reportPhoneMetrics(JSONArray(currentInsets), JSONArray(corners), keyboard)
     })
     DisposableEffect(host) {
         val listener = { report() }
         host.windowMetricsChanged = listener
         onDispose { if (host.windowMetricsChanged === listener) host.windowMetricsChanged = null }
     }
-    LaunchedEffect(insets, density, state.optBoolean("workspace_ready")) { report() }
+    LaunchedEffect(insets, density, keyboard, state.optBoolean("workspace_ready")) { report() }
 }

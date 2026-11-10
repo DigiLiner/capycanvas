@@ -61,6 +61,7 @@ pub struct PhoneState {
     pub(crate) platform: Option<crate::Platform>,
     pub insets: [f32; 4],
     pub corners: [f32; 4],
+    pub keyboard: f32,
     pub native: [f32; 2],
     pub native_counts: [u32; 2],
     pub movable: bool,
@@ -91,7 +92,7 @@ pub enum PhoneAction {
     Drawing { id: u64, close: bool },
     SwapSides,
     Slider { control: ToolbarControl, phase: crate::ContactPhase },
-    Metrics { native: [f32; 2], native_counts: [u32; 2], insets: [f32; 4], #[serde(default)] corners: [f32; 4], #[serde(default)] movable: bool },
+    Metrics { native: [f32; 2], native_counts: [u32; 2], insets: [f32; 4], #[serde(default)] corners: [f32; 4], #[serde(default)] movable: bool, #[serde(default)] keyboard: f32 },
 }
 impl crate::UiState {
     pub fn phone_settings(&self) -> crate::TileView {
@@ -123,6 +124,7 @@ impl PhoneState {
                 bottom.max(end(sw, left)).max(end(se, right))]
         };
         let mut phone = PhoneLayout::resolve(layout, viewport, insets, self.native, self.native_counts, self.swapped, self.movable)?;
+        phone.keyboard = self.keyboard;
         if self.hidden {
             phone.capy_hit = Bounds::default();
             phone.size = Bounds::default();
@@ -145,6 +147,8 @@ impl crate::UiState {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PhoneLayout {
+    #[serde(default)]
+    pub keyboard: f32,
     pub tile: f32,
     pub icon: f32,
     pub capy_icon: f32,
@@ -334,15 +338,20 @@ impl PhoneLayout {
             crate::PhoneDrawerAnchor::Tool(id) => layout.phone.as_ref()?.iter().position(|t| t.id == id).map(|i| self.tool_hits[i]),
         }
     }
-    pub fn drawer(&self, anchor: Bounds, viewport: [f32; 2], widths: &[f32], heights: &[f32], gap: f32) -> Option<DrawerPlacement> {
-        if !gap.is_finite() || gap < 0. || widths.is_empty() || heights.len() != widths.len()
-            || widths.iter().chain(heights).any(|v| !v.is_finite() || *v < 0.) { return None; }
-        let vertical = self.edge != Edge::Top;
-        let available = if vertical {
+    pub fn drawer_area(&self, viewport: [f32; 2]) -> Bounds {
+        let mut area = if self.edge != Edge::Top {
             Bounds { y: self.bars[0].y, height: self.bars[0].height, ..self.work_area }
         } else {
             Bounds { x: self.bars[0].x, width: self.bars[0].width, ..self.work_area }
         };
+        if self.keyboard > 0. { area.height = area.height.min((viewport[1] - self.keyboard - 8. - area.y).max(1.)); }
+        area
+    }
+    pub fn drawer(&self, anchor: Bounds, viewport: [f32; 2], widths: &[f32], heights: &[f32], gap: f32) -> Option<DrawerPlacement> {
+        if !gap.is_finite() || gap < 0. || widths.is_empty() || heights.len() != widths.len()
+            || widths.iter().chain(heights).any(|v| !v.is_finite() || *v < 0.) { return None; }
+        let vertical = self.edge != Edge::Top;
+        let available = self.drawer_area(viewport);
         let mut x = 0.;
         let mut y = 0.;
         let mut row = 0.;
@@ -369,7 +378,11 @@ impl PhoneLayout {
             width = available.width;
         }
         let natural_height = y + row;
-        let height = if vertical { available.height } else { natural_height.min(available.height) };
+        let direction = if vertical { if anchor.x < viewport[0] / 2. { Edge::Right } else { Edge::Left } }
+            else if anchor.y < viewport[1] / 2. { Edge::Bottom } else { Edge::Top };
+        let top = if direction == Edge::Bottom { anchor.y + anchor.height + 8. } else { available.y };
+        let bottom = if direction == Edge::Top { (anchor.y - 8.).min(available.y + available.height) } else { available.y + available.height };
+        let height = if vertical { available.height } else { natural_height.min((bottom - top).max(1.)) };
         if y > 0. {
             let scale = (height / natural_height).min(1.);
             for column in &mut columns {
@@ -379,10 +392,8 @@ impl PhoneLayout {
         } else {
             for column in &mut columns { column.height = height; }
         }
-        let direction = if vertical { if anchor.x < viewport[0] / 2. { Edge::Right } else { Edge::Left } }
-            else if anchor.y < viewport[1] / 2. { Edge::Bottom } else { Edge::Top };
         let x = match direction { Edge::Right => anchor.x + anchor.width + 8., Edge::Left => anchor.x - width - 8., _ => anchor.x.clamp(available.x, available.x + (available.width - width).max(0.)) };
-        let y = match direction { Edge::Bottom => anchor.y + anchor.height + 8., Edge::Top => anchor.y - height - 8., _ => available.y };
+        let y = match direction { Edge::Top => bottom - height, _ => top };
         Some(DrawerPlacement { bounds: Bounds { x, y, width, height }, anchor, direction, columns, tab_presentations: Vec::new() })
     }
     pub fn native_control(&self, side: usize, index: u32) -> Option<Bounds> {
@@ -495,7 +506,7 @@ impl PhoneLayout {
                 Edge::Right => Bounds { x: b.x, y, width: viewport[0] - b.x, height: (b.y + b.height + 1.).min(viewport[1]) - y },
             }
         };
-        Some(Self { tile, icon: tile * crate::HeaderSize::Medium.icon() as f32 / 48., capy_icon: tile * 440. / 512.,
+        Some(Self { keyboard: 0., tile, icon: tile * crate::HeaderSize::Medium.icon() as f32 / 48., capy_icon: tile * 440. / 512.,
             edge, capy, capy_hit: hit(capy, other), capy_target: hit(capy, other), size, strength, settings, settings_hit: hit(settings, other), tools,
             tool_hits: std::array::from_fn(|i| if tiles.get(i).is_some_and(|t| t.control != ToolbarControl::Divider) { hit(tools[i], edge) } else { Bounds::default() }),
             chips, controls, bars, title: if movable && vertical { Bounds { x: work_area.x, y: 0., width: work_area.width, height: 24. } } else { Bounds::default() }, work_area })

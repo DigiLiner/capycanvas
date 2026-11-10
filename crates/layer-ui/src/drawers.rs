@@ -844,11 +844,11 @@ impl DrawerMeasure {
     pub(crate) fn phone_layout(&self) -> Option<&crate::PhoneLayout> { self.phone.as_ref().map(|(phone, _, _)| phone) }
     pub fn color_fit(&self, heights: &[f32], fixed_height: f32, hdr: bool) -> Option<crate::ColorPanelFit> {
         let color = self.color?;
-        let (phone, _, _) = self.phone.as_ref()?;
+        let (phone, viewport, _) = self.phone.as_ref()?;
         if heights.len() != self.placement.columns.len() { return None; }
         let stacked = self.placement.columns.windows(2).any(|pair| pair[1].y > pair[0].y);
         let other = if stacked { heights.iter().enumerate().filter(|(i, _)| *i != color).map(|(_, h)| *h + 8.).sum() } else { 0. };
-        let height = if phone.edge == Edge::Top { phone.work_area.height } else { phone.bars[0].height };
+        let height = phone.drawer_area(*viewport).height;
         crate::ColorPanelLayout::fit_wheel(
             (self.placement.columns[color].width - 2. * crate::PANEL_CONTENT_INSET).max(0.),
             height, fixed_height + other, hdr, 128.,

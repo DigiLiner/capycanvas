@@ -588,8 +588,8 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             dispatchOwned(action, moving, published, focus)
         }
     }
-    internal fun reportPhoneMetrics(insets: JSONArray, corners: JSONArray) = post {
-        dispatchOwned(obj("type" to "phone", "action" to obj("kind" to "metrics", "insets" to insets, "corners" to corners,
+    internal fun reportPhoneMetrics(insets: JSONArray, corners: JSONArray, keyboard: Float) = post {
+        dispatchOwned(obj("type" to "phone", "action" to obj("kind" to "metrics", "insets" to insets, "corners" to corners, "keyboard" to keyboard,
             "native" to JSONArray(listOf(0, 0)), "native_counts" to JSONArray(listOf(0, 0)), "movable" to false)))
     }
     private fun dispatchOwned(action: JSONObject, moving: Boolean = false, published: (() -> Unit)? = null, focus: String? = null) {

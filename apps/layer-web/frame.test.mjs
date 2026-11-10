@@ -205,14 +205,15 @@ test('document transitions retain canvas bar measurement and reveal reports',()=
   assert.deepEqual(actions.map(action=>action.type),['measure_canvas_bar','reveal_canvas_bar']);
 });
 
-test('phone inset reports apply while busy and deduplicate against shared state',()=>{
+test('phone inset and keyboard reports apply while busy and deduplicate against shared state',()=>{
   const phoneSource=readFileSync(new URL('phone.js',import.meta.url),'utf8');
   const state={workspace_ready:true,phone:{insets:[0,0,0,0]}};
-  let busy=true,observer,refuse=false;
+  let busy=true,observer,refuse=false,viewportChanged;
+  const visualViewport={offsetTop:0,height:891,addEventListener(type,listener){assert.equal(type,'resize');viewportChanged=listener;}};
   const attempts=[],delivered=[];
-  const context={documents:{interactionBusy:()=>busy},workspaceGesture:null,window:{addEventListener(){}},
+  const context={documents:{interactionBusy:()=>busy},workspaceGesture:null,window:{addEventListener(){},innerHeight:891,visualViewport},
     app:{allowed_during_document_interaction:action=>action.type==='phone'&&action.action.kind==='metrics',
-      dispatch(action){if(!refuse){delivered.push(action);state.phone.insets=[...action.action.insets];}return{};}},
+      dispatch(action){if(!refuse){delivered.push(action);state.phone.insets=[...action.action.insets];state.phone.keyboard=action.action.keyboard;}return{};}},
     applyChange(){},message:assert.fail,
     ResizeObserver:class{constructor(callback){this.callback=callback;this.targets=[];observer=this;}observe(target){this.targets.push(target);}}};
   runInNewContext(source.slice(source.indexOf('function dispatch(action)'),source.indexOf('let languageTimer')),context);
@@ -237,6 +238,13 @@ test('phone inset reports apply while busy and deduplicate against shared state'
   const physical={left:3,top:17,right:11,bottom:29};
   observer.callback(observer.targets.map(target=>({target,contentRect:{width:physical[target.style.width.match(/inset-(\w+)/)[1]]}})));
   assert.deepEqual([...state.phone.insets],[3,17,11,29],'CSS side facts use the shared left/top/right/bottom order');
+  const before=attempts.length;
+  visualViewport.height=513.476;viewportChanged();
+  assert.equal(state.phone.keyboard,377.524);assert.equal(attempts.length,before+1);
+  viewportChanged();assert.equal(attempts.length,before+1,'Unchanged visual viewport does not send another report');
+  visualViewport.offsetTop=20;viewportChanged();assert.equal(state.phone.keyboard,357.524);
+  visualViewport.height=900;viewportChanged();assert.equal(state.phone.keyboard,0,'Viewport motion cannot report a negative keyboard');
+  assert.deepEqual([...state.phone.insets],[3,17,11,29],'Keyboard reports preserve sensor insets');
 });
 
 test('retained workspace placement keeps bubble presentation without scheduling GPU work',()=>{
