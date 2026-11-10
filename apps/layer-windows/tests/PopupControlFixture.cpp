@@ -977,6 +977,25 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         auto close=[this](WorkspaceManagerView& manager)->winrt::Windows::Foundation::IAsyncAction{
             manager.Hide();co_await wait([&manager]{return !manager.IsOpen();},L"Workspace IME dialog did not close");
         };
+        {
+            phase=L"workspace-grip-route";
+            WorkspaceManagerView manager([](std::string,std::function<void()> complete){if(complete)complete();},catalog,context.localization,root.XamlRoot(),[]{},
+                [](CanvasQueryKind,std::string,PreviewReply reply){reply(PreviewPacket{});return true;});
+            try{
+                manager.Apply(O({{L"state",state},{L"windows_workspace",model}}),false);
+                co_await wait([this]{auto grip=workspaceElement(L"workspace-manager-grip-fixture-custom").try_as<Button>();return grip&&grip.IsLoaded()&&grip.ActualWidth()>0;},L"Workspace reorder grip did not arrange");
+                auto grip=workspaceElement(L"workspace-manager-grip-fixture-custom").as<Button>();
+                auto swipe=workspaceElement(L"workspace-manager-swipe-fixture-custom").as<SwipeControl>();
+                auto row=workspaceElement(L"workspace-manager-row-fixture-custom").as<ListViewItem>();
+                require(!descendantOf(grip,swipe),L"Workspace reorder grip is inside the SwipeControl touch redirect route");
+                require(descendantOf(grip,row)&&descendantOf(swipe,row)&&VisualTreeHelper::GetParent(grip)==VisualTreeHelper::GetParent(swipe),L"Workspace grip and swipe body do not share their row layout");
+                auto slot=workspaceElement(L"workspace-name-slot-fixture-custom");auto pin=workspaceElement(L"workspace-manager-pin-fixture-custom");
+                require(descendantOf(slot,swipe)&&descendantOf(pin,swipe),L"Workspace body controls left their swipe route");
+                auto actions=swipe.RightItems();require(actions&&actions.Mode()==SwipeMode::Reveal&&actions.Size()==1&&AutomationProperties::GetAutomationId(actions.GetAt(0))==L"workspace-manager-swipe-delete-fixture-custom",L"Workspace body lost its native Reveal Delete action");
+                ++checks;co_await close(manager);
+            }catch(...){manager.Hide();throw;}
+            phase=L"workspace-ime";
+        }
         for(auto [key,label]:{std::pair<WORD,wchar_t const*>{WORD(VK_RETURN),L"inline-enter"},{WORD(VK_ESCAPE),L"inline-escape"},{WORD(VK_F2),L"inline-f2"},{WORD(VK_ESCAPE),L"form-escape"},{WORD(0),L"form-primary"},{WORD(VK_RETURN),L"retired-ordinary-korean-enter"},{WORD(VK_ESCAPE),L"retired-ordinary-inline-escape"},{WORD(VK_ESCAPE),L"retired-ordinary-form-escape"}}){
             bool retired=label[0]==L'r',heldKey=false,inlineName=label[0]==L'i'||hstring(label)==L"retired-ordinary-inline-escape";auto inputs=std::make_shared<std::vector<J>>();auto events=std::make_shared<unsigned>(0);
             auto activeModel=J::Parse(model.Stringify());

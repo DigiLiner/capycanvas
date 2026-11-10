@@ -284,9 +284,10 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
                 if(auto self=weak.lock();self&&self->showing&&!self->stopping&&self->dialog)self->fitRows();
         });
         auto fieldPadding=copyData->panelMetric(L"field_padding");
-        Grid content;content.MinHeight(56);content.Padding({12-fieldPadding,0,12,0});content.BorderBrush(copyData->line(L"settings",L"card_shade"));
-        content.ColumnDefinitions().Append(ColumnDefinition());
-        for(int i=0;i<3;++i){ColumnDefinition column;column.Width({1,GridUnitType::Auto});content.ColumnDefinitions().Append(column);}
+        Grid frame;frame.MinHeight(56);frame.Padding({12-fieldPadding,0,12,0});frame.BorderBrush(copyData->line(L"settings",L"card_shade"));
+        frame.ColumnDefinitions().Append(ColumnDefinition());ColumnDefinition handle;handle.Width({1,GridUnitType::Auto});frame.ColumnDefinitions().Append(handle);
+        Grid content;content.ColumnDefinitions().Append(ColumnDefinition());
+        for(int i=0;i<2;++i){ColumnDefinition column;column.Width({1,GridUnitType::Auto});content.ColumnDefinitions().Append(column);}
         StackPanel text;text.Spacing(2);text.Margin({0,4,4,4});text.VerticalAlignment(VerticalAlignment::Center);
         Grid nameSlot;nameSlot.MinHeight(copyData->controlHeight());
         AutomationProperties::SetAutomationId(nameSlot,L"workspace-name-slot-"+id);
@@ -346,11 +347,10 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         row.grip.Width(16);row.grip.MinWidth(16);row.grip.Height(34);row.grip.Margin({4,0,0,0});row.grip.Padding({0,0,0,0});
         row.grip.Background(clear());row.grip.BorderThickness({0,0,0,0});
         buttonFeedback(row.grip,copyData->brush(L"text"));
-        row.grip.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(row.grip,3);
+        row.grip.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(row.grip,1);
         AutomationProperties::SetAutomationId(row.grip,L"workspace-manager-grip-"+id);
         AutomationProperties::SetHelpText(row.grip,copy(L"header",L"drag_to_reorder"));
-        content.Children().Append(row.grip);
-        row.swipeItems.Mode(SwipeMode::Reveal);row.swipeItems.Append(row.swipeDelete);row.swipe.RightItems(row.swipeItems);row.swipe.Content(content);row.item.Content(row.swipe);
+        row.swipeItems.Mode(SwipeMode::Reveal);row.swipeItems.Append(row.swipeDelete);row.swipe.RightItems(row.swipeItems);row.swipe.Content(content);frame.Children().Append(row.swipe);frame.Children().Append(row.grip);row.item.Content(frame);
         row.swipeDelete.Invoked([weak=weak_from_this(),id](auto&&,SwipeItemInvokedEventArgs const&){if(auto self=weak.lock())self->dispatch(form(L"delete",S(id)));});
         AutomationProperties::SetAutomationId(row.swipe,L"workspace-manager-swipe-"+id);
         AutomationProperties::SetAutomationId(row.swipeDelete,L"workspace-manager-swipe-delete-"+id);
@@ -364,7 +364,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             auto data=value.GetObject();auto id=str(data,L"id");std::wstring key(id);next.push_back(key);
             auto found=rows.find(key);
             if(found==rows.end())found=rows.emplace(key,makeRow(id)).first;
-            auto& row=found->second;row.swipe.Content().as<Grid>().BorderThickness({0,next.size()==1?0.:1.,0,0});auto label=str(data,L"title"),detail=str(data,L"subtitle");
+            auto& row=found->second;row.item.Content().as<Grid>().BorderThickness({0,next.size()==1?0.:1.,0,0});auto label=str(data,L"title"),detail=str(data,L"subtitle");
             row.title.Text(label);row.subtitle.Text(detail);row.subtitle.Visibility(detail.empty()?Visibility::Collapsed:Visibility::Visible);
             auto pin=object(data,L"pin");
             uint32_t position=saved.Size();for(uint32_t i=0;i<saved.Size();++i)if(saved.GetStringAt(i)==id)position=i;
