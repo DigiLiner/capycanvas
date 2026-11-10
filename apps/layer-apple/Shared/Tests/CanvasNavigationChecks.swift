@@ -131,6 +131,7 @@ extension XCTestCase {
         app.launchEnvironment["CAPY_COLOR_PROBE"] = "1"
         #endif
         app.launch(); capturePaintEditor(in: app)
+        createWhitePaperDrawing(in: app)
         editorTool("Hand", in: app)
         let hand = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
             "tool-subtool-", "Hand")).firstMatch

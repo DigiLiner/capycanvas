@@ -65,16 +65,23 @@ extension XCTestCase {
     }
     #endif
 
-    @MainActor func createWhitePaperDrawing(width: String = "2400", height: String = "1800", in app: XCUIApplication,
-        open: (() -> Void)? = nil) {
+    @MainActor func createWhitePaperDrawing(width: String = "2400", height: String = "1800", texture: String = "None", relief: String? = nil,
+        in app: XCUIApplication, open: (() -> Void)? = nil) {
         if let open { open() } else { editorMenu(in: app, menu: "File", id: "new_document", label: "New…") }
         XCTAssertTrue(app.buttons["new-drawing-create"].waitForExistence(timeout: 60))
         #if os(iOS)
         revealNewDrawingControl("new-drawing-texture", in: app)
         #endif
         workspaceActivate(app.buttons["new-drawing-texture"])
-        enterNewDrawingNumber("paper-relief", "0", in: app)
-        XCTAssertEqual(newDrawingNumber("paper-relief", in: app).value as? String, "0")
+        let choice = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "new-drawing-paper-tile-", texture)).firstMatch
+        revealEditorControl(choice, label: texture, type: .button,
+            in: newDrawingElement("new-drawing-paper-drawer", in: app).scrollViews.firstMatch)
+        workspaceActivate(choice)
+        if let relief {
+            enterNewDrawingNumber("paper-relief", relief, in: app)
+            XCTAssertEqual(newDrawingNumber("paper-relief", in: app).value as? String, relief)
+        }
         let usePaper = app.buttons["new-drawing-paper-use"]
         workspaceActivate(usePaper)
         XCTAssertTrue(usePaper.waitForNonExistence(timeout: 10))

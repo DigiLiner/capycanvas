@@ -690,6 +690,7 @@ extension XCTestCase {
                 "toolbar-tile-toolbar-", label)).firstMatch)
         }
         #if os(macOS)
+        createWhitePaperDrawing(in: app)
         let viewport = workspaceViewport(in: app), paper = editorPaper(in: app)
         func drag(_ a: CGPoint, _ b: CGPoint) {
             viewport.coordinate(withNormalizedOffset: CGVector(dx: a.x, dy: a.y)).click(forDuration: 0.05,

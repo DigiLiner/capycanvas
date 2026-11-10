@@ -152,6 +152,7 @@ extension XCTestCase {
         #endif
         app.launch(); capturePaintEditor(in: app)
         #if os(macOS)
+        createWhitePaperDrawing(in: app)
         let viewport = workspaceViewport(in: app), paper = editorPaper(in: app)
         let center = paper.point(0.25, 0.5)
         let points = [center, paper.point(0.55, 0.5), paper.point(0.85, 0.5)]
@@ -269,6 +270,7 @@ extension XCTestCase {
     @MainActor func checkSelectionInversion(in app: XCUIApplication) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"set_color","rgba":[0.9,0.25,0.2,1]},{"type":"color","action":{"op":"swap"}},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
         app.launch(); capturePaintEditor(in: app)
+        createWhitePaperDrawing(in: app)
         func pixels() -> Data { editorPixels(in: app) }
         func invert() { editorMenu(in: app, menu: "Select", id: "invert_selection", label: "Invert selection") }
         func fill() { editorMenu(in: app, menu: "Edit", id: "fill_selection", label: "Fill selection") }

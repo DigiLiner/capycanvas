@@ -377,7 +377,7 @@ extension XCTestCase {
             canvas.value as? String == "Canvas ready" && sketch.exists && sketch.isSelected
         }, evaluatedWith: app)
         waitForExpectations(timeout: 30)
-        createWhitePaperDrawing(in: app)
+        createWhitePaperDrawing(texture: "Cold press", relief: "0", in: app)
         editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
         func pixels(_ accept: @escaping (Int, Int, Int) -> Bool, _ message: String) {
             let match = NSPredicate { _, _ in

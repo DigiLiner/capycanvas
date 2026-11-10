@@ -127,11 +127,10 @@ extension XCTestCase {
     }
 
     @MainActor func checkSelectionAndTransform(in app: XCUIApplication, theme: String = "light") {
-        // Only choose the starting color. Selection, artwork and transforms
-        // below are created through the same visible controls as normal use.
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
         app.launch()
         capturePaintEditor(in: app)
+        createWhitePaperDrawing(in: app)
 
         func menu(_ menu: String, _ id: String, _ label: String) {
             editorMenu(in: app, menu: menu, id: id, label: label)
