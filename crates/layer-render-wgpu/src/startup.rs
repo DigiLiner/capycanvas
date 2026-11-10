@@ -161,6 +161,68 @@ impl ShaderDocument {
     }
 }
 impl Needs {
+    pub(super) fn brush(&mut self, r: &WgpuRasterizer, document: &Document, brush: &BrushSnapshot, selection: Option<Arc<layer_core::Selection>>) {
+        let mask = document.drawing_target().or(document.working.target).is_some_and(SourceTarget::is_coverage);
+        let selection = selection.or_else(|| document.working.selection.clone().map(Arc::new));
+        for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
+            self.style(r, &layer_render::DabStyle {selection: selection.clone(), ..brush_style(document, brush, tool)}, dry_material::Reach::of(brush), mask, true);
+        }
+    }
+    pub(super) fn sizes(&mut self, r: &WgpuRasterizer, document: &Document, brush: &BrushSnapshot) {
+        if document.drawing_target().or(document.working.target).is_some_and(SourceTarget::is_coverage) { return; }
+        let reach = dry_material::Reach::of(brush);
+        for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
+            let style = layer_render::DabStyle {selection: document.working.selection.clone().map(Arc::new), ..brush_style(document, brush, tool)};
+            let plan = BrushPassPlan::for_device(&style, &r.device);
+            if pointwise(&style) && plan.direct.is_none() {
+                for extra in reach.any_size().batch_variants(&style).filter(|&extra| !reach.required_variants(&style).any(|required| required == extra)) {
+                    for coverage in [Some(plan.state.coverage), plan.state.coverage.then_some(false)].into_iter().flatten() {
+                        self.compute.push(r.pipelines.dry_material.selected_kernel(&style, plan.material, coverage, extra).clone());
+                    }
+                }
+            }
+        }
+    }
+    pub(super) fn transform(&mut self, r: &WgpuRasterizer) {
+        self.render.extend(r.transforms.as_ref().unwrap().pipelines());
+        self.compute.extend(r.transforms.as_ref().unwrap().display_pipelines());
+        self.render.extend([4, 5].map(|i| r.scene_pipelines.resample.mesh[i].clone()));
+        self.compute.extend(r.selection_clip.pipelines().into_iter().cloned());
+    }
+    pub(super) fn selection_paint(&mut self, r: &WgpuRasterizer) {
+        self.compute.extend(r.recipes.selection_paint.pipelines.iter().chain(r.selection_clip.pipelines()).cloned());
+    }
+    pub(super) fn fill(&mut self, r: &WgpuRasterizer, scene: Option<SceneView<'_>>) {
+        if let Some(scene) = scene {
+            let required = Self::capture_scene(r, scene, true);
+            self.render.extend(required.render);
+            self.compute.extend(required.compute);
+        }
+        self.render.extend(r.scene_pipelines.fill_pipelines(&r.device).into_iter().cloned());
+        self.render.push(r.layer_masks.initialize.clone());
+        self.compute.extend(r.selection_clip.pipelines().into_iter().cloned());
+        self.compute.push(r.selection_clip.resample.clone());
+    }
+    pub(super) fn regions(&mut self, r: &mut WgpuRasterizer, refinement: layer_render::RegionRefinement, enclosed: bool, contiguous: bool, prepare_ends: bool) {
+        if r.regions.is_none() { r.regions = Some(region_requests::RegionRequests::new(r)); }
+        let regions = r.regions.as_ref().unwrap();
+        self.compute.extend(regions.raw.pipelines().chain(regions.flood.request_pipelines(refinement, enclosed, contiguous, prepare_ends)).cloned());
+    }
+    pub(super) fn operation(&mut self, r: &WgpuRasterizer, operation: layer_render::OperationUse) {
+        self.render.push(r.scene_pipelines.pipeline[scene::operation_index(operation)].clone());
+    }
+    fn uses(&mut self, r: &WgpuRasterizer, document: &Document, brush: &BrushSnapshot, uses: layer_render::PreparationUses) {
+        if uses.selection_strokes && document.working.selection.is_none() && !DocumentKey::new(document).mask {
+            let [width, height] = document.composition().size.map(|n| n as f32);
+            if let Ok(selection) = layer_core::Selection::polygon(vec![layer_core::Point {x:0.,y:0.}, layer_core::Point {x:width,y:0.}, layer_core::Point {x:width,y:height}, layer_core::Point {x:0.,y:height}]) {
+                self.brush(r, document, brush, Some(Arc::new(selection)));
+            }
+        }
+        if uses.transform { self.transform(r); }
+        if uses.selection_paint { self.selection_paint(r); }
+        if uses.fill { self.fill(r, Some(document.scene())); }
+        if let Some(operation) = uses.operation { self.operation(r, operation); }
+    }
     pub(super) fn capture_scene(r:&WgpuRasterizer,view:SceneView<'_>,watercolor:bool)->Self {
         let mut required = Self::default();
         required.render.extend(r.scene_pipelines.for_scene(r,view,&[]).cloned());
@@ -266,7 +328,6 @@ pub(super) struct Startup {
     pub(super) document: Needs,
     pub(super) current: Needs,
     pub(super) strokes: Needs,
-    warming: Vec<Deferred<wgpu::ComputePipeline>>,
     papers: Vec<(layer_core::paper::PaperBinding, AssetId)>,
     effects: Option<(mpsc::Receiver<Result<effects::Effects, String>>, u64)>,
     effects_ready: bool,
@@ -327,7 +388,6 @@ impl Startup {
             document: Needs::default(),
             current: Needs::default(),
             strokes: Needs::default(),
-            warming: Vec::new(),
             papers: Vec::new(),
             effects: None,
             effects_ready: false,
@@ -409,29 +469,28 @@ impl WgpuRasterizer {
         };
         let prepared = self.prepare_startup_into(&mut startup, document, brush, transform);
         self.startup = Some(startup);
+        if prepared.is_ok() { self.declare_context(document, brush); }
         prepared
     }
     pub fn prepare_context(&mut self, document: &Document, brush: &BrushSnapshot, context: layer_render::PreparationContext) {
+        self.preparation = context;
+        self.declare_context(document, brush);
+    }
+    fn declare_context(&mut self, document: &Document, brush: &BrushSnapshot) {
         if self.startup.is_none() { return; }
         let generation = self.context_compilation.advance();
-        if document.working.selection.is_some() || !context.selection { return; }
-        let mask = DocumentKey::new(document).mask;
-        if mask { return; }
-        let [width, height] = document.composition().size.map(|size| size as f32);
-        let Ok(selection) = layer_core::Selection::polygon(vec![layer_core::Point { x: 0., y: 0. },
-            layer_core::Point { x: width, y: 0. }, layer_core::Point { x: width, y: height }, layer_core::Point { x: 0., y: height }]) else { return };
-        let selection = Arc::new(selection);
-        for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
-            let style = layer_render::DabStyle { selection: Some(selection.clone()), ..brush_style(document, brush, tool) };
-            let mut required = Needs::default();
-            required.style(self, &style, dry_material::Reach::of(brush), mask, true);
-            for pipeline in required.render.iter().filter(|pipeline| !pipeline.ready()) {
-                self.context_compilation.warm(pipeline, ANTICIPATED, generation);
-            }
-            for pipeline in required.compute.iter().filter(|pipeline| !pipeline.ready()) {
-                self.context_compilation.warm(pipeline, ANTICIPATED, generation);
-            }
-        }
+        let context = self.preparation.clone();
+        let mut next = Needs::default();
+        next.uses(self, document, brush, context.next);
+        let mut idle: [Needs; 6] = std::array::from_fn(|_| Needs::default());
+        idle[0].sizes(self, document, brush);
+        for shown in &context.brushes { idle[1].brush(self, document, shown, None); }
+        idle[2].transform(self);
+        idle[3].selection_paint(self);
+        idle[4].fill(self, Some(document.scene()));
+        idle[5].regions(self, context.regions, false, true, true);
+        next.warm(&self.context_compilation, ANTICIPATED, generation);
+        for family in idle { family.warm(&self.context_compilation, BACKGROUND, generation); }
     }
     fn prepare_startup_into(
         &mut self,
@@ -456,7 +515,6 @@ impl WgpuRasterizer {
             strokes.require(&startup.compiler, BRUSH);
         }
         let mut current = Needs::default();
-        let mut warming: Vec<&Deferred<wgpu::ComputePipeline>> = Vec::new();
         // Native publication must be ready before accepting a brush contact,
         // but blank paper does not depend on writeback/promotion/validation.
         if let Some(native) = &self.native_edit {
@@ -466,15 +524,6 @@ impl WgpuRasterizer {
         }
         for style in &styles {
             strokes.style_helpers(self, style, mask, true);
-            let plan = BrushPassPlan::for_device(style, &self.device);
-            if !mask && pointwise(style) && plan.direct.is_none() {
-                for extra in reach.any_size().batch_variants(style).filter(|&extra| !reach.required_variants(style).any(|required| required == extra)) {
-                    for coverage in [Some(plan.state.coverage), plan.state.coverage.then_some(false)].into_iter().flatten() {
-                        let pipeline = self.pipelines.dry_material.selected_kernel(style, plan.material, coverage, extra);
-                        if !warming.iter().any(|p| std::ptr::eq(*p, pipeline)) { warming.push(pipeline); }
-                    }
-                }
-            }
         }
         strokes.require(&startup.compiler, BRUSH);
         startup.papers.clear();
@@ -487,10 +536,7 @@ impl WgpuRasterizer {
         // Live transforms do not change document revision or brush settings.
         // They still need their own shaders before an interactive frame runs.
         if transform {
-            current.render.extend(self.transforms.as_ref().unwrap().pipelines());
-            current.compute.extend(self.transforms.as_ref().unwrap().display_pipelines());
-            current.render.extend([4, 5].map(|i| self.scene_pipelines.resample.mesh[i].clone()));
-            current.compute.extend(self.selection_clip.pipelines().map(Clone::clone));
+            current.transform(self);
         }
         if let Some(retouch) = self.retouch.as_ref().filter(|r| r.prepared()) {
             let (render, compute) = retouch.pipelines();
@@ -601,13 +647,11 @@ impl WgpuRasterizer {
         }
         startup.current = current;
         startup.strokes = strokes;
-        startup.warming = warming.into_iter().cloned().collect();
         startup.brush = Some(ShaderBrushKey::new(document, brush));
         startup.transform = transform;
         Ok(())
     }
     pub fn poll_startup(&mut self) -> Result<StartupProgress, GpuRasterError> {
-        self.context_compilation.check()?;
         if let Some(startup) = &mut self.startup {
             for (binding,id) in &mut startup.papers {
                 *id=self.papers.require(&self.device,Some(&startup.compiler),binding,BRUSH)?;
@@ -665,12 +709,6 @@ impl WgpuRasterizer {
         #[cfg(not(target_arch = "wasm32"))]
         if startup.finished {
             startup.compiler.save();
-        }
-        if brush_ready {
-            let generation = startup.compiler.generation();
-            for pipeline in std::mem::take(&mut startup.warming).into_iter().filter(|p| !p.ready()) {
-                startup.compiler.warm(&pipeline, BACKGROUND, generation);
-            }
         }
         let progress = StartupProgress {
             canvas_ready,
@@ -1191,6 +1229,41 @@ mod tests {
 #[cfg(test)]
 mod gpu_tests {
     use super::*;
+
+    #[test]
+    fn context_received_before_startup_is_declared_when_startup_begins() {
+        let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let document = Document::new(layer_core::PortableId::random(), 64, 64,
+            layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        let context = layer_render::PreparationContext {next:layer_render::PreparationUses {selection_strokes:true,..Default::default()},..Default::default()};
+        let mut next = Needs::default();
+        next.uses(&r, &document, &brush, context.next);
+        let expected: std::collections::HashSet<_> = next.render.iter().map(Deferred::identity)
+            .chain(next.compute.iter().map(Deferred::identity)).collect();
+        assert!(!expected.is_empty());
+        r.shader_idle(true, false);
+        r.prepare_context(&document, &brush, context);
+        r.startup = Some(Startup::new(r.compilation.clone()).unwrap());
+        r.prepare_startup(&document, &brush, false).unwrap();
+        assert_eq!(compile::tests::demands(&r.context_compilation, ANTICIPATED), expected);
+    }
+
+    #[test]
+    fn optional_context_failure_surfaces_only_when_the_recipe_is_required() {
+        let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        r.startup = Some(Startup::new(r.compilation.clone()).unwrap());
+        let recipe = Deferred::new(|| -> () { panic!("optional context recipe failed") });
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            r.context_compilation.blocking(|| { recipe.compile(); });
+        }));
+        assert!(failed.is_err());
+        assert!(recipe.error().is_some());
+        r.context_compilation.warm(&recipe, BACKGROUND, r.context_compilation.generation());
+        assert!(r.poll_startup().is_ok());
+        r.compilation.require([&recipe], BRUSH);
+        assert!(r.poll_startup().is_err());
+    }
     #[test]
     fn restore_readiness_admits_the_integer_normalizer_without_the_float_recipe() {
         use layer_core::color::{DocumentColor,SampleDepth,RgbSpace};
@@ -1478,9 +1551,10 @@ mod gpu_tests {
     fn cold_preview_prepares_the_drawn_filter_without_unused_planes() {
         let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
+        renderer.shader_idle(false, false);
         let document = Document::new(layer_core::authored::PortableId::random(), 128, 128, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
         let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
-        renderer.prepare_startup(&document, &brush, true).unwrap();
+        renderer.prepare_startup(&document, &brush, false).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(60);
         crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready, format_args!("Transform preparation timed out"));
         let target = document.scene().targets().find(|target| matches!(target, SourceTarget::Paint(_))).unwrap();
@@ -1668,7 +1742,7 @@ mod gpu_tests {
         crate::test_support::wait_startup(&mut r,deadline,|p|p.complete,format_args!("initial Pencil readiness"));
         assert!(!required.ready(),"Pencil starts without its selection kernels");
         let generation=r.compilation.generation();
-        layer_render::CanvasRenderer::prepare_context(&mut r,&document,&brush,layer_render::PreparationContext {selection:true});
+        layer_render::CanvasRenderer::prepare_context(&mut r,&document,&brush,layer_render::PreparationContext {next:layer_render::PreparationUses {selection_strokes:true,..Default::default()},..Default::default()});
         assert!(!r.startup_needs_update(&document,&brush,false));
         assert!(r.startup.as_ref().unwrap().brush_ready && r.startup.as_ref().unwrap().finished);
         assert_eq!(r.compilation.generation(),generation);
@@ -1734,9 +1808,9 @@ mod gpu_tests {
             .filter(|extra| !Reach::of(&brush).required_variants(&style).any(|required| required == *extra)).map(|extra|
             r.pipelines.dry_material.selected_kernel(&style,MaterialOperation::Deposit,false,extra).clone()).collect::<Vec<_>>();
         assert!(!exact.is_empty() && exact.iter().all(|p|!p.ready()));
-        let queued_before=exact.iter().filter(|p|compile::tests::requested(&r.compilation,p,BACKGROUND)).count();
-        layer_render::CanvasRenderer::prepare_context(&mut r,&doc,&brush,layer_render::PreparationContext {selection:true});
-        let queued_after=exact.iter().filter(|p|compile::tests::requested(&r.compilation,p,BACKGROUND)).count();
+        let queued_before=exact.iter().filter(|p|compile::tests::requested(&r.context_compilation,p,BACKGROUND)).count();
+        layer_render::CanvasRenderer::prepare_context(&mut r,&doc,&brush,layer_render::PreparationContext {next:layer_render::PreparationUses {selection_strokes:true,..Default::default()},..Default::default()});
+        let queued_after=exact.iter().filter(|p|compile::tests::requested(&r.context_compilation,p,BACKGROUND)).count();
         r.shader_idle(true,true);
         let warm_deadline=std::time::Instant::now()+Duration::from_secs(15);
         while !exact.iter().all(|p|p.ready()) && std::time::Instant::now()<warm_deadline {
@@ -1901,3 +1975,9 @@ mod gpu_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod mc_transform_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod mc_context_tests;

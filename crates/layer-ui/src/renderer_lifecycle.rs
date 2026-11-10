@@ -453,6 +453,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         self.refresh_commands();
         self.begin_canvas_transition();
+        self.preparation_context = None;
         let change = self.changed(regions::DOCUMENT | regions::BRUSH | regions::COMMANDS, true);
         Ok((previous, change))
     }

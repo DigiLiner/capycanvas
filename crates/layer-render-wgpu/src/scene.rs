@@ -2675,10 +2675,14 @@ pub(super) fn operation_pipeline(kind: &RasterOperationKind) -> Option<usize> {
     match kind {
         RasterOperationKind::Fill {edges:Some(edges),..} => Some(if edges.translucent_seed {3}else{10}),
         RasterOperationKind::Fill { .. } => Some(3),
-        RasterOperationKind::Gradient { .. } => Some(4),
-        RasterOperationKind::Figure(_) => Some(5),
+        RasterOperationKind::Gradient { .. } => Some(operation_index(layer_render::OperationUse::Gradient)),
+        RasterOperationKind::Figure(_) => Some(operation_index(layer_render::OperationUse::Figure)),
         _ => None,
     }
+}
+
+pub(super) fn operation_index(operation: layer_render::OperationUse) -> usize {
+    match operation { layer_render::OperationUse::Gradient => 4, layer_render::OperationUse::Figure => 5 }
 }
 
 fn shader_source(space: layer_core::color::RgbSpace) -> Cow<'static,str> {

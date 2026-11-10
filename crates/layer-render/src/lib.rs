@@ -850,8 +850,24 @@ impl CanvasFade {
     pub const WAITING: Self = Self {drawing:Some(1.),navigator:Some(1.)};
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperationUse { Gradient, Figure }
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PreparationContext { pub selection: bool }
+pub struct PreparationUses {
+    pub selection_strokes: bool,
+    pub selection_paint: bool,
+    pub fill: bool,
+    pub transform: bool,
+    pub operation: Option<OperationUse>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PreparationContext {
+    pub next: PreparationUses,
+    pub brushes: Vec<layer_core::BrushSnapshot>,
+    pub regions: RegionRefinement,
+}
 
 /// GPU command boundary implemented by the renderer owned by each platform.
 ///

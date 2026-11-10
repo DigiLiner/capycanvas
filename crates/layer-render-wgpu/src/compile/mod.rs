@@ -318,6 +318,10 @@ impl Needs {
     pub fn require(&self, scope: &Scope, class: Class) -> bool {
         scope.require(&self.render, class) & scope.require(&self.compute, class)
     }
+    pub fn warm(&self, scope: &Scope, class: Class, generation: u64) {
+        for recipe in &self.render { scope.warm(recipe, class, generation); }
+        for recipe in &self.compute { scope.warm(recipe, class, generation); }
+    }
     pub async fn prepare(&self, scope: &Scope) -> Result<(), String> {
         scope.prepare_all(&self.render).await?;
         scope.prepare_all(&self.compute).await

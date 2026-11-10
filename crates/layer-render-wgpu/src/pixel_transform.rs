@@ -227,6 +227,13 @@ impl PixelTransform {
     pub(super) fn render_pipeline(&self, transform: &ImageTransform, taps: u32) -> Deferred<wgpu::RenderPipeline> {
         self.kernels.render(Key::new(transform, taps))
     }
+    pub(super) fn linear_affine_pipeline(&self) -> Deferred<wgpu::RenderPipeline> {
+        self.kernels.render(Key {mapping: Mapping::Affine, filter: Interpolation::Linear as u8, area: false})
+    }
+    #[cfg(test)]
+    pub(super) fn bound_pipeline(&self) -> (String, Deferred<wgpu::RenderPipeline>) {
+        (format!("{:?}", self.key), self.kernels.render(self.key))
+    }
     pub(super) fn placement_pipeline(&self, transform: &ImageTransform, taps: u32) -> Deferred<wgpu::ComputePipeline> {
         self.kernels.compute(Key::new(transform, taps), false)
     }

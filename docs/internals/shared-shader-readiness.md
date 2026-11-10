@@ -60,9 +60,11 @@ size, opacity, selection or alpha lock prepares again before the next contact,
 never during one, and debug builds assert that once a brush is ready, every
 kernel its strokes select was prepared. Kernels without fine-tip filtering omit
 its shader code. Once the brush is ready and speculative work is admitted, every
-host prepares the other tip size in the background so a later size change is
-usually ready; selecting another brush discards that queued work. This
-background work does not hold startup completion. A brush with another blend
+host prepares the other tip size, visible toolbar brushes, Transform, selection
+paint, fill draws and region kernels in that Background order. Context and startup
+key changes replace queued warming; renderer replacement resends the context.
+Warming does not hold startup completion. Context-warming errors surface when
+the same recipe is required by a tool. A brush with another blend
 mode prepares one commit and one prediction kernel for its contact family and
 blend, with no tip-size or single-pigment variants. Web's
 `--tip-resize-readiness` checks that a Pencil resized from 4 to 300 px after an
@@ -92,7 +94,8 @@ never waits for an in-flight optional pipeline compile: native hosts start it on
 another thread, and browsers start its batch while the optional promise resolves.
 Required canvas/brush dependencies and explicit package validation retain
 priority and progress while input arrives. Visible optional previews wait for
-200 ms without input and no continuous canvas work. Host reports, such as layout
+200 ms without input; Anticipated and Background wait one second and also require
+no continuous canvas work. Host reports, such as layout
 measurements and system theme changes, are not input; a panel that remeasures
 while it updates must not postpone optional preparation. Required compilation renews the
 quiet interval on completion. Strokes, held gestures, queued input, pending

@@ -339,7 +339,8 @@ pub struct UiSession<R: CanvasRenderer> {
     logical_viewport: Option<[f32; 2]>,
     initial_fit: bool,
     restored_view: Option<(session_recovery::SessionCamera, u64)>,
-    preparation_context: layer_render::PreparationContext,
+    preparation_context: Option<layer_render::PreparationContext>,
+    toolbar_brushes: Vec<layer_core::BrushSnapshot>,
     automatic_camera_revision: u64,
     workspace_view_revision: Option<u64>,
     divider_drag: Option<(u32, ResizeDrag)>,
@@ -622,7 +623,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             logical_viewport: None,
             initial_fit: true,
             restored_view: None,
-            preparation_context: Default::default(),
+            preparation_context: None,
+            toolbar_brushes: Vec::new(),
             automatic_camera_revision: 0,
             workspace_view_revision: None,
             divider_drag: None,
@@ -6608,9 +6610,18 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.workspace_content_revision = self.state.revision;
             }
         }
-        let selecting = self.layer_interaction.tool.selection_tool().is_some() && self.engine.document().working.selection.is_none();
-        let context = layer_render::PreparationContext { selection: selecting };
-        if context != self.preparation_context { self.engine.prepare_context(context); self.preparation_context = context; }
+        if regions & (regions::LAYOUT | regions::CUSTOMIZATION | regions::BRUSH | regions::DOCUMENT | regions::SETTINGS) != 0 {
+            self.toolbar_brushes = self.visible_toolbar_brushes();
+        }
+        let next = layer_render::PreparationUses {
+            selection_strokes: self.layer_interaction.tool.selection_tool().is_some() && self.engine.document().working.selection.is_none(),
+            ..Default::default()
+        };
+        if self.preparation_context.as_ref().is_none_or(|c| c.next != next || c.brushes != self.toolbar_brushes || c.regions != self.region_tools.refinement) {
+            let context = layer_render::PreparationContext { next, brushes: self.toolbar_brushes.clone(), regions: self.region_tools.refinement };
+            self.engine.prepare_context(context.clone());
+            self.preparation_context = Some(context);
+        }
         UiChange {
             revision: self.state.revision,
             regions,
@@ -6618,6 +6629,38 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.engine.document(), self.engine.brush(), self.engine.transform_preview().is_some()),
             presentation_wake,
         }
+    }
+    fn visible_toolbar_brushes(&self) -> Vec<layer_core::BrushSnapshot> {
+        let mut controls = Vec::new();
+        if self.phone_layout().is_some() {
+            if !self.state.phone.hidden {
+                controls.extend(self.state.workspace.layout.phone.iter().flatten().map(|tile| tile.control));
+            }
+        } else {
+            let layout = self.layout(self.workspace_viewport());
+            for group in layout.groups.iter().filter(|g| !self.state.workspace.zen_mode || g.zen_kept) {
+                if let Ok(panel) = self.state.workspace.layout.panel(group.active) {
+                    controls.extend(panel.tiles().iter().map(|tile| tile.control));
+                }
+            }
+            if !self.interaction.hidden {
+                controls.extend(self.state.workspace.layout.header.projected_for(self.state.platform).entries().filter_map(|entry| match entry.item {
+                    HeaderItem::Tool {control} => Some(control), _ => None,
+                }));
+            }
+        }
+        let mut presets = Vec::new();
+        controls.into_iter().filter_map(|control| {
+            let resolved = self.state.resolve_group(control).map_or(control, |(_, _, _, resolved)| resolved);
+            let id = match resolved {
+                ToolbarControl::Brush {id} => id,
+                ToolbarControl::Command {command} => self.tools.command_preset_in(command, &self.state.brush, self.layer_interaction.tool)?,
+                _ => return None,
+            };
+            if id == self.state.brush.preset || presets.contains(&id) { return None; }
+            presets.push(id);
+            Some(self.tools.brush_in(tools::preset(id).ok()?, self.engine.document().composition().color.space))
+        }).collect()
     }
     fn update_toolbar_context(&mut self) {
         let mut target = self.state.toolbar_context();
@@ -6996,6 +7039,10 @@ fn pen_phase(phase: ContactPhase) -> PenPhase {
 #[cfg(test)]
 #[path = "session_test_support.rs"]
 pub(crate) mod test_support;
+
+#[cfg(test)]
+#[path = "preparation_tests.rs"]
+mod preparation_tests;
 
 #[cfg(test)]
 #[path = "pressure_calibration_tests.rs"]

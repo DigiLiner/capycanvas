@@ -35,13 +35,18 @@ impl PaintTransforms {
     pub(super) fn placement_pass(&self, scalar: bool) -> PixelTransform {
         if scalar { self.0[0].scalar.fork() } else { self.0[0].color.fork() }
     }
+    #[cfg(test)]
+    pub(super) fn bound_color_pipeline(&self) -> (String, Deferred<wgpu::RenderPipeline>) {
+        self.0[0].color.bound_pipeline()
+    }
     pub fn new(device: &PipelineDevice) -> Self {
         let primary = ImageTransformState::new(device);
         let companion = primary.fork();
         Self([primary, companion])
     }
-    pub fn pipelines(&self) -> [Deferred<wgpu::RenderPipeline>; 3] {
-        self.0[0].pipelines()
+    pub fn pipelines(&self) -> [Deferred<wgpu::RenderPipeline>; 4] {
+        let [color, scalar, visibility] = self.0[0].pipelines();
+        [color, scalar, visibility, self.0[0].color.linear_affine_pipeline()]
     }
     /// What warp meshes draw with, compiled when a mesh is first shown.
     pub fn mesh_pipelines(&self) -> [Deferred<wgpu::RenderPipeline>; 1] {
