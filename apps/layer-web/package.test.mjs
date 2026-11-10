@@ -44,6 +44,7 @@ function fakeBrowser(t, { userAgent, platform, popover = true, clipboard }) {
   }});
   const element = (tagName, className = "", textContent = "") => Object.assign(new FakeElement(), {
     tagName, className, textContent, children: [], attributes: new Map(), listeners: {}, hidden: false,
+    removeAttribute(name) { this.attributes.delete(name); },
     append(...nodes) { FakeElement.prototype.append.call(this, ...nodes.map(node => typeof node === "string" ? element("#text", "", node) : node)); },
   });
   Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: tag => element(tag) } });
@@ -61,8 +62,10 @@ test("GPU failure notice retains the cause, unhides itself and offers restart", 
   for (const error of [{ stage: "device", message: "capy-test: device refused" },
     new Error("capy-test: native compiler failure"), "capy-test: escaped rejection"]) {
     container.hidden = true;
+    container.setAttribute('data-launch', 'loading');
     showGpuNotice({ container, error, restart: () => retries++, restartLabel: "Restart canvas" });
     assert.equal(container.hidden, false);
+    assert.equal(container.attributes.has('data-launch'), false, 'The diagnostic replaces the full launch cover');
     assert.ok(text(container).includes(error.message ?? String(error)));
     const retry = nodes(container).filter(node => node.tagName === "button" && node.textContent === "Restart canvas");
     assert.equal(retry.length, 1);

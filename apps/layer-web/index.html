@@ -25,25 +25,29 @@
     <script type="module" async src="workspace-preload.js"></script>
     <script>for (const href of ["icons.svg", "pkg/layer_web_bg.wasm"]) document.head.append(Object.assign(document.createElement("link"), {rel: "preload", as: "fetch", crossOrigin: "anonymous", href}));</script>
     <link id="workspace-style" rel="stylesheet" href="style.css" />
+    <link rel="preload" as="image" crossorigin="anonymous" href="icons/layer-zen-looking-up-symbolic.svg" />
     <!-- Packager inserts install metadata here; development never registers a worker. -->
   </head>
   <body data-theme="dark" data-gpu="starting">
     <main id="workspace">
-      <div id="center">
+      <div id="center" inert>
         <canvas
           id="canvas"
           tabindex="0"
         ></canvas>
       </div>
-      <section id="gpu-notice" aria-live="polite">
-        <div class="gpu-help"></div>
+      <section id="gpu-notice" data-launch="loading" aria-live="polite">
+        <div class="launch-splash">
+          <span class="launch-capy" aria-hidden="true"></span>
+          <p class="launch-caption"></p>
+        </div>
       </section>
-      <header id="header" class="chrome">
+      <header id="header" class="chrome" inert>
         <nav id="header-start"></nav>
         <span id="document-title">Capy Canvas</span>
         <nav id="header-end"></nav>
       </header>
-      <div id="canvas-status" class="chrome">
+      <div id="canvas-status" class="chrome" inert>
         <button id="view-info" type="button"></button>
       </div>
     </main>

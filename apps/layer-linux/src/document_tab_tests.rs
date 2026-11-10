@@ -49,8 +49,15 @@ fn native_canvas_background_during_startup_and_tab_switch() {
         assert_eq!(info.color_type, png::ColorType::Rgb);
         let center = ((info.height / 2 * info.width + info.width / 2) * 3) as usize;
         let expected = expected.unwrap_or_else(|| pixels[center..center + 3].try_into().unwrap());
+        let sample_x = if name == "startup-wait" {
+            let mark_pixels = (info.height / 2 - 80..info.height / 2 + 80).flat_map(|y| {
+                (info.width / 2 - 80..info.width / 2 + 80).map(move |x| ((y * info.width + x) * 3) as usize)
+            }).filter(|&i| pixels[i..i + 3].iter().zip(expected).any(|(a, b)| a.abs_diff(b) > 24)).count();
+            assert!(mark_pixels > 100, "the centered launch mark is visible above the waiting canvas");
+            info.width / 2 + 160
+        } else { info.width / 2 };
         for y in info.height / 2 - 20..info.height / 2 + 20 {
-            for x in info.width / 2 - 20..info.width / 2 + 20 {
+            for x in sample_x - 20..sample_x + 20 {
                 let i = ((y * info.width + x) * 3) as usize;
                 assert!(
                     pixels[i..i + 3]

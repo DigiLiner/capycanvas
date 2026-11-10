@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory)][string]$Executable,
-    [ValidateNotNullOrEmpty()][int[]]$Delays = @(0, 1000, 2500, 5000)
+    [ValidateNotNullOrEmpty()][int[]]$Delays = @(0, 1000, 2500, 5000),
+    [ValidateSet('dark','light')][string]$Theme = 'dark',
+    [switch]$FailSettings
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
@@ -14,18 +16,57 @@ $run = Join-Path $repo ('artifacts/windows/startup-close/' + [Guid]::NewGuid().T
 [IO.Directory]::CreateDirectory($run) | Out-Null
 $results = @()
 $review = $null
+$settingsLock = $null
+function Launch-Profile([string]$Directory) {
+    $env:CAPY_STORAGE_DIR = Join-Path $Directory 'profile'
+    $config = Join-Path $env:CAPY_STORAGE_DIR 'config'
+    [IO.Directory]::CreateDirectory($config) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $config 'settings.json'),(@{theme=$Theme}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+}
+function Launch-Capture([string]$Name) {
+    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -TraceDirectory $directory -Output (Join-Path $launch "$Name.png") -ClientOnly -Composed -CaptureOnly
+}
 try {
     Enter-CapyEnvironment @('CAPY_LATENCY_TRACE', 'CAPY_TRACE_SHADER_JOBS', 'CAPY_FILTERS_DIR', 'CAPY_FILTERS_MODE')
     $env:CAPY_TEST_DISPLAY = '1'
     $env:CAPY_TEST_PRIMARY = '1'
     $launch = Join-Path $run 'latency'
     [IO.Directory]::CreateDirectory($launch) | Out-Null
-    $env:CAPY_STORAGE_DIR = Join-Path $launch 'profile'
-    $env:CAPY_LATENCY_TRACE = '1'
+    Launch-Profile $launch
+    if($FailSettings){
+        $settingsLock=[IO.File]::Open((Join-Path $env:CAPY_STORAGE_DIR 'config/settings.json'),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        $env:CAPY_TRACE_UI='1'
+    }else{$env:CAPY_LATENCY_TRACE = '1'}
     $review = Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $launch 'stderr.log')
     $null = $review.Handle
     Wait-Until { $script:drawing = Owned-DrawingWindow $review; $null -ne $drawing } 'Latency-only tracing did not publish the owned drawing window.' 60
-    Wait-Until { Trace-File 'presentation-probe' } 'Latency-only renderer did not become ready.' 90
+    $script:root = $drawing.Root
+    $launchAge=[Diagnostics.Stopwatch]::StartNew()
+    $captionDelay=(Read-Snapshot (Join-Path $directory "bootstrap-$($review.Id)-$($drawing.Handle.ToInt64()).json")).launch_caption_delay_ms
+    if(!$captionDelay){throw 'The launch bootstrap has no caption delay'}
+    if($splash=Find 'launch-splash' -Within $root -NoPopups){Launch-Capture 'launch'}
+    if($FailSettings){
+        Wait-Until { $view=Model; $view.error -and !$view.launch.visible -and !$view.launch.finished } 'The launch error did not bypass the unfinished splash.'
+        Wait-Until { $cover=Find 'launch-splash' -Within $root -NoPopups; !$cover -or $cover.Current.IsOffscreen } 'The launch error remained covered.'
+        $errorStatus=Control 'canvas-status' -Arranged
+        if(!$errorStatus.Current.Name){throw 'The uncovered launch error has no text'}
+        Launch-Capture 'error'
+        $settingsLock.Dispose();$settingsLock=$null
+        if(!(Close-OwnedDrawing $review) -or !$review.WaitForExit(5000) -or $review.ExitCode -ne 0){throw 'The launch error review did not close cleanly'}
+        $review.Dispose()
+        $review=$null
+        Write-Output 'Startup settings failure bypassed the splash and closed cleanly.'
+        return
+    }
+    $captionCapture=@{done=$false}
+    Wait-Until {
+        if(!$captionCapture.done -and $launchAge.ElapsedMilliseconds -ge ($captionDelay+200)){
+            if($cover=Find 'launch-splash' -Within $root -NoPopups){if(!$cover.Current.IsOffscreen){Launch-Capture 'caption';$captionCapture.done=$true}}
+        }
+        Trace-File 'presentation-probe'
+    } 'Latency-only renderer did not become ready.' 90
+    Wait-Until { $cover=Find 'launch-splash' -Within $root -NoPopups; !$cover -or $cover.Current.IsOffscreen } 'The latency-only splash did not reveal its ready canvas.'
+    Launch-Capture 'revealed'
     if ((Test-Path Env:CAPY_TRACE_UI) -or (Get-ChildItem -LiteralPath $directory -Filter "ui-state-$($review.Id)-*.json")) { throw 'Latency-only tracing enabled per-frame UI tracing.' }
     if (!(Close-OwnedDrawing $review) -or !$review.WaitForExit(5000) -or $review.ExitCode -ne 0) { throw 'Latency-only drawing did not close with zero exit within five seconds.' }
     $review.Dispose()
@@ -37,7 +78,7 @@ try {
     foreach ($delay in $Delays) {
         $launch = Join-Path $run ([string]$results.Count)
         [IO.Directory]::CreateDirectory($launch) | Out-Null
-        $env:CAPY_STORAGE_DIR = Join-Path $launch 'profile'
+        Launch-Profile $launch
         $stderr = Join-Path $launch 'shader-jobs.log'
         $review = Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
         # Retain the exact process handle through shutdown and final exit-code collection.
@@ -47,6 +88,12 @@ try {
         $startup = [Diagnostics.Stopwatch]::StartNew()
         Wait-Until { $model = Model; $model.brush_ready -and $model.windows_workspace.ready } 'Owned review did not become ready within 60 seconds.' 60
         $startup.Stop()
+        Wait-Until { $view=Model; $view.launch.finished -and !$view.launch.visible -and $view.state.theme -eq $Theme } 'The shared launch did not finish on its ready presented frame.' 60
+        $script:drawing=Owned-DrawingWindow $review
+        $script:root=$drawing.Root
+        Wait-Until { $cover=Find 'launch-splash' -Within $root -NoPopups; !$cover -or $cover.Current.IsOffscreen } 'The launch cover did not finish its reveal.'
+        if(!(Model).canvas_ready -or !(Model).brush_ready){throw 'The revealed canvas lost its painting readiness'}
+        Launch-Capture 'revealed'
         if ($delay) { Start-Sleep -Milliseconds $delay }
         $watch = [Diagnostics.Stopwatch]::StartNew()
         if (!(Close-OwnedDrawing $review)) { throw 'Owned review rejected the close request.' }
@@ -82,6 +129,7 @@ try {
     }
     Write-Output 'All startup/close launches passed the five-second zero-exit gate. Painting cadence and physical input latency are separate acceptance tests.'
 } finally {
+    if($settingsLock){$settingsLock.Dispose()}
     if ($null -ne $review) {
         $review.Refresh()
         if (!$review.HasExited) {

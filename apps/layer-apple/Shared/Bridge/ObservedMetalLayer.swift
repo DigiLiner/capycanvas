@@ -17,13 +17,11 @@ final class CanvasFrameRateObserver: @unchecked Sendable {
     }
 }
 
-/// wgpu acquires drawables through this same CAMetalLayer. Its real presentation
-/// callback is diagnostic only: missing notifications must not stop rendering.
-/// CAMetalLayer owns drawable availability; the serial owner bounds submission.
 final class ObservedMetalLayer: CAMetalLayer {
     // Read/written only by the serial render owner, including nextDrawable.
     var observation: (trace: FrameTrace, frame: UInt64)?
     var frameRate: CanvasFrameRateObserver?
+    var launchPresented: (@Sendable () -> Void)?
     override func nextDrawable() -> (any CAMetalDrawable)? {
         #if targetEnvironment(simulator)
         // The simulator SDK has no drawable ID or presentation callback.
@@ -32,6 +30,7 @@ final class ObservedMetalLayer: CAMetalLayer {
         #else
         let observation = self.observation
         let frameRate = self.frameRate
+        let launchPresented = self.launchPresented
         let start = observation == nil ? 0 : FrameTrace.now()
         let drawable = super.nextDrawable()
         if let observation {
@@ -41,6 +40,7 @@ final class ObservedMetalLayer: CAMetalLayer {
         drawable?.addPresentedHandler { drawable in
             let received = observation == nil ? 0 : FrameTrace.now()
             frameRate?.presented(at: drawable.presentedTime)
+            launchPresented?()
             if let observation {
                 observation.trace.record(FrameTraceEvent(kind: .presented, a: observation.frame,
                     b: FrameTrace.timestamp(drawable.presentedTime * 1_000_000_000),

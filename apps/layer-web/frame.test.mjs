@@ -6,8 +6,171 @@ import {headerButtonHint, presentCapy} from './header.js';
 import {colorDialogDom} from './color-dialog-fixture.mjs';
 import {latinKey} from './text-input.js';
 import {bindCopy,refreshBindings} from './localization.js';
+import {createLaunchCover} from './gpu.js';
+
+function launchCoverHarness() {
+  let clock = 0, sequence = 0;
+  const timers = new Map(), caption = {dataset:{},textContent:''};
+  const content = {querySelector:()=>caption};
+  const container = {dataset:{launch:'loading'},hidden:false,firstElementChild:content,
+    querySelector:()=>content,replaceChildren(node){this.firstElementChild=node;},
+    removeAttribute(name){if(name==='data-launch')delete this.dataset.launch;}};
+  const controls = {inert:false};container.parentElement={children:[controls,container]};
+  const cover = createLaunchCover({container,now:()=>clock,
+    setTimer:(callback,delay)=>{const id=++sequence;timers.set(id,{callback,at:clock+delay});return id;},
+    clearTimer:id=>timers.delete(id)});
+  return {cover,container,caption,content,controls,advance(ms){clock+=ms;for(const [id,timer] of [...timers])if(timer.at<=clock){timers.delete(id);timer.callback();}}};
+}
+
+test('launch cover delays its existing localized caption and fades only a finished launch',()=>{
+  const h=launchCoverHarness(),copy={launch_caption_delay_ms:5000,preparing_canvas:'Preparing canvas…',preparing_brush:'Preparing brush…'};
+  h.cover.update({visible:true,finished:false,notice:'canvas'},copy);
+  assert.equal(h.controls.inert,true);assert.equal(h.cover.blocking,true);
+  assert.equal(h.caption.textContent,copy.preparing_canvas);
+  h.advance(copy.launch_caption_delay_ms-1);assert.equal(h.caption.dataset.visible,undefined);
+  h.advance(1);assert.equal(h.caption.dataset.visible,'');
+  h.cover.update({visible:true,finished:false,notice:'brush'},copy);
+  assert.equal(h.caption.textContent,copy.preparing_brush);
+  h.cover.update({visible:false,finished:true,notice:'canvas'},copy);
+  assert.equal(h.cover.pending,false);
+  assert.equal(h.controls.inert,false);assert.equal(h.cover.blocking,false);
+  assert.equal(h.container.dataset.launch,'leaving');assert.equal(h.container.hidden,false);
+  h.advance(179);assert.equal(h.container.hidden,false);
+  h.advance(1);assert.equal(h.container.hidden,true);
+});
+
+test('interactive launch bypass is immediate and diagnostics survive later shared updates',()=>{
+  const h=launchCoverHarness(),copy={launch_caption_delay_ms:5000,preparing_canvas:'Preparing canvas…'};
+  h.cover.update({visible:false,finished:false,notice:'canvas'},copy);
+  assert.equal(h.container.hidden,true);
+  assert.equal(h.cover.pending,true);
+  h.cover.update({visible:true,finished:false,notice:'canvas'},copy);
+  assert.equal(h.container.hidden,false);
+  h.cover.update({visible:false,finished:true,notice:'canvas'},copy);
+  h.cover.diagnostic();h.container.replaceChildren({error:true});
+  h.advance(copy.launch_caption_delay_ms);
+  h.cover.update({visible:false,finished:true,notice:'canvas'},copy);
+  assert.equal(h.container.hidden,false);assert.equal(h.container.firstElementChild.error,true);
+});
+
+test('launch caption uses the shared delay and elapsed HTML time when copy arrives',()=>{
+  const h=launchCoverHarness(),copy={launch_caption_delay_ms:7311,preparing_canvas:'Preparing canvas…'};
+  h.advance(1300);assert.equal(h.caption.dataset.visible,undefined);
+  h.cover.update({visible:true,finished:false,notice:'canvas'},copy);
+  h.advance(copy.launch_caption_delay_ms-1301);assert.equal(h.caption.dataset.visible,undefined);
+  h.advance(1);assert.equal(h.caption.dataset.visible,'');
+  const late=launchCoverHarness();late.advance(copy.launch_caption_delay_ms+1);
+  assert.equal(late.caption.dataset.visible,undefined);
+  late.cover.update({visible:true,finished:false,notice:'canvas'},copy);
+  late.advance(0);assert.equal(late.caption.dataset.visible,'');
+});
+
+test('launch caption accepts the Wasm Bootstrap u64 delay',()=>{
+  const h=launchCoverHarness(),copy={launch_caption_delay_ms:5000n,preparing_canvas:'Preparing canvas…'};
+  h.cover.update({visible:true,finished:false,notice:'canvas'},copy);
+  h.advance(Number(copy.launch_caption_delay_ms)-1);assert.equal(h.caption.dataset.visible,undefined);
+  h.advance(1);assert.equal(h.caption.dataset.visible,'');
+});
+
+function launchFrameHarness(numbers = false) {
+  const waits=[],acknowledgments=[],views=[];
+  let owner=numbers?11:11n,finished=false,submitted=true,wakes=0,ready=true;
+  let ticket=numbers?1:1n;
+  const context={app:{
+    launch_state:()=>({visible:!finished,finished,notice:'canvas',frame:finished||!ready?null:ticket}),
+    startup_progress:()=>[true,true,false],canvas_presented:()=>true,canvas_notice:()=>null,
+    launch_frame:()=>finished||!ready||!submitted?null:[ticket,owner],
+    wait_for_canvas:()=>new Promise(resolve=>waits.push(resolve)),
+    launch_presented:(frame,surface)=>{assert.equal(typeof frame,'bigint');assert.equal(typeof surface,'bigint');acknowledgments.push([frame,surface]);if(surface===BigInt(owner)&&frame===BigInt(ticket)&&ready)finished=true;},
+    language_pending:()=>false,dispatch(action){ready=action.type==='close_settings';if(!ready)submitted=false;return{regions:0,canvas_wake:false};},
+  },bootstrap:{},layout:{},workspaceLayoutReady:()=>true,workspacePresentation:null,
+    compilerFailed:false,compilerEpoch:0,gpuReady:true,launchPresentation:null,
+    document:{body:{dataset:{gpu:'ready'}}},launchCover:{blocking:true,pending:true,update:view=>views.push(view)},
+    startupTimes:{canvas:null,document:null,brush:null,complete:null},statusError:null,
+    $:()=>({textContent:''}),performance:{now:()=>0,mark(){}},wake(){wakes++;},stopGpu:assert.fail,
+    documents:null,workspaceGesture:null,message:assert.fail};
+  runInNewContext(source.slice(source.indexOf('function launchChromeReady()'),source.indexOf('// Host timing and contacts')),context);
+  runInNewContext(source.slice(source.indexOf('function dispatch(action)'),source.indexOf('let languageTimer')),context);
+  runInNewContext(source.slice(source.indexOf('function applyChange(change)'),source.indexOf('let canvasCursorActive')),context);
+  return {waits,acknowledgments,views,refresh:()=>context.refreshStartup(),dispatch:action=>context.dispatch(action),bypass(){context.launchCover.blocking=false;},replace(){owner++;},
+    unsubmitted(){submitted=false;},submit(){submitted=true;},unready(){ready=false;submitted=false;},ready(){ready=true;},digest(value){ticket=value;submitted=false;},get wakes(){return wakes;},get finished(){return finished;}};
+}
+
+test('launch presentation waits for queue completion and carries the matching surface owner',async()=>{
+  const h=launchFrameHarness();h.refresh();
+  assert.equal(h.finished,false);assert.deepEqual(h.acknowledgments,[]);
+  h.replace();h.refresh();assert.equal(h.waits.length,2,'A retired queue promise cannot hold the new surface');
+  h.waits[0]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[]);assert.equal(h.finished,false);
+  h.waits[1]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[[1n,12n]]);assert.equal(h.finished,true);
+  assert.equal(h.views.at(-1).finished,true,'Optional compiler completion is not required');
+});
+
+test('a readiness flap cancels the old submission even when digest and surface return unchanged',async()=>{
+  const h=launchFrameHarness();h.refresh();
+  h.unready();h.refresh();h.ready();h.refresh();
+  assert.equal(h.waits.length,1,'Readiness alone cannot reuse the old submitted frame');
+  h.submit();h.refresh();assert.equal(h.waits.length,2);
+  h.waits[0]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[],'The old receipt must be retired before calling Wasm');
+  assert.equal(h.finished,false);
+  h.waits[1]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[[1n,11n]]);assert.equal(h.finished,true);
+});
+
+test('a decreasing launch digest replaces the pending receipt without ordering comparisons',async()=>{
+  const h=launchFrameHarness();h.digest(900n);h.submit();h.refresh();
+  h.digest(7n);h.refresh();h.submit();h.refresh();
+  assert.equal(h.waits.length,2);
+  h.waits[0]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[]);assert.equal(h.finished,false);
+  h.waits[1]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[[7n,11n]]);assert.equal(h.finished,true);
+});
+
+test('same-turn Settings dispatch cancels the old receipt before its queue promise resolves',async()=>{
+  const h=launchFrameHarness();h.refresh();
+  h.dispatch({type:'open_settings'});h.dispatch({type:'close_settings'});
+  h.waits[0]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[],'Mutation publication must observe the unready state before it returns');
+  assert.equal(h.finished,false);
+  h.submit();h.refresh();assert.equal(h.waits.length,2);
+  h.waits[1]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[[1n,11n]]);assert.equal(h.finished,true);
+});
+
+test('hidden unfinished launch mutations publish before any submission receipt exists',()=>{
+  const h=launchFrameHarness();h.unsubmitted();h.bypass();h.dispatch({type:'open_settings'});
+  assert.equal(h.views.at(-1).frame,null);
+  assert.equal(h.waits.length,0);
+});
+
+test('numeric serialized launch ownership is converted to the wasm u64 BigInt ABI',async()=>{
+  const h=launchFrameHarness(true);h.refresh();h.waits[0]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[[1n,11n]]);assert.equal(h.finished,true);
+});
+
+test('launch digest transport preserves every bit above the JavaScript integer range',async()=>{
+  const h=launchFrameHarness(),digest=(1n<<63n)+123n;
+  h.digest(digest);h.submit();h.refresh();h.waits[0]();await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(h.acknowledgments,[[digest,11n]]);assert.equal(h.finished,true);
+});
+
+test('a ready launch without a matching submitted frame requests one fresh frame',()=>{
+  const h=launchFrameHarness();h.unsubmitted();h.refresh();
+  assert.equal(h.wakes,1);assert.equal(h.waits.length,0);assert.equal(h.finished,false);
+});
 
 const source = readFileSync(new URL("app.js", import.meta.url), "utf8");
+test('launch cover obscures ordinary workspace status while failure recovery stays above it',()=>{
+  const css=readFileSync(new URL('style.css',import.meta.url),'utf8');
+  const stacking=selector=>Number(css.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+' \\{([^}]+)\\}'))?.[1].match(/z-index:\s*([0-9]+)/)?.[1]);
+  const status=stacking('.workspace-status'),cover=stacking('#gpu-notice[data-launch]');
+  assert.ok(status<cover,'Ordinary workspace loading must stay underneath the launch cover');
+  const failure=stacking('.workspace-status.error');
+  assert.ok((Number.isFinite(failure)?failure:status)>cover,'Workspace failure and recovery actions remain above the launch cover');
+});
 test('glass CSS preserves the shared straight RGBA channels',()=>{
   const styles=new Map(),context={appliedTheme:null,glass:null,document:{
     body:{dataset:{},style:{setProperty:(key,value)=>styles.set(key,value)}},
@@ -78,7 +241,7 @@ test('phone inset reports apply while busy and deduplicate against shared state'
 
 test('retained workspace placement keeps bubble presentation without scheduling GPU work',()=>{
   let refreshes=0,wakes=0,model=1;
-  const context={app:{language_pending:()=>false,workspace_update:()=>({model_revision:model,content_revision:1}),state_update:assert.fail},
+  const context={launchPresentation:null,launchCover:{blocking:false},app:{language_pending:()=>false,workspace_update:()=>({model_revision:model,content_revision:1}),state_update:assert.fail},
     bubbles:{refresh(){refreshes++;wakes++;}},canvasBar:null,workspaceManager:{observe(){}},editor:{refreshColorPreview(){}},
     fillGesture:null,phone:null,workspaceModelRevision:1,workspaceContentRevision:1,workspaceGesture:{started:true},
     queueWorkspacePresentation(){},queueWorkspaceLayout(){},refreshColorEditors(){},refreshTextureDialogs(){},wake(){wakes++;}};
@@ -94,7 +257,7 @@ test('retained workspace placement keeps bubble presentation without scheduling 
 
 test('fill gesture publishes through the color preview fast path without a workspace patch',()=>{
   const received=[],gesture={transaction:7,pill:{label:'Shared label',value:'Shared value'}};
-  const context={app:{language_pending:()=>false,color_preview:()=>({fill_gesture:gesture}),state_update:assert.fail},
+  const context={launchPresentation:null,launchCover:{blocking:false},app:{language_pending:()=>false,color_preview:()=>({fill_gesture:gesture}),state_update:assert.fail},
     fillGesture:{refresh:value=>received.push(value)},phone:null,editor:null,refreshColorEditors(){},bubbles:null,wake(){}};
   runInNewContext(source.slice(source.indexOf('function applyChange(change)'),source.indexOf('let canvasCursorActive')),context);
   context.applyChange({regions:256,canvas_wake:false});

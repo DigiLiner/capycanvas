@@ -438,6 +438,7 @@ impl Drop for TransitionReply {
 }
 
 enum Command {
+    LaunchFrame(Option<LaunchRequest>),
     SeedContext(EvaluationContext),
     CaptureContext(ContextRequest),
     CanvasTransition(layer_render::CanvasFade),
@@ -493,6 +494,7 @@ enum Command {
     PendingDependency(mpsc::Sender<(usize, bool)>),
 }
 impl Command {
+    fn ready_after_frames(&self, pending: bool) -> bool { !pending || !matches!(self, Self::LaunchFrame(Some(_))) }
     fn take_presentation(&mut self) -> Option<Presentation> {
         match self {
             Self::Frame(_, presentation) | Self::Present(presentation) => presentation.take(),
@@ -514,6 +516,7 @@ struct FrameReport {
     showing_navigator: AtomicBool,
 }
 enum Reply {
+    LaunchPresented(LaunchRequest),
     ColorAdopted(u64, HashMap<AssetId, BrushSource>, layer_render_wgpu::snapshot::SnapshotGpu, Option<layer_render_wgpu::ShaderActivity>),
     Initialized(crate::display_color::ViewColor, layer_render_wgpu::snapshot::SnapshotGpu, Option<layer_render_wgpu::ShaderActivity>),
     Startup(
@@ -591,6 +594,8 @@ pub struct RenderWorker {
     snapshot_gpu: Option<layer_render_wgpu::snapshot::SnapshotGpu>,
     pub(crate) view_color: crate::display_color::ViewColor,
     first_frame_sent: bool,
+    launch_requested: Option<LaunchRequest>,
+    launch_presented: Vec<LaunchRequest>,
     context_seed: EvaluationContext,
     selection_overlays: Arc<layer_core::authored::SelectionOverlays>,
     settling_roots: Vec<layer_core::raster::RasterRevision>,
@@ -666,6 +671,25 @@ impl RenderWorker {
     }
     pub(crate) fn resize_transition(&self, extent: [u32; 2]) {
         if let Some(transition) = &self.transition { transition.resize(extent); }
+    }
+    pub(super) fn invalidate_launch_frame(&mut self, frame: Option<u64>) -> Result<bool, String> {
+        if self.launch_requested.as_ref().map(|request| request.frame) != frame {
+            self.request_launch_frame(None, 0)?;
+        }
+        Ok(frame.is_some() && self.launch_requested.is_none())
+    }
+    pub(super) fn request_launch_frame(&mut self, frame: Option<u64>, owner: u64) -> Result<(), String> {
+        if self.launch_requested.as_ref().map(|request| request.frame) != frame {
+            let request = frame.map(|frame| LaunchRequest::new(frame, owner));
+            self.send(Command::LaunchFrame(request.clone())).map_err(error)?;
+            self.launch_requested = request;
+        }
+        Ok(())
+    }
+    pub(super) fn take_launch_presented(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.launch_presented).into_iter()
+            .filter(|receipt| self.launch_requested.as_ref().is_some_and(|current| current.matches(receipt)))
+            .map(|receipt| receipt.frame).collect()
     }
     pub(super) fn present_chrome(&mut self) -> Result<(), BackendError> {
         if self.chrome_sent != Some((self.chrome, self.chrome_hold)) {
@@ -868,6 +892,8 @@ impl RenderWorker {
             snapshot_gpu: None,
             view_color: Default::default(),
             first_frame_sent: false,
+            launch_requested: None,
+            launch_presented: Vec::new(),
             settling_roots: Vec::new(),
             settling_view: None,
             startup: Default::default(),
@@ -1018,6 +1044,7 @@ impl RenderWorker {
             }
             match reply {
                 Reply::ColorAdopted(..) => (),
+                Reply::LaunchPresented(frame) => self.launch_presented.push(frame),
                 Reply::Initialized(color, gpu, activity) => {
                     self.shader_activity = activity;
                     self.initialized = true;
@@ -1549,6 +1576,42 @@ impl CanvasRenderer for RenderWorker {
     }
 }
 
+#[derive(Clone)]
+struct LaunchRequest {
+    frame: u64,
+    owner: u64,
+    completion: Arc<crate::wayland::LaunchCompletion>,
+}
+impl LaunchRequest {
+    fn new(frame: u64, owner: u64) -> Self {
+        Self {frame, owner, completion: Arc::new(crate::wayland::LaunchCompletion::default())}
+    }
+    fn matches(&self, receipt: &Self) -> bool { Arc::ptr_eq(&self.completion, &receipt.completion) }
+}
+#[derive(Default)]
+struct LaunchFrame {
+    requested: Option<LaunchRequest>,
+    submitted: bool,
+}
+impl LaunchFrame {
+    fn request(&mut self, request: Option<LaunchRequest>) {
+        self.requested = request;
+        self.submitted = false;
+    }
+    fn submit(&mut self, owner: Option<u64>, ready: bool) -> Option<Arc<crate::wayland::LaunchCompletion>> {
+        if self.submitted || !ready { return None; }
+        let request = self.requested.as_ref()?;
+        if owner != Some(request.owner) { return None; }
+        self.submitted = true;
+        Some(request.completion.clone())
+    }
+    fn take_presented(&mut self) -> Option<LaunchRequest> {
+        if !self.submitted || !self.requested.as_ref()?.completion.ready() { return None; }
+        self.submitted = false;
+        self.requested.take()
+    }
+}
+
 struct Worker {
     clock: Arc<crate::wayland::FrameClock>,
     transition: Option<CanvasTransition>,
@@ -1593,6 +1656,8 @@ struct Worker {
     chrome_requests: ChromeRequests,
     presented_chrome: Arc<ChromeStatus>,
     initial_completion: Option<Arc<AtomicBool>>,
+    launch_frame: LaunchFrame,
+    last_owner: Option<u64>,
 }
 impl Worker {
     #[cfg(test)]
@@ -1657,7 +1722,7 @@ impl Worker {
         let mut pending_frames: VecDeque<Box<Frame>> = VecDeque::new();
         let mut context_capture: Option<ContextRequest> = None;
         let mut park = None;
-        let mut deferred = VecDeque::new();
+        let mut deferred: VecDeque<Command> = VecDeque::new();
         let mut selection_generation = 0;
         let mut region_generation = 0;
         let mut pending_thumbnails = VecDeque::new();
@@ -1697,6 +1762,10 @@ impl Worker {
                 .poll(wgpu::PollType::Poll)
                 .map_err(error)?;
             self.child.dispatch()?;
+            if let Some(frame) = self.launch_frame.take_presented() {
+                reply.send(Reply::LaunchPresented(frame)).map_err(error)?;
+                wake_canvas(&self.area, &self.presented_chrome);
+            }
             if self.child.take_initial_commit() && self.chrome.initial_applied() {
                 self.child.synchronize(false)?;
                 self.initial_completion = None;
@@ -1772,7 +1841,8 @@ impl Worker {
                 let request = context_capture.take().unwrap();
                 let _ = request.value.set(Ok(self.renderer.evaluation_context()));
             }
-            let queued = if context_capture.is_none() && self.initial_completion.is_none() && document_drawn && !deferred.is_empty() {
+            let queued = if context_capture.is_none() && self.initial_completion.is_none() && document_drawn
+                && deferred.front().is_some_and(|command| command.ready_after_frames(!pending_frames.is_empty())) {
                 Some(deferred.pop_front().unwrap())
             } else {
                 match receiver.try_recv() {
@@ -1879,6 +1949,7 @@ impl Worker {
                 || self.renderer.selection_paint_pending()
                 || self.renderer.region_pending()
                 || self.child.feedback_pending()
+                || self.launch_frame.submitted
                 || self.presenter.screen_check_busy()
             {
                 receiver.recv_timeout(Duration::from_millis(if thumbnail_ready || self.renderer.region_pending() { 1 } else { 8 }))
@@ -1965,6 +2036,10 @@ impl Worker {
                 deferred.push_back(command);
                 continue;
             }
+            if !command.ready_after_frames(!pending_frames.is_empty()) {
+                deferred.push_back(command);
+                continue;
+            }
             if let Some(presentation) = command.take_presentation() { self.pending_presentation = Some(presentation); }
             match command {
                 #[cfg(test)]
@@ -1991,6 +2066,10 @@ impl Worker {
                     self.preview_sdr = preview_sdr;
                     self.update_hdr_view()?;
                     self.pending_present = self.last_view.is_some();
+                }
+                Command::LaunchFrame(request) => {
+                    self.pending_present |= request.is_some() && self.last_view.is_some();
+                    self.launch_frame.request(request);
                 }
                 Command::Screen(generation, headroom, check) => {
                     self.screen_generation = generation;
@@ -2291,6 +2370,8 @@ impl Worker {
             chrome_requests: ChromeRequests::default(),
             presented_chrome,
             initial_completion: None,
+            launch_frame: LaunchFrame::default(),
+            last_owner: None,
         })
     }
     /// Publish whether the renderer has work for later frames, and wake an
@@ -2487,6 +2568,7 @@ impl Worker {
         self.renderer.set_transform_preview(frame.transform_preview.as_ref()).map_err(error)?;
         self.renderer.set_fill_reveal(frame.fill_reveal);
         self.renderer.submit(frame.packet()).map_err(error)?;
+        self.last_owner = Some(frame.scene.view().owner());
         if self.renderer.has_pending_submission() { frame.pending_rasters.clear(); }
         #[cfg(test)]
         timing.photo_frame(frame.scene.view());
@@ -2617,6 +2699,13 @@ impl Worker {
         if let Some(timing) = &timing {
             timing.mark(2);
         }
+        let launch_commit = if let Some(completion) = self.launch_frame.submit(self.last_owner,
+            self.renderer.showing_drawing() && !self.renderer.has_pending_submission()) {
+            let done = completion.clone();
+            self.renderer.queue().on_submitted_work_done(move || done.gpu_completed());
+            self.child.launch_frame(completion);
+            true
+        } else { false };
         #[cfg(test)]
         self.child.feedback_camera(timing.as_ref().map_or(0, |t| t.id()), stroke_target, camera.document_to_surface, self.renderer.canvas_preview_revision(), self.chrome.requested, queued_frames_at_chrome_admission);
         #[cfg(not(test))]
@@ -2626,7 +2715,7 @@ impl Worker {
             timing.mark(3);
         }
         self.renderer.queue().present(target);
-        if self.chrome.needs_parent_commit(moved) {
+        if launch_commit || self.chrome.needs_parent_commit(moved) {
             let area = self.area.clone();
             let status = self.presented_chrome.clone();
             gtk::glib::idle_add_once(move || {

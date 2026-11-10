@@ -29,7 +29,10 @@ fn pixels(a: &mut App) -> Result<Vec<u8>, String> {
             timeout: Some(TIMEOUT),
         })
         .map_err(error)?;
-    if let Some(target) = surface.pending_target.take() { gpu.queue().present(target); }
+    if let Some((target, launch)) = surface.pending_target.take() {
+        gpu.queue().present(target);
+        surface.track_launch(gpu.queue(), launch, a.host.wake_callback());
+    }
     let start = Instant::now();
     let target = loop {
         match surface.surface.get_current_texture() {

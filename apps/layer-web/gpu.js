@@ -51,6 +51,7 @@ function button(text, action, className = "") {
 }
 
 export function showGpuNotice({ container, error, restart, restartLabel }) {
+  container.removeAttribute("data-launch");
   const support = browserSupport();
   const [title, reason] = gpuProblem({ ...support, stage: error?.stage });
   const content = element("div", "gpu-help");
@@ -129,4 +130,46 @@ export function showGpuNotice({ container, error, restart, restartLabel }) {
   }
   container.replaceChildren(content);
   container.hidden = false;
+}
+
+export function createLaunchCover({ container, now = () => performance.now(), setTimer = setTimeout, clearTimer = clearTimeout }) {
+  const content = container.querySelector('.launch-splash');
+  const caption = content.querySelector('.launch-caption');
+  const controls = blocked => {
+    for (const node of container.parentElement.children)
+      if (node !== container && node.inert !== blocked) node.inert = blocked;
+  };
+  controls(true);
+  let fade, captionTimer;
+  return {
+    update(view, copy) {
+      if (!view.visible && container.dataset.launch === undefined) return;
+      captionTimer ??= setTimer(() => { caption.dataset.visible = ''; }, Math.max(0, Number(copy.launch_caption_delay_ms) - now()));
+      controls(view.visible);
+      if (view.visible) {
+        caption.textContent = copy[`preparing_${view.notice}`];
+        if (fade !== undefined) clearTimer(fade);
+        fade = undefined;
+        if (container.firstElementChild !== content) container.replaceChildren(content);
+        container.hidden = false;
+        container.dataset.launch = 'loading';
+      } else if (!view.finished) {
+        if (fade !== undefined) clearTimer(fade);
+        fade = undefined;
+        container.hidden = true;
+      } else if (container.dataset.launch === 'loading') {
+        container.dataset.launch = 'leaving';
+        fade = setTimer(() => { container.hidden = true; fade = undefined; }, 180);
+      }
+    },
+    diagnostic() {
+      controls(false);
+      if (fade !== undefined) clearTimer(fade);
+      fade = undefined;
+      container.removeAttribute('data-launch');
+      container.hidden = false;
+    },
+    get pending() { return container.dataset.launch === 'loading'; },
+    get blocking() { return !container.hidden && container.dataset.launch === 'loading'; },
+  };
 }

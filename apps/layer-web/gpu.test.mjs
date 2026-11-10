@@ -88,7 +88,7 @@ export async function checkOutdatedBrowser({ call, evaluate, settle, url, errors
         assert.match(await evaluate("document.querySelector('#gpu-notice').innerText"), help);
         assert.equal(await evaluate("getComputedStyle(document.querySelector('.gpu-help')).backgroundColor"), panels[theme]);
         assert.ok(await evaluate("(()=>{const n=document.querySelector('#gpu-notice').getBoundingClientRect(),h=document.querySelector('.gpu-help').getBoundingClientRect();return h.width>0&&h.left>=n.left&&h.right<=n.right&&h.top>=n.top})()"), "Help sits inside the canvas area");
-        const dir = "artifacts/ui/outdated-browser";
+        const dir = process.env.LAYER_TEST_ARTIFACTS || "artifacts/ui/outdated-browser";
         await mkdir(dir, { recursive: true });
         const shot = await call("Page.captureScreenshot", { format: "png" });
         await writeFile(`${dir}/${mode}-${theme}.png`, Buffer.from(shot.data, "base64"));
@@ -523,6 +523,9 @@ export async function checkGpuFailureLifecycle({call,evaluate,settle,errors}) {
       const screenshot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/${theme}.png`,Buffer.from(screenshot.data,'base64'));
       await click('#gpu-notice > button');
       await wait(`document.body.dataset.gpu==='ready'&&layerApp.app.brush_ready()&&gpuFailureTest.current!==gpuFailureTest.old`);
+      assert.equal(await evaluate("document.querySelector('#gpu-notice').hidden"),true,'Successful post-launch reattachment removes the old diagnostic');
+      assert.notEqual(await evaluate("document.querySelector('#gpu-notice').dataset.launch"),'loading','A completed launch does not restart after device recovery');
+      assert.equal(await evaluate("[...document.querySelector('#workspace').children].some(node=>node.inert)"),false,'Recovered workspace controls remain available');
       await evaluate(`gpuFailureTest.old.dispatchEvent(new GPUUncapturedErrorEvent('uncapturederror',{error:new GPUOutOfMemoryError('capy-test: retired device memory failure')}))`);
       await new Promise(resolve=>setTimeout(resolve,1600));
       assert.equal(await evaluate(`document.body.dataset.gpu`),'ready','A retired device event cannot stop its replacement');

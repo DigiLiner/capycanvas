@@ -8,6 +8,7 @@ fn now() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
 impl App {
     pub fn workspace(&mut self, request: Value) -> Result<Value, String> {
         let time = now();
@@ -39,6 +40,56 @@ impl App {
         let before = self.host.session.state().revision;
         let change = c.tick(&mut self.host.session, time);
         self.host.apply_change(before, change);
+        self.host.set_launch_interaction(c.view.error.is_some() || c.view.prompt.is_some()
+            || c.view.status.as_ref().is_some_and(|status| status.action.is_some()));
         Ok(json!({"view": c.view, "wake": change.needs_present(), "refresh": change.regions != 0}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_failure_bypasses_launch_until_retry_clears_it() {
+        let directory = std::env::temp_dir().join(format!("capy-android-launch-{}", layer_workspace::new_id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut app = App::new("", &["en-US"], None).unwrap();
+        app.workspace_wake = Some(std::sync::Arc::new(|| {}));
+        app.workspace(json!({"type":"start","directory":directory})).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !app.workspaces.as_ref().unwrap().view.ready {
+            app.workspace(json!({"type":"tick"})).unwrap();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(app.host.launch_state().visible);
+        app.workspaces.as_mut().unwrap().set_error(layer_workspace::StoreError::new(
+            layer_workspace::ErrorKind::StorageFull, "Storage full"));
+        app.workspace(json!({"type":"tick"})).unwrap();
+        let failed = app.host.launch_state();
+        assert!(!failed.visible);
+        assert!(!failed.finished);
+        assert_eq!(failed.frame, None);
+        app.workspace(json!({"type":"form","action":{"type":"save_as_new"}})).unwrap();
+        assert!(app.workspaces.as_ref().unwrap().view.prompt.is_some());
+        assert!(!app.host.launch_state().visible);
+        assert!(!app.host.launch_state().finished);
+        app.workspace(json!({"type":"cancel"})).unwrap();
+        assert!(app.host.launch_state().visible);
+        app.workspaces.as_mut().unwrap().set_error(layer_workspace::StoreError::new(
+            layer_workspace::ErrorKind::StorageFull, "Storage full"));
+        app.workspace(json!({"type":"tick"})).unwrap();
+        assert!(!app.host.launch_state().visible);
+        app.workspace(json!({"type":"retry"})).unwrap();
+        while app.workspaces.as_ref().unwrap().view.error.is_some() || app.workspaces.as_ref().unwrap().view.busy {
+            app.workspace(json!({"type":"tick"})).unwrap();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(app.host.launch_state().visible);
+        assert!(!app.host.launch_state().finished);
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -1042,6 +1042,7 @@ pub struct Workspace {
     pub(crate) view_info: Rc<crate::zoom_readout::ZoomReadout>,
     notice: Rc<crate::notice::NoticeBubble>,
     status: gtk::Label,
+    pub(crate) launch: crate::launch::LaunchSplash,
     restart_canvas: gtk::Button,
     pub(crate) preferences: crate::preferences::Preferences,
     pub(crate) command_bar: crate::command_bar::CommandBar,
@@ -1298,6 +1299,7 @@ impl Workspace {
         restart_canvas.set_halign(gtk::Align::Center);
         restart_canvas.set_visible(false);
         let content = gtk::Overlay::new();
+        let launch = crate::launch::LaunchSplash::new(&localization);
         let workspaces = manager::NativeWorkspaces::new();
         workspaces.root.add_css_class("workspace-notice");
         content.set_child(Some(&surface));
@@ -1321,6 +1323,7 @@ impl Workspace {
         notices.append(&status);
         notices.append(&restart_canvas);
         notices.append(&workspaces.root);
+        content.add_overlay(&launch.root);
         content.add_overlay(&notices);
         let notice = crate::notice::NoticeBubble::new();
         content.add_overlay(&notice.root);
@@ -1447,6 +1450,7 @@ impl Workspace {
             view_info,
             notice,
             status,
+            launch,
             restart_canvas,
             preferences: crate::preferences::Preferences::new(),
             command_bar: crate::command_bar::CommandBar::new(),
@@ -2474,7 +2478,21 @@ impl Workspace {
         }
         self.changed(result);
     }
+    fn refresh_launch(self: &Rc<Self>) {
+        let view = self.gpu.borrow_mut().as_mut().map(|gpu| (gpu.launch_view(), gpu.needs_present));
+        match view {
+            Some((Ok(view), wake)) => {
+                self.launch.update(view, &self.localization());
+                if wake { self.wake(); }
+            }
+            Some((Err(_), _)) => self.launch.bypass(),
+            None if self.status.is_visible() => self.launch.bypass(),
+            None => (),
+        }
+    }
     pub fn changed(self: &Rc<Self>, result: Result<UiChange, String>) {
+        self.refresh_launch();
+        if result.is_err() { self.launch.bypass(); }
         match result {
             Ok(mut change) => {
                 if change.presentation_wake { self.surface.queue_draw(); }
@@ -2814,6 +2832,7 @@ impl Workspace {
                         this.chrome.attach(&status);
                         this.chrome_presented.set(true);
                         this.surface.queue_draw();
+                        this.refresh_launch();
                     }
                 }
             }));
@@ -2901,6 +2920,7 @@ impl Workspace {
         }
     }
     fn gpu_error(self: &Rc<Self>, error: &str) {
+        self.launch.bypass();
         if self
             .gpu
             .borrow()
@@ -3200,6 +3220,9 @@ impl Workspace {
             ("header-selection-hover", palette.header_selection_hover),
         ];
         let mut css = format!("window#{} {{", self.window.widget_name());
+        let [r, g, b, a] = palette.surround_linear;
+        let surround = gdk::RGBA::new(layer_core::color::srgb_encode(r), layer_core::color::srgb_encode(g), layer_core::color::srgb_encode(b), a);
+        css.push_str(&format!("--capy-launch-surround: {surround};"));
         for (name, color) in roles {
             use std::fmt::Write;
             write!(css, "--capy-{name}: {color};").unwrap();

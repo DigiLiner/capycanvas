@@ -12,6 +12,9 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.MotionDurationScale
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -43,8 +46,11 @@ internal class CanvasContent(context: Context, private val host: CanvasHost) : A
                 host.dispatch(obj("type" to "system_motion_changed", "reduced" to it))
             }
         }
-        ReportDrawnWhen { host.snapshot?.optBoolean("brush_ready") == true }
-        CapyApp(host)
+        ReportDrawnWhen { host.snapshot?.objectOrNull("launch")?.optBoolean("finished") == true }
+        Box(Modifier.fillMaxSize()) {
+            Box(if (host.launchCovered()) Modifier.clearAndSetSemantics {} else Modifier) { CapyApp(host) }
+            LaunchSplash(host)
+        }
     }
 
     override fun onResolvePointerIcon(event: MotionEvent, pointerIndex: Int): PointerIcon? {

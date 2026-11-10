@@ -15,7 +15,7 @@ import { createPreferences } from "./preferences.js";
 import {createPenResponse} from "./pen-response.js";
 import {observePenInput,paintToolKind,browserDeviceClass} from "./pen-input.js";
 import { createCommandBar } from "./command-bar.js";
-import { showGpuNotice } from "./gpu.js";
+import { createLaunchCover, showGpuNotice } from "./gpu.js";
 import { createGpuDiagnostics, gpuErrorText, gpuReportDetails, suspendGpuForReport } from './gpu-diagnostics.js';
 import { createCustomization } from "./customization.js";
 import {createDropdown} from './dropdown.js';
@@ -124,7 +124,11 @@ let compilerResumeTimer;
 const startupTimes = { canvas: null, document: null, brush: null, complete: null };
 installTooltips();
 installPenScrolling();
-let startupNotice;
+const launchCover = createLaunchCover({ container: $("gpu-notice") });
+let launchPresentation;
+for (const type of ['keydown', 'keyup']) window.addEventListener(type, event => {
+  if (launchCover.blocking && !hasModalDialog()) event.stopImmediatePropagation();
+}, {capture: true});
 const gpuDiagnostics=createGpuDiagnostics();
 let wasmMemory;
 let servicingRequests = false;
@@ -329,6 +333,7 @@ function publishLanguage(patch) {
   return true;
 }
 function applyChange(change) {
+  if (launchPresentation || launchCover.pending) refreshStartup();
   if (app.language_pending()) queueLanguage();
   if (change.regions & 512) {
     state.command_search = app.command_search();
@@ -461,10 +466,18 @@ function frame(frameTime) {
     if (pending.length) wake();
   } catch (error) { stopGpu(error); }
 }
+function launchChromeReady() { return !!layout && workspaceLayoutReady() && !workspacePresentation; }
 function refreshStartup() {
+  if (!app || !bootstrap) return;
+  const launch = app.launch_state(launchChromeReady(), compilerFailed || document.body.dataset.gpu === 'unavailable');
+  if (launch.frame === null || launchPresentation && launchPresentation[0] !== launch.frame) launchPresentation = null;
+  launchCover.update(launch, bootstrap);
   if (!gpuReady || compilerFailed) return;
   const [documentReady, brushReady, complete] = app.startup_progress();
-  const notice = app.canvas_notice();
+  if (launch.finished && statusError === null) {
+    const notice = app.canvas_notice();
+    $("status").textContent = notice === null ? "" : bootstrap[`preparing_${notice}`];
+  }
   const stages = { canvas: app.canvas_presented(), document: documentReady, brush: brushReady, complete };
   for (const [name, ready] of Object.entries(stages)) {
     if (ready && startupTimes[name] === null) {
@@ -472,15 +485,20 @@ function refreshStartup() {
       performance.mark(`capy.startup.${name}`);
     }
   }
-  if (!startupNotice) {
-    startupNotice = element("div", "startup-progress");
-    startupNotice.setAttribute("role", "status");
-    workspace.append(startupNotice);
+  const frame = app.launch_frame();
+  if (!frame) launchPresentation = null;
+  if (frame && (!launchPresentation || frame[0] !== launchPresentation[0] || frame[1] !== launchPresentation[1])) {
+    const epoch = compilerEpoch;
+    launchPresentation = frame;
+    app.wait_for_canvas().then(() => {
+      if (epoch !== compilerEpoch || launchPresentation !== frame) return;
+      app.launch_presented(BigInt(frame[0]), BigInt(frame[1]), launchChromeReady());
+      if (launchPresentation === frame) launchPresentation = null;
+      refreshStartup();
+      wake();
+    }).catch(error => { if (epoch === compilerEpoch && launchPresentation === frame) stopGpu(error); });
   }
-  const hidden = !stages.canvas || notice === null;
-  const text = notice === null ? "" : bootstrap[`preparing_${notice}`];
-  if (startupNotice.hidden !== hidden) startupNotice.hidden = hidden;
-  if (startupNotice.textContent !== text) startupNotice.textContent = text;
+  if (launch.frame !== null && (!frame || frame[0] !== launch.frame)) wake();
 }
 // Host timing and contacts govern admission; Rust also checks queued input,
 // strokes, gestures and unfinished edits. Required jobs always retain priority.
@@ -1926,7 +1944,7 @@ try {
   document.documentElement.lang = bootstrap.active_tag;
   for (const [id, label] of [["workspace", bootstrap.drawing_workspace], ["canvas", bootstrap.drawing_canvas], ["gpu-notice", bootstrap.canvas_availability], ["header-start", bootstrap.application_menus], ["header-end", bootstrap.workspace_controls], ["canvas-status", bootstrap.canvas_status]]) $(id).setAttribute("aria-label", label);
   $("canvas").setAttribute("aria-description", bootstrap.drawing_canvas_help);
-  $("gpu-notice").replaceChildren(element("div", "gpu-help", bootstrap.starting_canvas));
+  refreshStartup();
   $("status").textContent = bootstrap.starting_webgpu;
   app.prediction_availability(typeof globalThis.PointerEvent?.prototype.getPredictedEvents === "function");
   const themeAction = () => ({
@@ -2040,6 +2058,7 @@ try {
     });
   }
 } catch (error) {
+  launchCover.diagnostic();
   $("gpu-notice").replaceChildren(element("h1", "", bootstrap?.application_start_failed??"Capy Canvas"), element("pre", "", String(error)));
   $("status").textContent = "";
   console.error(error);
@@ -2056,7 +2075,7 @@ function stopGpu(error) {
     navigation:performance.getEntriesByType('navigation')[0]?.type??null,
   }));
   suspendGpuForReport(report,()=>applyChange(app.suspend_gpu()));
-  if(startupNotice)startupNotice.hidden=true;
+  launchCover.diagnostic();
   const notice=$("gpu-notice");notice.hidden=false;
   notice.replaceChildren(element("p","",report.recovery_error?bootstrap.canvas_recovery_failed:bootstrap.canvas_stopped),
     element('p','diagnostic-detail',report.error),button(bootstrap.restart_canvas,()=>restartGpu()),
@@ -2093,7 +2112,7 @@ async function resumeDocumentCanvas() {
     }catch(error){if(documentGpuCurrent(owner))stopGpu(error);return;}
   }
   if(!gpuReady)await startGpu();
-  else {document.body.dataset.gpu='ready';$('gpu-notice').hidden=true;wake();}
+  else {document.body.dataset.gpu='ready';if(!$('gpu-notice').hasAttribute('data-launch'))$('gpu-notice').hidden=true;refreshStartup();wake();}
   // Renderer replacement refreshes shared command availability. Publish that
   // change after attachment so retained controls do not keep their parked state.
   if(gpuReady){update(255);wake();}
@@ -2104,7 +2123,7 @@ async function startGpu() {
   gpuStarting = true;
   document.body.dataset.gpu = "starting";
   const notice = $("gpu-notice");
-  notice.replaceChildren(element("div", "gpu-help", bootstrap.starting_canvas));
+  refreshStartup();
   try {
     if (!isSecureContext) throw new Error("WebGPU requires HTTPS or localhost.");
     if (!navigator.gpu) throw new Error("navigator.gpu is unavailable.");
@@ -2121,10 +2140,12 @@ async function startGpu() {
       gpuReady=true;
     }
     document.body.dataset.gpu = "ready";
-    notice.hidden = true;
+    if (!notice.hasAttribute("data-launch")) notice.hidden = true;
+    refreshStartup();
     wake();
   } catch (error) {
     document.body.dataset.gpu = "unavailable";
+    launchCover.diagnostic();
     showGpuNotice({ container: notice, error, restart: restartGpu, restartLabel: bootstrap.restart_canvas });
     console.warn("GPU canvas unavailable:", error?.message ?? error);
   } finally {

@@ -18,6 +18,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : ComponentActivity() {
+    internal val launchSplash by lazy { LaunchSplashWindow(this) }
     val host: CanvasHost by viewModels {
         viewModelFactory {
             initializer { CanvasHost(application, screenInfo(androidx.core.content.ContextCompat.getDisplayOrDefault(this@MainActivity))) }
@@ -25,6 +26,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        launchSplash.install()
         host.attachWindow(this)
         if(isFinishing)return
         updateDeviceClass()
@@ -108,6 +110,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        launchSplash.close()
         host.detachWindow(this)
         super.onDestroy()
     }

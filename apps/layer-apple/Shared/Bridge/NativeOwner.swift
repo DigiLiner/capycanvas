@@ -92,6 +92,10 @@ struct ScreenReport: Equatable {
     var name = "", wide = false, headroom = 1.0
 }
 
+private final class LaunchFrame: @unchecked Sendable {
+    var ticket: UInt64 = 0
+}
+
 final class NativeOwner: @unchecked Sendable {
     private let queue: RenderOwnerQueue
     private let drawingWorker = DispatchQueue(label: "art.capycanvas.drawing-activation", qos: .userInitiated)
@@ -111,6 +115,8 @@ final class NativeOwner: @unchecked Sendable {
     private var launchFailure: String?
     private var workspaceStart: JSON?
     private var layer: CAMetalLayer?
+    private var launchFrame: LaunchFrame?
+    private var launchVisible = true
     private var surfaceSize: (width: UInt32, height: UInt32, scale: Float)?
     private var gpuHealth: DispatchSourceTimer?
     private var hdrDocument = false
@@ -301,6 +307,10 @@ final class NativeOwner: @unchecked Sendable {
     private func publish() throws {
         defer { motionPublicationPending = false }
         if let snapshot = try request(7) {
+            if !snapshot["launch"].isNull {
+                launchVisible = snapshot["launch"]["visible"].bool
+                if launchFrame?.ticket != snapshot["launch"]["frame"].optionalUInt { launchFrame = nil }
+            }
             if !snapshot["catalog"].isNull {
                 catalogLoaded = true
                 documentDeliveryCopy = snapshot["catalog"]["document_delivery_copy"]
@@ -826,6 +836,7 @@ final class NativeOwner: @unchecked Sendable {
     }
     private func perform(_ work: @escaping @Sendable () throws -> Void) {
         queue.async { [self] in
+            defer { if launchFrame != nil { try? publish() } }
             do { try work() } catch { receive(nil, error.localizedDescription) }
         }
     }
@@ -837,6 +848,8 @@ final class NativeOwner: @unchecked Sendable {
     }
     func submit(_ kind: UInt32, _ value: JSON, completion: (@Sendable (JSON?) -> Void)? = nil) {
         queue.async { [self] in
+            defer { if launchFrame != nil { try? publish() } }
+            if kind == 1 && launchVisible && value["type"].string != "blur" { completion?(nil); return }
             do {
                 let result = try request(kind, value)
                 if framePublicationActive && kind == 0 && value["type"].string == "bubble" && value["action"]["phase"].string == "move" {
@@ -895,6 +908,7 @@ final class NativeOwner: @unchecked Sendable {
         }
     }
     private func attachCurrentLayer() throws {
+        launchFrame = nil
         guard handle != nil else { throw HostFailure(message: launchFailure ?? "Native session is unavailable") }
         guard let layer, let size = surfaceSize else { throw HostFailure(message: "The canvas has no presentation surface") }
         let surface = Unmanaged.passUnretained(layer).toOpaque()
@@ -953,6 +967,7 @@ final class NativeOwner: @unchecked Sendable {
     }
     func resize(width: UInt32, height: UInt32, scale: Float) {
         perform { [self] in
+            launchFrame = nil
             try check(capy_apple_resize(nativeValue(handle), width, height, scale))
             surfaceSize = (width, height, scale)
             #if DEBUG
@@ -996,6 +1011,7 @@ final class NativeOwner: @unchecked Sendable {
     }
     func detach() {
         perform { [self] in
+            launchFrame = nil
             (layer as? ObservedMetalLayer)?.frameRate = nil
             try check(capy_apple_detach(nativeValue(handle)))
             gpuHealth?.cancel(); gpuHealth = nil
@@ -1009,7 +1025,7 @@ final class NativeOwner: @unchecked Sendable {
     }
     func penInput(_ device: NativePenDevice, sample: [Double]? = nil) {
         perform { [self] in
-            guard !launchSessionPending else { return }
+            guard !launchSessionPending && !launchVisible else { return }
             if let sample {
                 _ = try request(0, device.action(sample: sample)); penDevice = device
             } else { try registerPenDevice(device) }
@@ -1021,7 +1037,7 @@ final class NativeOwner: @unchecked Sendable {
         let observation = trace.flatMap { $0.isRecording ? $0 : nil }
         let queued = observation == nil ? 0 : FrameTrace.now()
         perform { [self] in
-            guard !launchSessionPending else { return }
+            guard !launchSessionPending && !launchVisible else { return }
             if let device { try registerPenDevice(device) }
             let start = observation == nil ? 0 : FrameTrace.now()
             var succeeded = false
@@ -1080,12 +1096,14 @@ final class NativeOwner: @unchecked Sendable {
     }
     func scroll(x: Float, y: Float, dx: Float, dy: Float, scale: Float, zoom: Bool, horizontal: Bool) {
         perform { [self] in
+            guard !launchVisible else { return }
             try check(capy_apple_scroll(nativeValue(handle), x, y, dx, dy, scale, zoom ? 1 : 0, horizontal ? 1 : 0))
             try publish()
         }
     }
     func gesture(x: Float, y: Float, scale: Float, rotation: Float, began: Bool) {
         perform { [self] in
+            guard !launchVisible else { return }
             try check(capy_apple_gesture(nativeValue(handle), x, y, scale, rotation, began ? 1 : 0))
             try publish()
         }
@@ -1132,9 +1150,20 @@ final class NativeOwner: @unchecked Sendable {
             guard handle != nil else { completion(false, 0, costs); return }
             let start = observation == nil ? 0 : FrameTrace.now()
             var encodedCameraRevision: UInt64 = 0, frameOutcome: UInt64 = 0
+            let submitted = launchVisible ? LaunchFrame() : nil
+            if let submitted {
+                (layer as? ObservedMetalLayer)?.launchPresented = { [weak self] in
+                    self?.queue.async { [weak self] in
+                        guard let self, launchFrame === submitted, submitted.ticket != 0 else { return }
+                        launchFrame = nil
+                        if capy_apple_launch_presented(nativeValue(handle), submitted.ticket) { try? publish() }
+                    }
+                }
+            }
             (layer as? ObservedMetalLayer)?.observation = observation.map { ($0, now) }
             defer {
                 (layer as? ObservedMetalLayer)?.observation = nil
+                (layer as? ObservedMetalLayer)?.launchPresented = nil
                 observation?.record(FrameTraceEvent(kind: .frame, a: now, b: target, c: start, d: FrameTrace.now(),
                     e: costs[0], f: costs[1], g: costs[2], h: costs[3], i: costs[4], j: latestTracedInput))
                 if let observation {
@@ -1151,7 +1180,13 @@ final class NativeOwner: @unchecked Sendable {
                     gpuTimingEnabled = wantsGpuTiming
                 }
                 if wantsGpuTiming, let observation { sampleGpuClock(observation) }
-                let result = capy_apple_frame(nativeValue(handle), now, max(now, target), &costs)
+                var launchTicket: UInt64 = 0
+                let result = capy_apple_frame(nativeValue(handle), now, max(now, target), &costs, &launchTicket)
+                if launchTicket == 0 { launchFrame = nil }
+                else if launchFrame?.ticket != launchTicket {
+                    submitted?.ticket = launchTicket
+                    launchFrame = submitted
+                }
                 if observation != nil && (result == 0 || result == 1) {
                     encodedCameraRevision = capy_apple_camera_revision(nativeValue(handle))
                     frameOutcome = UInt64(result) + 1

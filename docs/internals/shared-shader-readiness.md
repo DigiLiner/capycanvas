@@ -132,9 +132,21 @@ Optional drawing skips cold recipes and repaints when they become ready.
 Unresolved raster backings retain conservative watercolor preparation until their
 material state is available.
 
-Application controls such as Settings remain usable while required shaders and
+After launch, application controls such as Settings remain usable while required shaders and
 raster work prepare. Shared command classification keeps these controls outside
 the ordered drawing-edit queue; file commands still wait for preceding edits.
+
+`UiSession::launch_state` keeps the window's cover until workspace input, a
+published drawing, its canvas/brush dependencies and chrome are ready. Its frame
+ticket identifies the current document, renderer and layout. Hosts acknowledge
+that ready frame through `launch_presented` using their surface-owned completion;
+an earlier or invalidated frame cannot reveal the workspace. Errors and required
+dialogs bypass the cover without completing launch. Hosts supply external
+workspace error and form facts through launch readiness. A finished window never
+restarts its launch cover for a drawing switch or renderer recovery.
+
+Caption timing uses `layer_ui::LAUNCH_CAPTION_DELAY_MS`, exported as
+`BootstrapView.launch_caption_delay_ms`; hosts own their clocks and fades.
 
 The first frame follows normal document and raster admission with the full scene.
 An already prepared drawing supplies its first surface presentation without

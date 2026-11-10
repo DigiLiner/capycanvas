@@ -59,6 +59,8 @@ impl CapyApple {
             a.metal.observe_failure(&mut a.host, false);
             work(a)
         });
+        #[cfg(target_abi = "sim")]
+        self.metal.observe_launch(&self.host);
         match result {
             Ok(value) => Some(value),
             Err(message) => {
@@ -808,6 +810,8 @@ pub unsafe extern "C" fn capy_apple_poll_renderer(app: u64) -> i32 {
             a.metal.observe_failure(&mut a.host, true);
             let changed=a.metal.poll_color(&mut a.host)? | a.metal.screen_tick(&mut a.host)
                 | a.metal.poll_presentation(&mut a.host)?;
+            #[cfg(target_abi = "sim")]
+            let changed = a.metal.poll_launch(&mut a.host) | changed;
             if changed {a.host.invalidate_snapshot();}
             Ok(i32::from(changed || a.host.session.rendering_suspended()))
         })
@@ -958,14 +962,16 @@ unsafe fn apple_pointer(
     .map_or(-1, |_| 0)
 }
 /// # Safety
-/// Valid handle; costs, if non-NULL, must point to five writable u64 values.
+/// Valid handle; non-NULL costs points to five writable u64 values and launch_frame to one.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_frame(
     app: u64,
     now: u64,
     presentation: u64,
     costs: *mut u64,
+    launch_frame: *mut u64,
 ) -> i32 {
+    if !launch_frame.is_null() { unsafe { *launch_frame = 0; } }
     let Some(mut lease_app)=handles::app(app) else {
         return -1;
     };
@@ -975,7 +981,9 @@ pub unsafe extern "C" fn capy_apple_frame(
             return Err("Presentation precedes observation time".into());
         }
         if a.host.session.rendering_suspended() { return Ok(0); }
-        let (again, timing) = a.gpu_operation(|a| a.metal.frame(&mut a.host, now, presentation))?;
+        let mut frame = 0;
+        let (again, timing) = a.gpu_operation(|a| a.metal.frame(&mut a.host, now, presentation, &mut frame))?;
+        if !launch_frame.is_null() { unsafe { *launch_frame = frame; } }
         if !costs.is_null() {
             unsafe {
                 std::ptr::copy_nonoverlapping(timing.as_ptr(), costs, 5);
@@ -985,6 +993,13 @@ pub unsafe extern "C" fn capy_apple_frame(
     })
     .unwrap_or(-1)
 }
+/// # Safety
+/// Valid handle on its serial owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_launch_presented(app: u64, frame: u64) -> bool {
+    handles::app(app).is_some_and(|mut a| a.host.launch_presented(frame))
+}
+
 /// # Safety
 /// Valid handle on its serial owner.
 #[unsafe(no_mangle)]

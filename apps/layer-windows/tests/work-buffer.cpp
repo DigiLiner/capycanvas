@@ -75,6 +75,17 @@ int main() {
     std::thread newer([&]{for(uint64_t i=700;i<800;++i)modality.Observe(false,i);});
     older.join();newer.join();assert(!modality.Mouse());
     std::cout<<"Pointer modality: ordered native/routed contacts, coalesced latest kind and stale callbacks passed\n";
+    {
+        auto start=CanvasLaunchTiming::Clock::time_point{};
+        CanvasLaunchTiming timing(start);
+        auto delay=std::chrono::seconds(5);
+        assert(timing.CaptionRemaining(start,delay)==delay);
+        assert(timing.CaptionRemaining(start+delay/2,delay)==delay-delay/2);
+        assert(timing.CaptionRemaining(start+delay-std::chrono::milliseconds(1),delay)==std::chrono::milliseconds(1));
+        assert(timing.CaptionRemaining(start+delay,delay).count()==0);
+        assert(timing.CaptionRemaining(start+delay+std::chrono::seconds(1),delay).count()==0);
+        assert(CanvasLaunchTiming::FadeDuration>=std::chrono::milliseconds(150)&&CanvasLaunchTiming::FadeDuration<=std::chrono::milliseconds(200));
+    }
     CanvasSurfaceState surface;
     surface.Reset(0);
     assert(!surface.CanAttach(0,true)&&!surface.CanAttach(1,false));

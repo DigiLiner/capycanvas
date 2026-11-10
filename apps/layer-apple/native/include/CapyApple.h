@@ -255,7 +255,8 @@ int32_t capy_apple_gesture(CapyApple app, float x, float y, float scale, float r
 /* Returns 1 if more frames are needed, 0 when idle, -1 on error. Optional costs
    receives 5 nanosecond durations: paint, acquire, viewport, present, poll. */
 int32_t capy_apple_frame(CapyApple app, uint64_t now_ns, uint64_t presentation_ns,
-                        uint64_t *costs);
+                        uint64_t *costs, uint64_t *launch_frame);
+bool capy_apple_launch_presented(CapyApple app, uint64_t frame);
 /* Last consumed real Down/Move timestamp; serial owner only, zero for NULL. */
 uint64_t capy_apple_consumed_paint_ns(CapyApple app);
 uint64_t capy_apple_submitted_canvas_updates(CapyApple app);

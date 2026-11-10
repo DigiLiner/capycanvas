@@ -285,6 +285,10 @@ pub struct SceneComposition {
 impl NativeHost {
     pub fn prepare_canvas_presentation(&mut self, presenter: &ViewportPresenter) -> bool {
         let ready=self.session.engine().backend().0.as_ref().is_some_and(|gpu|presenter.pipelines_ready(gpu));
+        if self.chrome_ready != ready {
+            self.chrome_ready = ready;
+            self.invalidate_snapshot();
+        }
         self.dirty|=!ready;
         ready
     }

@@ -97,3 +97,28 @@ mod tests {
         assert!(!host.set_localization(next));
     }
 }
+
+#[cfg(any(target_os = "android", test))]
+#[derive(Default)]
+pub(crate) struct LaunchFrame(Option<(u64, Arc<std::sync::atomic::AtomicBool>)>);
+#[cfg(any(target_os = "android", test))]
+impl LaunchFrame {
+    pub(crate) fn ticket(&self) -> Option<u64> { self.0.as_ref().map(|(ticket,_)| *ticket) }
+    pub(crate) fn cancel(&mut self, current: Option<u64>) {
+        if self.ticket() != current { self.0 = None; }
+    }
+    pub(crate) fn submit(&mut self, ticket: Option<u64>) -> Option<Arc<std::sync::atomic::AtomicBool>> {
+        let ticket = ticket?;
+        if self.ticket() == Some(ticket) { return None; }
+        let complete = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.0 = Some((ticket,complete.clone()));
+        Some(complete)
+    }
+    pub(crate) fn take_completed(&mut self) -> Option<u64> {
+        let (ticket,complete) = self.0.as_ref()?;
+        if !complete.load(std::sync::atomic::Ordering::Acquire) { return None; }
+        let ticket = *ticket;
+        self.0 = None;
+        Some(ticket)
+    }
+}

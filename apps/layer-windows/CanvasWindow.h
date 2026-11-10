@@ -11,6 +11,7 @@
 #include "WorkspaceManagerView.h"
 #include "CanvasWorkBuffer.h"
 #include "CanvasSurfaceState.h"
+#include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
 #include "CanvasContactGate.h"
 #include "CanvasLatencyTrace.h"
 #include "CanvasSnapshotMailbox.h"
@@ -73,6 +74,18 @@ private:
     CanvasSurfaceState surfaceState;
     winrt::Microsoft::UI::Xaml::Controls::ContentControl canvasFocus;
     winrt::Microsoft::UI::Xaml::Controls::TextBlock status;
+    winrt::Microsoft::UI::Xaml::Controls::Grid launchCover;
+    winrt::Microsoft::UI::Xaml::Controls::Image launchMark;
+    winrt::Microsoft::UI::Xaml::Controls::TextBlock launchCaption;
+    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer launchCaptionTimer{nullptr};
+    winrt::Microsoft::UI::Xaml::Media::Animation::Storyboard launchFade{nullptr},launchCaptionFade{nullptr};
+    CanvasLaunchTiming launchTiming;
+    bool launchLoaded=false;
+    void CreateLaunchCover();
+    void ArmLaunchCaption();
+    void ApplyLaunchCover(winrt::Windows::Data::Json::JsonObject const& model);
+    void HideLaunchCover(bool animate);
+
     std::shared_ptr<CapyUi::WorkspaceData> screenData;
     winrt::Microsoft::UI::Xaml::Controls::Button screenChip;
     winrt::Microsoft::UI::Xaml::Controls::Flyout screenPopup;

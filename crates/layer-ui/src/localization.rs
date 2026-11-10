@@ -69,6 +69,7 @@ pub fn launch_localization(saved: &str, preferred_tags: &[&str]) -> Arc<Localize
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BootstrapView {
+    pub launch_caption_delay_ms: u64,
     pub active_tag: &'static str,
     pub app_name: &'static str,
     pub common: crate::CommonCopy,
@@ -109,6 +110,7 @@ pub struct BootstrapView {
 
 pub fn bootstrap_view(l: &Localizer) -> BootstrapView {
     BootstrapView {
+        launch_caption_delay_ms: crate::LAUNCH_CAPTION_DELAY_MS,
         active_tag: l.language().tag(),
         app_name: l.language().app_name(),
         common: crate::CommonCopy::new(l),
@@ -498,6 +500,7 @@ mod tests {
         let localization = launch_localization("", &["en-US"]);
         let first = bootstrap_view(&localization);
         let second = bootstrap_view(&localization);
+        assert_eq!(serde_json::to_value(&first).unwrap()["launch_caption_delay_ms"], 5000);
         assert!(Arc::ptr_eq(&first.preparing_canvas, &second.preparing_canvas));
         assert_eq!(first.active_tag, "en");
         assert_eq!(first.shipped_tags, SHIPPED_LANGUAGES.iter().map(|language| language.tag()).collect::<Vec<_>>());

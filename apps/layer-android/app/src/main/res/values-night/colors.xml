@@ -2,4 +2,5 @@
 <resources>
     <!-- Match the shared dark theme's default canvas surround. -->
     <color name="canvas_launch_background">#333333</color>
+    <color name="capy_splash_foreground">#F6F5F4</color>
 </resources>

@@ -149,7 +149,9 @@ private val HiddenChromeShape=object:Shape {
 @Composable fun CapyApp(host: CanvasHost) {
     val launch = host.bootstrap
     if (launch == null) {
-        Box(Modifier.fillMaxSize().background(colorResource(R.color.canvas_launch_background)))
+        Box(Modifier.fillMaxSize().background(colorResource(R.color.canvas_launch_background)), contentAlignment = Alignment.Center) {
+            host.notice?.takeIf { it.id == null }?.let { Text(it.text, Modifier.padding(24.dp), color = colorResource(R.color.capy_splash_foreground)) }
+        }
         return
     }
     val source = LocalContext.current
@@ -180,7 +182,9 @@ private val HiddenChromeShape=object:Shape {
         // The session publishes its palette before the native surface attaches.
         // Only the launch/error screen uses the system-themed launch background.
         Box(Modifier.fillMaxSize().background(colorResource(R.color.canvas_launch_background)), contentAlignment = Alignment.Center) {
-            host.failure?.let { Text(it, Modifier.padding(24.dp), color = Color.White) }
+            (host.failure ?: host.notice?.takeIf { it.id == null }?.text)?.let {
+                Text(it, Modifier.padding(24.dp), color = colorResource(R.color.capy_splash_foreground))
+            }
         }
         return
     }
@@ -358,13 +362,10 @@ private val HiddenChromeShape=object:Shape {
         }.also { dock.canvas = it } }, modifier = Modifier.fillMaxSize(), update = { view ->
             view.contentDescription = host.bootstrap?.getString("drawing_canvas")
         })
-        // SurfaceView punches through the window background. Cover its empty
-        // layer with normal Android UI until this surface has a finished buffer.
-        // This requires none of the application's Vulkan shaders.
-        if (!host.surfaceReady) {
+        if (snapshot?.objectOrNull("launch")?.optBoolean("finished") == true && !host.surfaceReady) {
             Box(Modifier.fillMaxSize().background(colors.surround).testTag("canvas-placeholder"))
         }
-        if (snapshot != null && !snapshot.isNull("canvas_notice") && host.failure == null) {
+        if (snapshot != null && !snapshot.isNull("canvas_notice") && snapshot.objectOrNull("launch")?.optBoolean("finished") == true && host.failure == null) {
             Surface(Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp), shape = SurfaceShape, tonalElevation = 3.dp) {
                 Text(host.bootstrap!!.getString("preparing_${snapshot.getString("canvas_notice")}"), Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }

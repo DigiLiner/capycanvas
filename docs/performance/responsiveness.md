@@ -18,8 +18,8 @@ otherwise.
 | Tonal selection, warm mask on the tier canvas | 350 ms | | Huion: 244–266 ms on 61 MP ([tonal performance](../internals/tonal-performance.md), 2026-09-24) | |
 | Filter preview after a parameter change | 100 ms p95 | | | |
 | Command search open or query → drawn | 50 ms p95 | | Huion: 20.5 ms (`9b830b42`, 2026-09-25) | |
-| Warm launch → canvas ready for a stroke | 2 s | **Not met.** Android median 7.50 s to selected-brush readiness ([idle preparation](#idle-brush-preparation), 2026-10-08) | Huion: workspace ready 1.72–1.80 s ([shader readiness](../internals/shared-shader-readiness.md), 2026-09-25) | |
-| Cold launch with an empty shader cache → ready | 10 s | **Not met.** Android median 35.29 s to selected-brush readiness ([idle preparation](#idle-brush-preparation), 2026-10-08) | Huion: 3.50 s to all shaders; workspace 2.34 s ([shader readiness](../internals/shared-shader-readiness.md), 2026-09-25) | |
+| Warm launch → canvas ready for a stroke | 2 s | **Not met.** Android median 7.50 s to selected-brush readiness ([idle preparation](#idle-brush-preparation), 2026-10-08) | **Not met.** MP11 native readiness 3.451 → 2.825 s; full reveal unmeasured (2026-11-09, qualification below) | |
+| Cold launch with an empty shader cache → ready | 10 s | **Not met.** Android median 35.29 s to selected-brush readiness ([idle preparation](#idle-brush-preparation), 2026-10-08) | MP11 native readiness 4.401 → 3.886 s; full reveal unmeasured (2026-11-09, qualification below) | |
 | Open the tier photo → first frame | 3 / 4 / 6 s | | | |
 
 ## Windows UI VM diagnostic
@@ -34,6 +34,15 @@ Measured 2026-10-28 on RTX PRO 6000 Windows GPU VM, 2560 × 1600 at 120 Hz/125%,
 | Sketch / light | 158.3 | 224.2 | 1 |
 
 ## Demand-driven startup
+
+MP11 launch medians compare `2c027283a` with the launch-cover milestone at factory
+display settings, thermal status 0 and the default drawing: five launches per
+build and cache condition in a fixed 20-run alternating series. Native readiness
+is the maximum of canvas, selected-brush and surface readiness. It excludes the
+final cover reveal and does not qualify complete launch latency. The verified
+warm-cache 2-second miss is shared with the control. Evidence is in
+`artifacts/compile-speed/mb-runtime-android-mp11/latency-clean/`.
+These timings predate the caption delay and external-interaction follow-ups.
 
 Startup prepares the document, selected brush and physical eraser. Other brushes,
 transform and warp prepare on first use and retain their shader handles. The

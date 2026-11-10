@@ -1325,11 +1325,21 @@ fn native_document_files() {
 #[ignore = "private Wayland desktop: startup timing and event-loop responsiveness"]
 fn native_startup_latency() {
     let app = native_test_app("art.capycanvas.StartupTest");
+    adw::StyleManager::default().set_color_scheme(if std::env::var("CAPY_NATIVE_TEST_THEME").is_ok_and(|theme| theme == "dark") {
+        adw::ColorScheme::ForceDark
+    } else { adw::ColorScheme::ForceLight });
     let started = Instant::now();
     let w = Workspace::new(&app);
     let built = started.elapsed().as_secs_f64() * 1000.;
     w.window.present();
     let presented = started.elapsed().as_secs_f64() * 1000.;
+    let mut capture = std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").map(|_| {
+        let input = RemoteInput::new();
+        input.ready();
+        input
+    });
+    let mut icon_captured = false;
+    let mut caption_captured = false;
     let paint_start = glib::monotonic_time();
     let frames = sample_after_paint(&w.surface, glib::clone!(#[strong] w, move || {
         (w.workspaces.ready(), w.chrome_released.get(), w.chrome.revision(), glib::monotonic_time())
@@ -1362,6 +1372,18 @@ fn native_startup_latency() {
         pump(1);
         max_pump_ms = max_pump_ms.max(tick.elapsed().as_secs_f64() * 1000.);
         assert!(started.elapsed() < Duration::from_secs(30), "startup never completed");
+        if let Some(input) = &mut capture {
+            let name = if !icon_captured && w.launch.covering() {
+                icon_captured = true;
+                Some("launch-icon")
+            } else if !caption_captured && started.elapsed() >= Duration::from_secs(1) && w.launch.covering() {
+                caption_captured = true;
+                Some("launch-caption")
+            } else { None };
+            if let Some(name) = name {
+                input.perform(serde_json::json!([{"capture_window":{"name":name,"maximized":w.window.is_maximized()}}]));
+            }
+        }
         if first_canvas.is_none()
             && w.gpu.borrow().as_ref().is_some_and(|g| {
                 !g.session
@@ -1395,7 +1417,7 @@ fn native_startup_latency() {
             let engine = g.session.engine();
             engine.backend().paint_ready(engine.document(), engine.configured_brush(), false)
         });
-        if paint_ready && contact_started && !painted {
+        if paint_ready && contact_started && !painted && !w.launch.covering() {
             send(PenPhase::Down, 400.);
             send(PenPhase::Move, 450.);
             send(PenPhase::Up, 500.);
@@ -1422,7 +1444,12 @@ fn native_startup_latency() {
     }
     until(|| strokes() == 2, "both ready startup contacts commit");
     assert_eq!(strokes(), 2);
+    assert!(!w.launch.covering(), "the ready frame reveals the working workspace");
     assert!(paper_pixels(&w) > 100_000);
+    if let Some(input) = &mut capture {
+        input.perform(serde_json::json!([{"capture_window":{"name":"launch-ready","maximized":w.window.is_maximized()}}]));
+        input.finish();
+    }
     w.window.destroy();
     pump(20);
 }

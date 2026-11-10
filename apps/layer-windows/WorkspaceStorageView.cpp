@@ -130,6 +130,7 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
         auto palette=object(object(model,L"state"),L"palette");
         root.Background(data->brush(L"bg"));
         message.Foreground(fill(color(str(palette,L"text",L"#fafafb"))));
+        Canvas::SetZIndex(root,error.empty()?0:1300);
         buttons.Visibility(error.empty()?Visibility::Collapsed:Visibility::Visible);
         for(auto button:{retry,saveNew,backup})button.IsEnabled(!blocked&&!showing&&!flag(storage,L"busy"));
         saveNew.Visibility(flag(storage,L"ready")?Visibility::Visible:Visibility::Collapsed);

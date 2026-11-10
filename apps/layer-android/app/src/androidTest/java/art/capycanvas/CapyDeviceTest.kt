@@ -32,6 +32,14 @@ import java.util.concurrent.TimeUnit
 
 internal val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
+internal fun startupTheme(): String {
+    val theme = InstrumentationRegistry.getArguments().getString("theme") ?: "dark"
+    require(theme in listOf("light", "dark"))
+    instrumentation.targetContext.getSharedPreferences(CanvasHost.preferencesName, 0).edit()
+        .putString("settings", obj("version" to 1, "theme" to theme, "language" to "en").toString()).commit()
+    return theme
+}
+
 fun jsonValue(value: Any?): Any? = when (value) {
     is JSONObject -> value.keys().asSequence().associateWith { jsonValue(value.get(it)) }
     is JSONArray -> (0 until value.length()).map { jsonValue(value.get(it)) }

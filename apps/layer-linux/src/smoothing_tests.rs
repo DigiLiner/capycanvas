@@ -6,6 +6,7 @@ use serde_json::json;
 #[ignore = "private Mutter display and tablet proxy; workspace-motion.sh gtk --native-test=native_smoothing_strokes --tablet"]
 fn native_smoothing_strokes() {
     let (_app, w, mut input) = super::photo_edit::start("art.capycanvas.SmoothingStrokes");
+    new_photo::ready(&w);
     let feedback_enabled = match std::env::var("LAYER_SMOOTHING_FEEDBACK").as_deref() {
         Ok("0") => false,
         Ok("1") | Err(_) => true,
@@ -53,6 +54,9 @@ fn native_smoothing_strokes() {
             let painted = glib::MainContext::default().block_on(read_canvas_pixels(&w, 801)).unwrap();
             assert_ne!(painted.bytes, empty.bytes, "strength-{strength} paints ink");
             capture_reference(&w, output.join(format!("{theme:?}-strength-{strength}.png")).to_str().unwrap(), 1.);
+            if std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").is_some() {
+                input.perform(json!([{"capture_window":{"name":format!("{theme:?}-strength-{strength}").to_lowercase().replace('.', "-"),"maximized":w.window.is_maximized()}}]));
+            }
             w.dispatch(UiAction::Invoke { command: CommandId::Undo });
             let undone = glib::MainContext::default().block_on(read_canvas_pixels(&w, 802)).unwrap();
             assert_eq!(undone.bytes, empty.bytes);

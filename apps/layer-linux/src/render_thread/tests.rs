@@ -955,3 +955,92 @@ fn reused_child_initial_publication_commits_parent_without_geometry_change() {
     assert!(!chrome.needs_parent_commit(false));
     assert!(chrome.needs_parent_commit(true));
 }
+
+#[test]
+fn launch_frame_requires_its_gpu_completion_and_parent_commit() {
+    for gpu_first in [false, true] {
+        let mut frame = LaunchFrame::default();
+        frame.request(Some(LaunchRequest::new(7, 3)));
+        assert!(frame.submit(Some(4), true).is_none());
+        assert!(frame.submit(Some(3), false).is_none());
+        let completion = frame.submit(Some(3), true).unwrap();
+        assert!(frame.take_presented().is_none());
+        if gpu_first { completion.gpu_completed(); } else { completion.parent_committed(); }
+        assert!(frame.take_presented().is_none());
+        if gpu_first { completion.parent_committed(); } else { completion.gpu_completed(); }
+        assert_eq!(frame.take_presented().map(|receipt| receipt.frame), Some(7));
+        assert!(frame.take_presented().is_none());
+    }
+}
+
+#[test]
+fn retired_launch_submission_cannot_complete_its_replacement() {
+    let mut frame = LaunchFrame::default();
+    let previous = LaunchRequest::new(7, 3);
+    frame.request(Some(previous.clone()));
+    frame.submit(Some(3), true).unwrap();
+    let current = LaunchRequest::new(2, 4);
+    frame.request(Some(current.clone()));
+    frame.submit(Some(4), true).unwrap();
+    previous.completion.gpu_completed();
+    previous.completion.parent_committed();
+    assert!(!current.matches(&previous));
+    assert!(frame.take_presented().is_none());
+    current.completion.parent_committed();
+    assert!(frame.take_presented().is_none());
+    current.completion.gpu_completed();
+    let receipt = frame.take_presented().unwrap();
+    assert_eq!(receipt.frame, 2);
+    assert!(current.matches(&receipt));
+    assert!(!previous.matches(&receipt));
+}
+
+#[test]
+fn cancelled_launch_ticket_needs_a_new_submission_even_when_its_digest_is_unchanged() {
+    let mut frame = LaunchFrame::default();
+    let previous = LaunchRequest::new(7, 3);
+    frame.request(Some(previous.clone()));
+    frame.submit(Some(3), true).unwrap();
+    frame.request(None);
+    previous.completion.gpu_completed();
+    previous.completion.parent_committed();
+    assert!(frame.take_presented().is_none());
+    let current = LaunchRequest::new(7, 3);
+    assert!(!current.matches(&previous));
+    frame.request(Some(current.clone()));
+    assert!(frame.take_presented().is_none());
+    frame.submit(Some(3), true).unwrap();
+    current.completion.gpu_completed();
+    assert!(frame.take_presented().is_none());
+    current.completion.parent_committed();
+    let receipt = frame.take_presented().unwrap();
+    assert!(current.matches(&receipt));
+    assert!(!previous.matches(&receipt));
+}
+
+#[test]
+fn launch_receipt_waits_for_the_new_view_even_when_its_frame_dependencies_are_cold() {
+    let request = LaunchRequest::new(7, 3);
+    let command = Command::LaunchFrame(Some(request.clone()));
+    let mut pending = VecDeque::new();
+    let mut view = 1;
+    assert_eq!(admit_frame(Some(2), &mut pending, |_| Ok::<_, ()>(false)).unwrap(), 0);
+    assert!(!command.ready_after_frames(!pending.is_empty()));
+    assert!(!pending.is_empty());
+    assert_eq!(view, 1);
+    let mut launch = LaunchFrame::default();
+    assert!(launch.submit(Some(3), true).is_none());
+    assert_eq!(admit_frame(None, &mut pending, |next| {
+        view = *next;
+        Ok::<_, ()>(true)
+    }).unwrap(), 1);
+    assert!(pending.is_empty());
+    assert!(command.ready_after_frames(!pending.is_empty()));
+    launch.request(Some(request));
+    let completion = launch.submit(Some(3), true).unwrap();
+    completion.gpu_completed();
+    completion.parent_committed();
+    assert_eq!(view, 2);
+    assert_eq!(launch.take_presented().unwrap().frame, 7);
+    assert!(Command::LaunchFrame(None).ready_after_frames(true));
+}

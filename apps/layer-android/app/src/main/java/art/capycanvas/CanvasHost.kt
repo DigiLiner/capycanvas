@@ -179,16 +179,6 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     internal var workspaceManager by mutableStateOf<JSONObject?>(null)
         private set
     private var workspaceManagerKey: String? = null
-    private var pendingCanvasAttach: (() -> Unit)? = null
-    private var startupHeaderMeasured = false
-    private fun attachMeasuredCanvas() {
-        if (startupHeaderMeasured || publishedWorkspaceLayout?.objectOrNull("phone") != null) {
-            pendingCanvasAttach?.let { attach ->
-                pendingCanvasAttach = null
-                worker.post { if (!disposed) attempt(canvas = true, block = attach) }
-            }
-        }
-    }
     private val workspaceTick = object : Runnable {
         override fun run() {
             if (disposed || handle == 0L) return
@@ -617,10 +607,6 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             if (!penPublicationQueued) { penPublicationQueued = true; choreographer?.postFrameCallback(penPublication) }
         } else if (moving) presentMotion() else { publish(true); wake() }
         if (published != null) main.post { published() }
-        if (type == "measure_header" && workspaceManagerKey?.let(::JSONObject)?.optBoolean("ready") == true) {
-            startupHeaderMeasured = true
-            attachMeasuredCanvas()
-        }
     }
     private var motionAt = 0L
     private var penPublicationQueued = false
@@ -788,20 +774,16 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             // Sizing computes the toolbars/panels without a GPU. Publish their layout
             // before device creation or even the first compositing shader can block.
             publish(true)
-            val attach = {
-                if (generation == surfaceGeneration && surface.isValid) {
-                    if (BuildConfig.DEBUG) beforeGpuAttachForTest?.invoke()
-                    Log.i("CapyStartup", "gpu_attach boot_ns=${SystemClock.elapsedRealtimeNanos()}")
-                    Native.attach(handle, surface)
-                    attached = true
-                    awaitingSurfaceFrame = true
-                    main.post { failure = null }
-                    publish(true)
-                    wake()
-                }
+            if (generation == surfaceGeneration && surface.isValid) {
+                if (BuildConfig.DEBUG) beforeGpuAttachForTest?.invoke()
+                Log.i("CapyStartup", "gpu_attach boot_ns=${SystemClock.elapsedRealtimeNanos()}")
+                Native.attach(handle, surface)
+                attached = true
+                awaitingSurfaceFrame = true
+                main.post { failure = null }
+                publish(true)
+                wake()
             }
-            if (workspaceManagerKey != null) { pendingCanvasAttach = attach; attachMeasuredCanvas() }
-            else attach()
         }
     }
     fun restartCanvas() {
@@ -1029,7 +1011,6 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             val retained = shareModel(publishedWorkspaceLayout, layout) as JSONObject
             publishedWorkspaceLayout = retained
             next.put("layout", retained)
-            attachMeasuredCanvas()
         }
         fun recordPublication() {
             if (measuredPublications != null && publicationCount < 8192) {

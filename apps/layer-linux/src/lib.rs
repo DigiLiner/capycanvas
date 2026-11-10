@@ -3,6 +3,7 @@ mod page_dialog;
 mod menu_presentation;
 mod dialog_content;
 mod canvas;
+mod launch;
 mod canvas_bar;
 mod canvas_size;
 mod image_size;

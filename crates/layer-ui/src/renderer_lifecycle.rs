@@ -1,6 +1,8 @@
 //! Renderer replacement keeps CPU document/session ownership in place.
 use super::*;
 
+pub const LAUNCH_CAPTION_DELAY_MS: u64 = 5000;
+
 pub(super) const PAINTING_UNAVAILABLE: &str = "Painting is unavailable. Save the drawing and reopen it.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -8,6 +10,23 @@ pub(super) const PAINTING_UNAVAILABLE: &str = "Painting is unavailable. Save the
 pub enum CanvasNotice {
     Canvas,
     Brush,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LaunchReadiness {
+    pub canvas: bool,
+    pub brush: bool,
+    pub chrome: bool,
+    pub failed: bool,
+    pub interaction: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct LaunchView {
+    pub visible: bool,
+    pub finished: bool,
+    pub notice: CanvasNotice,
+    pub frame: Option<u64>,
 }
 
 /// Accepted layer-preview requests of one drawing. After a renderer
@@ -52,6 +71,44 @@ impl ThumbnailRequests {
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
+    pub fn launch_state(&self, readiness: LaunchReadiness) -> LaunchView {
+        let blocked = readiness.failed || readiness.interaction || self.rendering_suspended || self.state.host_error.is_some()
+            || self.state.settings_open || self.state.new_drawing.is_some()
+            || self.state.requests.iter().any(|request| !matches!(request.kind,
+                HostRequestKind::SaveSettings { .. } | HostRequestKind::SetFullscreen { .. }
+                    | HostRequestKind::NewWindow | HostRequestKind::OpenLink { .. }));
+        let workspace = self.state.workspace_ready && !self.workspace_read_only;
+        let canvas = readiness.canvas && self.engine.backend().showing_drawing();
+        let ready = workspace && canvas && readiness.brush && readiness.chrome;
+        let identity = [self.engine.document().owner, self.state.document_file.epoch,
+            self.renderer_generation, self.workspace_model_revision(), self.state.camera.revision,
+            self.engine.document().revision];
+        let frame = (!self.launch_finished && !blocked && ready).then(|| {
+            use sha2::Digest;
+            const MAX_EXACT_JSON_INTEGER: u64 = (1 << 53) - 1;
+            let mut digest = sha2::Sha256::new();
+            for field in identity { digest.update(field.to_le_bytes()); }
+            digest.update([u8::from(workspace), u8::from(canvas), u8::from(readiness.brush),
+                u8::from(readiness.chrome), u8::from(readiness.failed)]);
+            (u64::from_le_bytes(digest.finalize()[..8].try_into().unwrap()) & MAX_EXACT_JSON_INTEGER).max(1)
+        });
+        LaunchView {
+            visible: !self.launch_finished && !blocked,
+            finished: self.launch_finished,
+            notice: if workspace && canvas && readiness.chrome && !readiness.brush {
+                CanvasNotice::Brush
+            } else { CanvasNotice::Canvas },
+            frame,
+        }
+    }
+
+    pub fn launch_presented(&mut self, frame: u64, readiness: LaunchReadiness) -> bool {
+        let view = self.launch_state(readiness);
+        if view.frame != Some(frame) { return false; }
+        self.launch_finished = true;
+        true
+    }
+
     pub fn canvas_notice(&self, canvas_ready: bool, brush_ready: bool) -> Option<CanvasNotice> {
         if self.drawing_switch_pending { None }
         else if !canvas_ready { Some(CanvasNotice::Canvas) }
@@ -153,6 +210,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// layout/history/settings forward without overwriting this drawing's view,
     /// tools, history, dirty checkpoint or color interpretation.
     pub fn inherit_window_state(&mut self, previous: &Self) -> Result<UiChange, String> {
+        self.launch_finished = previous.launch_finished;
         let navigation=self.camera_navigation_revision();
         let camera=(!self.initial_fit).then(||self.state.camera.clone());
         let restored_view=self.restored_view.take();
@@ -396,6 +454,158 @@ impl<R: CanvasRenderer> UiSession<R> {
 mod tests {
     use super::*;
     use crate::session::test_support::*;
+
+    const LAUNCH_READY: LaunchReadiness = LaunchReadiness { canvas: true, brush: true, chrome: true, failed: false, interaction: false };
+
+    fn launching() -> UiSession<Recorder> {
+        let mut app = session(Platform::Windows);
+        app.finish_workspace_startup();
+        app.renderer_mut().showing_drawing = true;
+        app
+    }
+
+    #[test]
+    fn launch_waits_for_each_dependency_and_then_a_ready_presentation() {
+        for missing in 0..4 {
+            let mut app = launching();
+            let mut readiness = LAUNCH_READY;
+            match missing {
+                0 => app.set_workspace_read_only(true),
+                1 => readiness.canvas = false,
+                2 => readiness.brush = false,
+                _ => readiness.chrome = false,
+            }
+            let pending = app.launch_state(readiness);
+            assert!(pending.visible && !pending.finished);
+            assert_eq!(pending.frame, None);
+            assert_eq!(pending.notice, if missing == 2 { CanvasNotice::Brush } else { CanvasNotice::Canvas });
+            app.set_workspace_read_only(false);
+            let ready = app.launch_state(LAUNCH_READY);
+            assert!(ready.visible && !ready.finished);
+            assert!(ready.frame.is_some());
+            assert_eq!(app.launch_state(LAUNCH_READY).frame, ready.frame);
+            assert!(!app.launch_presented(0, LAUNCH_READY));
+            assert!(app.launch_presented(ready.frame.unwrap(), LAUNCH_READY));
+            assert!(!app.launch_state(LAUNCH_READY).visible);
+        }
+    }
+
+    #[test]
+    fn launch_queries_are_pure_and_reject_completion_while_unready() {
+        let mut app = launching();
+        let old = app.launch_state(LAUNCH_READY).frame.unwrap();
+        assert_eq!(old as f64 as u64, old);
+        let unready = LaunchReadiness { brush: false, ..LAUNCH_READY };
+        assert!(!app.launch_presented(old, unready));
+        let current = app.launch_state(LAUNCH_READY).frame.unwrap();
+        assert_eq!(old, current);
+        assert!(!app.launch_finished);
+        app.set_workspace_read_only(true);
+        assert!(!app.launch_presented(current, LAUNCH_READY));
+        app.set_workspace_read_only(false);
+        let current = app.launch_state(LAUNCH_READY).frame.unwrap();
+        assert!(app.launch_presented(current, LAUNCH_READY));
+    }
+
+    #[test]
+    fn launch_rejects_old_renderer_and_document_completions() {
+        let mut app = launching();
+        let renderer_frame = app.launch_state(LAUNCH_READY).frame.unwrap();
+        app.replace_renderer(Recorder::default()).unwrap();
+        assert!(!app.launch_presented(renderer_frame, LAUNCH_READY));
+        app.renderer_mut().showing_drawing = true;
+        let document_frame = app.launch_state(LAUNCH_READY).frame.unwrap();
+        let mut incoming = launching();
+        incoming.inherit_window_state(&app).unwrap();
+        assert!(!incoming.launch_presented(document_frame, LAUNCH_READY));
+        let current = incoming.launch_state(LAUNCH_READY).frame.unwrap();
+        assert!(incoming.launch_presented(current, LAUNCH_READY));
+    }
+
+    #[test]
+    fn launch_rejects_presentation_from_before_the_final_layout() {
+        let mut app = launching();
+        let old = app.launch_state(LAUNCH_READY).frame.unwrap();
+        app.set_viewport([720., 480.], [1440, 960]).unwrap();
+        assert!(!app.launch_presented(old, LAUNCH_READY));
+        let current = app.launch_state(LAUNCH_READY).frame.unwrap();
+        assert!(app.launch_presented(current, LAUNCH_READY));
+    }
+
+    #[test]
+    fn launch_waits_for_restored_workspace_to_accept_input() {
+        let mut app = session(Platform::Gtk);
+        app.renderer_mut().showing_drawing = true;
+        assert!(!app.state.workspace_ready);
+        assert_eq!(app.launch_state(LAUNCH_READY).frame, None);
+        app.set_workspace_read_only(true);
+        app.finish_workspace_startup();
+        assert_eq!(app.launch_state(LAUNCH_READY).frame, None);
+        app.set_workspace_read_only(false);
+        assert!(app.launch_state(LAUNCH_READY).frame.is_some());
+    }
+
+    #[test]
+    fn launch_does_not_reveal_a_surround_only_frame_with_ready_shaders() {
+        let mut app = launching();
+        app.renderer_mut().showing_drawing = false;
+        let surround = app.launch_state(LAUNCH_READY);
+        assert!(surround.visible && !surround.finished);
+        assert_eq!(surround.frame, None);
+        assert!(!app.launch_presented(1, LAUNCH_READY));
+        app.renderer_mut().showing_drawing = true;
+        let drawing = app.launch_state(LAUNCH_READY).frame.unwrap();
+        assert!(app.launch_presented(drawing, LAUNCH_READY));
+    }
+
+    #[test]
+    fn launch_never_covers_failures_or_required_interaction() {
+        let mut app = launching();
+        for condition in 0..6 {
+            let old = app.launch_state(LAUNCH_READY).frame.unwrap();
+            let readiness = LaunchReadiness { failed: condition == 0, interaction: condition == 5, ..LAUNCH_READY };
+            app.state.host_error = (condition == 1).then(|| "Cannot initialize canvas".into());
+            app.state.settings_open = condition == 2;
+            app.rendering_suspended = condition == 3;
+            if condition == 4 {
+                app.state.requests.push(HostRequest { id: 999, kind: HostRequestKind::ImportKeymap });
+            }
+            let view = app.launch_state(readiness);
+            assert!(!view.visible && !view.finished);
+            assert_eq!(view.frame, None);
+            assert!(!app.launch_presented(old, readiness));
+            app.state.host_error = None;
+            app.state.settings_open = false;
+            app.rendering_suspended = false;
+            app.state.requests.retain(|request| request.id != 999);
+            assert!(app.launch_state(LAUNCH_READY).visible);
+        }
+    }
+
+    #[test]
+    fn launch_ignores_background_settings_save_requests() {
+        let mut app = launching();
+        let settings = Box::new(app.state.settings.clone());
+        app.state.requests.push(HostRequest { id: 999, kind: HostRequestKind::SaveSettings { settings } });
+        let ready = app.launch_state(LAUNCH_READY);
+        assert!(ready.visible && ready.frame.is_some());
+    }
+
+    #[test]
+    fn launch_finishes_once_per_window_across_switches_and_restarts() {
+        let mut app = launching();
+        let frame = app.launch_state(LAUNCH_READY).frame.unwrap();
+        assert!(app.launch_presented(frame, LAUNCH_READY));
+        assert!(!app.launch_presented(frame, LAUNCH_READY));
+        app.replace_renderer(Recorder::default()).unwrap();
+        assert!(app.launch_state(LaunchReadiness::default()).finished);
+        let mut incoming = launching();
+        incoming.inherit_window_state(&app).unwrap();
+        let inherited = incoming.launch_state(LaunchReadiness::default());
+        assert!(inherited.finished && !inherited.visible && inherited.frame.is_none());
+        let new_window = launching();
+        assert!(new_window.launch_state(LaunchReadiness::default()).visible);
+    }
 
     fn sources() -> Recorder {
         Recorder { tiled_sources: true, ..Default::default() }

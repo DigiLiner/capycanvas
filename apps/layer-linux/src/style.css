@@ -672,3 +672,5 @@ window.capy-workspace.glass .zen-capy.phone-capy.drawer-open { background: var(-
 
 .phone-dialog-page { background-color: var(--dialog-bg-color); color: var(--dialog-fg-color); }
 .phone-dialog-page .dialog-page { padding: 8px; }
+
+.launch-splash { background-color: var(--capy-launch-surround, var(--capy-view)); color: var(--capy-text); }

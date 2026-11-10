@@ -141,6 +141,13 @@ val generateBrand by tasks.registering {
               </group>
             </vector>
         """.trimIndent())
+        output.resolve("drawable/capy_splash_mark.xml").writeText("""
+            <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="96dp" android:height="96dp" android:viewportWidth="${viewBox[2]}" android:viewportHeight="${viewBox[3]}">
+              <group android:translateX="${-viewBox[0]}" android:translateY="${-viewBox[1]}">
+                <path android:fillColor="@color/capy_splash_foreground" android:fillType="evenOdd" android:pathData="$path" />
+              </group>
+            </vector>
+        """.trimIndent())
     }
 }
 tasks.named("preBuild") { dependsOn(generateBrand) }

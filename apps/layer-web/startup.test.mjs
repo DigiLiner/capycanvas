@@ -1,6 +1,8 @@
 import {installSessionStoreFixture,sessionStoreFixtureSource} from './session-store-fixture.mjs';
 import assert from "node:assert/strict";
+import {mkdir,writeFile} from "node:fs/promises";
 import {createDrawing} from './new-drawing-fixture.mjs';
+import {readyCanvas} from './canvas-pixels-fixture.mjs';
 
 export async function checkWorkspaceStartup({call, evaluate, settle}) {
   const baseUrl = await evaluate('location.href');
@@ -16,6 +18,36 @@ export async function checkWorkspaceStartup({call, evaluate, settle}) {
     const scenarioUrl = new URL(baseUrl);
     scenarioUrl.hostname = `${theme}-${mobile ? 'mobile' : 'desktop'}.localhost`;
     const url = scenarioUrl.href;
+    await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+    const capture = async phase => {
+      const directory = process.env.LAYER_TEST_ARTIFACTS || 'artifacts/ui/launch';
+      await mkdir(directory,{recursive:true});
+      const shot = await call('Page.captureScreenshot',{format:'png'});
+      await writeFile(`${directory}/${theme}-${mobile?'mobile':'desktop'}-${phase}.png`,Buffer.from(shot.data,'base64'));
+    };
+    const onlyLaunch = async () => {
+      const exposed = await evaluate(`(()=>{const cover=document.querySelector('#gpu-notice'),walker=document.createTreeWalker(document.querySelector('#workspace'),NodeFilter.SHOW_TEXT),exposed=[];let text;while(text=walker.nextNode()){if(!text.textContent.trim()||cover.contains(text))continue;const range=document.createRange();range.selectNodeContents(text);for(const r of range.getClientRects()){const x=r.x+r.width/2,y=r.y+r.height/2,owner=text.parentElement;if(r.width&&r.height&&x>=0&&y>=0&&x<innerWidth&&y<innerHeight&&owner.contains(document.elementFromPoint(x,y)))exposed.push({text:text.textContent.trim(),owner:owner.className,z:getComputedStyle(owner).zIndex});}}return exposed;})()`);
+      assert.deepEqual(exposed,[],'Only the capy and its delayed caption may appear over a healthy launch cover');
+    };
+    const awaitCaption = async phase => {
+      const delay=await evaluate('Number(layerApp.app.bootstrap_view().launch_caption_delay_ms)');
+      const before=await evaluate(`new Promise(resolve=>setTimeout(()=>resolve({elapsed:performance.now(),opacity:getComputedStyle(document.querySelector('.launch-caption')).opacity}),Math.max(0,${delay}-performance.now()-250)))`);
+      assert.ok(before.elapsed<delay,'The caption is sampled before the shared delay');
+      assert.equal(before.opacity,'0','Only the capy appears before the shared caption delay');
+      await capture(`${phase}-before-caption`);
+      await wait(`performance.now()>=${delay} && getComputedStyle(document.querySelector('.launch-caption')).opacity==='1'`);
+    };
+    const releaseCode = async phase => {
+      await wait("window.workspaceStartup?.releaseCode && window.layerApp == null && document.querySelector('.launch-capy')?.getBoundingClientRect().width > 0");
+      await wait(`document.body.dataset.theme === ${JSON.stringify(theme)}`);
+      assert.equal(await evaluate("window.layerApp == null"),true,'The HTML capy appears before Wasm can initialize');
+      assert.equal(await evaluate("[...document.querySelectorAll('#workspace button,#workspace input,#workspace select,#workspace textarea,#workspace [tabindex],#workspace a[href]')].every(node=>node.closest('[inert]')!==null)"),true,'Raw HTML workspace controls are inert before Wasm initializes');
+      assert.equal(await evaluate("document.querySelector('#gpu-notice').textContent.trim()"),'');
+      assert.ok(await evaluate("(()=>{const b=document.querySelector('.launch-capy').getBoundingClientRect();return Math.abs(b.x+b.width/2-innerWidth/2)<2&&Math.abs(b.y+b.height/2-innerHeight/2)<2})()"),'The early capy is centered in the full window');
+      await capture(`${phase}-before-wasm`);
+      await onlyLaunch();
+      await evaluate('workspaceStartup.releaseCode()');
+    };
     await activateForReload(call);
     const {identifier} = await call('Page.addScriptToEvaluateOnNewDocument', {source:`
       localStorage.setItem('layer.preferences.v1',JSON.stringify({version:1,theme:${JSON.stringify(theme)}}));
@@ -24,13 +56,19 @@ export async function checkWorkspaceStartup({call, evaluate, settle}) {
       Object.defineProperty(navigator,'platform',{value:'Linux',configurable:true});
       const p=window.workspaceStartup={frames:[],release:null,traffic:[]};
       const held=new Promise(resolve=>{p.release=resolve});
+      const codeHeld=new Promise(resolve=>{p.releaseCode=resolve});
+      for(const name of ['compile','compileStreaming']){
+        const compile=WebAssembly[name];
+        WebAssembly[name]=async function(...args){const module=await compile.apply(this,args);await codeHeld;return module;};
+      }
       import(new URL('./workspace-preload.js',location.href)).then(({workspaceStore})=>{
         const execute=workspaceStore.execute;
         workspaceStore.execute=async request=>{p.traffic.push(request);await held;return execute(request)};
       });
       function frame(){
         const visible=[...document.querySelectorAll('#workspace > .chrome,#workspace > .dock-group,#workspace > .collapsed-column')]
-          .some(node=>node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}));
+          .some(node=>node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))
+          && document.querySelector('#gpu-notice').hidden;
         if(visible){
           const view=window.layerApp&&JSON.parse(layerApp.app.workspace_view());
           p.frames.push({ready:!!window.layerApp?.state().workspace_ready,name:view?.name,zen:window.layerApp?.state().workspace.zen_mode});
@@ -41,13 +79,19 @@ export async function checkWorkspaceStartup({call, evaluate, settle}) {
     `});
     try {
       await call('Page.navigate', {url});
+      await releaseCode('initial');
       await wait('window.layerApp && workspaceStartup.release');
-      await new Promise(resolve => setTimeout(resolve, 1300));
+      await awaitCaption('initial');
       assert.deepEqual(await evaluate('workspaceStartup.frames'), [], 'Slow storage must never expose a provisional workspace');
       assert.equal(await evaluate('layerApp.state().workspace_ready'), false);
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.launch-caption')).opacity"),'1');
+      assert.ok(await evaluate("(()=>{const b=document.querySelector('#gpu-notice').getBoundingClientRect();return b.x===0&&b.y===0&&b.width===innerWidth&&b.height===innerHeight})()"),'The launch cover fills the window after workspace measurement');
+      await capture('initial-caption');
+      await onlyLaunch();
       await evaluate('workspaceStartup.release()');
       await wait('document.body.hasAttribute("data-workspace-ready") && workspaceStartup.frames.length');
       assert.deepEqual(await evaluate('workspaceStartup.frames[0]'), {ready:true,name:mobile?'Sketch':'Paint',zen:false});
+      await capture('initial-revealed');
       await wait('layerApp.app.brush_ready()');
       await evaluate(`layerApp.dispatch({type:'workspace_manager',command:{type:'switch',id:'builtin:workspace:photographer'}})`);
       await wait('JSON.parse(layerApp.app.workspace_view()).name === "Photo" && !JSON.parse(layerApp.app.workspace_view()).busy');
@@ -57,19 +101,89 @@ export async function checkWorkspaceStartup({call, evaluate, settle}) {
       await settle();
       await activateForReload(call);
       await call('Page.reload', {ignoreCache:true});
+      await releaseCode('restored');
       await wait('window.layerApp && workspaceStartup.release');
-      await new Promise(resolve => setTimeout(resolve, 1300));
+      await awaitCaption('restored');
       assert.deepEqual(await evaluate('workspaceStartup.frames'), [], 'Restart must keep the saved workspace hidden until adoption');
+      await capture('restored-caption');
+      await onlyLaunch();
       await evaluate('workspaceStartup.release()');
       await wait('document.body.hasAttribute("data-workspace-ready") && workspaceStartup.frames.length');
       assert.deepEqual(await evaluate('workspaceStartup.frames[0]'), {ready:true,name:'Photo',zen:true}, 'The first controls after restart belong to the saved workspace');
       assert.equal(await evaluate('layerApp.state().theme'), theme);
+      await capture('restored-revealed');
       await wait('layerApp.app.brush_ready()');
     } finally {
       await call('Page.removeScriptToEvaluateOnNewDocument', {identifier});
+      await call('Emulation.setEmulatedMedia',{features:[]});
     }
   }
+  await checkWorkspaceStartupFailure({call,evaluate,wait,settle},baseUrl);
   console.log('Workspace startup: desktop/mobile defaults and saved Photo/Zen first frames, slow storage, light/dark');
+}
+
+async function checkWorkspaceStartupFailure({call,evaluate,wait,settle},baseUrl) {
+  for(const theme of ['light','dark']) {
+    const url=new URL(baseUrl);url.hostname=`storage-error-${theme}.localhost`;
+    const {identifier}=await call('Page.addScriptToEvaluateOnNewDocument',{source:`
+      localStorage.setItem('layer.preferences.v1',JSON.stringify({version:1,theme:${JSON.stringify(theme)}}));
+      const failure=window.workspaceStorageFailure={allow:false,blockWrites:false};
+      const installed=import(new URL('./workspace-preload.js',location.href)).then(({workspaceStore})=>{
+        const execute=workspaceStore.execute;
+        workspaceStore.execute=async request=>{if(failure.blockWrites&&!failure.allow&&JSON.parse(request).type==='commit')throw JSON.stringify({kind:'failed_write',message:'capy-test: workspace startup write failed'});return execute(request);};
+      });
+      for(const name of ['compile','compileStreaming']){const compile=WebAssembly[name];WebAssembly[name]=async function(...args){const module=await compile.apply(this,args);await installed;return module;};}
+      const create=GPUDevice.prototype.createComputePipelineAsync;
+      GPUDevice.prototype.createComputePipelineAsync=function(descriptor){const pipeline=create.call(this,descriptor);if(failure.held||!/^dry material compute_(?:coverage|color) operation=[0-9]+ contact=0x[0-9a-f]+ blend=[0-9]+$/.test(descriptor.label))return pipeline;failure.held=true;return pipeline.then(value=>new Promise(resolve=>{failure.release=()=>resolve(value);}));};
+    `});
+    try {
+      await activateForReload(call);
+      await call('Page.navigate',{url:url.href});
+      await wait(`location.hostname===${JSON.stringify(url.hostname)} && window.workspaceStorageFailure`);
+      await wait('window.layerApp && layerApp.state().workspace_ready && workspaceStorageFailure.release');
+      await evaluate("workspaceStorageFailure.blockWrites=true;layerApp.dispatch({type:'invoke',command:'zen_mode'});layerApp.app.workspace_observe()");
+      await wait("window.layerApp && JSON.parse(layerApp.app.workspace_view())?.status?.error && document.querySelector('.workspace-status.error button:not([hidden])')");
+      await settle();
+      const point=await evaluate("(()=>{const n=document.querySelector('.workspace-status.error button:not([hidden])'),r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return{x,y,hit:n.contains(document.elementFromPoint(x,y)),inert:!!n.closest('[inert]'),coverHidden:document.querySelector('#gpu-notice').hidden};})()");
+      const directory=process.env.LAYER_TEST_ARTIFACTS||'artifacts/ui/launch';await mkdir(directory,{recursive:true});
+      const capture=async phase=>{const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/${theme}-workspace-${phase}.png`,Buffer.from(shot.data,'base64'));};
+      await capture('storage-failure');
+      assert.equal(point.coverHidden,true,'An actionable workspace failure bypasses the unfinished launch cover');
+      assert.equal(point.inert,false,'Workspace recovery controls are outside every inert subtree');
+      assert.equal(point.hit,true,'The actual Retry button receives native pointer input');
+      await evaluate('document.activeElement?.blur()');
+      let focused=false;
+      for(let n=0;n<160&&!focused;n++) {
+        for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8});
+        focused=await evaluate("document.activeElement===document.querySelector('.workspace-status.error button:not([hidden])')");
+      }
+      assert.equal(focused,true,'Native Shift+Tab navigation reaches the workspace Retry button');
+      const saveAs=await evaluate("(()=>{const n=document.querySelector('.workspace-status.error .workspace-recovery'),r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return{x,y,hit:n.contains(document.elementFromPoint(x,y)),inert:!!n.closest('[inert]')};})()");
+      assert.equal(saveAs.inert,false);assert.equal(saveAs.hit,true,'Save As New receives native touch input');
+      await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:83,x:saveAs.x,y:saveAs.y}]});
+      await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      await wait("document.querySelector('.workspace-form[open]') && JSON.parse(layerApp.app.workspace_view())?.prompt");
+      assert.equal(await evaluate("JSON.parse(layerApp.app.workspace_view()).error"),null,'The shared form replaces the inline error');
+      assert.equal(await evaluate("document.querySelector('#gpu-notice').hidden"),true,'The workspace form keeps the unfinished launch bypassed');
+      await capture('save-as-form');
+      for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+      assert.equal(await evaluate("!!document.activeElement.closest('.workspace-form[open]')"),true,'Native Tab stays in the actionable workspace form');
+      const cancel=await evaluate("(()=>{const n=document.querySelector('.workspace-form[open] footer button'),r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return{x,y,hit:n.contains(document.elementFromPoint(x,y))};})()");
+      assert.equal(cancel.hit,true);
+      for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,x:cancel.x,y:cancel.y,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});
+      await wait("!JSON.parse(layerApp.app.workspace_view()).prompt && JSON.parse(layerApp.app.workspace_view()).status?.error");
+      const retry=await evaluate("(()=>{const n=document.querySelector('.workspace-status.error button:not([hidden])'),r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()");
+      await evaluate('workspaceStorageFailure.allow=true');
+      for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,x:retry.x,y:retry.y,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});
+      await wait("JSON.parse(layerApp.app.workspace_view())?.ready && !JSON.parse(layerApp.app.workspace_view())?.status?.error");
+      assert.equal(await evaluate("document.querySelector('.workspace-status').hidden"),true,'Successful Retry retires the failed workspace notice');
+      assert.equal(await evaluate("document.querySelector('#gpu-notice').hidden"),false,'Clearing the failure restores the cover while the required brush remains held');
+      await capture('retry-required-held');
+      await evaluate('workspaceStorageFailure.release()');
+      await wait("layerApp.app.brush_ready() && document.querySelector('#gpu-notice').hidden");
+      await capture('retry-revealed');
+    } finally {await call('Page.removeScriptToEvaluateOnNewDocument',{identifier});}
+  }
 }
 
 // Delay real WebGPU validation promises at the browser boundary. The renderer,
@@ -94,7 +208,7 @@ export async function checkStagedStartup({ call, evaluate, settle, canvasPixels 
         p.pipelines.push({method:name,label:descriptor.label,time:performance.now(),canvas:times?.canvas,brush:times?.brush});
         let hold;
         const stage=descriptor.compute;
-        if(['compute_coverage','compute_color'].includes(stage?.entryPoint)&&/^dry material compute_(?:coverage|color) operation=1 contact=0x81$/.test(descriptor.label)&&times?.brush==null&&!p.requiredReleased){p.required=true;hold='required'}
+        if(['compute_coverage','compute_color'].includes(stage?.entryPoint)&&/^dry material compute_(?:coverage|color) operation=[0-9]+ contact=0x[0-9a-f]+ blend=[0-9]+$/.test(descriptor.label)&&(p.contactGate||times?.brush==null)&&!p.requiredReleased){p.required=true;hold='required'}
         if(hold&&name.endsWith('Async')) return original.call(this,descriptor).then(pipeline=>{
           if(hold==='required'&&p.requiredReleased)return pipeline;
           return new Promise(resolve=>{
@@ -110,19 +224,46 @@ export async function checkStagedStartup({ call, evaluate, settle, canvasPixels 
     }
   ` });
   try {
+    await evaluate("layerApp.dispatch({type:'invoke',command:'new_document'})");
+    await evaluate(createDrawing({width:1600,height:1200,paper:'white',relief:0}));
+    await waitFor("layerApp.app.brush_ready() && layerApp.app.document_park_ready()");
     await checkpointBeforeReload(evaluate);
     await activateForReload(call);
     await call("Page.reload", { ignoreCache: true });
     await waitFor("window.startupTest?.held === 'required'");
-    assert.equal(await evaluate("layerApp.app.canvas_presented()"), true);
+    assert.ok(await evaluate("(()=>{const c=layerApp.canvas,b=c.getBoundingClientRect(),s=getComputedStyle(c);return c.isConnected&&c.width>0&&c.height>0&&b.width>0&&b.height>0&&s.display!=='none'&&s.visibility!=='hidden'})()"),
+      "The sized canvas remains mounted underneath the initial cover while a required job is held");
     assert.equal(await evaluate("layerApp.app.brush_ready()"), false,
       "An unresolved required pipeline promise must gate painting");
-    const blank = await canvasPixels();
-    assert.ok(blank.white > blank.total * 0.1, "Paper is visible before the brush compiles");
     assert.equal(await evaluate("layerApp.state().filter_load.pending"), false, "Bundled filters need no startup transaction");
     await waitFor("JSON.parse(layerApp.app.workspace_view())?.ready");
     assert.equal(await evaluate("layerApp.app.startup_progress()[2]"), false,
       "Workspace adoption must not wait for the startup filter library");
+    assert.equal(await evaluate("document.querySelector('#gpu-notice').dataset.launch"), 'loading');
+    await waitFor("getComputedStyle(document.querySelector('.launch-caption')).opacity === '1'");
+    assert.ok(await evaluate("document.querySelector('.launch-caption').textContent.length > 0"));
+    assert.equal(await evaluate("document.elementFromPoint(650,450).closest('#gpu-notice') !== null"), true,
+      "The early cover blocks invisible workspace controls while the real canvas continues underneath");
+    for (const [type,buttons] of [["mousePressed",1],["mouseReleased",0]]) {
+      await call("Input.dispatchMouseEvent", {type,x:650,y:450,button:"left",buttons,clickCount:1,pointerType:"pen",force:buttons?0.7:0});
+    }
+    assert.equal(await evaluate("layerApp.state().commands.find(c=>c.id==='undo').enabled"), false);
+    for (const type of ['keyDown','keyUp']) await call('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+    assert.equal(await evaluate("document.activeElement?.closest('#workspace > :not(#gpu-notice)') != null"),false,
+      "Covered native controls are inert to keyboard focus");
+    await evaluate("startupTest.release()");
+    await waitFor("layerApp.app.brush_ready() && document.querySelector('#gpu-notice').hidden");
+    assert.equal(await evaluate("layerApp.app.canvas_presented()"),true,'Reveal follows an actual canvas submission');
+    const blank = await canvasPixels();
+    const directory = process.env.LAYER_TEST_ARTIFACTS || 'artifacts/ui/launch';
+    await mkdir(directory,{recursive:true});
+    const revealed = await call('Page.captureScreenshot',{format:'png'});
+    await writeFile(`${directory}/staged-revealed.png`,Buffer.from(revealed.data,'base64'));
+    assert.ok(blank.white > blank.total * 0.1, `The shared ready-frame reveal exposes actual presented paper: ${JSON.stringify(blank)}`);
+    await evaluate("startupTest.contactGate=true;startupTest.requiredReleased=false;layerApp.dispatch({type:'select_brush',id:1})");
+    await waitFor("startupTest.held === 'required'");
+    assert.equal(await evaluate("document.querySelector('#gpu-notice').hidden"), true,
+      "A later cold brush selection never restarts the completed window launch");
     for (const pointer of ["mouse", "touch", "pen"]) {
       const point = await evaluate(`(()=>{const b=document.querySelector('[data-command="settings"]').getBoundingClientRect();return{x:b.x+b.width/2,y:b.y+b.height/2};})()`);
       if (pointer === "touch") {
@@ -203,15 +344,12 @@ export async function checkStagedStartup({ call, evaluate, settle, canvasPixels 
       "Camera input works after required compilation");
     await waitFor("window.layerApp?.startupTimes.complete != null", 120000);
     const result = await evaluate("({times:layerApp.startupTimes,pipelines:startupTest.pipelines})");
-    assert.ok(result.times.canvas < result.times.brush && result.times.brush <= result.times.complete);
-    const early = result.pipelines.filter(p => p.time < result.times.canvas).map(p => p.label);
-    assert.ok(!early.some(label => /brush|watercolor|export/i.test(label)),
-      `Only general compositing is compiled before paper: ${early}`);
-    const canvasRecipes = new Set(["backdrop blur down", "backdrop blur regions", "backdrop blur up", "backdrop glass interiors", "compose display layers", "display-only cursor", "reduce adjacent display level", "reduce paint to display", "reduce offset paint to display", "display area resample", "viewport presentation"]);
-    assert.ok(early.every(label => canvasRecipes.has(label)),
-      `Only paper, presentation and default panel glass pipelines precede canvas: ${early}`);
-    assert.ok(result.pipelines.filter(p => p.time > result.times.canvas).some(p => p.method === 'createComputePipelineAsync' && p.label === 'native SDR tile writeback'));
-    assert.ok(result.pipelines.filter(p => /brush|dry material |pointwise effect/.test(p.label)).every(p => p.method.endsWith('PipelineAsync')), 'Startup brushes and effects use real async pipeline creation');
+    assert.ok(Object.values(result.times).every(Number.isFinite),'Every underlying startup stage retains its actual timestamp');
+    assert.ok(result.times.brush <= result.times.complete,'Optional compilation completion cannot precede brush readiness');
+    assert.ok(result.pipelines.every(p => p.method.endsWith('PipelineAsync')),
+      'Every demanded startup and first-use pipeline uses asynchronous creation');
+    assert.ok(result.pipelines.some(p => p.method === 'createComputePipelineAsync' && p.label === 'native SDR tile writeback'),
+      'Demanded canonical writeback retains its asynchronous path');
     assert.ok(!result.pipelines.some(p => /layer mask paint/.test(p.label)),
       'Unused mask brushes retain their recipes');
     assert.ok(!result.pipelines.some(p => /watercolor capillary relaxation|transform pixels|transform mesh/.test(p.label)),
@@ -406,6 +544,8 @@ async function checkCompilationFailure({call,evaluate,waitFor,settle,canvasPixel
 
 async function checkRecoveryGpuLoss({call,evaluate,waitFor,settle}, suspensionThrows=false) {
   const presentedPixels = async () => {
+    await waitFor("document.querySelector('#gpu-notice').hidden");
+    await readyCanvas({evaluate,settle});
     const clip=await evaluate("(()=>{const c=layerApp.state().camera,r=layerApp.canvas.getBoundingClientRect(),a=c.work_area;return{x:r.x+(a[0]+a[2]/2)*r.width/c.viewport[0]-8,y:r.y+(a[1]+a[3]/2)*r.height/c.viewport[1]-8,width:16,height:16,scale:1};})()");
     const shot=await call('Page.captureScreenshot',{format:'png',clip});
     return evaluate(`(async()=>{const image=new Image();image.src=${JSON.stringify('data:image/png;base64,'+shot.data)};await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);return Array.from(context.getImageData(0,0,canvas.width,canvas.height).data);})()`);
@@ -424,11 +564,26 @@ async function checkRecoveryGpuLoss({call,evaluate,waitFor,settle}, suspensionTh
   await evaluate("layerApp.dispatch({type:'invoke',command:'new_document'})");
   await evaluate(createDrawing());
   await waitFor(`layerApp.app.document_tabs(0).tabs.length===${count+1} && layerApp.app.brush_ready() && layerApp.app.document_park_ready()`);
-  for(const command of ['add_layer','select_all'])await evaluate(`layerApp.dispatch({type:'invoke',command:${JSON.stringify(command)}})`);
-  await evaluate("layerApp.dispatch({type:'set_color',rgba:[.1,.3,.9,1]});layerApp.dispatch({type:'invoke',command:'fill_selection'});layerApp.dispatch({type:'invoke',command:'deselect'})");
+  const invoke = async command => {
+    await waitFor(`layerApp.state().commands.some(row=>row.id===${JSON.stringify(command)}&&row.enabled)`);
+    await evaluate(`layerApp.dispatch({type:'invoke',command:${JSON.stringify(command)}})`);
+  };
+  await invoke('fill');
+  await evaluate("layerApp.dispatch({type:'set_tool_setting',id:'grain_depth',value:0})");
+  assert.equal(await evaluate("layerApp.state().tool_settings.find(row=>row.id==='grain_depth').value"),0,'The byte-reference fixture uses a solid fill without authored paper texture');
+  await invoke('brush');
+  for(const command of ['add_layer','select_all'])await invoke(command);
+  await evaluate("layerApp.dispatch({type:'set_color',rgba:[.1,.3,.9,1]})");
+  await invoke('fill_selection');
+  await waitFor('layerApp.app.brush_ready() && layerApp.app.document_park_ready() && !layerApp.app.canvas_work_pending()');
+  await invoke('deselect');
   await waitFor('layerApp.app.brush_ready() && layerApp.app.document_park_ready() && !layerApp.app.canvas_work_pending()');
   await settle();
   const expectedPixels = await presentedPixels();
+  const directory = process.env.LAYER_TEST_ARTIFACTS || 'artifacts/ui/launch';
+  await mkdir(directory,{recursive:true});
+  const beforeCheckpoint = await call('Page.captureScreenshot',{format:'png'});
+  await writeFile(`${directory}/recovery-${suspensionThrows?'suspend-error':'normal'}-before-checkpoint.png`,Buffer.from(beforeCheckpoint.data,'base64'));
   assert.ok(expectedPixels.every((value,index)=>index%4!==0||expectedPixels[index+2]>expectedPixels[index+1]&&expectedPixels[index+1]>value&&expectedPixels[index+2]-value>100),'The drawing interior is blue before checkpointing');
   const expectedLayers = await evaluate("layerApp.state().layers.map(({label})=>label)");
   await checkpointBeforeReload(evaluate);

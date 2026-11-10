@@ -23,7 +23,7 @@ fn fail(e: impl std::fmt::Display) {
 fn guard(raw:u64, f: impl FnOnce(&mut CapyHost) -> Result<i32, String>) -> i32 {
     let mut owned=match borrow::<CapyHost>(raw) {Ok(host)=>host,Err(error)=> {fail(error);return -1;}};
     let host=&mut *owned;
-    match layer_host::contain(host, f) {
+    let result=match layer_host::contain(host, f) {
         Ok(value) => value,
         Err(error) => {
             if host.native.poisoned().is_none() {
@@ -32,7 +32,9 @@ fn guard(raw:u64, f: impl FnOnce(&mut CapyHost) -> Result<i32, String>) -> i32 {
             fail(error);
             -1
         }
-    }
+    };
+    if host.surface_ready.launch.is_some(){host.surface_ready.cancel_launch(host.native.launch_frame());}
+    result
 }
 fn borrow<T:Send+'static>(raw:u64)->Result<Borrowed<T>,String> {
     Handle::from_raw(raw).and_then(handles::lease::<T>).and_then(|lease|lease.borrow()).map_err(err)
@@ -62,25 +64,43 @@ struct SurfaceReadiness {
     completed_chrome: std::sync::Arc<std::sync::atomic::AtomicU64>,
     documents: std::collections::VecDeque<(u64,[u32;2])>,
     published: bool,
+    launch: Option<(u64,std::sync::Arc<std::sync::atomic::AtomicBool>)>,
 }
 impl SurfaceReadiness {
-    fn submitted(&mut self, queue: &wgpu::Queue, chrome: &crate::chrome::Chrome, document: Option<[u32;2]>) {
+    fn submitted(&mut self, queue: &wgpu::Queue, chrome: &crate::chrome::Chrome, document: Option<[u32;2]>, launch: Option<u64>) {
         let document=document.filter(|document|*document==chrome.document);
         let revision=if document.is_some(){chrome.revision()}else{0};
-        if self.queued&&revision<=self.queued_chrome{return;}
+        let launch=launch.filter(|_|document.is_some());
+        self.cancel_launch(launch);
+        let launch=launch.filter(|_|self.launch.is_none()).map(|frame|{
+            let completed=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            self.launch=Some((frame,completed.clone()));completed
+        });
+        if self.queued&&revision<=self.queued_chrome&&launch.is_none(){return;}
         if let Some(document)=document{self.documents.push_back((revision,document));}
-        self.queued=true;self.queued_chrome=revision;
+        self.queued=true;self.queued_chrome=self.queued_chrome.max(revision);
         let ready=self.ready.clone();let completed=self.completed_chrome.clone();
         queue.on_submitted_work_done(move|| {
+            if let Some(completed)=launch{completed.store(true,std::sync::atomic::Ordering::Release);}
             completed.fetch_max(revision,std::sync::atomic::Ordering::Release);
             ready.store(true,std::sync::atomic::Ordering::Release);
         });
     }
     fn ready(&self)->bool {self.ready.load(std::sync::atomic::Ordering::Acquire)}
     fn pending(&self)->bool {
-        self.queued&&(!self.ready()||self.completed_chrome.load(std::sync::atomic::Ordering::Acquire)<self.queued_chrome)
+        self.queued&&(!self.ready()||self.completed_chrome.load(std::sync::atomic::Ordering::Acquire)<self.queued_chrome
+            ||self.launch.as_ref().is_some_and(|(_,completed)|!completed.load(std::sync::atomic::Ordering::Acquire)))
     }
-    fn retire_chrome(&mut self){self.completed_chrome=Default::default();self.queued_chrome=0;self.documents.clear();}
+    fn cancel_launch(&mut self, current:Option<u64>){
+        if self.launch.as_ref().map(|(frame,_)|*frame)!=current{self.launch=None;}
+    }
+    fn completed_launch(&mut self,current:Option<u64>)->Option<u64>{
+        self.cancel_launch(current);
+        if self.launch.as_ref().is_some_and(|(_,completed)|completed.load(std::sync::atomic::Ordering::Acquire)){
+            self.launch.take().map(|(frame,_)|frame)
+        }else{None}
+    }
+    fn retire_chrome(&mut self){self.launch=None;self.completed_chrome=Default::default();self.queued_chrome=0;self.documents.clear();}
     fn changed(&mut self, chrome: &mut crate::chrome::Chrome)->bool {
         let completed=self.completed_chrome.load(std::sync::atomic::Ordering::Acquire);
         while self.documents.front().is_some_and(|(revision,_)|*revision<=completed){
@@ -481,6 +501,14 @@ impl CapyHost {
         Ok(())
     }
 
+    fn observe_surface(&mut self)->bool {
+        let frame=self.surface_ready.completed_launch(self.native.launch_frame());
+        let changed=self.surface_ready.changed(&mut self.chrome);
+        let finished=frame.is_some_and(|frame|self.native.launch_presented(frame));
+        if let Some(frame)=self.native.launch_frame()&&self.surface_ready.launch.as_ref().map(|(queued,_)|*queued)!=Some(frame){self.native.dirty=true;}
+        changed||finished
+    }
+
     fn frame(&mut self, now: u64, presentation: u64) -> Result<i32, String> {
         self.gpu.check()?;
         // A tab command can arrive after DXGI acquisition. Retire that image
@@ -574,7 +602,7 @@ impl CapyHost {
                 }
                 let submission=gpu.queue().submit_for_present([encoder.finish()]);gpu.queue().present(target);
                 self.native.canvas_frame_rate.submitted();self.pacing.submitted(submission);
-                self.surface_ready.submitted(gpu.queue(), &self.chrome, None);
+                self.surface_ready.submitted(gpu.queue(), &self.chrome, None, None);
             }
             self.native.dirty = true;
             self.poll_services()?;
@@ -592,7 +620,9 @@ impl CapyHost {
         self.native.canvas_frame_rate.submitted();
         self.pacing.submitted(submission);
         let document=self.native.session.engine().document().composition().size;
-        self.surface_ready.submitted(gpu.queue(), &self.chrome, (composition.staged&&presenter.chrome_ready()).then_some(document));
+        let ready=composition.staged&&presenter.chrome_ready();
+        let launch=if ready {self.native.launch_frame()}else{None};
+        self.surface_ready.submitted(gpu.queue(), &self.chrome, ready.then_some(document), launch);
         self.blank_presented = true;
         gpu.device().poll(wgpu::PollType::Poll).map_err(err)?;
         self.native.session.renderer_mut().0.as_mut().unwrap().after_present();
@@ -779,7 +809,7 @@ pub unsafe extern "C" fn capy_poll_services(host: u64) -> i32 {
         if host.surface_ready.pending()&&let Some(gpu)=host.native.session.engine().backend().0.as_ref(){
             gpu.device().poll(wgpu::PollType::Poll).map_err(err)?;
         }
-        if host.surface_ready.changed(&mut host.chrome){host.native.invalidate_snapshot();}
+        if host.observe_surface(){host.native.invalidate_snapshot();}
         Ok(i32::from(host.native.dirty))
     })
 }
@@ -1317,7 +1347,7 @@ pub unsafe extern "C" fn capy_snapshot(host: u64, info: *mut CapySnapshotInfo) -
     if let Some(info) = unsafe { info.as_mut() } { *info = CapySnapshotInfo::default(); }
     let mut result = 0;
     guard(host, |host| {
-        if host.surface_ready.changed(&mut host.chrome) { host.native.invalidate_snapshot(); }
+        if host.observe_surface() { host.native.invalidate_snapshot(); }
         let generation = host.native.localization_generation();
         let localization = if host.localization_generation != Some(generation) {
             Some(crate::settings::localization_presentation(&mut host.native)?)
@@ -1955,7 +1985,7 @@ mod presentation_readiness_tests {
             let paper=[(a*48.+c*48.+tx).floor() as usize,(b*48.+d*48.+ty).floor() as usize];
             assert!(paper[0]<viewport[0] as usize&&paper[1]<viewport[1] as usize,"paper center outside fixture viewport: {view:?}");
             presenter.present(gpu,&output.create_view(&Default::default()),view,[0.25,0.25,0.25,1.]).unwrap();
-            readiness.submitted(gpu.queue(), &crate::chrome::Chrome::default(), None);assert!(readiness.queued);
+            readiness.submitted(gpu.queue(), &crate::chrome::Chrome::default(), None, None);assert!(readiness.queued);
             let pixel:u32=if format==wgpu::TextureFormat::Rgba16Float{8}else{4};
             let row=extent[0]*pixel;
             let stride=row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)*wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -2155,6 +2185,23 @@ mod handle_tests {
         }
     }
     impl Drop for Owner { fn drop(&mut self) { unsafe {capy_destroy(self.0);} } }
+
+    #[test]
+    fn guarded_mutations_cancel_launch_receipts_before_the_next_snapshot() {
+        for failed in [false,true] {
+            let owner=Owner::new(1600,1000);
+            let retired=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            borrow::<CapyHost>(owner.0).unwrap().surface_ready.launch=Some((7,retired.clone()));
+            assert_eq!(guard(owner.0,|host| {
+                host.native.error=Some(String::new());
+                if failed{Err(String::new())}else{Ok(0)}
+            }),if failed{-1}else{0});
+            assert!(borrow::<CapyHost>(owner.0).unwrap().surface_ready.launch.is_none());
+            assert_eq!(guard(owner.0,|host| {host.native.error=None;Ok(0)}),0);
+            retired.store(true,std::sync::atomic::Ordering::Release);
+            assert_eq!(borrow::<CapyHost>(owner.0).unwrap().surface_ready.completed_launch(Some(7)),None);
+        }
+    }
 
     #[test]
     fn native_layer_taps_use_physical_slop_after_dpi_changes() {
@@ -2449,6 +2496,48 @@ mod chrome_completion_tests {
         assert_eq!(chrome.presented_revision,Some(7));assert!(native.take_layout_update_bytes().unwrap().is_none());
     }
     #[test]
+    fn retired_launch_completion_cannot_finish_a_new_surface() {
+        let mut readiness=SurfaceReadiness::default();
+        let retired=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        readiness.launch=Some((3,retired.clone()));readiness.retire_chrome();
+        retired.store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(readiness.completed_launch(Some(3)),None);
+        let current=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        readiness.launch=Some((3,current.clone()));
+        readiness.queued=true;readiness.ready.store(true,std::sync::atomic::Ordering::Release);
+        assert!(readiness.pending());assert_eq!(readiness.completed_launch(Some(3)),None);
+        current.store(true,std::sync::atomic::Ordering::Release);
+        assert!(!readiness.pending());assert_eq!(readiness.completed_launch(Some(3)),Some(3));
+        assert_eq!(readiness.completed_launch(Some(3)),None);
+    }
+    #[test]
+    fn decreasing_launch_digest_waits_for_its_own_submission() {
+        let mut readiness=SurfaceReadiness::default();
+        let retired=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        readiness.launch=Some((u64::MAX,retired.clone()));
+        assert_eq!(readiness.completed_launch(Some(1)),None);
+        let current=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        readiness.launch=Some((1,current.clone()));
+        retired.store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(readiness.completed_launch(Some(1)),None);
+        current.store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(readiness.completed_launch(Some(1)),Some(1));
+    }
+    #[test]
+    fn readiness_flap_requires_a_new_receipt_for_the_same_launch_digest() {
+        let mut readiness=SurfaceReadiness::default();
+        let retired=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        readiness.launch=Some((7,retired.clone()));
+        assert_eq!(readiness.completed_launch(None),None);
+        retired.store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(readiness.completed_launch(Some(7)),None);
+        let current=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        readiness.launch=Some((7,current.clone()));
+        assert_eq!(readiness.completed_launch(Some(7)),None);
+        current.store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(readiness.completed_launch(Some(7)),Some(7));
+    }
+    #[test]
     fn retired_chrome_completion_cannot_acknowledge_a_new_presenter() {
         let mut readiness=SurfaceReadiness::default();
         let ready=readiness.ready.clone();let completed=readiness.completed_chrome.clone();
@@ -2485,11 +2574,13 @@ mod chrome_completion_tests {
         let mut chrome=crate::chrome::Chrome::default();
         chrome.set(serde_json::from_value(serde_json::json!({"revision":7,"document":[192,192],"glass":{"regions":[],"connections":[]},"overviews":[]})).unwrap()).unwrap();
         let mut readiness=SurfaceReadiness::default();
-        let submitted=gpu.queue().submit([encoder.finish()]);readiness.submitted(gpu.queue(),&chrome,Some([192;2]));
+        let submitted=gpu.queue().submit([encoder.finish()]);readiness.submitted(gpu.queue(),&chrome,Some([192;2]),Some(11));
+        let launch_completed=readiness.launch.as_ref().unwrap().1.clone();
         chrome.set(serde_json::from_value(serde_json::json!({"revision":8,"document":[128,64],"glass":{"regions":[],"connections":[]},"overviews":[]})).unwrap()).unwrap();
-        readiness.submitted(gpu.queue(),&chrome,Some([192;2]));assert_eq!(readiness.queued_chrome,7);
+        readiness.submitted(gpu.queue(),&chrome,Some([192;2]),None);assert_eq!(readiness.queued_chrome,7);
         gpu.device().poll(wgpu::PollType::Poll).unwrap();readiness.changed(&mut chrome);
         assert_eq!(chrome.presented_revision,None,"queued chrome must remain covered until its submission completes");
+        assert!(!launch_completed.load(std::sync::atomic::Ordering::Acquire));
         let unrelated={
             let native=unsafe{gpu.device().as_hal::<wgpu::hal::api::Dx12>()}.unwrap();
             let device:ID3D12Device=native.raw_device().cast().unwrap();
@@ -2498,11 +2589,14 @@ mod chrome_completion_tests {
         };
         gpu.queue().submit([]);drop(gate);
         gpu.device().poll(wgpu::PollType::Wait{submission_index:Some(submitted),timeout:Some(Duration::from_secs(10))}).unwrap();
-        assert!(readiness.changed(&mut chrome));assert_eq!(chrome.presented_revision,Some(7));assert!(!readiness.changed(&mut chrome));
+        assert!(readiness.changed(&mut chrome));assert_eq!(chrome.presented_revision,Some(7));
+        assert!(launch_completed.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(readiness.completed_launch(Some(11)),None);assert!(!readiness.changed(&mut chrome));
         assert_eq!(chrome.document,[128,64]);assert_eq!(chrome.presented_document,Some([192;2]));
-        drop(unrelated);let next=gpu.queue().submit([]);readiness.submitted(gpu.queue(),&chrome,Some([128,64]));
+        drop(unrelated);let next=gpu.queue().submit([]);readiness.submitted(gpu.queue(),&chrome,Some([128,64]),Some(3));
         gpu.device().poll(wgpu::PollType::Wait{submission_index:Some(next),timeout:Some(Duration::from_secs(10))}).unwrap();
         assert!(!readiness.changed(&mut chrome));assert_eq!(chrome.presented_revision,Some(8));assert_eq!(chrome.presented_document,Some([128,64]));
+        assert_eq!(readiness.completed_launch(Some(3)),Some(3));
         drop(gpu);layer_render_wgpu::finish_shader_compiler_shutdown();
     }
 }

@@ -1,5 +1,8 @@
 package art.capycanvas
 
+import android.graphics.Bitmap
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import android.os.SystemClock
 import android.view.MotionEvent
 import androidx.test.core.app.ActivityScenario
@@ -12,8 +15,10 @@ import java.util.concurrent.TimeUnit
 
 /** Run alone in a fresh instrumentation process to exercise the cold renderer. */
 class AndroidStartupTest {
-    @get:Rule val device = CapyDeviceRule()
+    @get:Rule(order = 0) val device = CapyDeviceRule()
+    @get:Rule(order = 1) val compose = createEmptyComposeRule()
     @Test fun drawingNavigationAndFirstUseShadersRemainResponsive() {
+        val theme = startupTheme()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             lateinit var host: CanvasHost
             scenario.onActivity { host = it.host }
@@ -42,6 +47,7 @@ class AndroidStartupTest {
                         }
                         if (condition(it)) return it
                     }
+                    compose.mainClock.takeIf { it.autoAdvance }?.advanceTimeByFrame()
                     SystemClock.sleep(10)
                 }
                 throw AssertionError("Startup did not become ready; readiness=$lastReadiness; brush=${last?.optJSONObject("state")?.opt("brush")}; camera=${last?.optJSONObject("state")?.opt("camera")}")
@@ -51,8 +57,28 @@ class AndroidStartupTest {
                 scenario.onActivity { ready = host.workspaceManager?.let { it.optBoolean("ready") && !it.optBoolean("busy") } == true }
                 return ready
             }
-            val ready = waitFor { it.optBoolean("brush_ready") && workspaceReady() }
+            val ready = waitFor { it.optBoolean("brush_ready") && workspaceReady() && it.objectOrNull("launch")?.optBoolean("finished") == true }
+            assertEquals(theme, ready.getJSONObject("state").getString("theme"))
+            assertTrue(ready.objectOrNull("launch")?.optBoolean("visible") == false)
             assertTrue(ready.getBoolean("canvas_ready"))
+            compose.waitUntil(5_000) { compose.onAllNodesWithTag("launch-splash").fetchSemanticsNodes().isEmpty() }
+            fun strokePixel(): Int {
+                val origin = IntArray(2)
+                var x = 0; var y = 0
+                scenario.onActivity { activity ->
+                    val view = activity.window.decorView.descendant<CanvasSurfaceView>()!!
+                    view.getLocationOnScreen(origin)
+                    x = origin[0] + (.48f * view.width).toInt(); y = origin[1] + (.5f * view.height).toInt()
+                }
+                val screen = instrumentation.uiAutomation.takeScreenshot()!!
+                val pixels = screen.copy(Bitmap.Config.ARGB_8888, false)
+                return try {
+                    (-2..2).minOf { offset -> val pixel = pixels.getPixel(x, y + offset)
+                        ((pixel shr 16 and 255) + (pixel shr 8 and 255) + (pixel and 255)) / 3 }
+                } finally { pixels.recycle(); screen.recycle() }
+            }
+            val paper = strokePixel()
+            screenshot("startup-reveal-$theme.png")
             var down = SystemClock.uptimeMillis()
             fun event(action: Int, positions: List<Pair<Float, Float>>, tool: Int) {
                 scenario.onActivity { activity ->
@@ -74,6 +100,8 @@ class AndroidStartupTest {
             }
             event(MotionEvent.ACTION_UP, listOf(.51f to .5f), MotionEvent.TOOL_TYPE_STYLUS)
             val painted = waitFor { it.getJSONObject("state").array("commands").objects().first { c -> c.getString("id") == "undo" }.getBoolean("enabled") }
+            compose.waitUntil(20_000) { strokePixel() < paper - 8 }
+            screenshot("startup-first-stroke-$theme.png")
             android.util.Log.i("CapyStartupTest", "painted_while_compiling=${!painted.getBoolean("shaders_ready")}")
             val zoom = painted.getJSONObject("state").getJSONObject("camera").getDouble("zoom")
             event(MotionEvent.ACTION_DOWN, listOf(.45f to .5f), MotionEvent.TOOL_TYPE_FINGER)

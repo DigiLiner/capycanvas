@@ -148,6 +148,23 @@ impl GpuCanvas {
             gtk::glib::timeout_future(std::time::Duration::from_millis(2)).await;
         }
     }
+    pub(crate) fn launch_view(&mut self) -> Result<layer_ui::LaunchView, String> {
+        self.session.renderer_mut().ready()?;
+        let readiness = layer_ui::LaunchReadiness {
+            canvas: self.session.engine().backend().startup.canvas_ready,
+            brush: self.session.paint_ready(),
+            chrome: matches!(self.session.engine().backend().chrome_status().state(), crate::glass::ChromeState::Visible(..)),
+            failed: self.session.rendering_suspended() || self.session.state().host_error.is_some(),
+            interaction: false,
+        };
+        let view = self.session.launch_state(readiness);
+        self.needs_present |= self.session.renderer_mut().invalidate_launch_frame(view.frame)?;
+        for frame in self.session.renderer_mut().take_launch_presented() {
+            self.session.launch_presented(frame, readiness);
+        }
+        let view = self.session.launch_state(readiness);
+        Ok(view)
+    }
     pub fn measure(&mut self, action: layer_ui::UiAction) -> Result<UiChange, String> {
         let change = self.session.dispatch(action)?;
         self.pending_regions |= change.regions;
@@ -200,6 +217,9 @@ impl GpuCanvas {
         self.session.renderer_mut().stroke_target = target;
         let mut changed = self.session.frame(now_ns, presentation_ns)?;
         self.session.renderer_mut().present_chrome().map_err(|error| error.to_string())?;
+        let launch = self.launch_view()?;
+        let owner = self.session.engine().document().scene().owner();
+        self.session.renderer_mut().request_launch_frame(launch.frame, owner)?;
         changed.regions |= resized.regions | std::mem::take(&mut self.pending_regions);
         if view_color_changed {
             changed.regions |= layer_ui::regions::BRUSH

@@ -100,3 +100,39 @@ fn android_workspace_startup_ticks_on_storage_replies_without_a_timer() {
     assert!(host.session.state().workspace_ready);
     assert!(ticks > 1);
 }
+
+#[test]
+fn canceled_ready_frame_cannot_complete_a_same_digest_reveal() {
+    use std::sync::atomic::Ordering;
+    let mut frame = crate::launch::LaunchFrame::default();
+    let stale = frame.submit(Some(17)).unwrap();
+    frame.cancel(None);
+    assert_eq!(frame.take_completed(),None);
+    let current = frame.submit(Some(17)).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&stale,&current));
+    stale.store(true,Ordering::Release);
+    assert_eq!(frame.take_completed(),None);
+    current.store(true,Ordering::Release);
+    assert_eq!(frame.take_completed(),Some(17));
+    assert_eq!(frame.take_completed(),None);
+}
+
+#[test]
+fn launch_completion_matches_decreasing_digest_and_surface_ownership() {
+    use std::sync::atomic::Ordering;
+    let mut frame = crate::launch::LaunchFrame::default();
+    let stale = frame.submit(Some(91)).unwrap();
+    frame.cancel(Some(7));
+    let current = frame.submit(Some(7)).unwrap();
+    stale.store(true,Ordering::Release);
+    assert_eq!(frame.take_completed(),None);
+    current.store(true,Ordering::Release);
+    assert_eq!(frame.take_completed(),Some(7));
+    let destroyed = frame.submit(Some(7)).unwrap();
+    let mut replacement = crate::launch::LaunchFrame::default();
+    let current = replacement.submit(Some(7)).unwrap();
+    destroyed.store(true,Ordering::Release);
+    assert_eq!(replacement.take_completed(),None);
+    current.store(true,Ordering::Release);
+    assert_eq!(replacement.take_completed(),Some(7));
+}

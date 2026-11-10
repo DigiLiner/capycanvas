@@ -66,7 +66,8 @@ impl Drop for Window {
     }
 }
 pub(crate) struct Surface {
-    pending_target: Option<wgpu::SurfaceTexture>,
+    pending_target: Option<(wgpu::SurfaceTexture, Option<u64>)>,
+    launch_frame: crate::launch::LaunchFrame,
     // Drop the swapchain before releasing its native-window reference.
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -95,6 +96,14 @@ pub(crate) struct Surface {
     _window: Window,
 }
 impl Surface {
+    fn sync_launch(&mut self, current: Option<u64>) {
+        self.launch_frame.cancel(current);
+        if let Some((_,ticket)) = &mut self.pending_target && *ticket != current { *ticket = None; }
+    }
+    fn track_launch(&mut self, queue: &wgpu::Queue, frame: Option<u64>, wake: Arc<dyn Fn()+Send+Sync>) {
+        let Some(complete) = self.launch_frame.submit(frame) else { return; };
+        queue.on_submitted_work_done(move || { complete.store(true, Ordering::Release); wake(); });
+    }
     fn configure(&mut self, gpu: &WgpuRasterizer, extent: [u32; 2]) -> Result<(), String> {
         self.quarter_turns = match (unsafe { self.surface.as_hal::<wgpu::hal::api::Vulkan>() },
             unsafe { gpu.adapter().as_hal::<wgpu::hal::api::Vulkan>() }) {
@@ -513,6 +522,7 @@ impl App {
         let gpu = self.host.session.engine().backend().0.as_ref().unwrap();
         let mut surface = Surface {
             pending_target: None,
+            launch_frame: crate::launch::LaunchFrame::default(),
             surface,
             config,
             sdr_format,
@@ -588,24 +598,32 @@ impl App {
     }
     fn render(&mut self, now: u64, presentation: u64) -> Result<bool, String> {
         self.host.poll_preparation();
+        let launch = self.host.launch_frame();
+        if let Some(surface) = &mut self.surface { surface.sync_launch(launch); }
+        if let Some(frame) = self.surface.as_mut().and_then(|surface| surface.launch_frame.take_completed()) {
+            self.host.launch_presented(frame);
+        }
         // A lost device may already have been retired by observe_gpu_failure.
         // Still propagate its error so the host offers renderer recovery.
         self.check_gpu()?;
         if self.host.session.engine().backend().0.is_none() { return Ok(false); }
         self.frame_cost.fill(0);
         if let Some(surface) = &mut self.surface {
-            if let Some(target) = surface.pending_target.take() {
+            if let Some((target, launch)) = surface.pending_target.take() {
                 let clock = self.profiling.then(std::time::Instant::now);
                 if let Err(target) = self.host.session.engine().backend().0.as_ref().unwrap().queue().try_present(target) {
-                    surface.pending_target = Some(target);
+                    surface.pending_target = Some((target, launch));
                     return Ok(true);
                 }
+                surface.track_launch(self.host.session.engine().backend().0.as_ref().unwrap().queue(), launch, self.host.wake_callback());
                 self.frame_cost[3] = clock.map_or(0, |clock| clock.elapsed().as_nanos() as i64);
                 self.host.session.renderer_mut().0.as_mut().unwrap().after_present();
             }
         }
-        if (!self.host.dirty && self.host.startup.complete) || self.surface.is_none() {
-            return Ok(false);
+        let launch_needed = self.host.launch_frame().is_some_and(|frame|
+            self.surface.as_ref().is_some_and(|surface| surface.launch_frame.ticket() != Some(frame)));
+        if (!self.host.dirty && self.host.startup.complete && !launch_needed) || self.surface.is_none() {
+            return Ok(self.surface.as_ref().is_some_and(|surface| surface.launch_frame.ticket().is_some()));
         }
         if self.surface.as_ref().is_some_and(|s| s.submitted_frames.saturating_sub(s.completed_frames.load(Ordering::Acquire)) >= 2) { return Ok(true); }
         let clock = self.profiling.then(std::time::Instant::now);
@@ -671,6 +689,10 @@ impl App {
         let composition = self.host.compose_scene(&mut surface.presenter, &mut self.cursor, &self.navigators, &self.glass, tone, display)?;
         surface.presenter.set_surface_rotation(surface.quarter_turns);
         if !composition.ready {return Ok(true);}
+        let launch = self.host.launch_frame();
+        surface.sync_launch(launch);
+        let launch_needed = launch.is_some() && surface.launch_frame.ticket() != launch;
+        let wake = self.host.wake_callback();
         let gpu = self.host.session.renderer_mut().0.as_ref().unwrap();
         surface.presenter.set_screen_check(gpu, screen_check);
         let trace_timings = unsafe { ndk_sys::ATrace_isEnabled() };
@@ -684,8 +706,8 @@ impl App {
         }
 
         self.frame_cost[0] = elapsed();
-        if !surface.presenter.needs_present(gpu, view, surround) {
-            return Ok(self.host.dirty);
+        if !surface.presenter.needs_present(gpu, view, surround) && !launch_needed {
+            return Ok(self.host.dirty || surface.launch_frame.ticket().is_some());
         }
         let target = match surface.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
@@ -718,7 +740,8 @@ impl App {
         self.frame_cost[2] = elapsed() - self.frame_cost[0] - self.frame_cost[1];
         let submitted_ns = surface.completion_observer.as_ref().map_or(0, |_| monotonic_ns());
         if surface.ink { gpu.queue().present(target); }
-        else { surface.pending_target = gpu.queue().try_present(target).err(); }
+        else { surface.pending_target = gpu.queue().try_present(target).err().map(|target| (target, launch)); }
+        if surface.pending_target.is_none() { surface.track_launch(gpu.queue(), launch, wake); }
         surface.last_view = Some(view);
         surface.last_paint_start = paint_start;
         surface.submitted_frames += 1;
@@ -763,8 +786,9 @@ impl App {
         // has its own poll while its first finished buffer is awaited.
         let pending = surface.pending_target.is_some();
         if !pending { self.host.session.renderer_mut().0.as_mut().unwrap().after_present(); }
+        let launch_pending = surface.launch_frame.ticket().is_some();
         self.check_gpu()?;
-        Ok(self.host.dirty || pending)
+        Ok(self.host.dirty || pending || launch_pending)
     }
 }
 
@@ -774,7 +798,15 @@ pub(crate) fn with_app_owner<T>(handle:jlong,work:impl FnOnce(&mut App)->Result<
     APPS.with(|apps|apps.with(handle,work)).map_err(error)?
 }
 pub(crate) fn with_app<T>(handle:jlong,work:impl FnOnce(&mut App)->Result<T,String>)->Result<T,String> {
-    with_app_owner(handle,|app|layer_host::contain(app,|app| {app.observe_gpu_failure(false);work(app)}))
+    with_app_owner(handle,|app|layer_host::contain(app,|app| {
+        app.observe_gpu_failure(false);
+        let result = work(app);
+        if let Some(surface) = &mut app.surface && (surface.launch_frame.ticket().is_some()
+            || surface.pending_target.as_ref().is_some_and(|(_,ticket)| ticket.is_some())) {
+            surface.sync_launch(app.host.launch_frame());
+        }
+        result
+    }))
 }
 pub(crate) trait Fallback {
     fn fallback() -> Self;

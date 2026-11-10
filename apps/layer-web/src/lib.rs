@@ -64,6 +64,9 @@ pub struct WebApp {
     header_drag: Option<layer_ui::HeaderDrag>,
     glass: Vec<layer_render_wgpu::BackdropRegion>,
     screen_presented_ms: f64,
+    surface_generation: u64,
+    launch_frame: Option<(u64, u64)>,
+    launch_dom_ready: bool,
     thumbnails: layer_ui::ThumbnailRequests,
 }
 
@@ -373,6 +376,9 @@ impl WebApp {
             header_drag: None,
             glass: Vec::new(),
             screen_presented_ms: 0.,
+            surface_generation: 0,
+            launch_frame: None,
+            launch_dom_ready: false,
             thumbnails: Default::default(),
         })
     }
@@ -424,6 +430,24 @@ impl WebApp {
             self.startup.complete,
         ])
     }
+    pub fn launch_state(&mut self, chrome_ready: bool, failed: bool) -> Result<JsValue, JsValue> {
+        self.launch_dom_ready = chrome_ready;
+        let mut readiness = self.launch_readiness();
+        readiness.failed |= failed;
+        let view = self.session.launch_state(readiness);
+        if self.launch_frame.is_some_and(|(frame, surface)| view.frame != Some(frame) || surface != self.surface_generation) {
+            self.launch_frame = None;
+        }
+        serialize(&view)
+    }
+    pub fn launch_frame(&self) -> Result<JsValue, JsValue> { serialize(&self.launch_frame) }
+    pub fn launch_presented(&mut self, frame: u64, surface: u64, chrome_ready: bool) -> bool {
+        self.launch_dom_ready = chrome_ready;
+        if self.surface_generation != surface || self.launch_frame != Some((frame, surface)) { return false; }
+        self.launch_frame = None;
+        let readiness = self.launch_readiness();
+        self.session.launch_presented(frame, readiness)
+    }
     pub fn canvas_notice(&self) -> Result<JsValue, JsValue> {
         match self.session.canvas_notice(self.gpu_ready() && self.startup.canvas_ready, self.brush_ready()) {
             Some(notice) => serialize(&notice),
@@ -466,6 +490,8 @@ impl WebApp {
             gpu.device().destroy();
         }
         self.surface = None;
+        self.surface_generation = self.surface_generation.wrapping_add(1);
+        self.launch_frame = None;
         // Retained DOM navigators keep their registration and geometry through
         // device replacement; only resources owned by the retired GPU expire.
         for slot in self.overviews.values_mut() { slot.gpu = None; }
@@ -487,6 +513,8 @@ impl WebApp {
             .replace_renderer(AttachedRenderer(Some(Box::new(renderer))))
             .map_err(js)?;
         self.surface = Some(surface);
+        self.surface_generation = self.surface_generation.wrapping_add(1);
+        self.launch_frame = None;
         self.session.set_hdr_display_available(false);
         self.startup = StartupProgress::default();
         self.prepare_startup()?;
@@ -1058,6 +1086,8 @@ impl WebApp {
             surface.config.width = width;
             surface.config.height = height;
             surface.surface.configure(gpu.device(), &surface.config);
+            self.surface_generation = self.surface_generation.wrapping_add(1);
+            self.launch_frame = None;
             surface.presenter.set_target_retention(true);
         }
         serialize(&change)
@@ -1190,6 +1220,8 @@ impl WebApp {
                 surface.presenter_color = gpu.document_color();
                 surface.color = color;
                 surface.surface.configure(gpu.device(), &surface.config);
+                self.surface_generation = self.surface_generation.wrapping_add(1);
+                self.launch_frame = None;
                 surface.presenter.set_target_retention(true);
             } else if surface.presenter_color != gpu.document_color() {
                 let held = surface.presenter.capture_held(gpu.device(), gpu.queue());
@@ -1217,6 +1249,7 @@ impl WebApp {
         let backdrop_hold = self.session.hold_canvas_backdrop();
         let scale = self.viewport_scale;
         change.canvas_wake |= self.present_navigators()?;
+        let interaction = self.launch_interaction();
         let (Some(gpu), Some(surface)) = (self.session.engine().backend().0.as_deref(), self.surface.as_mut()) else {
             return serialize(&change);
         };
@@ -1232,7 +1265,19 @@ impl WebApp {
         if !surface.presenter.pipelines_ready(gpu) {
             return serialize(&layer_ui::UiChange { canvas_wake: true, ..change });
         }
-        if !surface.presenter.needs_present(gpu, view, surround) {
+        let readiness = layer_ui::LaunchReadiness {
+            canvas: self.startup.canvas_ready && gpu.has_presentable_frame(),
+            brush: self.session.paint_ready(),
+            chrome: self.launch_dom_ready,
+            failed: surface.lost.lock().unwrap().is_some(),
+            interaction,
+        };
+        let launch = self.session.launch_state(readiness).frame;
+        if self.launch_frame.is_some_and(|(frame, surface)| launch != Some(frame) || surface != self.surface_generation) {
+            self.launch_frame = None;
+        }
+        let fresh_launch = launch.is_some_and(|frame| self.launch_frame != Some((frame, self.surface_generation)));
+        if !fresh_launch && !surface.presenter.needs_present(gpu, view, surround) {
             return serialize(&change);
         }
         let target = match surface.surface.get_current_texture() {
@@ -1244,6 +1289,8 @@ impl WebApp {
                     .create_surface(wgpu::SurfaceTarget::Canvas(self.canvas.clone()))
                     .map_err(js)?;
                 surface.surface.configure(gpu.device(), &surface.config);
+                self.surface_generation = self.surface_generation.wrapping_add(1);
+                self.launch_frame = None;
                 surface.presenter.set_target_retention(true);
                 return serialize(&layer_ui::UiChange {
                     canvas_wake: true,
@@ -1252,6 +1299,8 @@ impl WebApp {
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
                 surface.surface.configure(gpu.device(), &surface.config);
+                self.surface_generation = self.surface_generation.wrapping_add(1);
+                self.launch_frame = None;
                 surface.presenter.set_target_retention(true);
                 return serialize(&layer_ui::UiChange {
                     canvas_wake: true,
@@ -1293,6 +1342,7 @@ impl WebApp {
         gpu.queue().present(target);
         surface.submitted_frames.observe(surface.submission_time_ns());
         surface.blank_presented = true;
+        self.launch_frame = launch.map(|frame| (frame, self.surface_generation));
         self.screen_presented_ms = now_ms;
         self.session.renderer_mut().0.as_mut().unwrap().after_present();
         serialize(&change)
@@ -1343,6 +1393,23 @@ async fn request_device(instance: &wgpu::Instance, surface: Option<&wgpu::Surfac
 }
 
 impl WebApp {
+    fn launch_interaction(&self) -> bool {
+        self.workspaces.as_ref().is_some_and(|controller| {
+            let view = &controller.view;
+            view.error.is_some() || view.prompt.is_some() || view.status.as_ref().is_some_and(|status| status.action.is_some())
+        })
+    }
+    fn launch_readiness(&self) -> layer_ui::LaunchReadiness {
+        let gpu = self.session.engine().backend().0.as_deref();
+        layer_ui::LaunchReadiness {
+            canvas: self.startup.canvas_ready && gpu.is_some_and(WgpuRasterizer::has_presentable_frame),
+            brush: self.brush_ready(),
+            chrome: self.launch_dom_ready && self.surface.as_ref().zip(gpu)
+                .is_some_and(|(surface, gpu)| surface.presenter.pipelines_ready(gpu)),
+            failed: self.gpu_failure().is_some(),
+            interaction: self.launch_interaction(),
+        }
+    }
     fn request_language(&mut self) {
         let tags: Vec<&str> = self.preferred_tags.iter().map(String::as_str).collect();
         if let Some(request) = self.language_transition.request(self.session.state().settings.language, &tags) {

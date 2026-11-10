@@ -59,6 +59,41 @@ impl<'a> SnapshotFields<'a> {
 }
 
 impl NativeHost {
+    pub fn set_launch_interaction(&mut self, interaction: bool) {
+        if self.launch_interaction != interaction {
+            self.launch_interaction = interaction;
+            self.invalidate_snapshot();
+            self.dirty = true;
+        }
+    }
+
+    fn launch_readiness(&self) -> layer_ui::LaunchReadiness {
+        let progress = self.shader_progress();
+        layer_ui::LaunchReadiness {
+            canvas: self.session.engine().backend().0.is_some() && progress.canvas_ready,
+            brush: progress.brush_ready,
+            chrome: self.chrome_ready,
+            failed: self.error.is_some(),
+            interaction: self.launch_interaction,
+        }
+    }
+
+    pub fn launch_state(&self) -> layer_ui::LaunchView {
+        self.session.launch_state(self.launch_readiness())
+    }
+
+    pub fn launch_frame(&self) -> Option<u64> {
+        self.launch_state().frame
+    }
+
+    pub fn launch_presented(&mut self, frame: u64) -> bool {
+        let readiness = self.launch_readiness();
+        if !self.session.launch_presented(frame, readiness) { return false; }
+        self.invalidate_snapshot();
+        self.dirty = true;
+        true
+    }
+
     pub fn panel_vector_data(&self) -> Vec<i32> {self.panel_vectors.borrow().packed()}
 
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>,serde_json::Error> {
@@ -142,6 +177,7 @@ impl NativeHost {
             gpu_ready: self.session.engine().backend().0.is_some(),
             startup: self.shader_progress(),
             canvas_notice: self.canvas_notice(),
+            launch: self.launch_state(),
             error: self.error.clone(),
         };
         let camera = &self.session.state().camera;
@@ -417,6 +453,7 @@ impl NativeHost {
         map.serialize_entry("canvas_ready", &(gpu_ready && progress.canvas_ready))?;
         map.serialize_entry("brush_ready", &(gpu_ready && progress.brush_ready))?;
         map.serialize_entry("canvas_notice", &self.canvas_notice())?;
+        map.serialize_entry("launch", &self.launch_state())?;
         map.serialize_entry("shaders_ready", &(gpu_ready && progress.complete))?;
         map.serialize_entry("error", &self.error)?;
         map.end()
@@ -549,6 +586,30 @@ mod tests {
         .unwrap();
         host.resize(2410, 1810, 2.).unwrap();
         host
+    }
+
+    #[test]
+    fn cold_launch_snapshot_keeps_cover_before_ready_presentation() {
+        let mut app = host(Platform::Windows);
+        let snapshot = decoded(app.take_update_bytes().unwrap()).unwrap();
+        assert_eq!(snapshot["launch"]["visible"], true);
+        assert!(snapshot["launch"]["frame"].is_null());
+    }
+
+    #[test]
+    fn workspace_failure_bypasses_launch_without_replacing_the_renderer_error() {
+        let mut app = host(Platform::Android);
+        assert!(app.launch_state().visible);
+        app.set_launch_interaction(true);
+        let failed = decoded(app.take_update_bytes().unwrap()).unwrap();
+        assert_eq!(failed["launch"]["visible"], false);
+        assert_eq!(failed["launch"]["finished"], false);
+        assert!(app.error.is_none());
+        app.set_launch_interaction(false);
+        let retry = decoded(app.take_update_bytes().unwrap()).unwrap();
+        assert_eq!(retry["launch"]["visible"], true);
+        assert_eq!(retry["launch"]["finished"], false);
+        assert!(app.error.is_none());
     }
 
     #[test]

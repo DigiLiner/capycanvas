@@ -24,10 +24,10 @@ struct EditorView<Canvas: View>: View {
         ZStack(alignment: .topLeading) {
             canvas().ignoresSafeArea().modifier(PhotoDropTarget(store: store)).overlay(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
-            if !store.canvasSubmitted {
+            if !store.launchVisible && !store.canvasSubmitted {
                 palette["bg"].ignoresSafeArea().allowsHitTesting(false)
             }
-            if !store.canvasSubmitted && !store.snapshot["canvas_notice"].isNull && store.failure == nil && store.snapshot["error"].isNull && !store.bootstrap.isNull {
+            if !store.launchVisible && !store.canvasSubmitted && !store.snapshot["canvas_notice"].isNull && store.failure == nil && store.snapshot["error"].isNull && !store.bootstrap.isNull {
                 ProgressView(store.bootstrap[store.restartingCanvas ? "restarting_canvas" :
                     "preparing_\(store.snapshot["canvas_notice"].string)"].string)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -61,6 +61,12 @@ struct EditorView<Canvas: View>: View {
             }
             }.modifier(RecoveryInteraction(recovery: store.recovery))
                 .modifier(OptionalWorkspaceInteraction(store: store))
+                .allowsHitTesting(!store.launchVisible)
+                .accessibilityHidden(store.launchVisible)
+                .disabled(store.launchVisible)
+            if store.launchVisible {
+                LaunchCover(store: store).transition(.opacity)
+            }
             #if DEBUG
             if ProcessInfo.processInfo.environment["CAPY_PERSISTENCE_PROBE"] == "1" {
                 PersistenceProbe(store: store)
@@ -77,6 +83,7 @@ struct EditorView<Canvas: View>: View {
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(.easeOut(duration: 0.18), value: store.snapshot["launch"]["finished"].bool)
         .modifier(EditorPopoverHost())
         .coordinateSpace(name: "editor-workspace")
         .onKeyPress(keys: [.escape], phases: [.down, .repeat]) { [store] press in
@@ -185,6 +192,43 @@ struct EditorView<Canvas: View>: View {
         let error = accepted ? nil : store.bootstrap["recovery"]["link_open_failed"].string
         store.dispatch(["type": "complete_request", "id": id, "error": error as Any? ?? NSNull()])
         if let error { store.failure = error }
+    }
+}
+
+private struct LaunchCover: View {
+    @ObservedObject var store: EditorStore
+    @State private var captionVisible = false
+    @State private var shownAt: ContinuousClock.Instant?
+    private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
+    private var captionDelay: UInt64 { store.bootstrap["launch_caption_delay_ms"].uint }
+    private var notice: String { store.snapshot["launch"]["notice"].string == "brush" ? "brush" : "canvas" }
+    var body: some View {
+        ZStack {
+            SharedIcon(name: "layer-zen-looking-up-symbolic", size: 96)
+            Text(store.bootstrap["preparing_\(notice)"].string)
+                .font(.callout).opacity(captionVisible ? 0.55 : 0)
+                .accessibilityHidden(!captionVisible)
+                .multilineTextAlignment(.center).padding(.horizontal, 24).offset(y: 76)
+        }
+        .foregroundStyle(store.state.isNull ? Color.primary : palette["text"])
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            if store.state.isNull { Rectangle().fill(.background) }
+            else { palette["bg"] }
+        }
+        .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .accessibilityIdentifier("canvas-startup")
+        .task(id: captionDelay) {
+            let clock = ContinuousClock()
+            let shown = shownAt ?? clock.now
+            shownAt = shown
+            guard captionDelay > 0 else { return }
+            do { try await clock.sleep(until: shown.advanced(by: .milliseconds(Int64(captionDelay)))) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.18)) { captionVisible = true }
+        }
     }
 }
 
@@ -316,6 +360,7 @@ struct MenuItems: View {
         #if os(macOS)
         if nativeTextMenuAction(action) { didInvoke(); return }
         #endif
+        guard !store.launchVisible else { return }
         if action["type"].string == "invoke", ["undo", "redo"].contains(action["command"].string),
            store.palettes.undoReorder(redo: action["command"].string == "redo") { didInvoke(); return }
         store.dispatch(action); didInvoke()

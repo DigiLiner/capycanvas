@@ -10,12 +10,39 @@ use layer_render_wgpu::{
 };
 use layer_ui::CanvasCursor;
 use std::{ffi::c_void, time::Instant};
+#[cfg(any(target_abi = "sim", test))]
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 struct Surface {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     presenter: ViewportPresenter,
     working_color: layer_core::color::DocumentColor,
+    #[cfg(target_abi = "sim")]
+    launch: LaunchReceipt,
+}
+
+#[cfg(any(target_abi = "sim", test))]
+#[derive(Default)]
+struct LaunchReceipt(Option<(u64, Arc<AtomicBool>)>);
+
+#[cfg(any(target_abi = "sim", test))]
+impl LaunchReceipt {
+    fn observe(&mut self, frame: Option<u64>) {
+        if self.0.as_ref().is_some_and(|(pending, _)| Some(*pending) != frame) { self.0 = None; }
+    }
+    fn submit(&mut self, frame: u64) -> Option<Arc<AtomicBool>> {
+        self.observe((frame != 0).then_some(frame));
+        if frame == 0 || self.0.is_some() { return None; }
+        let completed = Arc::new(AtomicBool::new(false));
+        self.0 = Some((frame, completed.clone()));
+        Some(completed)
+    }
+    fn take_completed(&mut self, frame: Option<u64>) -> Option<u64> {
+        self.observe(frame);
+        if !self.0.as_ref()?.1.load(Ordering::Acquire) { return None; }
+        self.0.take().map(|(frame, _)| frame)
+    }
 }
 
 #[derive(Default)]
@@ -78,6 +105,16 @@ impl MetalHost {
         let changed=self.local_tone.tick(host)?;
         if changed {host.dirty=true; host.invalidate_snapshot();}
         Ok(changed)
+    }
+    #[cfg(target_abi = "sim")]
+    pub(crate) fn observe_launch(&mut self, host: &NativeHost) {
+        if let Some(surface) = &mut self.surface { surface.launch.observe(host.launch_frame()); }
+    }
+    #[cfg(target_abi = "sim")]
+    pub(crate) fn poll_launch(&mut self, host: &mut NativeHost) -> bool {
+        let frame = host.launch_frame();
+        self.surface.as_mut().and_then(|surface| surface.launch.take_completed(frame))
+            .is_some_and(|frame| host.launch_presented(frame))
     }
     pub(crate) fn poll_presentation(&mut self, host: &mut NativeHost) -> Result<bool, String> {
         let Some(surface) = self.surface.as_mut() else { return Ok(false); };
@@ -233,6 +270,8 @@ impl MetalHost {
             config,
             presenter,
             working_color: gpu.document_color(),
+            #[cfg(target_abi = "sim")]
+            launch: LaunchReceipt::default(),
         });
         host.error = None;
         host.dirty = true;
@@ -278,13 +317,17 @@ impl MetalHost {
         host: &mut NativeHost,
         now: u64,
         presentation: u64,
+        launch_frame: &mut u64,
     ) -> Result<(bool, [u64; 5]), String> {
+        *launch_frame = 0;
         host.poll_preparation();
         self.observe_failure(host, true);
         self.poll_color(host)?;
+        #[cfg(target_abi = "sim")]
+        self.poll_launch(host);
         if !host.dirty && host.startup.complete { self.poll_presentation(host)?; }
         if host.session.rendering_suspended() { return Ok((false, [0; 5])); }
-        if (!host.dirty && host.startup.complete) || self.surface.is_none() {
+        if (!host.dirty && host.startup.complete && host.launch_frame().is_none()) || self.surface.is_none() {
             return Ok((false, [0; 5]));
         }
         // Own the timer locally so a panic cannot strand an active query in the
@@ -296,7 +339,7 @@ impl MetalHost {
                     .get_or_insert_with(|| GpuFrameTimer::new(gpu))
                     .begin(gpu.device(), gpu.queue(), now);
             }
-        let result = self.frame_inner(host, now, presentation);
+        let result = self.frame_inner(host, now, presentation, launch_frame);
         if let (Some(timing), Some(gpu)) = (&mut timing, &host.session.renderer_mut().0) {
             timing.end(gpu.device(), gpu.queue());
         }
@@ -309,6 +352,7 @@ impl MetalHost {
         host: &mut NativeHost,
         now: u64,
         presentation: u64,
+        launch_frame: &mut u64,
     ) -> Result<(bool, [u64; 5]), String> {
         let mut costs = [0; 5];
         let clock = Instant::now();
@@ -318,6 +362,8 @@ impl MetalHost {
         let scale = view.width_px as f32 / host.logical[0];
         let tone_guide = self.local_tone.current(host);
         let surface = self.surface.as_mut().unwrap();
+        #[cfg(target_abi = "sim")]
+        let launch_wake = host.wake_callback();
         let gpu = host
             .session
             .renderer_mut()
@@ -338,6 +384,7 @@ impl MetalHost {
         let display = SceneDisplay { scale, headroom: self.headroom, blank_presented: self.blank_presented, compositor_hdr: false };
         if !host.compose_scene(&mut surface.presenter, &mut self.cursor, &self.navigators,
             self.glass.regions(scale), tone_guide, display)?.ready { return Ok((true, costs)); }
+        let ready_frame = host.launch_frame().unwrap_or(0);
         let hdr_output = surface.working_color.depth.is_float() && self.headroom > 1. && host.session.hdr_presentation_allowed();
         let screen = &host.session.state().screen;
         let screen_check = layer_render_wgpu::ScreenCheck::for_view(&screen.assessment,
@@ -384,6 +431,14 @@ impl MetalHost {
         ).map_err(error)?;
         costs[2] = clock.elapsed().as_nanos() as u64 - costs[..2].iter().sum::<u64>();
         gpu.queue().present(target);
+        #[cfg(target_abi = "sim")]
+        if let Some(completed) = surface.launch.submit(ready_frame) {
+            gpu.queue().on_submitted_work_done(move || {
+                completed.store(true, Ordering::Release);
+                launch_wake();
+            });
+        }
+        *launch_frame = ready_frame;
         host.canvas_frame_rate.submitted();
         self.blank_presented = true;
         self.screen_presented = Some(Instant::now());
@@ -397,5 +452,64 @@ impl MetalHost {
             host.invalidate_snapshot();
         }
         Ok((host.dirty, costs))
+    }
+}
+
+#[cfg(test)]
+mod launch_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn launch_receipt_keeps_its_submission_until_gpu_completion() {
+        let mut receipt = LaunchReceipt::default();
+        assert!(receipt.submit(0).is_none());
+        let first = receipt.submit(7).unwrap();
+        assert!(receipt.submit(7).is_none());
+        assert_eq!(receipt.take_completed(Some(7)), None);
+        first.store(true, Ordering::Release);
+        assert_eq!(receipt.take_completed(Some(7)), Some(7));
+        assert_eq!(receipt.take_completed(Some(7)), None);
+        let next = receipt.submit(8).unwrap();
+        assert_eq!(receipt.take_completed(Some(8)), None);
+        next.store(true, Ordering::Release);
+        assert_eq!(receipt.take_completed(Some(8)), Some(8));
+    }
+
+    #[test]
+    fn retired_surface_completion_cannot_complete_its_replacement_receipt() {
+        let mut old = LaunchReceipt::default();
+        let retired = old.submit(7).unwrap();
+        drop(old);
+        let mut replacement = LaunchReceipt::default();
+        let current = replacement.submit(7).unwrap();
+        retired.store(true, Ordering::Release);
+        assert_eq!(replacement.take_completed(Some(7)), None);
+        current.store(true, Ordering::Release);
+        assert_eq!(replacement.take_completed(Some(7)), Some(7));
+    }
+
+    #[test]
+    fn readiness_flap_cancels_completion_before_the_same_digest_returns() {
+        let mut receipt = LaunchReceipt::default();
+        let old = receipt.submit(7).unwrap();
+        old.store(true, Ordering::Release);
+        assert_eq!(receipt.take_completed(None), None);
+        let fresh = receipt.submit(7).unwrap();
+        assert!(!Arc::ptr_eq(&old, &fresh));
+        old.store(true, Ordering::Release);
+        assert_eq!(receipt.take_completed(Some(7)), None);
+        fresh.store(true, Ordering::Release);
+        assert_eq!(receipt.take_completed(Some(7)), Some(7));
+    }
+
+    #[test]
+    fn decreasing_digest_cancels_the_old_receipt_without_ordering_tickets() {
+        let mut receipt = LaunchReceipt::default();
+        let old = receipt.submit(99).unwrap();
+        let fresh = receipt.submit(3).unwrap();
+        old.store(true, Ordering::Release);
+        assert_eq!(receipt.take_completed(Some(3)), None);
+        fresh.store(true, Ordering::Release);
+        assert_eq!(receipt.take_completed(Some(3)), Some(3));
     }
 }

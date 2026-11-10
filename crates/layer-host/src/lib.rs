@@ -81,6 +81,7 @@ struct SnapshotKey {
     gpu_ready: bool,
     startup: layer_render_wgpu::StartupProgress,
     canvas_notice: Option<layer_ui::CanvasNotice>,
+    launch: layer_ui::LaunchView,
     error: Option<String>,
 }
 
@@ -167,6 +168,8 @@ pub struct NativeHost {
     pub error: Option<String>,
     pub sequence: u64,
     pub startup: layer_render_wgpu::StartupProgress,
+    chrome_ready: bool,
+    launch_interaction: bool,
     pub(crate) document_close_prepared: bool,
     poisoned: Option<String>,
     pub proof: layer_ui::proof_workflow::ProofView,
@@ -232,6 +235,7 @@ impl NativeHost {
         self.require_document_owner()?;
         let previous = self.session.state().revision;
         let (retired, change) = self.session.replace_renderer(renderer)?;
+        self.chrome_ready = false;
         self.preparation.retire();
         self.install_preparation_wake();
         self.apply_change(previous, change);
@@ -345,6 +349,8 @@ impl NativeHost {
             proof: Default::default(),
             // Eager hosts are ready on GPU attachment; staged hosts reset this.
             startup: layer_render_wgpu::StartupProgress::COMPLETE,
+            chrome_ready: false,
+            launch_interaction: false,
             document_close_prepared: false,
             poisoned: None,
             last_pen: None,
@@ -386,6 +392,7 @@ impl NativeHost {
     }
     /// Invalidate host input and snapshot caches after shared document adoption.
     pub fn document_adopted(&mut self) {
+        self.chrome_ready = false;
         self.install_preparation_wake();
         self.header_drag = None;
         self.last_pen = None;

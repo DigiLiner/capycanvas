@@ -45,6 +45,7 @@ import UIKit
     private static func diagnostic(_ error: String) -> String { "\(error)\n\n\(diagnosticEnvironment)" }
     @Published var canvasSubmitted = false
     var canvasReady: Bool { canvasSubmitted && snapshot["canvas_ready"].bool }
+    var launchVisible: Bool { failure == nil && (snapshot["launch"].isNull || snapshot["launch"]["visible"].bool) }
     @Published private(set) var restartingCanvas = false
     @Published var storageFailure: String?
     @Published var storagePending = true
@@ -356,6 +357,7 @@ import UIKit
         completion()
     }
     func dispatch(_ action: JSON) {
+        guard !launchVisible || action["type"].string != "invoke" else { return }
         if action["type"].string == "invoke" && action["command"].string == "search_commands" { reportCommandFocus() }
         native?.submit(0, action); wake?()
     }
@@ -387,6 +389,7 @@ import UIKit
         }
     }
     func input(_ value: [String: Any]) {
+        guard !launchVisible || value["type"] as? String == "blur" else { return }
         if value["type"] as? String == "blur" { bubbles.input.cancel(); bubbles.closeMenu(); interruptInput?(); workspace.headerHeld = false; workspace.dismissTransients(at: nil) }
         if value["type"] as? String == "key", let key = value["key"] as? String,
            let modifiers = value["modifiers"] as? [String: Any],

@@ -10,7 +10,7 @@ use std::{
     ptr::NonNull,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 use wayland_client::{
@@ -334,6 +334,7 @@ impl Geometry {
 
 pub struct Child {
     pub surface: wl_surface::WlSurface,
+    parent: wl_surface::WlSurface,
     subsurface: wl_subsurface::WlSubsurface,
     connection: Connection,
     events: EventQueue<Events>,
@@ -391,6 +392,7 @@ impl Child {
         let color = color::ColorSurface::bind(&globals, &qh);
         Ok(Self {
             surface,
+            parent,
             subsurface,
             connection,
             events,
@@ -452,6 +454,9 @@ impl Child {
         self.state.clock.observe_draw_work(elapsed_ns);
     }
 
+    pub fn launch_frame(&self, completion: Arc<LaunchCompletion>) {
+        self.parent.frame(&self.events.handle(), LaunchFrame(completion));
+    }
     pub fn feedback(&mut self, id: u64, stroke: Option<StrokeTarget>) {
         if let Some(presentation) = &self.presentation {
             self.state.feedback_pending += 1;
@@ -459,7 +464,7 @@ impl Child {
         }
     }
     pub fn initial_commit(&self) {
-        self.surface.frame(&self.events.handle(), ());
+        self.parent.frame(&self.events.handle(), ());
     }
     pub fn take_initial_commit(&mut self) -> bool {
         std::mem::take(&mut self.state.initial_applied)
@@ -490,6 +495,25 @@ struct Presentation {
     #[cfg_attr(not(test), allow(dead_code))]
     id: u64,
     stroke: Option<StrokeTarget>,
+}
+#[derive(Default)]
+pub(crate) struct LaunchCompletion {
+    gpu: AtomicBool,
+    parent: AtomicBool,
+}
+impl LaunchCompletion {
+    pub fn gpu_completed(&self) { self.gpu.store(true, Ordering::Release); }
+    pub fn parent_committed(&self) { self.parent.store(true, Ordering::Release); }
+    pub fn ready(&self) -> bool { self.gpu.load(Ordering::Acquire) && self.parent.load(Ordering::Acquire) }
+}
+struct LaunchFrame(Arc<LaunchCompletion>);
+impl Dispatch<wl_callback::WlCallback, LaunchFrame> for Events {
+    fn event(_: &mut Self, _: &wl_callback::WlCallback, event: wl_callback::Event,
+        frame: &LaunchFrame, _: &Connection, _: &QueueHandle<Self>) {
+        if matches!(event, wl_callback::Event::Done {..}) {
+            frame.0.parent_committed();
+        }
+    }
 }
 
 impl Dispatch<wl_callback::WlCallback, ()> for Events {
@@ -582,5 +606,49 @@ impl Dispatch<wp_presentation_feedback::WpPresentationFeedback, Presentation> fo
             #[cfg(test)]
             state.presented.push([data.id, 0, 0, 0]);
         }
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    use std::{io::Read, os::unix::net::UnixStream};
+
+    wayland_client::delegate_noop!(Events: ignore wl_registry::WlRegistry);
+
+    #[test]
+    fn initial_and_launch_completion_follow_the_parent_even_when_the_child_is_occluded() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        server.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+        let connection = Connection::from_socket(client).unwrap();
+        let events = connection.new_event_queue::<Events>();
+        let handle = events.handle();
+        let registry = connection.display().get_registry(&handle, ());
+        let compositor = registry.bind::<wl_compositor::WlCompositor, _, _>(1, 4, &handle, ());
+        let subcompositor = registry.bind::<wl_subcompositor::WlSubcompositor, _, _>(2, 1, &handle, ());
+        let parent = compositor.create_surface(&handle, ());
+        let surface = compositor.create_surface(&handle, ());
+        let parent_id = parent.id().protocol_id();
+        let child_id = surface.id().protocol_id();
+        let subsurface = subcompositor.get_subsurface(&surface, &parent, &handle, ());
+        let child = Child {surface, parent, subsurface, connection, events,
+            state: Events::default(), geometry: None, presentation: None, color: None};
+        child.initial_commit();
+        child.launch_frame(Arc::default());
+        child.connection.flush().unwrap();
+        let mut targets = Vec::new();
+        while targets.len() < 2 {
+            let mut header = [0; 8];
+            server.read_exact(&mut header).unwrap();
+            let target = u32::from_ne_bytes(header[..4].try_into().unwrap());
+            let message = u32::from_ne_bytes(header[4..].try_into().unwrap());
+            let size = (message >> 16) as usize;
+            assert!(size >= 8);
+            server.read_exact(&mut vec![0; size - 8]).unwrap();
+            if (target == parent_id || target == child_id) && message & 0xffff == 3 {
+                targets.push(target);
+            }
+        }
+        assert_eq!(targets, [parent_id, parent_id]);
     }
 }
