@@ -38,5 +38,6 @@ struct TextureGrid : std::enable_shared_from_this<TextureGrid> {
     void mark(hstring const& id);
     bool focus(hstring const& id);
 };
+J TextureDialogState(std::shared_ptr<WorkspaceData> const& owner);
 void ChooseTexture(std::shared_ptr<WorkspaceData> const& data,UIElement const& owner,double layer);
 }

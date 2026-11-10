@@ -490,7 +490,7 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         }catch(...){if(attached)root.Children().RemoveAt(0);header.reset();root.Width(previousWidth);window.AppWindow().Resize(previousSize);result->set_exception(std::current_exception());}
     }
     winrt::Windows::Foundation::IAsyncAction layerLanguageDraft(){
-        auto theme=root.RequestedTheme();std::string snapshot,catalog,translated,paletteChanged,paletteRemoved,paletteSwitched,gradientSpec,inspectorSnapshot,tiltSnapshot;NativeLayoutInput layout,inspectorLayout;
+        auto theme=root.RequestedTheme();std::string snapshot,catalog,translated,paletteChanged,paletteRemoved,paletteSwitched,gradientSpec,inspectorSnapshot,tiltSnapshot,paperSnapshot;NativeLayoutInput layout,inspectorLayout,paperLayout;
         auto queue=root.DispatcherQueue();auto weak=weak_from_this();
         co_await resume_background();
         {
@@ -553,10 +553,23 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
             action(to_string(O({{L"type",S(L"customize")},{L"action",O({{L"type",S(L"toggle_header_drawer")},{L"id",N(layersEntry)}})}}).Stringify()));
             NativeString inspector(capy_snapshot(host.get(),&info));require(bool(inspector),L"Inspector fixture snapshot missing");auto inspectorModel=J::Parse(to_hstring(inspector.bytes));inspectorModel.Insert(L"localization",presentation);inspectorSnapshot=to_string(inspectorModel.Stringify());
             inspectorLayout=NativeLayoutInput(capy_layout_input_prepare(to_string(object(inspectorModel,L"layout_input").Stringify()).c_str()));require(bool(inspectorLayout),L"Inspector fixture layout missing");
+            action(R"({"type":"customize","action":{"type":"close_expanded"}})");
+            double paper=0;for(auto item:array(object(inspectorModel,L"state"),L"layers"))if(object(item.GetObject(),L"paper").Size())paper=num(item.GetObject(),L"id");
+            require(paper>0,L"Paper fixture has no shared Paper layer");
+            action(to_string(O({{L"type",S(L"layer")},{L"action",O({{L"op",S(L"select_row")},{L"id",N(paper)},{L"extend",B(false)},{L"toggle",B(false)}})}}).Stringify()));action(R"({"type":"customize","action":{"type":"set_panel_visible","panel":"properties","visible":true}})");
+            action(R"({"type":"move_panel","panel":"properties","target":{"kind":"float","position":[20,20]},"viewport":[1000,700]})");
+            CapySnapshotInfo paperInfo{};NativeString paperState(capy_snapshot(host.get(),&paperInfo));require(bool(paperState)&&paperInfo.full,L"Paper fixture selected-layer snapshot missing");
+            auto paperModel=J::Parse(to_hstring(paperState.bytes));paperModel.Insert(L"localization",presentation);paperSnapshot=to_string(paperModel.Stringify());
+            auto paperProperties=object(object(paperModel,L"state"),L"layer_properties");bool editable=false,projected=false;uint32_t tileCount=0;
+            for(auto item:array(object(paperModel,L"state"),L"layers"))if(num(item.GetObject(),L"id")==paper)editable=flag(object(item.GetObject(),L"paper"),L"editable");
+            for(auto item:array(paperProperties,L"controls")){auto control=item.GetObject();if(str(object(control,L"kind"),L"kind")==L"choice"&&object(control,L"paper").Size()){tileCount=array(object(control,L"paper"),L"tiles").Size();projected=tileCount>0;}}
+            if(num(paperProperties,L"layer")!=paper||!editable||!flag(paperProperties,L"enabled")||!projected)throw hresult_error(E_FAIL,L"Paper shared setup: layer="+to_hstring(paper)+L" selected="+to_hstring(num(paperProperties,L"layer"))+L" editable="+to_hstring(editable)+L" enabled="+to_hstring(flag(paperProperties,L"enabled"))+L" tiles="+to_hstring(tileCount));
+            paperLayout=NativeLayoutInput(capy_layout_input_prepare(to_string(object(paperModel,L"layout_input").Stringify()).c_str()));require(bool(paperLayout),L"Paper fixture actual shared layout missing");
             require(capy_finish_services(host.get())>=0,L"Layer fixture service shutdown failed");
         }
         co_await apartment;
         auto model=J::Parse(to_hstring(snapshot)),next=J::Parse(to_hstring(snapshot)),copy=J::Parse(to_hstring(catalog));
+        co_await paperRegistryClosed(J::Parse(to_hstring(paperSnapshot)),copy,paperLayout);
         phase=L"cold-layer-inspector";
         {
             auto inspectorModel=J::Parse(to_hstring(inspectorSnapshot));auto inspectorCopy=J::Parse(to_hstring(catalog));inspectorCopy.Insert(L"bootstrap",object(object(inspectorModel,L"localization"),L"bootstrap"));
@@ -738,6 +751,58 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
             if(!*closed)dialog.Hide();co_await wait([closed]{return *closed;},L"Native default dialog did not close");co_await shown;
         }catch(...){if(starter)entry.RemoveHandler(UIElement::PreviewKeyDownEvent(),starter);if(heldKey)try{nativeKey(VK_RETURN,true);}catch(...){}if(heldTrigger)try{nativeKey(VK_F24,true);}catch(...){}dialog.Hide();throw;}
         }
+    }
+    winrt::Windows::Foundation::IAsyncAction paperRegistryClosed(J model,J catalog,NativeLayoutInput layout){
+        phase=L"paper-registry-setup";
+        struct CloseFacts{winrt::weak_ref<Canvas> surface;bool armed=false,notified=false,applyAbsent=false,busy=false;hstring identity;std::exception_ptr failure;};
+        auto facts=std::make_shared<CloseFacts>();auto copy=J::Parse(catalog.Stringify());copy.Insert(L"bootstrap",object(object(model,L"localization"),L"bootstrap"));
+        auto send=[](std::string){};
+        auto view=std::make_unique<WorkspaceView>(send,copy,context.localization,[](CanvasQueryKind,std::string,PreviewReply){return false;},[facts](bool open){
+            if(open||!facts->armed)return;facts->notified=true;
+            try{auto surface=facts->surface.get();require(bool(surface),L"Paper close observer lost its native root");
+                auto status=J::Parse(AutomationProperties::GetItemStatus(surface));auto registered=object(status,L"texture_dialog");
+                require(str(registered,L"id")==facts->identity,L"Paper close observer lost its owned registry identity");facts->busy=registered.Size()!=0;facts->applyAbsent=true;
+                for(auto const& popup:VisualTreeHelper::GetOpenPopupsForXamlRoot(surface.XamlRoot()))if(findElement(popup.Child(),L"texture-apply"))facts->applyAbsent=false;
+            }catch(...){facts->failure=std::current_exception();}
+        },send,send,[](std::string,std::function<void(int32_t)>){ });
+        auto surface=view->Root();facts->surface=make_weak(surface);auto previous=window.AppWindow().Size();auto width=root.Width(),height=root.Height();
+        auto properties=object(object(model,L"state"),L"layer_properties");double layer=num(properties,L"layer"),epoch=num(object(object(model,L"state"),L"document_file"),L"epoch");
+        Rect bounds{};bool propertyReady=false,tileReady=false;ContentDialog picker{nullptr};std::exception_ptr failure;
+        try{
+            require(flag(properties,L"enabled"),L"Paper selected-layer Properties are disabled");
+            RECT client{};check_bool(GetClientRect(hwnd,&client));auto scale=root.XamlRoot().RasterizationScale();
+            root.Width(1000);root.Height(780);surface.Width(1000);surface.Height(700);root.Children().InsertAt(0,surface);
+            window.AppWindow().Resize({int32_t(std::ceil(1000*scale))+previous.Width-(client.right-client.left),int32_t(std::ceil(780*scale))+previous.Height-(client.bottom-client.top)});
+            require(view->Apply(model,layout),L"Paper real shared model was rejected");view->Resize(1000,700);
+            co_await wait([&]{auto control=findElement(surface,L"property-texture").try_as<Button>();propertyReady=control&&control.Visibility()==Visibility::Visible&&control.IsLoaded()&&control.IsEnabled()&&control.ActualWidth()>0&&control.ActualHeight()>0;return propertyReady;},L"Paper native property did not become ready");
+            auto property=findElement(surface,L"property-texture");bounds=property.TransformToVisual(surface).TransformBounds({0,0,float(property.ActualWidth()),float(property.ActualHeight())});
+            require(bounds.X>=0&&bounds.Y>=0&&bounds.X+bounds.Width<=surface.ActualWidth()&&bounds.Y+bounds.Height<=surface.ActualHeight(),L"Paper native property lies outside its actual workspace");
+            require(!workspaceElement(L"texture-dialog"),L"Paper test began with another picker");privacy();
+            auto invoke=[](FrameworkElement const& node){auto peer=Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(node);peer.GetPattern(Automation::Peers::PatternInterface::Invoke).as<Automation::Provider::IInvokeProvider>().Invoke();};
+            invoke(property);
+            co_await wait([&]{picker=workspaceElement(L"texture-dialog").try_as<ContentDialog>();auto tile=workspaceElement(L"texture-tile-0");tileReady=tile&&tile.IsLoaded()&&tile.ActualWidth()>0;return picker&&picker.IsLoaded()&&tileReady;},L"Paper real chooser and tile did not open");
+            phase=L"paper-registry-open";auto status=J::Parse(AutomationProperties::GetItemStatus(surface));
+            auto value=status.GetNamedValue(L"texture_dialog",JsonValue::CreateNullValue());
+            require(value.ValueType()==JsonValueType::Object,L"Paper provider did not publish its owned native registry acknowledgement");auto registered=value.GetObject();facts->identity=str(registered,L"id");
+            require(!facts->identity.empty()&&num(registered,L"epoch",-1)==epoch&&num(registered,L"layer",-1)==layer,L"Paper provider did not identify its admitted picker");auto admitted=num(status,L"snapshot_qpc");require(admitted>0,L"Paper native trace has no snapshot QPC");
+            auto foreign=std::make_unique<WorkspaceView>(send,copy,context.localization,[](CanvasQueryKind,std::string,PreviewReply){return false;},[](bool){},send,send,[](std::string,std::function<void(int32_t)>){ });
+            require(foreign->Apply(model,layout),L"Paper foreign workspace model was rejected");foreign->Resize(1000,700);
+            auto foreignValue=J::Parse(AutomationProperties::GetItemStatus(foreign->Root())).GetNamedValue(L"texture_dialog",JsonValue::CreateNullValue());
+            require(foreignValue.ValueType()==JsonValueType::Object&&foreignValue.GetObject().Size()==0,L"Paper registry publication leaked a different workspace owner's picker");
+            auto closed=std::make_shared<bool>(false);auto revoker=picker.Closed(auto_revoke,[closed](auto&&,auto&&){*closed=true;});facts->armed=true;
+            invoke(workspaceElement(L"texture-cancel"));co_await wait([closed]{return *closed;},L"Paper native Closed event did not arrive");if(facts->failure)std::rethrow_exception(facts->failure);
+            require(facts->notified&&facts->applyAbsent&&facts->busy,L"Paper pre-finish boundary did not retain registry busy after its popup Apply disappeared");
+            status=J::Parse(AutomationProperties::GetItemStatus(surface));value=status.GetNamedValue(L"texture_dialog",JsonValue::CreateNullValue());
+            require(value.ValueType()==JsonValueType::Object&&value.GetObject().Size()==0&&num(status,L"snapshot_qpc")>admitted,L"Paper native Closed did not publish fresh owned registry-empty acknowledgement");++checks;
+        }catch(hresult_error const& error){
+            wchar_t hex[16]{};swprintf_s(hex,L" [0x%08X]",uint32_t(error.code().value));
+            auto detail=L" [layer="+to_hstring(layer)+L" epoch="+to_hstring(epoch)+L" enabled="+to_hstring(flag(properties,L"enabled"))+L" propertyReady="+to_hstring(propertyReady)+L" bounds="+to_hstring(bounds.X)+L","+to_hstring(bounds.Y)+L","+to_hstring(bounds.Width)+L","+to_hstring(bounds.Height)+L" tileReady="+to_hstring(tileReady)+L" closeNotified="+to_hstring(facts->notified)+L" applyAbsent="+to_hstring(facts->applyAbsent)+L" busy="+to_hstring(facts->busy)+L"]";
+            failure=std::make_exception_ptr(hresult_error(error.code(),hstring(std::wstring(error.message().c_str())+detail.c_str()+hex)));
+        }catch(...){failure=std::current_exception();}
+        facts->armed=false;if(picker)picker.Hide();
+        try{co_await wait([this]{return !workspaceElement(L"texture-dialog");},L"Paper fixture cleanup retained its native chooser");}catch(...){if(!failure)failure=std::current_exception();}
+        uint32_t at;if(root.Children().IndexOf(surface,at))root.Children().RemoveAt(at);view.reset();root.Width(width);root.Height(height);window.AppWindow().Resize(previous);
+        if(failure)std::rethrow_exception(failure);
     }
     winrt::Windows::Foundation::IAsyncAction paperNameIme(){
         auto source=std::make_shared<WorkspaceData>();context.apply(source);

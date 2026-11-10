@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "WorkspaceView.h"
+#include "TextureDialog.h"
 #include "ChromeVisibility.h"
 #include "StrokeRecording.h"
 #include "CommandSearch.h"
@@ -821,7 +822,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             {L"model_revision",N(double(publication.ModelRevision()))},
             {L"full_updates",N(double(fullUpdates))},{L"motion_updates",N(double(motionUpdates))},
             {L"shaders_ready",B(flag(data->model,L"shaders_ready"))},{L"checkpoint_camera",object(object(data->model,L"windows_recovery"),L"camera")},
-            {L"color_field_pixels",N(double(data->colorFieldPixels))},
+            {L"color_field_pixels",N(double(data->colorFieldPixels))},{L"texture_dialog",TextureDialogState(data)},
             {L"color_preview",object(data->colorPreview,L"picker").GetNamedValue(L"preview",JsonValue::CreateNullValue())},
             {L"workspace_update",workspaceUpdate},{L"groups",positions},{L"columns",collapsed->Presentation()},{L"handles",grips},{L"elements",elements},
             {L"window_resizing",B(windowResizing)},{L"native_resize_pending",B(resizeHandback)},

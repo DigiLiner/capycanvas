@@ -343,14 +343,23 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
         }
         auto& open=openDialogs();auto self=shared_from_this();
         open.erase(std::remove(open.begin(),open.end(),self),open.end());
+        if(data->colorsPresented)data->colorsPresented();
     }
 };
+}
+
+J TextureDialogState(std::shared_ptr<WorkspaceData> const& owner){
+    for(auto const& picker:openDialogs())if(picker->data==owner)return O({
+        {L"id",S(to_hstring(reinterpret_cast<uintptr_t>(get_abi(picker->dialog))))},{L"epoch",N(picker->epoch)},{L"layer",N(picker->layer)}});
+    return {};
 }
 
 void ChooseTexture(std::shared_ptr<WorkspaceData> const& data,UIElement const& owner,double layer){
     auto xaml=owner.XamlRoot();if(!xaml||!openDialogs().empty())return;
     auto dialog=std::make_shared<TextureDialog>();dialog->data=data;dialog->layer=layer;
     dialog->epoch=num(object(data->state,L"document_file"),L"epoch");
-    dialog->init(xaml);openDialogs().push_back(dialog);dialog->present();
+    dialog->init(xaml);openDialogs().push_back(dialog);
+    if(data->colorsPresented)data->colorsPresented();
+    dialog->present();
 }
 }

@@ -2699,3 +2699,70 @@ namespace CapyNumericHoverTest {
  }
  'Actual lifecycle caption wait uses shared canvas/brush/notice/filter readiness and retains its original bound and native error check.'
 }
+
+& {
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/layer-paper.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ foreach($name in 'Texture-Begin','Texture-Observed','Texture-Open','Texture-Closed'){
+  $definition=$source.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$false)
+  if($definition){Invoke-Expression $definition.Extent.Text}
+ }
+ $review=[pscustomobject]@{Id=17};$script:phase='opening';$script:case='ready';$script:rootIdentity='owned'
+ $workspace=[pscustomobject]@{};$workspace|Add-Member ScriptMethod GetRuntimeId {,$script:rootIdentity}
+ $current=[pscustomobject]@{};$workspace|Add-Member NoteProperty Current $current
+ $current|Add-Member ScriptProperty ProcessId {if($script:phase -eq 'closed' -and $script:case -eq 'process'){18}else{17}}
+ $current|Add-Member ScriptProperty ItemStatus {
+  $registered=@{id='picker-1';epoch=1;layer=2};$qpc=10
+  if($script:phase -eq 'closing'){$qpc=11}
+  if($script:phase -eq 'closed'){
+   $registered=@{};$qpc=12
+   switch($script:case){
+    'missing' {return '{"snapshot_qpc":12}'}
+    'malformed' {return '{'}
+    'type' {$registered=$false}
+    'null' {$registered=$null}
+    'partial' {$registered=@{epoch=1;layer=2}}
+    'successor' {$registered=@{id='picker-2';epoch=1;layer=2}}
+    'stale' {$qpc=10}
+    'clock-type' {$qpc='12'}
+   }
+  }
+  @{texture_dialog=$registered;snapshot_qpc=$qpc}|ConvertTo-Json -Compress
+ }
+ function Workspace-Root{
+  if($script:phase -eq 'closed' -and $script:case -eq 'root'){$script:rootIdentity='replacement'}
+  $workspace
+ }
+ function Model{
+  [pscustomobject]@{windows_workspace=@{id=$(if($script:phase -eq 'closed' -and $script:case -eq 'workspace'){'other'}else{'paint'})};state=@{
+   layers=@(@{id=$(if($script:phase -eq 'closed' -and $script:case -eq 'layer'){3}else{2});paper=@{editable=$true}})
+   document_file=@{epoch=$(if($script:phase -eq 'closed' -and $script:case -eq 'epoch'){2}else{1})}
+   layer_properties=@{layer=$(if($script:case -eq 'unselected-row'){99}else{2})}
+  }}
+ }
+ function Invoke{param($Id)if($Id -notin 'property-texture','layer-texture-2'){throw 'Paper changed its actual opener'};$script:invocations++}
+ function Find{param($Id)if($script:phase -eq 'opening' -or ($script:phase -eq 'closed' -and $script:case -eq 'apply-present' -and $Id -eq 'texture-apply')){[pscustomobject]@{Current=@{IsOffscreen=$false}}}}
+ function Wait-Until([scriptblock]$Ready,[string]$Message,[int]$Seconds=8){
+  if($Seconds -ne 8){throw 'Paper changed its original close bound'}
+  if($script:phase -eq 'opening'){
+   if($Message -cne ('Choose Texture did not open from '+$script:opener) -or !(&$Ready)){throw 'Paper changed its original visible Apply/tile open assertion'}
+   return
+  }
+  if($Message -cne 'Original Paper close assertion'){throw 'Paper changed its original close failure'}
+  if(&$Ready){throw 'Texture Closed accepted hidden apply before the native registry was empty'}
+  $script:phase='closed';$accepted=&$Ready
+  if($script:case -in 'ready','unselected-row'){
+   if(!$accepted){throw 'Texture Closed rejected its fresh owned native Closed acknowledgement'}
+  }elseif($accepted){throw ('Texture Closed accepted invalid owner or acknowledgement: '+$script:case)}
+ }
+ foreach($case in 'ready','unselected-row','process','root','workspace','epoch','layer','type','null','partial','missing','malformed','successor','stale','clock-type','unobserved','apply-present'){
+  $script:case=$case;$script:phase='opening';$script:rootIdentity='owned';$script:TextureOwner=$null;$script:invocations=0
+  $script:opener=if($case -eq 'unselected-row'){'layer-texture-2'}else{'property-texture'}
+  Texture-Open $script:opener
+  if($case -eq 'unobserved'){$script:TextureOwner.opened=$null}
+  $script:phase='closing';Texture-Closed 'Original Paper close assertion'
+  if($script:invocations -ne 1){throw 'Paper replayed its actual opener'}
+ }
+ 'Actual Paper open/close consumer requires Apply absence and fresh owned native registry removal.'
+}

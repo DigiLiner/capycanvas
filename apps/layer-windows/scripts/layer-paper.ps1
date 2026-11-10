@@ -48,16 +48,38 @@ function Texture-Visible([int]$Index,$Edit,[double]$Scale){
 function Texture-Paper{@((Model).state.layers|Where-Object {$_.paper})[-1]}
 function Texture-Control{@((Model).state.layer_properties.controls|Where-Object {$_.paper})[0]}
 function Texture-Tiles{$control=Texture-Control;if($control){,@($control.paper.tiles)}else{,@()}}
+function Texture-Begin([string]$Id){
+    $workspace=Workspace-Root;$model=Model;$layer=$model.state.layer_properties.layer
+    if($Id -match '^layer-texture-([0-9]+)$'){$layer=[double]$Matches[1]}
+    $script:TextureOwner=@{runtime=($workspace.GetRuntimeId() -join ',');process=$review.Id;workspace=$model.windows_workspace.id;epoch=$model.state.document_file.epoch;layer=$layer;dialog=$null;opened=$null}
+}
+function Texture-Observed([bool]$Open){
+    if(!$script:TextureOwner -or $review.Id -ne $TextureOwner.process){return $false}
+    $workspace=Workspace-Root;$model=Model
+    if(!$workspace -or ($workspace.GetRuntimeId() -join ',') -cne $TextureOwner.runtime -or $workspace.Current.ProcessId -ne $TextureOwner.process -or
+        $model.windows_workspace.id -cne $TextureOwner.workspace -or $model.state.document_file.epoch -ne $TextureOwner.epoch -or
+        @($model.state.layers|Where-Object {$_.id -eq $TextureOwner.layer -and $_.paper}).Count -ne 1){return $false}
+    try{$trace=$workspace.Current.ItemStatus|ConvertFrom-Json}catch{return $false}
+    $registered=$trace.texture_dialog
+    if($registered -isnot [pscustomobject] -or ($trace.snapshot_qpc -isnot [long] -and $trace.snapshot_qpc -isnot [int])){return $false}
+    if($Open){
+        if($registered.id -isnot [string] -or !$registered.id -or $registered.epoch -ne $TextureOwner.epoch -or $registered.layer -ne $TextureOwner.layer -or ($TextureOwner.dialog -and $registered.id -cne $TextureOwner.dialog)){return $false}
+        $TextureOwner.dialog=$registered.id;$TextureOwner.opened=$trace.snapshot_qpc;return $true
+    }
+    $TextureOwner.dialog -and $null -ne $TextureOwner.opened -and @($registered.PSObject.Properties).Count -eq 0 -and $trace.snapshot_qpc -gt $TextureOwner.opened
+}
 function Texture-Open([string]$Id){
+    Texture-Begin $Id
     Invoke $Id
-    Wait-Until {$apply=Find 'texture-apply';$apply -and !$apply.Current.IsOffscreen -and (Find 'texture-tile-0')} "Choose Texture did not open from $Id"
+    Wait-Until {$apply=Find 'texture-apply';$apply -and !$apply.Current.IsOffscreen -and (Find 'texture-tile-0') -and (Texture-Observed $true)} "Choose Texture did not open from $Id"
 }
 function Texture-Click([string]$Id){
+    Texture-Begin $Id
     $b=(Control $Id -Arranged).Current.BoundingRectangle
     [CapyRowPointer]::Down('mouse',[int]($b.X+$b.Width/2),[int]($b.Y+$b.Height/2));Start-Sleep -Milliseconds 35;[CapyRowPointer]::Up()
-    Wait-Until {$apply=Find 'texture-apply';$apply -and !$apply.Current.IsOffscreen -and (Find 'texture-tile-0')} "Choose Texture did not open from a click on $Id"
+    Wait-Until {$apply=Find 'texture-apply';$apply -and !$apply.Current.IsOffscreen -and (Find 'texture-tile-0') -and (Texture-Observed $true)} "Choose Texture did not open from a click on $Id"
 }
-function Texture-Closed([string]$Message){Wait-Until {!(Find 'texture-apply')} $Message}
+function Texture-Closed([string]$Message){Wait-Until {!(Find 'texture-apply') -and (Texture-Observed $false)} $Message}
 function Texture-Pending{
     $grid=Find 'texture-grid' -Visible
     if(!$grid){return -1}
