@@ -752,6 +752,10 @@ fn native_default_workspace() {
                 click(&command(&w, id));
             }
             pump(250);
+            if id == CommandId::Zoom {
+                assert!(state(&w).customization.drawer.is_none(), "Zoom has no tool drawer");
+                continue;
+            }
             assert!(state(&w).customization.drawer.is_some(), "{id:?} controls");
             assert_drawer_connected(&w);
             if picker {

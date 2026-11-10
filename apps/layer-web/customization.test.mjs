@@ -730,7 +730,7 @@ export async function checkCustomization({ call, evaluate, settle, canvasPixels 
     await send({type:'workspace_manager',command:{type:'new_toolbar',group:8}});await toolbarForm();
     await text('#workspace-item-name',`illustration ${theme}`);
     await click('.workspace-form[open] .suggested-action');
-    await until("document.querySelector('.workspace-form[open] .workspace-error').textContent && !JSON.parse(layerApp.app.workspace_view()).busy");
+    await until("document.querySelector('.workspace-form[open] .preferences-error').textContent && !JSON.parse(layerApp.app.workspace_view()).busy");
     assert.deepEqual(await evaluate("layerApp.state().workspace"), beforeCancel, "duplicate names leave the workspace unchanged");
     assert.equal(await evaluate("document.querySelector('#workspace-item-name').value"), `illustration ${theme}`);
     await click('.workspace-form[open] footer button:first-child');await formClosed();
