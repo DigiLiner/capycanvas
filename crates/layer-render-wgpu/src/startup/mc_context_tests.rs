@@ -144,7 +144,7 @@ fn context_background_is_exactly_the_idle_family_union() {
         let shown = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         let context = PreparationContext { brushes: vec![shown.clone()], ..Default::default() };
         let mut families: [Needs; 6] = std::array::from_fn(|_| Needs::default());
-        families[0].sizes(renderer, document, brush);
+        families[0].sizes(renderer, document, brush, None);
         families[1].brush(renderer, document, &shown, None);
         families[2].transform(renderer);
         families[3].selection_paint(renderer);
@@ -168,6 +168,94 @@ fn context_background_is_exactly_the_idle_family_union() {
         assert_eq!(compile::tests::queued_recipes(&renderer.context_compilation), count);
         drop(batch);
     });
+}
+
+#[test]
+fn selection_publication_introduces_no_recipes_after_context_warming() {
+    for presets in [
+        vec![layer_core::DefaultBrushPreset::Smudge, layer_core::DefaultBrushPreset::Eraser],
+        vec![layer_core::DefaultBrushPreset::PointyPencil],
+    ] {
+        fixture(|renderer, document, brush, batch| {
+            let mut context = PreparationContext {
+                next: PreparationUses { selection_strokes: true, ..Default::default() },
+                brushes: presets.into_iter().map(layer_core::default_brush).collect(),
+                ..Default::default()
+            };
+            renderer.prepare_context(document, brush, context.clone());
+            drop(batch);
+            renderer.shader_idle(true, true);
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            loop {
+                let progress = renderer.poll_startup().unwrap();
+                if progress.brush_ready
+                    && compile::tests::queued_recipes(&renderer.context_compilation) == 0
+                    && compile::tests::queued_recipes(&renderer.startup.as_ref().unwrap().compiler) == 0 {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "selection context did not finish warming");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            renderer.shader_idle(true, false);
+            let paused = renderer.compilation.batch();
+            document.working.selection = Some(layer_core::Selection::polygon(vec![
+                layer_core::Point { x: 0., y: 0. }, layer_core::Point { x: 64., y: 0. },
+                layer_core::Point { x: 64., y: 64. }, layer_core::Point { x: 0., y: 64. },
+            ]).unwrap());
+            document.revision += 1;
+            renderer.prepare_startup(document, brush, false).unwrap();
+            context.next = PreparationUses { fill: true, transform: true, ..Default::default() };
+            renderer.prepare_context(document, brush, context);
+            let introduced: HashSet<_> = [&renderer.compilation, &renderer.context_compilation,
+                &renderer.startup.as_ref().unwrap().compiler].into_iter()
+                .flat_map(|scope| compile::tests::demands(scope, BACKGROUND)).collect();
+            assert!(introduced.is_empty(), "selection publication introduced recipes after warming: {introduced:?}");
+            drop(paused);
+        });
+    }
+    crate::finish_shader_compiler_shutdown();
+}
+
+#[test]
+fn predicted_selection_keeps_future_sizes_and_toolbar_brushes_in_background() {
+    fixture(|renderer, document, brush, batch| {
+        let selected = Arc::new(layer_core::Selection::polygon(vec![
+            layer_core::Point { x: 0., y: 0. }, layer_core::Point { x: 64., y: 0. },
+            layer_core::Point { x: 64., y: 64. }, layer_core::Point { x: 0., y: 64. },
+        ]).unwrap());
+        let shown = layer_core::default_brush(layer_core::DefaultBrushPreset::PointyPencil);
+        let mut anticipated = Needs::default();
+        anticipated.brush(renderer, document, brush, Some(selected.clone()));
+        anticipated.selection_paint(renderer);
+        renderer.prepare_context(document, brush, PreparationContext {
+            next: PreparationUses { selection_strokes: true, selection_paint: true, ..Default::default() },
+            brushes: vec![shown.clone()], ..Default::default()
+        });
+        let actual = compile::tests::ordered_demands(&renderer.context_compilation, ANTICIPATED);
+        let queued: HashSet<_> = actual.iter().copied().collect();
+        let mut seen = HashSet::new();
+        let expected: Vec<_> = anticipated.render.iter().map(Deferred::identity)
+            .chain(anticipated.compute.iter().map(Deferred::identity))
+            .filter(|id| queued.contains(id) && seen.insert(*id)).collect();
+        assert_eq!(actual, expected, "selected Brush/Eraser precede selection-paint anticipation");
+        document.working.selection = Some((*selected).clone());
+        let mut current = Needs::default();
+        current.brush(renderer, document, brush, None);
+        current.sizes(renderer, document, brush, None);
+        let mut toolbar = Needs::default();
+        toolbar.brush(renderer, document, &shown, None);
+        assert!(!identities(&toolbar).is_subset(&identities(&current)),
+            "visible Pencil-family brush must contribute a distinct selected recipe");
+        let mut future = Needs::default();
+        future.sizes(renderer, document, brush, None);
+        future.brush(renderer, document, &shown, None);
+        let future: HashSet<_> = identities(&future).difference(&identities(&anticipated)).copied().collect();
+        assert!(!future.is_empty());
+        let background: HashSet<_> = compile::tests::ordered_demands(&renderer.context_compilation, BACKGROUND).into_iter().collect();
+        assert!(future.is_subset(&background), "predicted selected future recipes must stay Background: {:?}", future.difference(&background).collect::<Vec<_>>());
+        drop(batch);
+    });
+    crate::finish_shader_compiler_shutdown();
 }
 
 #[test]
@@ -254,7 +342,7 @@ fn warmed_context_needs_no_compile_at_first_use(use_: FirstUse) {
     fixture(|renderer, document, brush, batch| {
         let shown = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         let context = PreparationContext {
-            next: PreparationUses { selection_strokes: true, selection_paint: true, fill: true, transform: true,
+            next: PreparationUses { selection_strokes: matches!(use_, FirstUse::AutoSelect | FirstUse::ColorSelect | FirstUse::SelectionPaint | FirstUse::SelectedBrush), selection_paint: true, fill: true, transform: true,
                 operation: Some(if matches!(use_, FirstUse::Figure) {OperationUse::Figure} else {OperationUse::Gradient}) },
             brushes: vec![shown.clone()], ..Default::default()
         };
@@ -342,11 +430,11 @@ warmed_first_use_tests! {
 #[test]
 fn startup_brush_changes_replace_queued_context_sizes() {
     fixture(|renderer, document, brush, batch| {
-        let mut old = Needs::default(); old.sizes(renderer, document, brush);
+        let mut old = Needs::default(); old.sizes(renderer, document, brush, None);
         let old = identities(&old);
         assert!(!old.is_empty());
         let next_brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Chalk);
-        let mut next = Needs::default(); next.sizes(renderer, document, &next_brush);
+        let mut next = Needs::default(); next.sizes(renderer, document, &next_brush, None);
         let next = identities(&next);
         assert!(!next.is_empty());
         renderer.prepare_startup(document, &next_brush, false).unwrap();

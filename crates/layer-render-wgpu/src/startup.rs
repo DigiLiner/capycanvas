@@ -168,11 +168,12 @@ impl Needs {
             self.style(r, &layer_render::DabStyle {selection: selection.clone(), ..brush_style(document, brush, tool)}, dry_material::Reach::of(brush), mask, true);
         }
     }
-    pub(super) fn sizes(&mut self, r: &WgpuRasterizer, document: &Document, brush: &BrushSnapshot) {
+    pub(super) fn sizes(&mut self, r: &WgpuRasterizer, document: &Document, brush: &BrushSnapshot, selection: Option<Arc<layer_core::Selection>>) {
         if document.drawing_target().or(document.working.target).is_some_and(SourceTarget::is_coverage) { return; }
+        let selection = selection.or_else(|| document.working.selection.clone().map(Arc::new));
         let reach = dry_material::Reach::of(brush);
         for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
-            let style = layer_render::DabStyle {selection: document.working.selection.clone().map(Arc::new), ..brush_style(document, brush, tool)};
+            let style = layer_render::DabStyle {selection: selection.clone(), ..brush_style(document, brush, tool)};
             let plan = BrushPassPlan::for_device(&style, &r.device);
             if pointwise(&style) && plan.direct.is_none() {
                 for extra in reach.any_size().batch_variants(&style).filter(|&extra| !reach.required_variants(&style).any(|required| required == extra)) {
@@ -211,13 +212,7 @@ impl Needs {
     pub(super) fn operation(&mut self, r: &WgpuRasterizer, operation: layer_render::OperationUse) {
         self.render.push(r.scene_pipelines.pipeline[scene::operation_index(operation)].clone());
     }
-    fn uses(&mut self, r: &WgpuRasterizer, document: &Document, brush: &BrushSnapshot, uses: layer_render::PreparationUses) {
-        if uses.selection_strokes && document.working.selection.is_none() && !DocumentKey::new(document).mask {
-            let [width, height] = document.composition().size.map(|n| n as f32);
-            if let Ok(selection) = layer_core::Selection::polygon(vec![layer_core::Point {x:0.,y:0.}, layer_core::Point {x:width,y:0.}, layer_core::Point {x:width,y:height}, layer_core::Point {x:0.,y:height}]) {
-                self.brush(r, document, brush, Some(Arc::new(selection)));
-            }
-        }
+    fn uses(&mut self, r: &WgpuRasterizer, document: &Document, uses: layer_render::PreparationUses) {
         if uses.transform { self.transform(r); }
         if uses.selection_paint { self.selection_paint(r); }
         if uses.fill { self.fill(r, Some(document.scene())); }
@@ -480,11 +475,16 @@ impl WgpuRasterizer {
         if self.startup.is_none() { return; }
         let generation = self.context_compilation.advance();
         let context = self.preparation.clone();
+        let selection = if context.next.selection_strokes && document.working.selection.is_none() && !DocumentKey::new(document).mask {
+            let [width, height] = document.composition().size.map(|n| n as f32);
+            layer_core::Selection::polygon(vec![layer_core::Point {x:0.,y:0.}, layer_core::Point {x:width,y:0.}, layer_core::Point {x:width,y:height}, layer_core::Point {x:0.,y:height}]).ok().map(Arc::new)
+        } else { None };
         let mut next = Needs::default();
-        next.uses(self, document, brush, context.next);
+        if let Some(selection) = &selection { next.brush(self, document, brush, Some(selection.clone())); }
+        next.uses(self, document, context.next);
         let mut idle: [Needs; 6] = std::array::from_fn(|_| Needs::default());
-        idle[0].sizes(self, document, brush);
-        for shown in &context.brushes { idle[1].brush(self, document, shown, None); }
+        idle[0].sizes(self, document, brush, selection.clone());
+        for shown in &context.brushes { idle[1].brush(self, document, shown, selection.clone()); }
         idle[2].transform(self);
         idle[3].selection_paint(self);
         idle[4].fill(self, Some(document.scene()));
@@ -1238,7 +1238,9 @@ mod gpu_tests {
         let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
         let context = layer_render::PreparationContext {next:layer_render::PreparationUses {selection_strokes:true,..Default::default()},..Default::default()};
         let mut next = Needs::default();
-        next.uses(&r, &document, &brush, context.next);
+        let mut selected = layer_core::Selection::empty();
+        selected.inverted = true;
+        next.brush(&r, &document, &brush, Some(Arc::new(selected)));
         let expected: std::collections::HashSet<_> = next.render.iter().map(Deferred::identity)
             .chain(next.compute.iter().map(Deferred::identity)).collect();
         assert!(!expected.is_empty());
@@ -1788,38 +1790,6 @@ mod gpu_tests {
         assert!(evicted>0,"the fixture must evict the startup paper");
         assert!(!r.startup_needs_update(&doc,&brush,false));
         assert!(progress.brush_ready,"an evicted startup paper bake must not hold the brush gate");
-        drop(r);drop(reference);finish_shader_compiler_shutdown();
-    }
-
-    #[test]
-    fn selection_context_preserves_startup_size_warming() {
-        use dry_material::Reach;
-        let color=Default::default();
-        let reference=WgpuRasterizer::new_native_headless(color).unwrap();
-        let mut r=crate::test_support::staged_renderer(&reference,color);
-        let doc=Document::new(layer_core::PortableId::random(),64,64,layer_core::DocumentNames {paint:"Ink".into(),paper:"Paper".into()});
-        let brush=layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
-        let style=brush_style(&doc,&brush,StrokeTool::Brush);
-        let deadline=std::time::Instant::now()+Duration::from_secs(60);
-        r.shader_idle(true,false);
-        r.prepare_startup(&doc,&brush,false).unwrap();
-        crate::test_support::wait_startup(&mut r,deadline,|p|p.brush_ready,format_args!("Pencil"));
-        let exact=Reach::of(&brush).any_size().batch_variants(&style)
-            .filter(|extra| !Reach::of(&brush).required_variants(&style).any(|required| required == *extra)).map(|extra|
-            r.pipelines.dry_material.selected_kernel(&style,MaterialOperation::Deposit,false,extra).clone()).collect::<Vec<_>>();
-        assert!(!exact.is_empty() && exact.iter().all(|p|!p.ready()));
-        let queued_before=exact.iter().filter(|p|compile::tests::requested(&r.context_compilation,p,BACKGROUND)).count();
-        layer_render::CanvasRenderer::prepare_context(&mut r,&doc,&brush,layer_render::PreparationContext {next:layer_render::PreparationUses {selection_strokes:true,..Default::default()},..Default::default()});
-        let queued_after=exact.iter().filter(|p|compile::tests::requested(&r.context_compilation,p,BACKGROUND)).count();
-        r.shader_idle(true,true);
-        let warm_deadline=std::time::Instant::now()+Duration::from_secs(15);
-        while !exact.iter().all(|p|p.ready()) && std::time::Instant::now()<warm_deadline {
-            r.poll_startup().unwrap();
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let ready=exact.iter().filter(|p|p.ready()).count();
-        assert_eq!(queued_after,queued_before,"selection anticipation retains startup warming");
-        assert_eq!(ready,exact.len(),"choosing a selection tool cancelled the startup size warming");
         drop(r);drop(reference);finish_shader_compiler_shutdown();
     }
 
