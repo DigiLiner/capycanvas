@@ -4729,6 +4729,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         result
     }
 
+    fn paints_selection(&self) -> bool {
+        self.selection_stroke_active() || (self.selection_masks.target().is_some() && self.layer_interaction.tool == LayerCanvasTool::Paint)
+    }
     fn pen_inner(&mut self, event: PenEvent) -> Result<(), PenEvent> {
         // Future points belong only to the engine's replaceable brush tail.
         // They must not pick colors or enter selection/shape gesture paths.
@@ -4744,7 +4747,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         {
             return Ok(());
         }
-        if self.selection_stroke_active() || (self.selection_masks.target().is_some() && self.layer_interaction.tool == LayerCanvasTool::Paint) {
+        if self.paints_selection() {
             if let Err(error) = self.selection_brush_pen(event) { self.notify(error); }
             return Ok(());
         }
@@ -6613,9 +6616,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         if regions & (regions::LAYOUT | regions::CUSTOMIZATION | regions::BRUSH | regions::DOCUMENT | regions::SETTINGS) != 0 {
             self.toolbar_brushes = self.visible_toolbar_brushes();
         }
+        let tool = self.layer_interaction.tool;
+        let selected = self.engine.document().working.selection.is_some();
         let next = layer_render::PreparationUses {
-            selection_strokes: self.layer_interaction.tool.selection_tool().is_some() && self.engine.document().working.selection.is_none(),
-            ..Default::default()
+            selection_strokes: tool.selection_tool().is_some() && !selected,
+            selection_paint: self.paints_selection(),
+            fill: selected || tool == LayerCanvasTool::LassoFill || tool.region().is_some_and(|(fill, _, _)| fill),
+            transform: selected,
+            operation: match tool {
+                LayerCanvasTool::Gradient { .. } => Some(layer_render::OperationUse::Gradient),
+                LayerCanvasTool::Figure { .. } => Some(layer_render::OperationUse::Figure),
+                _ => None,
+            },
         };
         if self.preparation_context.as_ref().is_none_or(|c| c.next != next || c.brushes != self.toolbar_brushes || c.regions != self.region_tools.refinement) {
             let context = layer_render::PreparationContext { next, brushes: self.toolbar_brushes.clone(), regions: self.region_tools.refinement };

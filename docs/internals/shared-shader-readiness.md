@@ -70,6 +70,11 @@ blend, with no tip-size or single-pigment variants. Web's
 `--tip-resize-readiness` checks that a Pencil resized from 4 to 300 px after an
 idle pause needs no compilation.
 
+Choosing a fill, selection-paint, Gradient or Figure tool declares its next-use
+family at Anticipated. A selection anticipates Transform and fill draws;
+selection tools also anticipate brush and eraser kernels for the result.
+`preparation_context_follows_tool_and_selection` checks these facts on every platform.
+
 One evaluator per variant serves every destination, so a brush compiles one
 heavy kernel per variant. Where read-write storage exists, the evaluator reads
 each texel's starting paint from its own output and stores only texels whose

@@ -159,3 +159,42 @@ fn customized_slot_warming_follows_the_displayed_variant_and_its_override() {
     assert_toolbar(&s, &[id]);
     assert_ne!(s.toolbar_brushes, overridden);
 }
+
+#[test]
+fn preparation_context_follows_tool_and_selection() {
+    use layer_render::{OperationUse, PreparationUses as Uses};
+    let mut mismatches = Vec::new();
+    for platform in Platform::ALL {
+        for (command, expected) in [
+            (CommandId::Lasso, Uses {selection_strokes: true, ..Default::default()}),
+            (CommandId::RectangleSelect, Uses {selection_strokes: true, ..Default::default()}),
+            (CommandId::AutoSelect, Uses {selection_strokes: true, ..Default::default()}),
+            (CommandId::ColorSelect, Uses {selection_strokes: true, ..Default::default()}),
+            (CommandId::Fill, Uses {fill: true, ..Default::default()}),
+            (CommandId::LassoFill, Uses {fill: true, ..Default::default()}),
+            (CommandId::EncloseFill, Uses {fill: true, ..Default::default()}),
+            (CommandId::SelectionBrush, Uses {selection_strokes: true, selection_paint: true, ..Default::default()}),
+            (CommandId::QuickMask, Uses {selection_paint: true, ..Default::default()}),
+            (CommandId::PaintUnfilled, Uses {selection_paint: true, fill: true, ..Default::default()}),
+            (CommandId::Gradient, Uses {operation: Some(OperationUse::Gradient), ..Default::default()}),
+            (CommandId::Figure, Uses {operation: Some(OperationUse::Figure), ..Default::default()}),
+            (CommandId::Brush, Uses::default()),
+        ] {
+            let mut s = session(platform);
+            invoke(&mut s, command);
+            let actual = s.engine.backend().contexts.last().unwrap().next;
+            if actual != expected { mismatches.push(format!("{platform:?}/{command:?}: {actual:?} != {expected:?}")); }
+            let count = s.engine.backend().contexts.len();
+            s.changed(regions::CAMERA, false);
+            assert_eq!(s.engine.backend().contexts.len(), count, "camera changes keep the same next uses");
+        }
+        let mut s = session(platform);
+        invoke(&mut s, CommandId::SelectAll);
+        let actual = s.engine.backend().contexts.last().unwrap().next;
+        let expected = Uses {transform: true, fill: true, ..Default::default()};
+        if actual != expected { mismatches.push(format!("{platform:?}/SelectAll: {actual:?} != {expected:?}")); }
+        invoke(&mut s, CommandId::Deselect);
+        assert_eq!(s.engine.backend().contexts.last().unwrap().next, Uses::default());
+    }
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
