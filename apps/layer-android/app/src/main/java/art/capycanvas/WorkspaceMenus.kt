@@ -29,8 +29,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
@@ -46,6 +44,12 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.PopupProperties
 import org.json.JSONArray
 import org.json.JSONObject
@@ -80,27 +84,8 @@ internal suspend fun CanvasHost.menuCopy(request: JSONObject): JSONObject? = sus
         currentCopy?.invoke()?.let { if (host.languageTag == tag && host.menuEpoch() == epoch) projected = it }
     }
     val current = if (copy == null) menu else projected
-    var popup by remember { mutableStateOf(Offset.Zero) }
-    val scale = androidx.compose.ui.platform.LocalDensity.current.density
-    val shape: Shape = if(presentation?.optBoolean("has_arrow") == true && anchor != null) androidx.compose.foundation.shape.GenericShape { size,_ ->
-        val arrow = 8f*scale
-        val below = popup.y >= anchor.center.y
-        val tip = (anchor.center.x-popup.x).coerceIn(16f*scale,(size.width-16f*scale).coerceAtLeast(16f*scale))
-        addRoundRect(RoundRect(Rect(0f,if(below)arrow else 0f,size.width,if(below)size.height else size.height-arrow),CornerRadius(10f*scale)))
-        if(below) { moveTo(tip-6f*scale,arrow);lineTo(tip,0f);lineTo(tip+6f*scale,arrow) }
-        else { moveTo(tip-6f*scale,size.height-arrow);lineTo(tip,size.height);lineTo(tip+6f*scale,size.height-arrow) }
-        close()
-    } else RoundedCornerShape(10.dp)
-    // A focusable Android popup cancels the contact in the activity that opened
-    // it. Context menus must leave that contact with the original drag owner.
     BackHandler(!focusable, dismiss)
-    DropdownMenu(true, dismiss, modifier = Modifier.widthIn(min = 240.dp, max = 380.dp).heightIn(max = maxHeight).testTag("workspace-menu")
-        .onGloballyPositioned { popup = it.localToScreen(Offset.Zero) }.onPreviewKeyEvent { event ->
-            val key = event.nativeKeyEvent
-            if (key.keyCode == KeyEvent.KEYCODE_ESCAPE) { if (key.action == KeyEvent.ACTION_DOWN) dismiss(); true } else false
-        },
-        properties = if (focusable) PopupProperties(focusable = true) else WindowlessMenu,
-        shape = shape, containerColor = LocalPalette.current.panel) {
+    val content: @Composable ColumnScope.() -> Unit = {
         if (!focusable) {
             val view = LocalView.current
             val currentDismiss by rememberUpdatedState(dismiss)
@@ -116,6 +101,58 @@ internal suspend fun CanvasHost.menuCopy(request: JSONObject): JSONObject? = sus
             }
         }
         WorkspaceMenuItems(host, current.array("sections"), dismiss, if (showTitle && current.has("title")) current.getString("title") else null, command, refresh = { refresh++ })
+    }
+    val modifier = Modifier.widthIn(min = 240.dp, max = 380.dp).heightIn(max = maxHeight).testTag("workspace-menu")
+        .onPreviewKeyEvent { event ->
+            val key = event.nativeKeyEvent
+            if (key.keyCode == KeyEvent.KEYCODE_ESCAPE) { if (key.action == KeyEvent.ACTION_DOWN) dismiss(); true } else false
+        }
+    val properties = if (focusable) PopupProperties(focusable = true) else WindowlessMenu
+    if (presentation?.optBoolean("has_arrow") == true && anchor != null) {
+        CalloutMenu(anchor, modifier, properties, dismiss, content)
+    } else DropdownMenu(true, dismiss, modifier = modifier, properties = properties,
+        shape = RoundedCornerShape(10.dp), containerColor = LocalPalette.current.panel, content = content)
+}
+
+@Composable private fun CalloutMenu(anchor: Rect, modifier: Modifier, properties: PopupProperties,
+    dismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val view = LocalView.current
+    val root = view.rootView
+    var window by remember(root) { mutableStateOf(IntSize(root.width, root.height)) }
+    DisposableEffect(root) {
+        val listener = android.view.View.OnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+            window = IntSize(right-left, bottom-top)
+        }
+        root.addOnLayoutChangeListener(listener)
+        onDispose { root.removeOnLayoutChangeListener(listener) }
+    }
+    val screen = IntArray(2)
+    val local = IntArray(2)
+    view.getLocationOnScreen(screen)
+    view.getLocationInWindow(local)
+    val target = anchor.translate(Offset((local[0]-screen[0]).toFloat(), (local[1]-screen[1]).toFloat()))
+    val below = window.height-target.bottom >= target.top
+    val available = (if (below) window.height-target.bottom else target.top).coerceAtLeast(1f)
+    val arrow = with(density) { 8.dp.toPx() }
+    fun left(width: Float) = target.left.coerceIn(0f, (window.width-width).coerceAtLeast(0f))
+    val provider = object : PopupPositionProvider {
+        override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize,
+            layoutDirection: LayoutDirection, popupContentSize: IntSize) = IntOffset(left(popupContentSize.width.toFloat()).toInt(),
+                (if (below) target.bottom else target.top-popupContentSize.height).toInt())
+    }
+    val shape = androidx.compose.foundation.shape.GenericShape { size,_ ->
+        val tip = (target.center.x-left(size.width)).coerceIn(16f*density.density, (size.width-16f*density.density).coerceAtLeast(16f*density.density))
+        addRoundRect(RoundRect(Rect(0f, if (below) arrow else 0f, size.width, if (below) size.height else size.height-arrow), CornerRadius(10f*density.density)))
+        if (below) { moveTo(tip-6f*density.density,arrow); lineTo(tip,0f); lineTo(tip+6f*density.density,arrow) }
+        else { moveTo(tip-6f*density.density,size.height-arrow); lineTo(tip,size.height); lineTo(tip+6f*density.density,size.height-arrow) }
+        close()
+    }
+    Popup(provider, onDismissRequest = dismiss, properties = properties) {
+        Surface(shape = shape, color = LocalPalette.current.panel, shadowElevation = 8.dp) {
+            Column(modifier.width(IntrinsicSize.Max).heightIn(max = with(density) { available.toDp() })
+                .verticalScroll(rememberScrollState()).padding(top = if (below) 16.dp else 8.dp, bottom = if (below) 8.dp else 16.dp), content = content)
+        }
     }
 }
 

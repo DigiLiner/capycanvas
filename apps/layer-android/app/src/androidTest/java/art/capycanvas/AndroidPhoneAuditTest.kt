@@ -15,8 +15,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewRootForTest
@@ -131,6 +133,75 @@ class AndroidPhoneAuditTest {
                 kotlin.math.abs(actual.left-expected.left*density)<=1f && kotlin.math.abs(actual.top-expected.top*density)<=1f &&
                     kotlin.math.abs(actual.width-expected.width*density)<=1f && kotlin.math.abs(actual.height-expected.height*density)<=1f
             } == true
+        }
+    }
+
+    @Test fun calloutRowsClearEitherArrow() {
+        val scenario = launchCapy(180_000, compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val original = activity.requestedOrientation
+        val anchor = mutableStateOf<Rect?>(null)
+        var view: ComposeView? = null
+        try {
+            compose.runOnIdle {
+                view = ComposeView(activity).also { mounted ->
+                    activity.addContentView(mounted, android.widget.FrameLayout.LayoutParams(-1, -1))
+                    mounted.setContent {
+                        val state = host.snapshot!!.getJSONObject("state")
+                        val palette = Palette(state.getString("theme") == "dark", state.getJSONObject("palette"))
+                        CompositionLocalProvider(LocalCanvasHost provides host, LocalPalette provides palette,
+                            androidx.compose.material3.LocalContentColor provides palette.text) {
+                            MaterialTheme(colorScheme = if (state.getString("theme") == "dark") androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()) {
+                                Box(Modifier.fillMaxSize()) {
+                                    anchor.value?.let { target ->
+                                        WorkspaceMenu(host, obj("sections" to JSONArray().put(JSONArray().put(obj("label" to "First")).put(obj("label" to "Last")))),
+                                            showTitle = false, presentation = obj("has_arrow" to true), anchor = target, dismiss = { anchor.value = null })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for ((name, orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
+                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+                val rotation = when (orientation) { 0 -> 1; 8 -> 3; else -> 0 }
+                host.awaitFrame("$name rotation and layout") { activity.display!!.rotation == rotation &&
+                    view!!.width == activity.window.decorView.width && view!!.height == activity.window.decorView.height &&
+                    (view!!.width > view!!.height) == (rotation != 0) }
+                for (theme in listOf("light", "dark")) {
+                    host.drain(obj("type" to "set_theme", "theme" to theme))
+                    for (below in listOf(true, false)) {
+                        compose.runOnIdle {
+                            val location = IntArray(2)
+                            view!!.getLocationOnScreen(location)
+                            val y = view!!.height * if (below) .25f else .75f
+                            anchor.value = Rect(location[0]+view!!.width*.5f, location[1]+y, location[0]+view!!.width*.5f+1, location[1]+y+1)
+                        }
+                        compose.waitForIdle()
+                        val menu = compose.onNodeWithTag("workspace-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                        val first = compose.onNodeWithText("First").fetchSemanticsNode().boundsInRoot
+                        val last = compose.onNodeWithText("Last").fetchSemanticsNode().boundsInRoot
+                        val density = activity.resources.displayMetrics.density
+                        val above = first.top-menu.top-if (below) 8*density else 0f
+                        val under = menu.bottom-last.bottom-if (below) 0f else 8*density
+                        screenshot("fix3-$name-$theme-${if (below) "below" else "above"}.png")
+                        assertEquals("$name $theme below=$below: rounded body gaps; menu=$menu first=$first last=$last", above, under, density)
+                        assertEquals("The rounded body retains 8dp padding", 8*density, above, density)
+                        compose.runOnIdle { anchor.value = null }
+                        compose.waitForIdle()
+                    }
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync {
+                view?.let { it.disposeComposition(); (it.parent as android.view.ViewGroup).removeView(it) }
+                activity.requestedOrientation = original
+            }
+            scenario.close()
         }
     }
 
@@ -277,17 +348,19 @@ class AndroidPhoneAuditTest {
         var scenario: androidx.test.core.app.ActivityScenario<MainActivity>? = null
         try {
             wakeDevice()
-            val devices = JSONObject(shell("cmd gpu vkjson")).getJSONArray("devices")
-            assertEquals("A single Vulkan adapter makes admission unambiguous", 1, devices.length())
-            val gpu = devices.getJSONObject(0).getJSONObject("properties")
-            val adapter = gpu.getString("deviceName")
-            val hal = shell("getprop ro.hardware.vulkan")
-            report.put("gpu", obj("name" to adapter, "type" to gpu.getInt("deviceType"), "api_version" to gpu.getLong("apiVersion"),
-                "driver" to devices.getJSONObject(0).optJSONObject("core12")?.optJSONObject("properties")?.optString("driverName"),
-                "vulkan_hal" to hal, "backend" to "Vulkan"))
-            assertEquals("Expected the gfxstream (ranchu) Vulkan HAL", "ranchu", hal)
-            assertNotEquals("CPU adapter is forbidden", 4, gpu.getInt("deviceType"))
-            assertFalse("Software adapter is forbidden: $adapter", listOf("swiftshader", "llvmpipe", "lavapipe").any { adapter.contains(it, ignoreCase = true) })
+            if (admissionOnly) {
+                val devices = JSONObject(shell("cmd gpu vkjson")).getJSONArray("devices")
+                assertEquals("A single Vulkan adapter makes admission unambiguous", 1, devices.length())
+                val gpu = devices.getJSONObject(0).getJSONObject("properties")
+                val adapter = gpu.getString("deviceName")
+                val hal = shell("getprop ro.hardware.vulkan")
+                report.put("gpu", obj("name" to adapter, "type" to gpu.getInt("deviceType"), "api_version" to gpu.getLong("apiVersion"),
+                    "driver" to devices.getJSONObject(0).optJSONObject("core12")?.optJSONObject("properties")?.optString("driverName"),
+                    "vulkan_hal" to hal, "backend" to "Vulkan"))
+                assertEquals("Expected the gfxstream (ranchu) Vulkan HAL", "ranchu", hal)
+                assertNotEquals("CPU adapter is forbidden", 4, gpu.getInt("deviceType"))
+                assertFalse("Software adapter is forbidden: $adapter", listOf("swiftshader", "llvmpipe", "lavapipe").any { adapter.contains(it, ignoreCase = true) })
+            }
             scenario = androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
             val activity = scenario.activity()
             val host = activity.host
@@ -379,8 +452,9 @@ class AndroidPhoneAuditTest {
                     if (cutout == "none") assertEquals("No cutout/waterfall insets",listOf(0,0,0,0),cutoutInsets)
                     else assertTrue("Corner cutout produces safe insets",cutoutInsets.any { it > 0 })
                     args.getString("insets")?.split(",")?.map(String::toInt)?.let { assertEquals("Configured cutout insets", it, actualInsets) }
-                    assertEquals("Native surface width", surface.width, display.getJSONArray("extent").getInt(0))
-                    assertEquals("Native surface height", surface.height, display.getJSONArray("extent").getInt(1))
+                    val axis = display.getInt("surface_quarter_turns") % 2
+                    assertEquals("Native surface width", surface.width, display.getJSONArray("extent").getInt(axis))
+                    assertEquals("Native surface height", surface.height, display.getJSONArray("extent").getInt(1-axis))
                 }
                 report.put("allocations", allocations)
                 val screenshot = checkNotNull(instrumentation.uiAutomation.takeScreenshot())

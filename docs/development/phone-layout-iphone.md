@@ -320,3 +320,12 @@ no regression. If a physical iPhone is available, record the same rows there.
 - **Large Dynamic Type sizes.** Expect the same clipping questions as the open
   narrow and large-text decisions in [phone layout](phone-layout.md). Report
   them; don't invent host rules.
+
+## Android device fixes to port (2026-11-09)
+
+- **Keep phone context-menu rows clear of the callout.** Android chooses the
+  callout side from the anchor and window before measuring, reserves its 8 dp
+  arrow height, and keeps 8 dp content padding inside both ends of the rounded
+  body. Check the iOS callout/popover implementation: the arrow must not consume
+  the first or last row's body padding. Verify equal first/last row gaps within
+  1 pt for arrows above and below, in both themes and all phone rotations.
