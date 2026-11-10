@@ -2,7 +2,7 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$root"
-repository=capyatelier/capycanvas
+repository=babymastodon/capycanvas
 url=https://flatpak.capycanvas.art
 config=packaging/flatpak/cloudflare/wrangler.jsonc
 wrangler=(npx --yes wrangler@4.160.0)
