@@ -30,7 +30,6 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -125,9 +124,9 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
     var profilesOpen by remember { mutableStateOf(false) }
     LaunchedEffect(open) { profilesOpen = false }
     val colors = LocalPalette.current
-    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     val paneFocus = remember { FocusRequester() }
-    LaunchedEffect(open, view.preferencesContentKey()) { if (open) paneFocus.requestFocus() else if(host.snapshot?.getJSONObject("layout")?.objectOrNull("phone")==null)focus.clearFocus() }
+    LaunchedEffect(open, view.preferencesContentKey()) { if (open) paneFocus.requestFocus() else if(host.snapshot?.getJSONObject("layout")?.objectOrNull("phone")==null)endEntry() }
     val reveal = view.optString("reveal").takeUnless { it.isEmpty() || it == "null" }
     BoxWithConstraints(Modifier.fillMaxSize().background(colors.settingsBackground)
         .then(if(host.snapshot?.getJSONObject("layout")?.objectOrNull("phone")==null)Modifier.imePadding() else Modifier)
@@ -141,9 +140,9 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
         val showPage=arranged.getBoolean("subpage")
         val navigation=view.getJSONObject("navigation")
         val detail=view.objectOrNull("shortcut_editor")?.getString("label") ?: navigation.nullableString("title")
-        fun close() { focus.clearFocus();host.dispatch(obj("type" to "close_settings")) }
+        fun close() { endEntry();host.dispatch(obj("type" to "close_settings")) }
         fun back() {
-            focus.clearFocus()
+            endEntry()
             view.preferencesBack()?.let(host::preference) ?: close()
         }
         BackHandler(enabled=open && host.snapshot?.getJSONObject("layout")?.objectOrNull("phone")==null,onBack=::back)
@@ -270,7 +269,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
 @Composable private fun PreferencesNavigation(host: CanvasHost, view: JSONObject, modifier: Modifier,
     showDone: Boolean, close: () -> Unit) {
     val colors = LocalPalette.current
-    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     val searching = view.optBoolean("searching")
     Column(modifier.background(colors.sidebar).testTag("settings-sidebar").padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -283,7 +282,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                 } },
                 trailingIcon = if (view.optString("query").isEmpty()) null else ({
                     IconButton({
-                        focus.clearFocus(); host.preference(obj("type" to "search", "query" to ""))
+                        endEntry(); host.preference(obj("type" to "search", "query" to ""))
                     }) { SharedIcon("close", host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("clear_search"), Modifier.size(20.dp)) }
                 }))
             if (showDone) { Spacer(Modifier.width(8.dp)); SettingsDone(close) }
@@ -292,7 +291,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
             if (searching) {
                 view.array("search_results").objects().forEach { result ->
                     Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(8.dp)).clickable {
-                        focus.clearFocus(); host.preference(result.getJSONObject("action"))
+                        endEntry(); host.preference(result.getJSONObject("action"))
                     }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(result.getString("title"), fontWeight = FontWeight.Medium)
                         Text(result.getString("description"), color = colors.settingsSecondary, fontSize = 14.sp, lineHeight = 20.sp)
@@ -304,7 +303,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (selected) colors.active else Color.Transparent)
                     .selectable(selected, role = Role.Tab) {
-                        focus.clearFocus(); host.preference(obj("type" to "page", "page" to page.getString("id")))
+                        endEntry(); host.preference(obj("type" to "page", "page" to page.getString("id")))
                     }.testTag("settings-category-" + page.getString("id"))
                     .padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
@@ -324,10 +323,10 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
     var open by remember(row.getString("id")) { mutableStateOf(false) }
     val visible = LocalPreferencesOpen.current
     LaunchedEffect(visible) { if (!visible) open = false }
-    val focus = LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     val colors = LocalPalette.current
     val currentReset by rememberUpdatedState(reset)
-    fun show() { focus.clearFocus(); open = true }
+    fun show() { endEntry(); open = true }
     Box(Modifier.fillMaxWidth()
         .semantics { customActions = listOf(CustomAccessibilityAction(currentReset.getString("label")) { show(); true }) }
         .onPreviewKeyEvent {
@@ -438,11 +437,11 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                     var open by remember(id, enabled) { mutableStateOf(false) }
                     val visible = LocalPreferencesOpen.current
                     LaunchedEffect(visible) { if (!visible) open = false }
-                    val focus = LocalFocusManager.current
+                    val endEntry = rememberEndTextEntry()
                     Box(Modifier.widthIn(max = controlWidth)) {
                         Row(Modifier.heightIn(min = 48.dp)
                             .clip(RoundedCornerShape(8.dp)).background(colors.input)
-                            .clickable(enabled = enabled, role = Role.Button) { focus.clearFocus(); open = true }
+                            .clickable(enabled = enabled, role = Role.Button) { endEntry(); open = true }
                             .testTag("setting-choice-$id").padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             kind.array("icons").optString(selected).takeIf { it.isNotEmpty() }?.let {
@@ -593,7 +592,6 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
     var focused by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(picker.getString("query"))) }
     LaunchedEffect(current != null) { if(current != null)searchText = androidx.compose.ui.text.input.TextFieldValue(picker.getString("query")) }
-    val focusManager = LocalFocusManager.current
     val cancel = { host.customize(obj("type" to "cancel_tools")) }
     val confirm = { host.customize(obj("type" to "confirm_tools")) }
     val search = { text: String -> host.customize(obj("type" to "picker_search", "query" to text)) }
@@ -617,7 +615,6 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                     .onFocusChanged { focused = it.isFocused;if(it.isFocused)scope.launch { bring.bringIntoView() } }.testTag("tool-picker-search"),
                     textStyle = LocalTextStyle.current.copy(color = LocalPalette.current.text),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() }),
                     decorationBox = { field -> Box(Modifier.fillMaxSize(),contentAlignment = Alignment.CenterStart) {
                         if(searchText.text.isEmpty())Text(picker.getString("search_hint"),color = LocalPalette.current.secondary)
                         field()

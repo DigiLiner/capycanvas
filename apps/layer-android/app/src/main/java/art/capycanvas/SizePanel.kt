@@ -15,7 +15,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -34,19 +33,19 @@ private fun typedValue(control: JSONObject, value: Float, text: String, language
     JSONObject(Native.number(obj("control" to control, "value" to value, "operation" to obj("type" to "expression", "text" to text)).toString(), language)).number("value")
 }.getOrNull()
 
-internal class SizePanelActions(private val dispatch: (JSONObject) -> Unit, private val clearFocus: () -> Unit) {
+internal class SizePanelActions(private val dispatch: (JSONObject) -> Unit, private val finishEntry: () -> Unit) {
     private val commits = linkedMapOf<Any, (Boolean) -> Boolean>()
     fun register(owner: Any, commit: ((Boolean) -> Boolean)?) {
         if (commit == null) commits.remove(owner) else commits[owner] = commit
     }
     fun send(action: JSONObject) = dispatch(action)
-    fun endTyping(cancel: Boolean = false): Boolean {
+    fun endTyping(cancel: Boolean = false, endEntry: () -> Unit = finishEntry): Boolean {
         val accepted = commits.values.toList().map { it(cancel) }.all { it }
-        if (accepted) clearFocus()
+        if (accepted) endEntry()
         return accepted
     }
-    fun choose(action: JSONObject) {
-        if (endTyping(action.getString("op") == "cancel")) send(action)
+    fun choose(action: JSONObject, endEntry: () -> Unit = finishEntry) {
+        if (endTyping(action.getString("op") == "cancel", endEntry)) send(action)
     }
 }
 
@@ -55,8 +54,8 @@ internal class SizePanelActions(private val dispatch: (JSONObject) -> Unit, priv
  * focus only while a number field is edited, and Back cancels them. */
 @Composable internal fun SizePanel(host: CanvasHost, dock: DockInteraction, workArea: JSONObject, type: String, tag: String,
     view: JSONObject, content: @Composable ColumnScope.(SizePanelActions) -> Unit) {
-    val focus = LocalFocusManager.current
-    val actions = remember(host, type, focus) { SizePanelActions({ host.dispatch(obj("type" to type, "action" to it)) }, { focus.clearFocus() }) }
+    val endEntry = rememberEndTextEntry()
+    val actions = remember(host, type, endEntry) { SizePanelActions({ host.dispatch(obj("type" to type, "action" to it)) }, endEntry) }
     if(host.snapshot?.getJSONObject("layout")?.objectOrNull("phone")!=null) {
         val cancel={actions.choose(obj("op" to "cancel"))}
         DialogShell(host,view.getJSONObject("dialog"),view.getString("title"),onCancel=cancel,
@@ -122,13 +121,14 @@ internal class SizePanelActions(private val dispatch: (JSONObject) -> Unit, priv
 /** Pixels or Percent, as segments that never take focus. */
 @Composable internal fun SizeUnits(actions: SizePanelActions, view: JSONObject, tag: String, modifier: Modifier) {
     val colors = LocalPalette.current
+    val endEntry = rememberEndTextEntry()
     Row(modifier.height(IntrinsicSize.Min).clip(ControlShape).background(colors.input)) {
         view.getJSONArray("units").objects().forEach { choice ->
             val unit = choice.getString("unit")
             val selected = unit == view.getString("unit")
             Box(Modifier.weight(1f).fillMaxHeight().heightIn(min = 40.dp).clip(ControlShape).background(if (selected) colors.active else Color.Transparent)
                 .focusProperties { canFocus = false }.testTag("$tag-unit-$unit")
-                .selectable(selected, role = Role.RadioButton) { actions.choose(obj("op" to "unit", "unit" to unit)) },
+                .selectable(selected, role = Role.RadioButton) { actions.choose(obj("op" to "unit", "unit" to unit), endEntry) },
                 contentAlignment = Alignment.Center) { Text(choice.getString("label"), Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), textAlign = TextAlign.Center) }
         }
     }
@@ -136,8 +136,9 @@ internal class SizePanelActions(private val dispatch: (JSONObject) -> Unit, priv
 
 /** A checkbox row that sends its state as the `key` field of an action. */
 @Composable internal fun SizeCheck(actions: SizePanelActions, label: String, checked: Boolean, key: String, tag: String) {
+    val endEntry = rememberEndTextEntry()
     Row(Modifier.heightIn(min = 40.dp).clip(ControlShape).focusProperties { canFocus = false }.testTag(tag)
-        .toggleable(checked, role = Role.Checkbox) { actions.choose(obj("op" to key, key to it)) }.padding(end = 8.dp),
+        .toggleable(checked, role = Role.Checkbox) { actions.choose(obj("op" to key, key to it), endEntry) }.padding(end = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked, onCheckedChange = null, Modifier.padding(horizontal = 8.dp))
         Text(label)

@@ -34,7 +34,6 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -90,7 +89,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     val captions = remember(label, host.languageTag) { JSONObject(Native.numericLabels(label, host.languageTag)) }
     val colors = LocalPalette.current
     val shape = if (settings) RoundedCornerShape(6.dp) else ControlShape
-    val focus = LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     val requester = remember { FocusRequester() }
     val ranged = control.getString("kind") == "slider"
     val dial = control.getString("kind") == "dial"
@@ -247,7 +246,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             if (down.isConsumed) return@awaitEachGesture
-            focus.clearFocus(); beginEdit(); var released = false
+            endEntry(); beginEdit(); var released = false
             try {
                 while (true) {
                     val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
@@ -263,7 +262,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     val step: @Composable (Int, String) -> Unit = { direction, name ->
         val available = enabled && if (direction < 0) shown.getDouble("value") > control.getDouble("min") else shown.getDouble("value") < control.getDouble("max")
         Box(Modifier.then(contact).size(height).clip(shape).alpha(if (available) 1f else .36f)
-            .clickable(enabled = available) { if (finish()) { focus.clearFocus(); apply(obj("type" to "step", "steps" to direction)) } }, contentAlignment = Alignment.Center) {
+            .clickable(enabled = available) { if (finish()) { endEntry(); apply(obj("type" to "step", "steps" to direction)) } }, contentAlignment = Alignment.Center) {
             SharedIcon(name, captions.getString(if (direction < 0) "decrease" else "increase"), Modifier.size(16.dp))
         }
     }
@@ -304,14 +303,14 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                 }
                 else if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) {
                     if (active == 1) { active = 2; phase?.invoke("cancel"); finish(true, keepEditing = true) }
-                    else { finish(true); focus.clearFocus() }; true
+                    else { finish(true); endEntry() }; true
                 }
-                else if (it.type == KeyEventType.KeyDown && it.key == Key.Enter) { if (finish()) focus.clearFocus(); true }
+                else if (it.type == KeyEventType.KeyDown && it.key == Key.Enter) { if (finish()) endEntry(); true }
                 else false
             }.semantics { contentDescription = captions.getString("edit") }.testTag(if (settings) "setting-number-$id" else if (presentedText != null) "number-$id" else "number-$label"), enabled = enabled, singleLine = true,
             textStyle = LocalTextStyle.current.copy(color = colors.text, textAlign = if (panel) TextAlign.End else TextAlign.Start),
             cursorBrush = SolidColor(colors.accent), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { if (text.composition == null && finish()) focus.clearFocus() }),
+            keyboardActions = KeyboardActions(onDone = { if (text.composition == null && finish()) endEntry() }),
             decorationBox = { input -> Box(Modifier.fillMaxSize().background(fieldFill, shape).padding(horizontal = valuePadding), contentAlignment = Alignment.CenterEnd) { input() } })
     }
     val valueControl: @Composable () -> Unit = {

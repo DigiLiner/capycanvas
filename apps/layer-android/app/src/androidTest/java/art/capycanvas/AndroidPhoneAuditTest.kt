@@ -31,6 +31,11 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
@@ -139,6 +144,68 @@ class AndroidPhoneAuditTest {
                 kotlin.math.abs(actual.left-expected.left*density)<=1f && kotlin.math.abs(actual.top-expected.top*density)<=1f &&
                     kotlin.math.abs(actual.width-expected.width*density)<=1f && kotlin.math.abs(actual.height-expected.height*density)<=1f
             } == true
+        }
+    }
+
+    @Test fun doneInPhonePagesPreservesDraftsAndValidation() {
+        val scenario = launchCapy(180_000, compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val decor = activity.window.decorView
+        val original = activity.requestedOrientation
+        fun entry(tag: String) = compose.onNode(hasSetTextAction() and (hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))), useUnmergedTree = true)
+        fun keyboard() = decor.rootWindowInsets.isVisible(WindowInsets.Type.ime())
+        fun done(tag: String, value: String, page: String = "tool-picker") {
+            entry(tag).performClick().performTextReplacement(value)
+            host.awaitFrame("$tag has its native keyboard") { keyboard() }
+            entry(tag).performImeAction()
+            host.awaitFrame("$tag Done ends text entry") { !keyboard() && !host.editingText }
+            awaitEditorPage(activity, host, page)
+        }
+        fun cancelPicker() {
+            host.drain(obj("type" to "customize", "action" to obj("type" to "cancel_tools")))
+            host.awaitFrame("The picker closes") { findTag("tool-picker") == null }
+        }
+        try {
+            for ((name, orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
+                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+                val rotation = when (orientation) { 0 -> 1; 8 -> 3; else -> 0 }
+                host.awaitFrame("$name phone page viewport") { activity.display!!.rotation == rotation && (decor.width > decor.height) == (rotation != 0) }
+                for (theme in listOf("light", "dark")) {
+                    host.drain(obj("type" to "set_theme", "theme" to theme))
+                    host.drain(obj("type" to "phone", "action" to obj("kind" to "insert_tools", "before" to null)))
+                    host.awaitFrame("Add Tools search opens") { findTag("tool-picker-search") != null }
+                    done("tool-picker-search", "pen")
+                    host.awaitFrame("Done preserves the search and page") { host.snapshot?.objectOrNull("picker")?.optString("query") == "pen" && findTag("tool-picker") != null }
+                    screenshot("fix4a-$name-$theme-search-done.png")
+                    cancelPicker()
+                    host.drain(obj("type" to "customize", "action" to obj("type" to "new_toolbar", "group" to JSONObject.NULL)))
+                    host.awaitFrame("The toolbar name opens") { findTag("toolbar-name") != null }
+                    done("toolbar-name", "Keyboard draft")
+                    host.awaitFrame("Done preserves the unconfirmed name and page") { host.snapshot?.objectOrNull("picker")?.optString("name") == "Keyboard draft" && findTag("tool-picker") != null }
+                    screenshot("fix4a-$name-$theme-name-done.png")
+                    cancelPicker()
+                    host.drain(obj("type" to "invoke", "command" to "new_document"))
+                    host.awaitFrame("New Drawing opens") { findTag("new-drawing-width") != null }
+                    host.drain(obj("type" to "new_drawing", "action" to obj("op" to "unit", "unit" to "px")))
+                    entry("new-drawing-width").performClick().performTextReplacement("bad")
+                    host.awaitFrame("The numeric keyboard opens") { keyboard() }
+                    entry("new-drawing-width").performImeAction()
+                    assertTrue("Invalid numeric Done retains text entry", keyboard() && host.editingText)
+                    assertNotNull("Invalid Done preserves New Drawing", findTag("new-drawing-width"))
+                    done("new-drawing-width", "64", "new-drawing-dialog")
+                    assertNotNull("Valid Done keeps New Drawing open", findTag("new-drawing-width"))
+                    host.awaitFrame("Done commits the numeric value") { host.snapshot!!.getJSONObject("state").getJSONObject("new_drawing").getJSONArray("values").getDouble(0) == 64.0 }
+                    screenshot("fix4a-$name-$theme-number-done.png")
+                    compose.onNodeWithTag("new-drawing-cancel", useUnmergedTree = true).performClick()
+                    host.awaitFrame("New Drawing cancels") { findTag("new-drawing-width") == null }
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.requestedOrientation = original }
+            scenario.close()
         }
     }
 

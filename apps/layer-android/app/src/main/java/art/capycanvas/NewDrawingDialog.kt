@@ -57,7 +57,6 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -430,12 +429,12 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
 @Composable private fun ResolutionField(view: JSONObject, actions: NewDrawingActions) {
     val colors = LocalPalette.current
     val copy = view.getJSONObject("copy")
-    val focus = LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     var open by remember { mutableStateOf(false) }
     Box {
         DialogNumber(actions, view.getJSONObject("setup").getDouble("resolution"), view.getJSONObject("resolution_numeric"), copy.getString("resolution"), null,
             copy.getString("resolution_unit"), "new-drawing-resolution", Modifier.width(124.dp), trailing = {
-                Box(Modifier.padding(end = 3.dp).size(30.dp).clip(ControlShape).clickable(role = Role.Button) { focus.clearFocus(); open = true }
+                Box(Modifier.padding(end = 3.dp).size(30.dp).clip(ControlShape).clickable(role = Role.Button) { endEntry(); open = true }
                     .semantics { contentDescription = copy.getString("common_resolutions") }.testTag("new-drawing-resolution-choices"), contentAlignment = Alignment.Center) {
                     SharedIcon("chevron-down", null, Modifier.size(12.dp))
                 }
@@ -459,7 +458,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
     modifier: Modifier, height: Dp = FieldHeight, enabled: Boolean = true, trailing: @Composable RowScope.() -> Unit = {}, onValue: (Double) -> Unit) {
     val host = LocalCanvasHost.current
     val colors = LocalPalette.current
-    val focus = LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     val requester = remember { FocusRequester() }
     fun resolve(base: Double, operation: JSONObject) =
         JSONObject(Native.number(obj("control" to control, "value" to base, "operation" to operation).toString(), host.languageTag))
@@ -510,14 +509,14 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
             }.onPreviewKeyEvent { event ->
                 if (host.textComposition.owns(event.nativeKeyEvent) || event.type != KeyEventType.KeyDown) false
                 else when (event.key) {
-                    Key.Escape -> { dirty = false; invalid = false; awaiting = null; text = TextFieldValue(shown.getString("text")); focus.clearFocus(); true }
-                    Key.Enter, Key.NumPadEnter -> { if (commit()) focus.clearFocus(); true }
+                    Key.Escape -> { dirty = false; invalid = false; awaiting = null; text = TextFieldValue(shown.getString("text")); endEntry(); true }
+                    Key.Enter, Key.NumPadEnter -> { if (commit()) endEntry(); true }
                     else -> false
                 }
             }.semantics { contentDescription = name },
             enabled = enabled, singleLine = true, textStyle = LocalTextStyle.current.copy(color = colors.text, textAlign = TextAlign.End, fontFeatureSettings = "tnum"),
             cursorBrush = SolidColor(colors.accent), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { if (text.composition == null && commit()) focus.clearFocus() }))
+            keyboardActions = KeyboardActions(onDone = { if (text.composition == null && commit()) endEntry() }))
         suffix?.let { Text(it, Modifier.padding(horizontal = 3.dp), color = colors.text.copy(alpha = .62f), fontSize = smallSize(), maxLines = 1) }
         trailing()
     }
@@ -580,14 +579,14 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
 @OptIn(ExperimentalLayoutApi::class)
 @Composable private fun PresetControls(copy:JSONObject,drawer:JSONObject,actions:NewDrawingActions,page:Boolean) {
     val save=drawer.objectOrNull("save")
-    val focus=LocalFocusManager.current
+    val endEntry=rememberEndTextEntry()
     var retainedSave by remember {mutableStateOf(save)}
     if(save != null)retainedSave=save
     AnimatedContent(save != null,label="preset-save-footer",transitionSpec={fadeIn() togetherWith fadeOut()}) {saving ->
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp,Alignment.End),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             if(!saving) {
                 if(!page)DialogButton(copy.getString("cancel"),"new-drawing-browser-cancel"){actions.send("close_drawer")}
-                DialogButton(drawer.getString("save_label"),"new-drawing-save-as"){focus.clearFocus();actions.send("save_as")}
+                DialogButton(drawer.getString("save_label"),"new-drawing-save-as"){endEntry();actions.send("save_as")}
                 if(!page)DialogButton(copy.getString("select"),"new-drawing-select",accent=true,enabled=drawer.getBoolean("can_select")){actions.send("use_preset")}
             } else retainedSave?.let {value ->
                 val canSave=value.getBoolean("can_save")
@@ -658,7 +657,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
     val own = tile.getBoolean("own")
     val selected = tile.getBoolean("selected")
     val name = tile.getString("name")
-    val focus = LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     val activate = rememberActivation({ actions.send("pick_preset", "index" to index) }) { actions.send("use_preset") }
     Box(modifier) {
         HoverTip("$name\n${tile.getString("dimensions")} · ${tile.getString("details")}", Modifier.fillMaxWidth()) {
@@ -687,7 +686,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
         }
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem(text = { Text(copy.getString("rename")) }, modifier = Modifier.testTag("new-drawing-preset-rename"),
-                onClick = { menu = false; focus.clearFocus(); actions.send("rename_preset", "index" to index) })
+                onClick = { menu = false; endEntry(); actions.send("rename_preset", "index" to index) })
             DropdownMenuItem(text = { Text(copy.getString("delete")) }, modifier = Modifier.testTag("new-drawing-preset-delete"),
                 onClick = { menu = false; actions.send("delete_preset", "index" to index) })
         }

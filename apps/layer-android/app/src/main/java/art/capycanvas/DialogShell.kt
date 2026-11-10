@@ -52,7 +52,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-private val LocalDialogFocus=compositionLocalOf<FocusRequester?> {null}
+internal val LocalDialogFocus=compositionLocalOf<FocusRequester?> {null}
+@Composable internal fun rememberEndTextEntry(): () -> Unit {
+    val dialog = LocalDialogFocus.current
+    val manager = LocalFocusManager.current
+    return remember<() -> Unit>(dialog, manager) {
+        { if (dialog == null) manager.clearFocus() else dialog.requestFocus() }
+    }
+}
+
 internal val LocalDialogLayer = staticCompositionLocalOf<androidx.compose.runtime.snapshots.SnapshotStateList<@Composable () -> Unit>> { error("Missing workspace dialog layer") }
 
 @Composable internal fun WorkspaceDialogs() {

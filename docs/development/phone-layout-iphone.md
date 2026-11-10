@@ -340,3 +340,11 @@ no regression. If a physical iPhone is available, record the same rows there.
   opening menus, pages and the keyboard, plus visible page actions in portrait
   and both landscapes. Before iOS 26, reported corner radii are zero; verify
   controls near the corners now that the bars can sit only 8 pt from an edge.
+
+- **Finish text entry inside the active dialog.** Android Done moves focus to
+  the current dialog's own focus target, so its modal focus boundary can stay
+  intact. Search/name drafts remain open; numeric fields retain their existing
+  composition and validation gates. On iOS, Return/Done must end editing in
+  the owning dialog without implicitly confirming or closing the page. Verify
+  keyboard dismissal and retained values for search, name and numeric fields,
+  including rejected numeric input, in both themes and all phone rotations.

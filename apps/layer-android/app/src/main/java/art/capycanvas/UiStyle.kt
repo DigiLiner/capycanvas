@@ -90,7 +90,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.toSize
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -220,6 +219,8 @@ private tailrec fun inputActivity(context: android.content.Context): android.app
     decorationBox: @Composable (@Composable () -> Unit) -> Unit = { it() }) {
     val host = LocalCanvasHost.current
     val owner = remember { Any() }
+    val endEntry = rememberEndTextEntry()
+    val inDialog = LocalDialogFocus.current != null
     var focused by remember { mutableStateOf(false) }
     val view = LocalView.current
     val window = remember(view) { (view.parent as? DialogWindowProvider)?.window ?: inputActivity(view.context).window }
@@ -238,7 +239,7 @@ private tailrec fun inputActivity(context: android.content.Context): android.app
     SideEffect { latest = value; host.textComposition.update(owner, value, focused, commit) }
     fun action(ime: ImeAction, callback: (KeyboardActionScope.() -> Unit)?): KeyboardActionScope.() -> Unit = {
         commit()
-        if (callback == null) defaultKeyboardAction(ime) else callback()
+        if (callback != null) callback() else if (ime == ImeAction.Done && inDialog) endEntry() else defaultKeyboardAction(ime)
     }
     BasicTextField(value, ::update,
         Modifier.onFocusChanged {
@@ -264,7 +265,7 @@ private tailrec fun inputActivity(context: android.content.Context): android.app
     var text by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     var focused by remember { mutableStateOf(false) }
     val requester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     LaunchedEffect(value, focused) { if (!focused) text = TextFieldValue(value, TextRange(value.length)) }
     // A core type-to-search request carries text as well as focus. Apply it
     // even if another key arrived before the native field gained focus.
@@ -289,7 +290,7 @@ private tailrec fun inputActivity(context: android.content.Context): android.app
             },
             enabled = enabled, singleLine = true, textStyle = textStyle.copy(color = colors.text),
             cursorBrush = SolidColor(colors.accent), keyboardOptions = keyboardOptions.copy(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+            keyboardActions = KeyboardActions(onDone = { endEntry() }),
             decorationBox = { field ->
                 Row(Modifier.fillMaxSize().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -316,7 +317,7 @@ private tailrec fun inputActivity(context: android.content.Context): android.app
     inactiveTrackColor: Color = LocalPalette.current.input, showThumb: Boolean = true,
     activeTrackColor: Color = LocalPalette.current.accent, onPress: () -> Unit = {}, onCancel: () -> Unit = {}) {
     val colors = LocalPalette.current
-    val focus = LocalFocusManager.current
+    val endEntry = rememberEndTextEntry()
     val fill = value.coerceIn(0f, 1f)
     val current by rememberUpdatedState(fill)
     val change by rememberUpdatedState(onChange)
@@ -345,7 +346,7 @@ private tailrec fun inputActivity(context: android.content.Context): android.app
             awaitEachGesture {
                 val down = awaitFirstDown()
                 if (currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
-                down.consume(); focus.clearFocus(); press()
+                down.consume(); endEntry(); press()
                 val inset = thumb.toPx() / 2
                 var picked = Float.NaN
                 fun pick(x: Float) = ((x - inset) / maxOf(1f, size.width - 2 * inset)).coerceIn(0f, 1f)
