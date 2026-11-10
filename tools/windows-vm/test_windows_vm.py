@@ -131,7 +131,9 @@ class CheckTests(unittest.TestCase):
             progress = [{"state": "Ready", "task_result": 0, "started": True, "result": {"exit_code": 0}}]
         progress = list(progress)
         clock = [0.0]
-        stdout, stderr = Mock(buffer=io.BytesIO()), Mock(buffer=io.BytesIO())
+        stdout, stderr = [io.TextIOWrapper(io.BytesIO(), encoding="utf-8") for _ in range(2)]
+        self.addCleanup(stdout.close)
+        self.addCleanup(stderr.close)
         output_bytes = "native input passed\n日本語\n".encode()
         error_bytes = b"\x1b[31mcomplete native stderr\x1b[0m\n"
         polls, events = [], []
@@ -195,9 +197,13 @@ class CheckTests(unittest.TestCase):
                     vm.main()
                 except SystemExit as failure:
                     error = failure.code
+            stdout.flush()
+            stderr.flush()
             self.assertEqual(stdout.buffer.getvalue(), b"" if fetch_error else output_bytes)
-            self.assertEqual(stderr.buffer.getvalue(), b"" if fetch_error else error_bytes)
-            self.diagnostics = "".join(call.args[0] for call in stderr.write.call_args_list)
+            forwarded_error = b"" if fetch_error else error_bytes
+            captured_error = stderr.buffer.getvalue()
+            self.assertEqual(captured_error[:len(forwarded_error)], forwarded_error)
+            self.diagnostics = captured_error[len(forwarded_error):].decode("utf-8")
             fetch.assert_called_once()
             self.assertEqual(events, ["retrieve", "cleanup"])
             self.assertFalse(held[0])
