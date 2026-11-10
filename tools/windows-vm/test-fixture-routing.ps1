@@ -168,8 +168,12 @@ if(@($errors).Count){throw ($errors|Out-String)}
 $edgeRuns=& {
     $scripts=(Resolve-Path (Join-Path $PSScriptRoot '../../apps/layer-windows/scripts')).Path
     $runs=[ordered]@{};$debuggable=@()
-    $discovery=$ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Extent.Text -like 'foreach ($script in Get-ChildItem*'}
-    . ([scriptblock]::Create($discovery.Extent.Text))
+    $statements=@($ast.EndBlock.Statements)
+    $discovery=$statements|Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Extent.Text -like 'foreach ($script in Get-ChildItem*'}
+    $hardware=$statements|Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Variable.VariablePath.UserPath -eq 'hardwareSelector'}
+    $first=[array]::IndexOf($statements,$discovery);$last=[array]::IndexOf($statements,$hardware)
+    if($first -lt 0 -or $last -le $first){throw 'Missing actual fixture discovery/registration boundary'}
+    . ([scriptblock]::Create(($statements[$first..($last-1)]|ForEach-Object {$_.Extent.Text}) -join "`n"))
     $runs
 }
 foreach($case in @(@{option='CanvasResetOnly';journey='Check-CanvasReset'},@{option='CancelOnly';journey='Check-NativeEdgeCancel'})){
@@ -189,6 +193,98 @@ foreach($case in @(@{option='CanvasResetOnly';journey='Check-CanvasReset'},@{opt
     try{& $probe @bound|Out-Null}catch{$failure=$_.Exception.Message}
     if(!$failure -or $failure -notlike ($case.option+' requires *')){throw 'Explicit mouse must retain the native edge guard'}
     if($case.option -eq 'CancelOnly'){$bound.Device='pen';if((& $probe @bound) -ne 'pen'){throw 'Explicit pen cancellation changed'}}
+}
+& {
+    $scenarios=@('photo','photo-open','photo-collapsed','paint');$themes=@('dark','light')
+    $leaves=@($edgeRuns.Keys|Where-Object {$_ -like 'edge-reach:sweep-*'})
+    if($leaves.Count -ne 8){throw 'Sweep matrix must contain exactly eight scenario/theme leaves'}
+    $expected=@(foreach($scenario in $scenarios){foreach($theme in $themes){"edge-reach:sweep-$scenario-$theme"}})
+    if((($leaves|Sort-Object) -join ',') -cne (($expected|Sort-Object) -join ',')){throw 'Sweep matrix changed its exact scenario/theme pairs'}
+    $scoped=@($edgeRuns.Keys|Where-Object {'-SweepOnly' -in $edgeRuns[$_].arguments -or '-SweepScenario' -in $edgeRuns[$_].arguments})
+    if($scoped.Count -ne 8 -or (($scoped|Sort-Object) -join ',') -cne (($expected|Sort-Object) -join ',')){throw 'Sweep matrix retained an aggregate or raw scenario duplicate'}
+    foreach($name in @('edge-reach:SweepOnly')+@($scenarios|ForEach-Object {"edge-reach:$_"})){if($edgeRuns.Contains($name)){throw 'Sweep matrix retained a generic aggregate or raw scenario leaf'}}
+    foreach($scenario in $scenarios){foreach($theme in $themes){
+        $arguments=@($edgeRuns["edge-reach:sweep-$scenario-$theme"].arguments)
+        if(($arguments -join ',') -cne "-SweepOnly,-SweepScenario,$scenario,-Theme,$theme"){throw 'Sweep leaf lost its exact scenario/theme arguments or changed device routing'}
+    }}
+    $selection=@($ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -in '$selected','$planned'})
+    $list=@($ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.IfStatementAst] -and $_.Clauses[0].Item1.Extent.Text -eq '$List'})
+    if($selection.Count -ne 2 -or $list.Count -ne 1){throw 'Missing actual fixture selection/List path'}
+    $listBody=@($list[0].Clauses[0].Item2.Statements|Where-Object {$_ -isnot [Management.Automation.Language.ExitStatementAst]})
+    $listCode=(($selection+$listBody)|ForEach-Object {$_.Extent.Text}) -join "`n"
+    foreach($request in @($null,'edge-reach:SweepOnly','edge-reach:SweepOnly,edge-reach:sweep-photo-dark,edge-reach:SweepOnly')){
+        $plan=& {$runs=$edgeRuns;$Name=$request;$List=$true;. ([scriptblock]::Create($listCode))}|ConvertFrom-Json
+        $plannedLeaves=@($plan.runs|Where-Object {$_ -like 'edge-reach:sweep-*'})
+        if($plannedLeaves.Count -ne 8 -or (($plannedLeaves|Sort-Object) -join ',') -cne (($expected|Sort-Object) -join ',')){throw 'Actual List plan lost or duplicated a sweep scenario/theme pair'}
+        if($request -and @($plan.runs).Count -ne 8){throw 'Legacy SweepOnly alias expanded beyond the exact eight leaves'}
+        foreach($name in $expected){if($null -eq $plan.requirements.$name){throw 'Actual List omitted a sweep requirement entry'}}
+    }
+    $selected=@(Select-Fixtures @($edgeRuns.Keys) @('edge-reach:SweepOnly'))
+    $deduplicated=@(Select-Fixtures @($edgeRuns.Keys) (@('edge-reach:SweepOnly')+$expected+@('edge-reach:SweepOnly')))
+    if(($selected -join ',') -cne ($deduplicated -join ',')){throw 'Legacy SweepOnly alias and explicit leaves did not deduplicate in inventory order'}
+    $scenarioParameter=@($edgeAst.ParamBlock.Parameters|Where-Object {$_.Name.VariablePath.UserPath -eq 'SweepScenario'})
+    $choices=@($scenarioParameter.Attributes|Where-Object {$_.TypeName.Name -eq 'ValidateSet'}|ForEach-Object {$_.PositionalArguments.Value})
+    if($scenarioParameter.Count -ne 1 -or ($choices -join ',') -cne ($scenarios -join ',')){throw 'SweepScenario must retain its four actual validated choices'}
+    $normalizers=@($edgeAst.EndBlock.Statements|Where-Object {
+        $_ -is [Management.Automation.Language.IfStatementAst] -and @($_.FindAll({param($n)$n -is [Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -in 'SweepScenario','Device'},$true)).Count
+    })
+    $sweep=$edgeAst.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Check-ReachSweep'},$false)
+    $scenarioInit=@($sweep.Body.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$scenarios'})
+    $themeInit=@($edgeAst.FindAll({param($n)$n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$themes'},$true))
+    if($scenarioInit.Count -ne 1 -or $themeInit.Count -ne 1){throw 'Missing actual sweep scenario/theme initializer'}
+    $probeStatements=@($normalizers)+@($scenarioInit)+@($themeInit)
+    $probe=[scriptblock]::Create($edgeAst.ParamBlock.Extent.Text+"`n"+(($probeStatements|ForEach-Object {$_.Extent.Text}) -join "`n")+"`n"+'[pscustomobject]@{sweep=[bool]$SweepOnly;device=$Device;scenarios=@($scenarios);themes=@($themes)}')
+    $direct=& $probe -Executable 'C:\owned\CapyCanvas.exe' -SweepOnly
+    if(!$direct.sweep -or $direct.device -cne 'mouse' -or ($direct.scenarios -join ',') -cne ($scenarios -join ',') -or ($direct.themes -join ',') -cne ($themes -join ',')){throw 'Direct SweepOnly lost its original four scenarios/two-theme order or device default'}
+    foreach($scenario in $scenarios){
+        $implied=& $probe -Executable 'C:\owned\CapyCanvas.exe' -SweepScenario $scenario
+        if(!$implied.sweep -or ($implied.scenarios -join ',') -cne $scenario -or ($implied.themes -join ',') -cne ($themes -join ',')){throw 'Binding SweepScenario did not imply one-scenario SweepOnly with original default themes'}
+    }
+    $rejected=$false;try{& $probe -Executable 'C:\owned\CapyCanvas.exe' -SweepScenario 'unknown'|Out-Null}catch{$rejected=$true}
+    if(!$rejected){throw 'SweepScenario accepted an unregistered scenario'}
+    $reach=$edgeAst.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reach-Samples'},$false)
+    if(!$reach){throw 'Missing actual Reach-Samples helper'}
+    . ([scriptblock]::Create($reach.Extent.Text))
+    function Layout{$coverageLayout}
+    $layouts=@{};$index=0
+    foreach($scenario in $scenarios){foreach($theme in $themes){
+        $offset=$index*3;$left=if($index -eq 0){18}else{42};$id=100+$index*10
+        $layouts["$theme/$scenario"]=[pscustomobject]@{viewport=@((300+$offset),200);dividers=@(
+            [pscustomobject]@{id=$id;axis='horizontal';owner_side='left';fixed=$false;bounds=@{x=$left;y=20;width=6;height=120}},
+            [pscustomobject]@{id=($id+1);axis='horizontal';owner_side='right';fixed=$false;bounds=@{x=(200+$offset);y=20;width=6;height=72}},
+            [pscustomobject]@{id=($id+2);axis='vertical';owner_side='top';fixed=$false;bounds=@{x=(12+$offset);y=40;width=120;height=6}},
+            [pscustomobject]@{id=($id+3);axis='horizontal';owner_side='left';fixed=$true;bounds=@{x=80;y=0;width=6;height=100}},
+            [pscustomobject]@{id=($id+4);axis='vertical';owner_side=$null;fixed=$false;bounds=@{x=0;y=80;width=120;height=6}}
+        )};$index++
+    }}
+    $legacy=@{};$legacyUnion=[Collections.Generic.List[string]]::new()
+    foreach($theme in $direct.themes){foreach($scenario in $direct.scenarios){
+        $key="$theme/$scenario";$coverageLayout=$layouts[$key]
+        $legacy[$key]=@(Reach-Samples|ForEach-Object {@($_.divider,$_.axis,$_.depth,$_.x,$_.y,$_.dx,$_.dy) -join '|'})
+        if($legacy[$key].Count -ne $(if($key -eq 'dark/photo'){21}else{27})){throw 'Synthetic sweep layout lost viewport-edge, axis, fixed or owner filtering coverage'}
+        foreach($tuple in $legacy[$key]){$legacyUnion.Add($key+'|'+$tuple)}
+    }}
+    $actualUnion=[Collections.Generic.List[string]]::new();$visited=[Collections.Generic.List[string]]::new()
+    foreach($name in $selected){
+        $bound=@{Executable='C:\owned\CapyCanvas.exe'};$arguments=@($edgeRuns[$name].arguments)
+        for($i=0;$i -lt $arguments.Count;$i++){
+            $parameter=$arguments[$i].TrimStart('-')
+            if($i+1 -lt $arguments.Count -and !$arguments[$i+1].StartsWith('-')){$i++;$bound[$parameter]=$arguments[$i]}else{$bound[$parameter]=$true}
+        }
+        $case=& $probe @bound
+        if(!$case.sweep -or $case.device -cne 'mouse' -or $case.scenarios.Count -ne 1 -or $case.themes.Count -ne 1){throw 'Registered sweep arguments did not bind exactly one original case'}
+        foreach($theme in $case.themes){foreach($scenario in $case.scenarios){
+            $key="$theme/$scenario"
+            if(!$legacy.ContainsKey($key) -or $visited.Contains($key)){throw 'Registered sweep path repeated or invented a scenario/theme case'}
+            $visited.Add($key);$coverageLayout=$layouts[$key]
+            $actual=@(Reach-Samples|ForEach-Object {@($_.divider,$_.axis,$_.depth,$_.x,$_.y,$_.dx,$_.dy) -join '|'})
+            if($actual.Count -ne $legacy[$key].Count -or ($actual -join "`n") -cne ($legacy[$key] -join "`n")){throw 'Registered sweep changed sample tuple order or multiplicity within a case'}
+            foreach($tuple in $actual){$actualUnion.Add($key+'|'+$tuple)}
+        }}
+    }
+    if($visited.Count -ne 8 -or $actualUnion.Count -ne $legacyUnion.Count -or (($actualUnion|Sort-Object) -join "`n") -cne (($legacyUnion|Sort-Object) -join "`n")){throw 'Sweep leaf union lost or repeated original theme/scenario sample identities'}
+    if(@($actualUnion|Select-Object -Unique).Count -ne $actualUnion.Count){throw 'Sweep leaf union duplicated a generated sample identity within one case'}
+    'Sweep leaves preserve exact eight-case routing, List/alias selection, manual defaults and actual generated sample coverage.'
 }
 & {
     $localization=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../../apps/layer-windows/scripts/exercise-localization.ps1'),[ref]$tokens,[ref]$errors)
@@ -364,13 +460,7 @@ try{
     if(!$rejected){throw 'A stale shipped resource silently rebuilt or passed'}
     $priorityAssignments=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -like '*PriorityClass'},$true))
     if($priorityAssignments.Count -ne 1 -or $priorityAssignments[0].Left.Extent.Text -ne '$process.PriorityClass'){throw 'Only the fixture input driver process should receive High priority'}
-    $all=@(& {
-        $scripts=(Resolve-Path (Join-Path $PSScriptRoot '../../apps/layer-windows/scripts')).Path
-        $runs=[ordered]@{shortcuts=$null};$debuggable=@()
-        $discovery=$ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Extent.Text -like 'foreach ($script in Get-ChildItem*'}
-        . ([scriptblock]::Create($discovery.Extent.Text))
-        $runs.Keys
-    })
+    $all=@('shortcuts')+@($edgeRuns.Keys)
     foreach($case in @(@{names=$null;controls='Feedback,LayerDrop,Popup'},@{names='navigator:default';controls='';runs=@('navigator')},@{names='button-feedback:default,popup:default';controls='Feedback,Popup'},@{names='layer-pickup:default';controls='LayerDrop'},@{names='smoke';controls='LayerDrop,Popup';runs=$smoke},@{names='smoke,popup:default';controls='LayerDrop,Popup';runs=$smoke},@{names='smoke,navigator:PixelsOnly';controls='LayerDrop,Popup';runs=$smokeExtended})){
         $selection=@{};if($case.names){$selection.Name=$case.names}
         $json=& (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'run-fixtures.ps1') -Executable 'C:\not-built\CapyCanvas.exe' -Output $cacheRun @selection -List

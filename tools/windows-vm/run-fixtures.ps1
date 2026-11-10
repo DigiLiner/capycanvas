@@ -165,6 +165,13 @@ foreach ($script in Get-ChildItem (Join-Path $scripts 'exercise-*.ps1')) {
         foreach ($choice in $choices | Where-Object { $null -ne $_ -and $_ -ne $parameter.DefaultValue.Value }) { $runs["${fixture}:$choice"] = @{arguments=@(Get-FixtureVariantArguments $fixture $option $choice);hardware_gpu=$false} }
     }
 }
+$runs.Remove('edge-reach:SweepOnly')
+foreach($scenario in 'photo','photo-open','photo-collapsed','paint'){
+    $runs.Remove("edge-reach:$scenario")
+    foreach($theme in 'dark','light'){
+        $runs["edge-reach:sweep-$scenario-$theme"]=@{arguments=@('-SweepOnly','-SweepScenario',$scenario,'-Theme',$theme);hardware_gpu=$false}
+    }
+}
 foreach($hardwareSelector in @('drawers','drawers:light','toolbars:light','idle-brush','idle-brush:light','touch-gestures','touch-gestures:Simple','touch-gestures:SimpleLight','touch-gestures:ThreeFinger','touch-gestures:layers','localization:ColorOnly','tool-variations:sketch','tool-variations:sketch-light','color-picker:light','tool-bubbles:EraserOnly','tool-bubbles:EraserLightOnly','tool-bubbles:blenders-dark','tool-bubbles:blenders-light','tool-bubbles:BlendersOnly','tool-bubbles:sliders-dark','tool-bubbles:sliders-light','tool-bubbles:SlidersOnly')){
     if(!$runs.Contains($hardwareSelector)){throw "Unknown hardware fixture: $hardwareSelector"}
     $runs[$hardwareSelector].hardware_gpu=$true
@@ -188,6 +195,7 @@ function Select-Fixtures([string[]]$Available,[string[]]$Requested) {
     $Requested=@($Requested|ForEach-Object {
         switch($_){
             'header-settings'{'header:catalog-only';'header:catalog-only-light'}
+            'edge-reach:SweepOnly'{foreach($scenario in 'photo','photo-open','photo-collapsed','paint'){foreach($theme in 'dark','light'){"edge-reach:sweep-$scenario-$theme"}}}
             'smoke'{
                 'activation:default','canvas-editing:smoke','canvas-editing:smoke-light','clipboard:default',
                 'color-editor:light','column-stacks:touch','documents:new-drawing','documents:native-writeback-light',

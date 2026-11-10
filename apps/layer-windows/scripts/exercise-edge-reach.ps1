@@ -1,5 +1,6 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[switch]$ColumnResetOnly,[switch]$CanvasResetOnly,[switch]$ClosedStripOnly,[switch]$LayerRowOnly,[switch]$CancelOnly,[switch]$EdgeEscapeOnly,[switch]$NumericOnly,[switch]$ControlRoleOnly,[switch]$SweepOnly,[ValidateSet('dark','light')][string]$Theme)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[switch]$ColumnResetOnly,[switch]$CanvasResetOnly,[switch]$ClosedStripOnly,[switch]$LayerRowOnly,[switch]$CancelOnly,[switch]$EdgeEscapeOnly,[switch]$NumericOnly,[switch]$ControlRoleOnly,[switch]$SweepOnly,[ValidateSet('photo','photo-open','photo-collapsed','paint')][string]$SweepScenario,[ValidateSet('dark','light')][string]$Theme)
 $ErrorActionPreference='Stop'
+if($SweepScenario){$SweepOnly=$true}
 if(($CanvasResetOnly -or $CancelOnly) -and !$PSBoundParameters.ContainsKey('Device')){$Device='touch'}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyPopups=$true
@@ -155,7 +156,7 @@ function Append-SweepRow($Row){
 }
 function Check-ReachSweep([string]$Theme){
     $rows=[Collections.Generic.List[object]]::new()
-    $scenarios='photo','photo-open','photo-collapsed','paint'
+    $scenarios=if($SweepScenario){@($SweepScenario)}else{@('photo','photo-open','photo-collapsed','paint')}
     foreach($scenario in $scenarios){
         Start-Review $Theme ($Theme+'-'+$scenario)
         if($scenario -like 'photo*'){Use-Workspace 'builtin:workspace:photographer' 'Photo'}else{Use-PaintWorkspace}

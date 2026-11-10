@@ -445,9 +445,12 @@ Use `fixtures --runners N <areas>` for matrices across the reserved
 [CPU runner pool](windows-vm.md#cpu-runner-pool).
 Run changed UI in both themes, and input changes with each device.
 
-`exercise-edge-reach.ps1 -SweepOnly` samples edge reach bands, group gaps and
-empty closed-strip space in Photo, Photo with both columns closed, and Paint.
-Run it with each `-Device` and both `-Theme` values.
+`fixtures edge-reach:SweepOnly` runs eight scenario/theme rows covering Photo,
+open and closed Photo columns, and Paint in both themes. Direct
+`exercise-edge-reach.ps1 -SweepOnly -SweepScenario photo -Theme dark` selects one
+group; omitting `-SweepScenario` keeps all four scenarios. Samples cover edge
+reach bands, group gaps and empty closed-strip space. Run direct checks with
+each `-Device` and both `-Theme` values.
 
 Run `gh workflow run windows-readiness.yml -f source_ref=<commit-sha>` for x64
 WARP fixtures on hosted Windows VMs; its `fixtures` input takes a JSON array
