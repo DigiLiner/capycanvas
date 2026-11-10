@@ -345,8 +345,10 @@ color-features-export-format-pq = HDR PNG · BT.2020 PQ
 color-features-export-format-pq-clipped = HDR PNG · dipotong ke rentang PQ
 
 color-features-export-format-jpeg-hdr = HDR JPEG
+color-features-export-format-jpeg-hdr-clipped = HDR JPEG · dipotong ke rentang peta penguatan
 
 color-features-export-format-avif-hdr = HDR AVIF dengan transparansi
+color-features-export-format-avif-hdr-clipped = HDR AVIF · dipotong ke rentang peta penguatan
 
 color-features-export-jpeg-gainmap = HDR JPEG · peta penguatan
 

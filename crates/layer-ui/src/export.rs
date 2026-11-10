@@ -28,8 +28,10 @@ impl ExportFormat {
             Self::Png => M::COLOR_FEATURES_EXPORT_FORMAT_PNG, Self::Tiff => M::COLOR_FEATURES_EXPORT_FORMAT_TIFF,
             Self::Jpeg => M::COLOR_FEATURES_EXPORT_FORMAT_JPEG, Self::Webp => M::COLOR_FEATURES_EXPORT_FORMAT_WEBP,
             Self::PngHdr => M::COLOR_FEATURES_EXPORT_FORMAT_PQ, Self::PngHdrMapped => M::COLOR_FEATURES_EXPORT_FORMAT_PQ_CLIPPED,
-            Self::JpegHdr | Self::JpegHdrMapped => M::COLOR_FEATURES_EXPORT_FORMAT_JPEG_HDR,
-            Self::AvifHdr | Self::AvifHdrMapped => M::COLOR_FEATURES_EXPORT_FORMAT_AVIF_HDR })
+            Self::JpegHdr => M::COLOR_FEATURES_EXPORT_FORMAT_JPEG_HDR,
+            Self::JpegHdrMapped => M::COLOR_FEATURES_EXPORT_FORMAT_JPEG_HDR_CLIPPED,
+            Self::AvifHdr => M::COLOR_FEATURES_EXPORT_FORMAT_AVIF_HDR,
+            Self::AvifHdrMapped => M::COLOR_FEATURES_EXPORT_FORMAT_AVIF_HDR_CLIPPED })
     }
     pub fn is_hdr(self) -> bool { matches!(self, Self::Exr | Self::PngHdr | Self::PngHdrMapped | Self::JpegHdr | Self::JpegHdrMapped | Self::AvifHdr | Self::AvifHdrMapped) }
     pub fn maps_hdr_range(self) -> bool { matches!(self, Self::PngHdrMapped | Self::JpegHdrMapped | Self::AvifHdrMapped) }
@@ -645,6 +647,40 @@ impl ExportForm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn export_choice_labels_are_unique_across_languages_and_document_depths() {
+        fn unique<T>(choices: &[ExportChoice<T>], context: &str, list: &str) {
+            let mut labels = std::collections::HashSet::new();
+            for choice in choices {
+                assert!(!choice.label.trim().is_empty(), "{context}/{list}: empty label");
+                assert!(labels.insert(choice.label.as_ref()), "{context}/{list}: duplicate label {:?}", choice.label);
+            }
+        }
+        for language in crate::UiLanguage::ALL {
+            let localizer = crate::Localizer::shared(language);
+            for depth in [SampleDepth::U8, SampleDepth::U16, SampleDepth::F16, SampleDepth::F32] {
+                let color = DocumentColor { space: RgbSpace::Srgb, depth };
+                for format in [ExportFormat::Png, ExportFormat::Tiff, ExportFormat::Jpeg, ExportFormat::Webp,
+                    ExportFormat::Exr, ExportFormat::PngHdr, ExportFormat::PngHdrMapped,
+                    ExportFormat::JpegHdr, ExportFormat::JpegHdrMapped, ExportFormat::AvifHdr, ExportFormat::AvifHdrMapped] {
+                    let recipe = ExportRecipe { format, ..ExportRecipe::web_share() };
+                    for (entry, draft) in [
+                        ("draft_localized", recipe.clone().draft_localized(ExportDraftAction::Refresh, &localizer)),
+                        ("draft_for_color_localized", recipe.draft_for_color_localized(color, ExportDraftAction::Refresh, &localizer)),
+                    ] {
+                        let context = format!("{language:?}/{depth:?}/{format:?}/{entry}");
+                        unique(&draft.choices.formats, &context, "formats");
+                        unique(&draft.choices.depths, &context, "depths");
+                        unique(&draft.choices.backgrounds, &context, "backgrounds");
+                        unique(&draft.choices.dithers, &context, "dithers");
+                        unique(&draft.choices.intents, &context, "intents");
+                        unique(&draft.choices.resolutions, &context, "resolutions");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn export_draft_projects_format_policy_and_preserves_authored_values() {
         for (format, quality, conversion) in [
