@@ -1094,7 +1094,7 @@ function Native-Bounds([string]$Id,[double]$Scale,[switch]$Group,$Snapshot=$null
     Wait-Until {
         $workspace=Workspace-Root
         if(!$workspace){return $false}
-        $presentation=$workspace.Current.ItemStatus|ConvertFrom-Json
+        $presentation=if($Snapshot){$Snapshot}else{$workspace.Current.ItemStatus|ConvertFrom-Json}
         $records=if($Group){$presentation.groups}else{$presentation.elements}
         $hit.record=@($records|Where-Object id -eq $Id)[0]
         $bounds=if($Group){$hit.record.bounds}else{$hit.record.actual_bounds}

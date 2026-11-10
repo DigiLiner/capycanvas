@@ -98,6 +98,7 @@ namespace CapyOwnedSearchTest {
   public static bool SetForegroundWindow(IntPtr window){Foreground=window;Activations++;return true;}
   public static IntPtr GetForegroundWindow(){return Foreground;}
  }
+ public static class Clock{public static long GetTimestamp(){return 100;}}
  public static class GeometryDriver{public static int GetDpiForWindow(IntPtr window){return 144;}}
  public class Node {
   public string AutomationId,Name;public object ControlType="control";public int ProcessId;bool offscreen;Rect bounds;public Node Parent;public Scroll Provider,TargetScroll;public int? ContentY;public bool UnclippedBounds;
@@ -513,19 +514,31 @@ if(@($errors).Count){throw ($errors|Out-String)}
 $scopesReveal=@($scopesAst.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reveal-Chart'},$true))
 if($scopesReveal.Count -ne 1){throw 'Missing actual scopes Reveal-Chart helper'}
 & {
-    . ([scriptblock]::Create($scopesReveal[0].Extent.Text.Replace('System.Windows.Automation.','CapyOwnedSearchTest.').Replace('[CapyRowPointer]','[CapyOwnedSearchTest.Driver]')))
+    . ([scriptblock]::Create($scopesReveal[0].Extent.Text.Replace('System.Windows.Automation.','CapyOwnedSearchTest.').Replace('[CapyRowPointer]','[CapyOwnedSearchTest.Driver]').Replace('[Diagnostics.Stopwatch]','[CapyOwnedSearchTest.Clock]')))
     $drawingWindow=[IntPtr]1
     $viewport=[CapyOwnedSearchTest.Node]::new('panel-body-scroll-14',33,0,0)
     $viewport.BoundingRectangle=[CapyOwnedSearchTest.Rect]::new(0,0,100,100);$viewport.Provider=[CapyOwnedSearchTest.Scroll]::new()
     $chart=[CapyOwnedSearchTest.Node]::new('histogram-chart',33,0,60);$chart.Parent=$viewport
     $chart.BoundingRectangle=[CapyOwnedSearchTest.Rect]::new(0,60,80,40)
-    $state=@{arranged=[CapyOwnedSearchTest.Rect]::new(0,60,80,80);waits=0}
+    $state=@{arranged=[CapyOwnedSearchTest.Rect]::new(0,60,80,80);qpc=90;waits=0}
     function Control([string]$Id){if($Id -ne 'histogram-chart'){throw 'Unexpected scopes target'};$chart}
-    function Native-Bounds([string]$Id,[double]$Scale){if($Id -ne 'histogram-chart' -or $Scale -ne 1){throw 'Unexpected scopes native bounds request'};$state.arranged}
+    function Workspace-Root{[pscustomobject]@{Current=[pscustomobject]@{ItemStatus=(@{snapshot_qpc=$state.qpc}|ConvertTo-Json -Compress)}}}
+    function Native-Bounds([string]$Id,[double]$Scale,$Snapshot=$null){
+        if($Id -ne 'histogram-chart' -or $Scale -ne 1){throw 'Unexpected scopes native bounds request'}
+        if($Snapshot -and $Snapshot.snapshot_qpc -ne $state.qpc){throw 'Scopes bounds did not use the acknowledged snapshot'}
+        $state.arranged
+    }
     function Start-Sleep([int]$Milliseconds){if($Milliseconds -ne 200){throw 'Unexpected scopes sleep'}}
     function Wait-Until([scriptblock]$Condition,[string]$Message){
         $state.waits++
         if(& $Condition){throw 'Scopes Reveal-Chart accepted clipped UIA bounds as its scroll acknowledgment'}
+        $state.arranged=[CapyOwnedSearchTest.Rect]::new(0,16,80,80)
+        foreach($qpc in @(0,90,100)){
+            $state.qpc=$qpc
+            if(& $Condition){throw 'Scopes Reveal-Chart accepted pre-request native bounds'}
+        }
+        $state.qpc=101;$state.arranged=[CapyOwnedSearchTest.Rect]::new(0,60,80,80)
+        if(& $Condition){throw 'Scopes Reveal-Chart accepted a fresh clipped chart'}
         $state.arranged=[CapyOwnedSearchTest.Rect]::new(0,16,80,80)
         if(!(& $Condition)){throw $Message}
     }

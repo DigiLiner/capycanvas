@@ -106,8 +106,14 @@ function Reveal-Chart([string]$Id){
     $range=$view.Height*(100/$scroll.Current.VerticalViewSize-1)
     if($range -gt 0 -and ($target.IsEmpty -or $target.Bottom -gt $view.Bottom)){
         $offset=if($target.IsEmpty){$range}else{$target.Bottom-$view.Bottom+4}
+        $requested=[Diagnostics.Stopwatch]::GetTimestamp()
         $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,[Math]::Min(100,100*$offset/$range))
-        Wait-Until {$box=Native-Bounds $Id $scale;!$box.IsEmpty -and $box.Bottom -le $view.Bottom+1} "$Id did not scroll into view"
+        Wait-Until {
+            $presentation=(Workspace-Root).Current.ItemStatus|ConvertFrom-Json
+            if($presentation.snapshot_qpc -le $requested){return $false}
+            $box=Native-Bounds $Id $scale -Snapshot $presentation
+            !$box.IsEmpty -and $box.Bottom -le $view.Bottom+1
+        } "$Id did not scroll into view"
     }
     $view
 }
