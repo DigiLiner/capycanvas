@@ -105,12 +105,15 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
         } catch(...) {if(!stopping)failure();}
         picker=nullptr;showing=false;changed();
     }
+    CanvasModelInputs inputs;bool wasBlocked=false;
     void apply(J const& snapshot,J const& bootstrap,bool blocked) {
-        data->adoptLocalization(snapshot);model=snapshot;copy=bootstrap;data->state=object(snapshot,L"state");data->refreshPalette();
+        data->adoptLocalization(snapshot);model=snapshot;data->model=snapshot;data->state=branch(snapshot,L"state");
+        bool nativeChanged=copy!=bootstrap||wasBlocked!=blocked;copy=bootstrap;wasBlocked=blocked;
+        auto presentation=data->presentation(inputs,nativeChanged);if(!presentation)return;data->refreshPalette();
         if(dialog)dialogSurface(data,dialog);
         message.FontSize(data->textSize());for(auto control:{retry,saveNew,backup}){control.FontSize(data->textSize());control.CornerRadius(data->controlCorner());}
         buttonCaption(retry,text(L"retry"));buttonCaption(saveNew,text(L"save_as_new_workspace"));buttonCaption(backup,text(L"export_backup"));
-        auto storage=object(model,L"windows_workspace");
+        auto storage=branch(model,L"windows_workspace");
         if(!storage.Size())return;
         auto error=str(storage,L"error"),notice=str(storage,L"notice");
         hstring status=error;
@@ -127,7 +130,7 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
             }
             return;
         }
-        auto palette=object(object(model,L"state"),L"palette");
+        auto palette=object(branch(model,L"state"),L"palette");
         root.Background(data->brush(L"bg"));
         message.Foreground(fill(color(str(palette,L"text",L"#fafafb"))));
         Canvas::SetZIndex(root,error.empty()?0:1300);

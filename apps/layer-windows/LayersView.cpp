@@ -215,7 +215,7 @@ void LayersView::init(){
 }
 void LayersView::refresh(){
     CapyEffects::Updating updating(data);
-    auto panel=find(array(data->model,L"panels"),L"id",L"layers");
+    auto panel=find(data->model,L"panels",L"id",L"layers");
     auto shown=[&](wchar_t const* control){return flag(find(array(panel,L"controls"),L"control",control),L"visible_in_panel",true);};
     bool rowsShown=shown(L"layers"),opacityShown=shown(L"layer_opacity");
     header.Visibility(full&&(rowsShown||opacityShown)?Visibility::Visible:Visibility::Collapsed);

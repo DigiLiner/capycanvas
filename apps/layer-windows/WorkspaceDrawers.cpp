@@ -102,7 +102,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
             orderPanelTabs(strip.Content().as<StackPanel>(),array(object(model,L"tabs"),L"panels"),column.tabs);
         }
         for(auto const& column:columns)for(auto const& update:column.paintIcons)update();
-        for(auto& [panel,body]:bodies)if(body.view)body.view->Apply(active(panel));
+        for(auto& [panel,body]:bodies)if(body.view)body.view->Apply(active(panel),changedModel);
         if(inspector&&model.HasKey(L"layer_properties")){inspector->properties->Apply(flag(model,L"layer_properties"));refreshInspector();if(inspectorSizingKey()!=inspector->sizingKey)wake();}
         frame.IsHitTestVisible(!closing);bridge.IsHitTestVisible(!closing);
         if(!closing)drive();

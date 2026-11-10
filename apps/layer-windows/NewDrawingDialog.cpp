@@ -181,7 +181,7 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
 
     void open(J const& envelope){
         request=num(envelope,L"id");
-        auto file=object(object(data->model,L"state"),L"document_file");
+        auto file=object(branch(data->model,L"state"),L"document_file");
         epoch=num(file,L"epoch");revision=num(file,L"revision");
         HWND handle=nullptr;check_hresult(window.as<IWindowNative>()->get_WindowHandle(&handle));
         if(IsIconic(handle))ShowWindow(handle,SW_RESTORE);
@@ -192,8 +192,8 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
     }
     void apply(){
         if(!waiting)return;
-        auto state=object(data->model,L"state");
-        auto view=state.GetNamedValue(L"new_drawing",JsonValue::CreateNullValue());
+        auto state=branch(data->model,L"state");
+        auto view=named(state,L"new_drawing");
         bool pending=false;for(auto value:array(state,L"requests"))pending|=num(value.GetObject(),L"id")==request;
         if(view.ValueType()==JsonValueType::Object){
             seen=true;

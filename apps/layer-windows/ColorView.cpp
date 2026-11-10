@@ -546,9 +546,12 @@ struct View:std::enable_shared_from_this<View>{
         for(;index<captionGlyphs.size();index++)captionGlyphs[index].image.Visibility(Visibility::Collapsed);
     }
     void refresh(){
-        auto view=model();if(!view.Size()||!root.XamlRoot())return;
-        auto nextContext=editingContext();if(context!=nextContext){cancel();context=nextContext;}
-        if(arcCapture&&arcCapture->Active()&&arcContext!=intensityContext())cancelArc();
+        auto view=model(),colors=paintColors();
+        auto nextContext=editingContext(),nextIntensityContext=intensityContext();
+        auto theme=data->theme(),language=data->language();auto textBrush=data->brush(L"text");
+        if(!view.Size()||!root.XamlRoot())return;
+        if(context!=nextContext){cancel();context=nextContext;}
+        if(arcCapture&&arcCapture->Active()&&arcContext!=nextIntensityContext)cancelArc();
         double scale=root.XamlRoot().RasterizationScale();
         bool hdr=flag(view,L"hdr");
         double available=std::floor(root.ActualWidth()*scale)/scale,height=fitHeight?root.ActualHeight():0;
@@ -576,12 +579,12 @@ struct View:std::enable_shared_from_this<View>{
                 auto swatchBox=array(layout,slots[i]);placeBox(swatches[i],swatchBox);
             }
         }
-        auto icons=data->theme()+data->language()+array(view,L"other_shapes").Stringify();
+        auto icons=theme+language+array(view,L"other_shapes").Stringify();
         if(icons!=iconKey){
-            iconKey=icons;swapGlyph.Source(icon(L"color-swap",data->theme()).Source());
+            iconKey=icons;swapGlyph.Source(icon(L"color-swap",theme).Source());
             for(int i=0;i<2;i++){
                 auto shape=array(view,L"other_shapes").GetStringAt(i);Grid content;Shapes::Ellipse hit;hit.Fill(clear());content.Children().Append(hit);
-                auto glyph=colorIcon(shape,shapeHovered[i]?accent(data):data->brush(L"text"));
+                auto glyph=colorIcon(shape,shapeHovered[i]?accent(data):textBrush);
                 RotateTransform rotation;rotation.CenterX(8);rotation.CenterY(8);rotation.Angle(array(layout,L"shape_rotations").GetNumberAt(i));
                 for(auto child:glyph.Children())child.as<Shapes::Path>().Data().Transform(rotation);
                 content.Children().Append(glyph);shapes[i].Content(content);shapeGlyphs[i]=glyph;
@@ -589,10 +592,10 @@ struct View:std::enable_shared_from_this<View>{
                 AutomationProperties::SetName(shapes[i],title);tooltip(shapes[i],title);
             }
         }
-        for(int i=0;i<2;i++)for(auto child:shapeGlyphs[i].Children())child.as<Shapes::Path>().Stroke(shapeHovered[i]?accent(data):data->brush(L"text"));
-        swapFill.Fill(buttonFeedbackBrush(swap,data->brush(L"text"),31,41));
+        for(int i=0;i<2;i++)for(auto child:shapeGlyphs[i].Children())child.as<Shapes::Path>().Stroke(shapeHovered[i]?accent(data):textBrush);
+        swapFill.Fill(buttonFeedbackBrush(swap,textBrush,31,41));
         bool editable=!transparentSlot();edit.IsEnabled(editable);edit.Opacity(editable?1.:.36);
-        editFill.Fill(buttonFeedbackBrush(edit,data->brush(L"text"),31,41));
+        editFill.Fill(buttonFeedbackBrush(edit,textBrush,31,41));
         updateArc(view);
         const std::array<hstring,3> slots{L"background",L"foreground",L"transparent"};
         auto front=str(view,L"front_swatch");
@@ -601,14 +604,13 @@ struct View:std::enable_shared_from_this<View>{
             int z=slots[i]==front?1:0;
             if(Canvas::GetZIndex(swatches[i])!=z)Canvas::SetZIndex(swatches[i],z);
             bool selected=flag(swatch,L"selected");
-            swatchFaces[i].feedback.Fill(buttonFeedbackBrush(swatches[i],data->brush(L"text")));
+            swatchFaces[i].feedback.Fill(buttonFeedbackBrush(swatches[i],textBrush));
             swatchFaces[i].Update(data,array(swatch,L"rgba"),array(layout,slots[i].c_str()).GetNumberAt(2),scale,selected,i==1,hovered[i]);
             AutomationProperties::SetName(swatches[i],str(swatch,L"label"));AutomationProperties::SetItemStatus(swatches[i],selected?data->caption(L"search",L"selected"):L"");
         }
         auto nextKey=view.Stringify()+to_hstring(side)+L"/"+to_hstring(scale);
         if(nextKey!=key){
             try{
-                auto colors=paintColors();
                 drawing.present(image,view,colors,side,scale);
                 data->colorFieldPixels=drawing.fieldPixels;
                 key=nextKey;drawError.Visibility(Visibility::Collapsed);AutomationProperties::SetItemStatus(image,data->caption(L"header",L"ready"));

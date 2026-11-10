@@ -176,6 +176,7 @@ private:
         NativeModelUpdates modelUpdates;
         CanvasModelUpdate models;
         uint32_t unappliedSections=0;
+        CanvasModelChanges unappliedChanges;
         winrt::Windows::Data::Json::JsonObject pendingLocalization{nullptr};
         void Close(){pending.Close();replies.clear();}
         void Reply(std::function<void()> deliver){
@@ -192,6 +193,7 @@ private:
         winrt::Windows::Data::Json::JsonObject full{nullptr},layout{nullptr},workspace{nullptr},camera{nullptr},search{nullptr},localization{nullptr},glass{nullptr};
         NativeLayoutInput fullInput,reflowInput;
         uint32_t sections=CanvasAllSections;
+        CanvasModelChanges changes;
     };
     std::shared_ptr<SnapshotState> snapshots=std::make_shared<SnapshotState>();
     winrt::Microsoft::UI::Xaml::Media::CompositionTarget::Rendered_revoker glassFrame;
@@ -204,10 +206,11 @@ private:
         winrt::Microsoft::UI::Dispatching::DispatcherQueue,std::weak_ptr<CanvasWindow>,CanvasSnapshotMailbox::Batch);
     bool ApplyPending(PreparedSnapshots);
     void FailPresentation(std::string);
-    bool ApplyModel(winrt::Windows::Data::Json::JsonObject const&,NativeLayoutInput,uint32_t sections=CanvasAllSections);
+    bool ApplyModel(winrt::Windows::Data::Json::JsonObject const&,NativeLayoutInput,uint32_t sections=CanvasAllSections,CanvasModelChanges const& changes={true});
+    CanvasModelInputs windowInputs,captionInputs;
     void Popup(bool open);
     void UpdatePopup();
-    void ApplyDialogs();
+    void ApplyDialogs(CanvasModelChanges const* changes=nullptr);
     bool ModalOpen()const;
     void RequestClose();
     void ChromeMotion(winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&,bool leave=false);

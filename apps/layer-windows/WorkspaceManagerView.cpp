@@ -373,7 +373,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             AutomationProperties::SetName(row.pin,str(pin,L"label"));tooltip(row.pin,str(pin,L"label"));
 
             row.current.Visibility(configurable&&flag(data,L"current")?Visibility::Visible:Visibility::Collapsed);
-            auto theme=str(object(snapshot,L"state"),L"theme",L"dark"),glyph=str(pin,L"icon",L"pin");
+            auto theme=str(branch(snapshot,L"state"),L"theme",L"dark"),glyph=str(pin,L"icon",L"pin");
             if(theme!=row.theme||glyph!=row.pinGlyph){row.pinGlyph=glyph;setIcon(row.pinIcon,glyph,theme,16);}
             if(theme!=row.theme){row.theme=theme;row.current.Source(icon(L"check",theme,14).Source());row.grip.Content(panelGrip(theme));}
             row.grip.Visibility(configurable?Visibility::Visible:Visibility::Collapsed);row.grip.IsEnabled(canReorder());
@@ -442,7 +442,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         auto key=naming?object(model,L"prompt_action").Stringify():L"";
         if(key!=promptKey){promptKey=key;nameDraft.reset();descriptionDraft.reset();validationName=L"";++validationSerial;validationQueued=true;nameValid=false;validationError=L"";choicesKey=L"";}
         title.Text(naming?str(details,L"title"):str(model,L"title"));
-        auto theme=str(object(snapshot,L"state"),L"theme",L"dark");
+        auto theme=str(branch(snapshot,L"state"),L"theme",L"dark");
         dialogSurface(copyData,dialog);
         body.Width(std::max(200.,std::min(472.,double(root.Size().Width)-80.)));
         split.ColumnDefinitions().GetAt(0).Width({std::max(220.,std::min(280.,body.Width()*.54)),GridUnitType::Pixel});
@@ -555,10 +555,15 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         if(!SetForegroundWindow(target.window)&&GetForegroundWindow()!=target.window)return recovery(L"workspace_activation_failed");
         return L"";
     }
+    CanvasModelInputs inputs;
     void apply(J const& value,bool unavailable) {
-        copyData->model=value;copyData->state=object(value,L"state");copyData->refreshPalette();
-        if(copyData->adoptLocalization(value)){
-            catalog=copyData->catalog;localization=copyData->localization;
+        copyData->model=value;copyData->state=branch(value,L"state");
+        bool relocalize=copyData->adoptLocalization(value),blockedChanged=blocked!=unavailable;
+        if(relocalize){catalog=copyData->catalog;localization=copyData->localization;}
+        snapshot=value;model=object(snapshot,L"windows_workspace");blocked=unavailable;
+        auto presentation=copyData->presentation(inputs,blockedChanged||relocalize);if(!presentation)return;
+        CanvasModelInputs::Capture::Alias(model,snapshot,{L"windows_workspace"});copyData->refreshPalette();
+        if(relocalize){
             buttonCaption(thisWorkspace,copy(L"header",L"this_workspace"));buttonCaption(savedToolbars,copy(L"header",L"saved_toolbars"));
             buttonCaption(toolbarActions,copy(L"header",L"toolbar_actions"));buttonCaption(retry,copy(L"header",L"retry"));
             progress.Text(recovery(L"loading"));search.PlaceholderText(copy(L"header",L"search"));
@@ -573,7 +578,6 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
                 AutomationProperties::SetHelpText(row.grip,copy(L"header",L"drag_to_reorder"));
             }
         }
-        snapshot=value;model=object(snapshot,L"windows_workspace");blocked=unavailable;
         if(stopping)return;
         auto focus=object(model,L"focus_window");
         if(focus.Size()){

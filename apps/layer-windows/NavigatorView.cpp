@@ -80,7 +80,7 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
         overview.HorizontalAlignment(HorizontalAlignment::Stretch);
         copyName(data,overview,data->copyCaption(L"color",L"navigator_overview"));
         AutomationProperties::SetAutomationId(overview,L"navigator-overview");
-        actions=NavigationButtons(data,L"navigator",[data=data]{return array(data->state,L"commands");},bindings);
+        actions=NavigationButtons(data,L"navigator",[data=data](hstring const& id){return find(data->state,L"commands",L"id",id);},bindings);
         for(auto const& bind:bindings)bind();
         content=make_self<NavigatorLayout>(overview,actions,data->panelMetric(L"inset"),data->panelMetric(L"control_spacing"),data->panelMetric(L"control_height"));
         root.Children().Append(content.as<Panel>());updateAspect();
@@ -141,7 +141,7 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
     double fixedHeight()const{return content->fixedHeight();}
     void apply(bool show){
         visible=show;if(!visible)cancel();
-        for(auto const& bind:bindings)bind();
+        for(auto const& bind:bindings)bind.Apply();
         updateAspect();
     }
     J placement(UIElement const& reference,Rect clip,int order,bool capture)const{

@@ -38,14 +38,15 @@ struct RampView:std::enable_shared_from_this<RampView> {
         root.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->refresh();});
     }
     void refresh(){
-        auto value=gradient();auto xaml=root.XamlRoot();if(!value.Size()||!xaml)return;
+        auto value=gradient(),panel=object(data->model,L"color_panel"),palette=object(data->state,L"palette");
+        auto depth=str(object(data->model,L"proof_panel"),L"depth",L"U8");
+        auto xaml=root.XamlRoot();if(!value.Size()||!xaml)return;
         double scale=xaml.RasterizationScale();
         int width=std::min(2048,int(std::lround(root.ActualWidth()*scale))),pixels=std::min(64,int(std::lround(height*scale)));
         if(width<1||pixels<1)return;
-        auto panel=object(data->model,L"color_panel");auto palette=object(data->state,L"palette");
         auto request=O({{L"type",S(L"gradient")},{L"gradient",value},{L"document_space",S(str(panel,L"rgb_space",L"Srgb"))},
             {L"rendition",panel.GetNamedValue(L"rendition",JsonValue::CreateNullValue())},
-            {L"image",O({{L"size",values({double(width),double(pixels)})},{L"depth",S(str(object(data->model,L"proof_panel"),L"depth",L"U8"))}})}});
+            {L"image",O({{L"size",values({double(width),double(pixels)})},{L"depth",S(depth)}})}});
         auto light=str(palette,L"checker_light"),dark=str(palette,L"checker_dark");
         auto key=request.Stringify()+light+dark+to_hstring(scale);
         if(key==requested)return;requested=key;

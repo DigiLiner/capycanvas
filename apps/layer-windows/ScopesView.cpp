@@ -28,7 +28,7 @@ struct ScopeFeed : std::enable_shared_from_this<ScopeFeed> {
     hstring context()const{
         auto data=owner.lock();if(!data)return L"";A value;
         value.Append(object(data->state,L"document_file").GetNamedValue(L"epoch",JsonValue::CreateNullValue()));
-        value.Append(data->state.GetNamedValue(L"palette",JsonValue::CreateNullValue()));
+        value.Append(object(data->state,L"palette"));
         for(auto kind:{L"histogram",L"waveform",L"tonal_histogram"}){
             auto scope=object(data->state,kind);A options;
             for(auto field:{L"source",L"channel",L"logarithmic",L"captured_source"})options.Append(scope.GetNamedValue(field,JsonValue::CreateNullValue()));

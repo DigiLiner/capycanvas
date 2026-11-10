@@ -133,6 +133,7 @@ metadata and retained beside their matching x64 DLLs for emulation on Arm.
 
 ### Changing the host
 
+- **Model inputs.** Use `NativeJson.h` readers (`named` for raw values, `branch` for traversal, `count` for array length) in cached presentation callbacks; adopt model/state before gating and force refreshes for native input changes.
 - **Integers in native JSON.** Emit unsigned identifiers and nanosecond
   timestamps as integer tokens through `NativeJson.h`; the WinRT JSON number type
   stores doubles.

@@ -107,10 +107,10 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         }
         if(type==L"new"){
             if(!newDrawing)newDrawing=std::make_unique<NewDrawingDialog>(data,send,window,changed);
-            newDrawing->Open(envelope);co_return;
+            newDrawing->Open(envelope);newDrawing->Apply();co_return;
         }
         auto id=num(envelope,L"id");
-        auto file=object(object(model,L"state"),L"document_file");
+        auto file=object(branch(model,L"state"),L"document_file");
         // Approval applies to the document shown when this dialog opened.
         J response=O({{L"operation",S(L"cancel")},{L"id",N(id)}});A queued;
         if(type==L"confirm_close")response=O({{L"operation",S(L"respond_close")},
@@ -134,7 +134,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                 dialog.DefaultButton(ContentDialogButton::Primary);
                 auto size=window.Content().XamlRoot().Size();
                 StackPanel body;body.Spacing(12);body.Width(std::max(180.,std::min(380.,double(size.Width)-96)));
-                presentationChanged=[this,id]{auto options=object(model,L"document_options");auto current=object(object(findId(array(object(model,L"state"),L"requests"),id),L"kind"),L"request");dialog.Title(box_value(str(current,L"title")));dialog.PrimaryButtonText(str(options,L"save_label"));dialog.SecondaryButtonText(str(options,L"discard_label"));dialog.CloseButtonText(str(options,L"cancel_label"));};
+                presentationChanged=[this,id]{auto options=object(model,L"document_options");auto current=object(object(findId(array(branch(model,L"state"),L"requests"),id),L"kind"),L"request");dialog.Title(box_value(str(current,L"title")));dialog.PrimaryButtonText(str(options,L"save_label"));dialog.SecondaryButtonText(str(options,L"discard_label"));dialog.CloseButtonText(str(options,L"cancel_label"));};
                 dialog.Title(box_value(str(request,L"title")));
                 dialog.PrimaryButtonText(str(options,L"save_label"));
                 dialog.SecondaryButtonText(str(options,L"discard_label"));
@@ -675,11 +675,14 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         else if(!stopping&&!busyCompleted)send(to_string(O({{L"operation",S(L"workflow")},{L"id",N(num(state,L"id"))},{L"action",O({{L"op",S(L"cancel")}})}}).Stringify()));
         busyDialog=false;showing=false;changed();
     }
+    CanvasModelInputs inputs;bool wasBlocked=false;
     void apply(J const& snapshot,bool blocked) {
         data->model=snapshot;
         bool relocalize=data->adoptLocalization(snapshot);
         if(relocalize){catalog=data->catalog;localization=data->localization;}
-        model=snapshot;data->state=object(snapshot,L"state");data->refreshPalette();
+        model=snapshot;data->state=branch(snapshot,L"state");
+        bool blockedChanged=std::exchange(wasBlocked,blocked)!=blocked;auto presentation=data->presentation(inputs,blockedChanged||relocalize);if(!presentation)return;
+        data->refreshPalette();
         if(dialog)dialogSurface(data,dialog);
         if(newDrawing)newDrawing->Apply();
         if(workflowChanged)workflowChanged();
@@ -711,7 +714,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             if(stamp!=workflowStamp){workflowStamp=stamp;workflow(document);}return;
         }
         if(str(document,L"type")==L"interpret"&&uint32_t(num(document,L"id"))!=interpreted){interpreted=uint32_t(num(document,L"id"));interpret(document);return;}
-        for(auto value:array(object(model,L"state"),L"requests")) {
+        for(auto value:array(branch(model,L"state"),L"requests")) {
             auto envelope=value.GetObject();
             if(str(object(envelope,L"kind"),L"type")==L"soft_proof_setup"){
                 auto id=uint32_t(num(envelope,L"id"));if(id!=handled){handled=id;send(to_string(O({{L"operation",S(L"workflow_begin")},{L"id",N(id)}}).Stringify()));}break;

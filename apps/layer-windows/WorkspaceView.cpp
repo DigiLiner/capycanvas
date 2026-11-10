@@ -112,6 +112,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         StackPanel tabLabels{nullptr};
         Grid activeTab{nullptr};
         Bindings paintIcons;
+        CanvasModelInputs iconInputs;
         ScrollView tabScroll{nullptr};
         ScrollView bodyScroll{nullptr};
         WorkspaceSurface background;
@@ -135,7 +136,8 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     };
     std::map<uint32_t,Group> groups;
     hstring panelBridgeKey;
-    NativeLayoutInput layoutInput,resolvedInput,metricInput;
+    NativeLayoutInput sourceInput,layoutInput,resolvedInput,metricInput;
+    CanvasModelInputs paletteInputs,backgroundInputs,configurationInputs,searchInputs,barInputs,pressureInputs,noticeInputs,popupInputs,requestInputs,previewInputs,drawerInputs,bubbleInputs,gestureInputs,cameraInputs;
     J panelMetricContext;hstring panelMetricKey,panelBodyMetricKey;
     J resolvedLayout;
     float viewportWidth=0,viewportHeight=0,resolvedWidth=0,resolvedHeight=0;
@@ -228,6 +230,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     }
     void colorRequests(){
         if(!root.XamlRoot())return;
+        auto capture=data->inputs(requestInputs);
         auto requests=array(data->state,L"requests");
         std::erase_if(handledColorRequests,[&](uint32_t id){return !findId(requests,id).Size();});
         for(auto value:requests){
@@ -477,12 +480,12 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         workspaceUpdate=update;
         if(update.Size()){applyMotion(object(update,L"drag"));canvasBar->Published(object(update,L"canvas_bar"));}
         model.Insert(L"layout",data->model.GetNamedValue(L"layout"));
-        data->model=model;data->state=object(model,L"state");
+        data->model=model;data->state=branch(model,L"state");
         commandSearch->Apply(data->state);
         if(scopes){
             CapyScopes::Refresh(data);
             for(auto& [id,copy]:offscreen)if(copy.data){
-                copy.data->model=model;copy.data->state=data->state;CapyScopes::Refresh(copy.data);
+                copy.data->model=model;copy.data->state=data->state;copy.data->changes=data->changes;CapyScopes::Refresh(copy.data);
             }
             queueMeasurements();
         }
@@ -518,7 +521,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         trough.Width(right-left);trough.Background(data->brush(L"input"));filled.Width(num(pill,L"fill_end")-track.GetNumberAt(0));auto panelColor=data->paletteColor(L"panel"),textColor=data->paletteColor(L"text");filled.Background(fill({255,uint8_t((int(panelColor.R)+textColor.R)/2),uint8_t((int(panelColor.G)+textColor.G)/2),uint8_t((int(panelColor.B)+textColor.B)/2)}));
         fillGesture.Children().Append(face);
     }
-    bool apply(J const& snapshot,NativeLayoutInput preparedInput){
+    bool apply(J const& snapshot,NativeLayoutInput preparedInput,CanvasModelChanges const& changes){
         auto previousGpu=num(data->model,L"windows_gpu_generation");
         bool relocalize=data->adoptLocalization(snapshot);
         if(relocalize){measureHost.Children().Clear();offscreen.clear();AutomationProperties::SetName(root,str(object(data->catalog,L"bootstrap"),L"drawing_workspace"));}
@@ -557,17 +560,16 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         struct Reset {bool& value;~Reset(){value=false;}} reset{data->updating};
         if(reflow)WorkspaceView::MergeLayout(data->model,snapshot);
         auto model=reflow?data->model:snapshot;
-        layoutInput=std::move(preparedInput);
+        if(sourceInput.get()!=preparedInput.get()){sourceInput=preparedInput;layoutInput=std::move(preparedInput);lastMeasurements=L"";}
         if(full){
         if(previousGpu>0&&num(model,L"windows_gpu_generation")!=previousGpu){
             data->chromeFrames->Reset();publishedBridgeGroups.clear();publishedColumns.clear();
             data->thumbnails=CreateLayerThumbnailCache(data->query);
             data->previews=CreateFilterPreviewCache(data->query);
         }
-        data->model=snapshot;data->state=object(model,L"state");data->colorPreview=object(model,L"color_preview");
+        data->model=snapshot;data->state=branch(model,L"state");data->colorPreview=object(model,L"color_preview");data->changes=changes;
         RefreshFilterPreviewContext(data->previews,object(data->state,L"document_file").GetNamedValue(L"epoch").Stringify());
-        lastMeasurements=L"";
-        data->refreshPalette();presentFill();
+        data->apply(paletteInputs,[&]{data->refreshPalette();});presentFill();
         auto theme=data->theme(),palette=object(data->state,L"palette").Stringify();
         if(theme!=previousTheme||palette!=previousPalette){
             panelBridgeKey=L"";
@@ -580,11 +582,40 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             auto viewport=array(object(model,L"layout"),L"viewport");
             if(viewport.Size()==2){viewportWidth=float(viewport.GetNumberAt(0));viewportHeight=float(viewport.GetNumberAt(1));}
         }
-        resolveLayout();applyLayout(data->model,full);if(full&&needsPanelMeasurements())preparePanels();data->updating=false;if(!applyGlass())presentBackgrounds();tracePresentation();if(full)colorRequests();return true;
+        bool layoutChanged=resolveLayout()||reflow||relocalize||changes.all||changes.Touches({L"chrome_hidden"})||changes.Touches({L"state",L"palette"})||changes.Touches({L"windows_gpu_generation"});
+        if(layoutChanged)applyLayout(data->model,full);
+        else{
+            for(auto& [id,group]:groups){
+                group.body->Apply(!group.hidden||(group.frame.Visibility()==Visibility::Visible&&group.frame.Opacity()>0));
+                data->apply(group.iconInputs,[&]{for(auto const& update:group.paintIcons)update();});
+            }
+            applyState(false);
+            applyOverlays(false);
+        }
+        if(full&&layoutChanged&&needsPanelMeasurements())preparePanels();
+        data->updating=false;
+        if(!applyGlass()&&(layoutChanged||backgroundInputs.Changed(changes)))presentBackgrounds();
+        tracePresentation();if(full&&requestInputs.Changed(changes))colorRequests();return true;
+    }
+    void applyState(bool layoutChanged){
+        data->apply(configurationInputs,[&]{updateConfiguration();},layoutChanged);
+        data->apply(searchInputs,[&]{commandSearch->Apply(data->state);});
+        data->apply(barInputs,[&]{canvasBar->Apply(data->state);});
+        data->apply(previewInputs,[&]{for(auto const& panel:previewPanels)panel->Publish(data->state);});
+        data->apply(pressureInputs,[&]{pressure->attach();pressure->Publish();},layoutChanged);
+        data->apply(noticeInputs,[&]{notice->Publish(data->state);});
+        if(data->colorInputs.Changed(data->changes))data->queueColors();
+    }
+    void applyOverlays(bool layoutChanged){
+        data->apply(drawerInputs,[&]{drawers->Apply(layoutInput,viewportWidth,viewportHeight);},layoutChanged);
+        data->apply(bubbleInputs,[&]{bubbles->Apply();},layoutChanged);
+        data->apply(gestureInputs,[&]{gestures->Refresh();},layoutChanged);
+        data->apply(cameraInputs,[&]{updateCamera(object(data->state,L"camera"));},layoutChanged);
+        data->apply(popupInputs,[&]{updatePopup();},layoutChanged);
+        canvasBar->Published(object(workspaceUpdate,L"canvas_bar"));applyMotion(object(workspaceUpdate,L"drag"));
     }
     bool applyLayout(J const& model,bool full){
         bool rebuilt=false;
-        auto update=workspaceUpdate;
         auto layout=object(model,L"layout");
         std::vector<uint32_t> visible;int order=0;
         std::vector<std::wstring> handleIds;
@@ -622,7 +653,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 try{build(group,geometry,panel);rebuilt=true;group.key=std::move(key);group.tabsPresentationKey=tabsPresentationKey;}
                 catch(...){removeGroup(group);groups.erase(it);throw;}
             }else if(group.tabsPresentationKey!=tabsPresentationKey){buildTabs(group,geometry);rebuilt=true;group.tabsPresentationKey=tabsPresentationKey;}
-            for(auto const& update:group.paintIcons)update();
+            data->apply(group.iconInputs,[&]{for(auto const& update:group.paintIcons)update();},true);
             }
             presentTabs(group,geometry);
             bool hidden=flag(model,L"chrome_hidden")&&!flag(geometry,L"floating")&&!flag(geometry,L"zen_kept");
@@ -655,22 +686,16 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 it=handles.erase(it);
             }else ++it;
         }
-        if(full)updateConfiguration();
-        if(full)commandSearch->Apply(data->state);
-        if(full)canvasBar->Apply(data->state);
-        canvasBar->Published(object(update,L"canvas_bar"));
-        for(auto const& panel:previewPanels){panel->Place(layout);if(full)panel->Publish(data->state);}
-        if(full){pressure->attach();pressure->Publish();}
-        notice->Place(layout);if(full){notice->Publish(data->state);data->queueColors();}
+        if(full)applyState(true);
+        for(auto const& panel:previewPanels)panel->Place(layout);
+        notice->Place(layout);
         collapsed->Apply();expansion->Apply(configurationHeight());present();
-        drawers->Apply(layoutInput,viewportWidth,viewportHeight);bubbles->Apply();gestures->Refresh();
+        applyOverlays(true);
         auto status=object(layout,L"status");place(cameraSlot,status);
         cameraSlot.Visibility(num(status,L"height")>0?Visibility::Visible:Visibility::Collapsed);
         zoom->text.Foreground(data->brush(L"text"));
-        updateCamera(object(data->state,L"camera"));
-        updatePopup();queueMeasurements();
+        queueMeasurements();
         if(paintedTheme!=data->theme()){paintedTheme=data->theme();std::set<void*> seen;refreshAssetIconTheme(root,paintedTheme,seen);}
-        applyMotion(object(update,L"drag"));
         return rebuilt;
     }
 
@@ -936,7 +961,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                         copy.body=std::make_unique<PanelBody>(inert,panel,O({{L"bounds",O({{L"width",N(width)}})}}),[]{},nullptr,false);
                         copy.data=inert;copy.key=key;copy.body->Root().Width(width);copy.body->Apply(true);measureHost.Children().Append(copy.body->Root());
                     }
-                    if(copy.data){copy.data->state=data->state;copy.data->model=data->model;}
+                    if(copy.data){copy.data->state=data->state;copy.data->model=data->model;copy.data->changes=data->changes;}
                     if(!flag(request,L"cacheable"))copy.body->Apply(true);
                     copy.body->Root().Width(width);
                     copy.body->Root().Measure({float(width),INFINITY});
@@ -1141,6 +1166,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         return surfaces;
     }
     void presentBackgrounds(){
+        auto capture=data->inputs(backgroundInputs);
         presentHoverTabs(gestures->HoverTab());
         measurePanelBridges();presentPanelBridges();
         auto document=data->chromeFrames->presented.document;
@@ -1268,7 +1294,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             auto sources=drawers->Sources();
             if(sources.Stringify()!=data->drawerSources.Stringify()){
                 data->drawerSources=sources;
-                for(auto& [id,group]:groups){group.backgroundKey=L"";if(group.body)group.body->Apply(!group.hidden);}
+                for(auto& [id,group]:groups){group.backgroundKey=L"";if(group.body)group.body->Apply(!group.hidden,true);}
                 collapsed->Apply();
                 queueMeasurements();
             }
@@ -1315,7 +1341,7 @@ WorkspaceView::WorkspaceView(Dispatch send,Json catalog,NativeLocalization local
 WorkspaceView::~WorkspaceView(){impl->gestures->Cancel();impl->data->chromeFrames->Close();}
 void WorkspaceView::SetCommit(std::function<void(std::string,bool,std::function<void()>)> commit){impl->data->commit=std::move(commit);}
 Canvas WorkspaceView::Root()const{return impl->root;}
-bool WorkspaceView::Apply(Json const& snapshot,NativeLayoutInput input){return impl->apply(snapshot,std::move(input));}
+bool WorkspaceView::Apply(Json const& snapshot,NativeLayoutInput input,CanvasModelChanges const& changes){return impl->apply(snapshot,std::move(input),changes);}
 bool WorkspaceView::ApplyFields(Json const& snapshot,bool scopes){return impl->applyFields(snapshot,scopes);}
 void WorkspaceView::Resize(float width,float height){impl->resize(width,height);}
 void WorkspaceView::SetWindowResizing(bool value){
@@ -1371,7 +1397,7 @@ void WorkspaceView::MergeLayout(Json const& model,Json const& patch){
     using namespace CapyUi;
     for(auto field:{L"layout",L"layout_input",L"panel_measurements",L"workspace_update",L"windows_glass"})
         if(patch.HasKey(field))model.Insert(field,patch.GetNamedValue(field));
-    auto state=object(model,L"state"),layout=object(object(state,L"workspace"),L"layout");
+    auto state=branch(model,L"state"),layout=object(object(state,L"workspace"),L"layout");
     for(auto const& item:object(patch,L"workspace_layout"))layout.Insert(item.Key(),item.Value());
     if(patch.HasKey(L"camera"))state.Insert(L"camera",patch.GetNamedValue(L"camera"));
 }

@@ -25,10 +25,10 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
     std::optional<uint32_t> pointer;Input::Pointer contact{nullptr};uint64_t source=0;Windows::Foundation::Point origin{},position{};
     PointerGesture hold;bool recognizing=false,dragging=false,held=false,releasing=false,updating=false,showing=false;
     uint64_t selectedModel=0;
-    hstring epoch,plainSource,plainCaption,storageError;bool storageTooltipReady=false;J model(){return object(data->model,L"windows_tabs");}
-    bool available(){return flag(model(),L"available")&&!flag(object(data->model,L"header"),L"editing");}
-    bool single(){return array(model(),L"tabs").Size()<2;}
-    J headerSize(){auto header=object(data->model,L"header");return find(array(header,L"sizes"),L"id",str(object(header,L"model"),L"size"));}
+    hstring epoch,plainSource,plainCaption,storageError;bool storageTooltipReady=false;J model(){return branch(data->model,L"windows_tabs");}
+    bool available(){return flag(model(),L"available")&&!flag(branch(data->model,L"header"),L"editing");}
+    bool single(){return count(model(),L"tabs")<2;}
+    J headerSize(){auto header=branch(data->model,L"header");return find(array(header,L"sizes"),L"id",str(object(header,L"model"),L"size"));}
     double tile(){return num(headerSize(),L"tile",36);}
     double gap(){return num(headerSize(),L"gap",2);}
     double corner(){return tile()*.5*CornerFit;}
@@ -174,7 +174,7 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
     void paintTab(Tab& t,bool chosen){t.chosen=chosen;t.box.Background(chosen?data->glass(L"document_tab"):clear());t.shade.Background(data->tint(L"text",t.pressed?(chosen?23:41):t.hovered?(chosen?8:18):0));}
     void separators(){bool previousIdle=false;for(auto value:array(model(),L"tabs")){auto id=uint64_t(num(value.GetObject(),L"id"));auto found=tabs.find(id);if(found==tabs.end())continue;auto& tab=found->second;bool idle=!tab.chosen&&!tab.hovered&&!tab.pressed;tab.separator.Visibility(previousIdle&&idle?Visibility::Visible:Visibility::Collapsed);previousIdle=idle;}}
     void hover(uint64_t id,bool active){auto found=tabs.find(id);if(found==tabs.end())return;found->second.hovered=active;paintTab(found->second,found->second.chosen);separators();}
-    void layout(){auto count=array(model(),L"tabs").Size();bool one=count<2,compact=!one&&capy_document_tabs_compact(float(root.ActualWidth()),count);
+    void layout(){auto count=CapyUi::count(model(),L"tabs");bool one=count<2,compact=!one&&capy_document_tabs_compact(float(root.ActualWidth()),count);
         plain.Visibility(one?Visibility::Visible:Visibility::Collapsed);
         strip.Visibility(one||compact?Visibility::Collapsed:Visibility::Visible);selector.Visibility(!one&&compact?Visibility::Visible:Visibility::Collapsed);
         root.Background(headerSurface(data));root.CornerRadius({corner(),corner(),corner(),corner()});strip.Spacing(gap());

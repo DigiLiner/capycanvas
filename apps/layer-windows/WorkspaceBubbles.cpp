@@ -301,7 +301,7 @@ void WorkspaceBubbles::Impl::content(std::shared_ptr<Record> const& r,std::share
         }
         auto& inspector=*p->inspector;bool open=flag(p->data,L"properties");auto target=open?1.:0.;
         if(inspector.targetPosition!=target){if(open)inspector.anchor=p->layers->layers->scrollAnchor();inspector.startPosition=inspector.position;inspector.targetPosition=target;inspector.started=Clock::now();inspector.animating=true;}
-        bool full=flag(p->data,L"full");p->layers->layers->full=full;p->layers->Apply(true);inspector.properties->Apply(open);inspector.refresh(open,str(p->data,L"disclosure"),!full);return;
+        bool full=flag(p->data,L"full"),modeChanged=std::exchange(p->layers->layers->full,full)!=full;p->layers->Apply(true,modeChanged);inspector.properties->Apply(open);inspector.refresh(open,str(p->data,L"disclosure"),!full);return;
     }
     if(p->key==L"halo"){
         auto rings=array(p->data,L"rings"),geometry=array(p->data,L"_geometry");

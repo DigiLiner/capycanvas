@@ -26,6 +26,206 @@ int main(){
     assert(!preview.GetNamedObject(L"picker").GetNamedBoolean(L"editor"));
     assert(preview.GetNamedObject(L"picker").GetNamedValue(L"preview").ValueType()==winrt::Windows::Data::Json::JsonValueType::Null);
     CanvasModelUpdate models;
+    CanvasModelInputs body;
+    auto record=[&](J const& model){
+        auto state=model.GetNamedObject(L"state");
+        CanvasModelInputs::Capture capture(body,{{model,{}},{state,{L"state"}}});
+        assert(CapyUi::array(state,L"layers").Size()==1);
+    };
+    auto inputModel=J::Parse(LR"({"state":{"brush":{"diameter":9},"layers":[{"opacity":1}]}})");
+    assert(body.Changed({}));
+    record(inputModel);
+    CanvasModelUpdate inputs;inputs.Read(inputModel);
+    inputs.Read(J::Parse(LR"({"model_update":[[["state","brush","diameter"],32]]})"));
+    assert(!body.Changed(inputs.changes));
+    auto pending=inputs.changes;
+    inputs.Read(J::Parse(LR"({"model_update":[[["state","layers","0","opacity"],0.5]]})"));
+    pending.Merge(inputs.changes);
+    assert(body.Changed(pending));
+    inputs.Read(J::Parse(LR"({"model_update":[[["state","layers"],[]]]})"));
+    assert(body.Changed(inputs.changes));
+    inputs.Read(J::Parse(LR"({"model_update":[[["state"],{"layers":[]}]]})"));
+    assert(body.Changed(inputs.changes));
+    inputs.Read(inputModel);
+    assert(body.Changed(inputs.changes));
+    CanvasModelInputs numeric;
+    {
+        CanvasModelInputs::Capture capture(numeric,{{inputModel.GetNamedObject(L"state"),{L"state"}}});
+        assert(CapyUi::num(inputModel.GetNamedObject(L"state"),{L"brush",L"diameter"})==9);
+    }
+    assert(!numeric.Changed({false,{{L"state",L"layers",L"0",L"opacity"}}}));
+    assert(numeric.Changed({false,{{L"state",L"brush",L"diameter"}}}));
+    record(inputModel);
+    assert(body.Changed({false,{{L"state",L"layers",L"1"}}}));
+    assert(!body.Changed({false,{{L"state",L"layer_properties"}}}));
+    CanvasModelInputs layout;
+    {
+        auto state=inputModel.GetNamedObject(L"state");
+        CanvasModelInputs::Capture capture(layout,{{inputModel,{}},{state,{L"state"}}});
+        auto adoptedState=CapyUi::branch(inputModel,L"state");assert(adoptedState.Size()==2);
+        {
+            CanvasModelInputs::Capture nested(numeric,{{state,{L"state"}}});
+            assert(CapyUi::num(state,{L"brush",L"diameter"})==9);
+        }
+        assert(CapyUi::array(inputModel,L"panels").Size()==0);
+    }
+    assert(!layout.Changed({false,{{L"state",L"brush",L"diameter"}}}));
+    assert(layout.Changed({false,{{L"panels",L"0",L"controls"}}}));
+    assert(!layout.Changed({}));
+    assert(layout.Changed({true}));
+    CanvasModelInputs conditional;
+    for(auto field:{L"layers",L"brush"}){
+        CanvasModelInputs::Capture capture(conditional,{{inputModel.GetNamedObject(L"state"),{L"state"}}});
+        auto value=CapyUi::object(inputModel.GetNamedObject(L"state"),field);assert(field==std::wstring(L"layers")||value.Size()==1);
+    }
+    assert(conditional.Changed({false,{{L"state",L"layers"}}}));
+    assert(conditional.Changed({false,{{L"state",L"brush"}}}));
+    auto selected=J::Parse(LR"({"commands":[{"id":"undo","label":"Undo"},{"id":"fit","label":"Fit"}]})");
+    CanvasModelInputs command;
+    {
+        CanvasModelInputs::Capture capture(command,{{selected,{L"state"}}});
+        auto row=CapyUi::find(selected,L"commands",L"id",L"fit");
+        assert(CapyUi::str(row,L"label")==L"Fit");
+    }
+    assert(command.Changed({false,{{L"state",L"commands",L"1",L"label"}}}));
+    assert(!command.Changed({false,{{L"state",L"commands",L"0",L"label"}}}));
+    assert(command.Changed({false,{{L"state",L"commands",L"0",L"id"}}}));
+    assert(command.Changed({false,{{L"state",L"commands"}}}));
+    int refreshes=0;
+    CanvasModelInputs parent;
+    auto state=inputModel.GetNamedObject(L"state");
+    CanvasModelBinding binding([&]{assert(CapyUi::num(state,{L"brush",L"preset"},-1)==-1);++refreshes;});
+    auto applyBinding=[&](CanvasModelChanges const& changes,bool force=false){
+        CanvasModelInputs::Capture capture(parent,{{state,{L"state"}}},&changes,force);binding.Apply();
+    };
+    applyBinding({});assert(refreshes==1);
+    applyBinding({false,{{L"state",L"brush",L"color"}}});assert(refreshes==1);
+    applyBinding({false,{{L"state",L"layers"}}});assert(refreshes==1);
+    applyBinding({false,{{L"state",L"brush",L"preset"}}});assert(refreshes==2);
+    applyBinding({},true);assert(refreshes==3);
+    assert(parent.Changed({false,{{L"state",L"brush",L"preset"}}}));
+    assert(!parent.Changed({false,{{L"state",L"brush",L"color"}}}));
+    binding();assert(refreshes==4);
+    std::vector<CanvasModelBinding> copied{binding};copied.front()();assert(refreshes==5);
+    bool alternate=false;int conditionalRefreshes=0;
+    CanvasModelBinding conditionalBinding([&]{if(alternate)CapyUi::array(state,L"layers");else CapyUi::object(state,L"brush");++conditionalRefreshes;});
+    {
+        CanvasModelChanges unchanged;
+        CanvasModelInputs::Capture capture(parent,{{state,{L"state"}}},&unchanged);
+        conditionalBinding.Apply();alternate=true;conditionalBinding.Apply(true);
+    }
+    assert(conditionalRefreshes==2);
+    {
+        CanvasModelChanges changed{false,{{L"state",L"layers"}}};
+        CanvasModelInputs::Capture capture(parent,{{state,{L"state"}}},&changed);conditionalBinding.Apply();
+    }
+    assert(conditionalRefreshes==3);
+    CanvasModelPaths paths{{L"state",L"layers",L"0",L"opacity"},{L"state",L"layers",L"1",L"opacity"}};
+    paths.Add({L"state",L"layers"});paths.Add({L"state",L"layers",L"2"});
+    assert(paths.Touches({L"state"})&&paths.Touches({L"state",L"layers",L"9",L"name"}));
+    assert(!paths.Touches({L"state",L"layer_properties"}));
+    CanvasModelPaths siblings{{L"state",L"brush",L"diameter"},{L"catalog",L"name"}};
+    assert(!paths.Intersects(siblings)&&!siblings.Intersects(paths));
+    siblings.Merge(paths);
+    assert(siblings.Intersects(paths)&&paths.Intersects(siblings));
+    assert(siblings.Touches({L"state",L"brush",L"diameter"}));
+    CanvasModelPaths rootPaths;rootPaths.Add({});
+    assert(rootPaths.Intersects(paths)&&paths.Intersects(rootPaths));
+    CanvasModelInputs fallback;
+    {
+        CanvasModelInputs::Capture capture(fallback,{{state,{L"state"}}});
+        assert(CapyUi::num(state,{L"missing",L"value"},17)==17);
+    }
+    assert(fallback.Changed({false,{{L"state",L"missing"}}}));
+    assert(!fallback.Changed({false,{{L"state",L"brush"}}}));
+    auto workspaceModel=J::Parse(LR"({"windows_workspace":{"name":"Studio","revision":1}})");
+    CanvasModelInputs workspaceName;
+    {
+        CanvasModelInputs::Capture capture(workspaceName,{{workspaceModel,{}}});
+        assert(CapyUi::str(CapyUi::branch(workspaceModel,L"windows_workspace"),L"name")==L"Studio");
+    }
+    assert(!workspaceName.Changed({false,{{L"windows_workspace",L"revision"}}}));
+    assert(workspaceName.Changed({false,{{L"windows_workspace",L"name"}}}));
+    assert(workspaceName.Changed({false,{{L"windows_workspace"}}}));
+    CanvasModelInputs emptyBranch;
+    {
+        CanvasModelInputs::Capture capture(emptyBranch,{{workspaceModel,{}}});
+        assert(CapyUi::str(CapyUi::branch(workspaceModel,L"missing"),L"name").empty());
+    }
+    assert(emptyBranch.Changed({false,{{L"missing",L"name"}}}));
+    assert(!emptyBranch.Changed({false,{{L"windows_workspace",L"name"}}}));
+    for(auto field:{L"command_search",L"canvas_bar",L"new_drawing"}){
+        J readerModel;readerModel.Insert(field,winrt::Windows::Data::Json::JsonValue::CreateNullValue());
+        CanvasModelInputs reads;
+        {
+            CanvasModelInputs::Capture capture(reads,{{readerModel,{}}});
+            assert(CapyUi::named(readerModel,field).ValueType()==winrt::Windows::Data::Json::JsonValueType::Null);
+        }
+        assert(reads.Changed({false,{{field}}}));
+        assert(!reads.Changed({false,{{L"unrelated"}}}));
+        readerModel.Insert(field,J::Parse(LR"({"value":3})"));
+        {
+            CanvasModelInputs::Capture capture(reads,{{readerModel,{}}});
+            auto value=CapyUi::named(readerModel,field);
+            assert(value.ValueType()==winrt::Windows::Data::Json::JsonValueType::Object&&value.GetObject().GetNamedNumber(L"value")==3);
+        }
+        assert(reads.Changed({false,{{field,L"value"}}}));
+        assert(!reads.Changed({false,{{L"unrelated",L"value"}}}));
+    }
+    CanvasModelInputs wholeState,preciseState;
+    {
+        CanvasModelInputs::Capture capture(wholeState,{{inputModel,{}},{state,{L"state"}}});
+        assert(CapyUi::object(inputModel,L"state").GetNamedObject(L"brush").GetNamedNumber(L"diameter")==9);
+    }
+    {
+        CanvasModelInputs::Capture capture(preciseState,{{inputModel,{}},{state,{L"state"}}});
+        assert(CapyUi::num(CapyUi::branch(inputModel,L"state"),{L"brush",L"diameter"})==9);
+    }
+    assert(wholeState.Changed({false,{{L"state",L"layers"}}}));
+    assert(!preciseState.Changed({false,{{L"state",L"layers"}}}));
+    assert(preciseState.Changed({false,{{L"state",L"brush",L"diameter"}}}));
+    auto aliasModel=J::Parse(LR"({"projection":{"value":1}})");
+    int aliasRefreshes=0;double aliasValue=0;
+    CanvasModelInputs aliasParent;
+    CanvasModelBinding aliasChild([&]{aliasValue=CapyUi::object(aliasModel,L"projection").GetNamedNumber(L"value");++aliasRefreshes;});
+    for(int value:{1,2}){
+        aliasModel=J::Parse(value==1?LR"({"projection":{"value":1}})":LR"({"projection":{"value":2}})");
+        CanvasModelChanges changed{value==1,{{L"projection",L"value"}}};
+        CanvasModelInputs::Capture capture(aliasParent,{{aliasModel,{}}},&changed);
+        auto inherited=CapyUi::object(aliasModel,L"projection");assert(inherited.GetNamedNumber(L"value")==value);
+        aliasChild.Apply();
+    }
+    assert(aliasRefreshes==2&&aliasValue==2);
+    CanvasModelInputs cardinality;
+    {
+        CanvasModelInputs::Capture capture(cardinality,{{selected,{L"state"}}});
+        assert(CapyUi::count(selected,L"commands")==2);
+        assert(CapyUi::count(selected,L"missing")==0);
+    }
+    assert(!cardinality.Changed({false,{{L"state",L"commands",L"0",L"label"}}}));
+    assert(!cardinality.Changed({false,{{L"state",L"commands",L"1"}}}));
+    assert(cardinality.Changed({false,{{L"state",L"commands"}}}));
+    assert(cardinality.Changed({false,{{L"state"}}}));
+    assert(cardinality.Changed({false,{{L"state",L"missing"}}}));
+    CanvasModelInputs presentation,parentPresentation;
+    int adopted=0,presented=0;
+    auto present=[&](J const& latest,CanvasModelChanges const* changes,bool force){
+        ++adopted;
+        CanvasModelInputs::Presentation scope(presentation,{{latest,{L"state"}}},changes,force);
+        if(scope){assert(CapyUi::num(latest,{L"brush",L"diameter"})==9);++presented;}
+    };
+    CanvasModelChanges noChanges,unrelated{false,{{L"state",L"layers"}}};
+    present(state,&noChanges,false);present(state,&unrelated,false);
+    assert(adopted==2&&presented==1);
+    {
+        CanvasModelInputs::Capture capture(parentPresentation,{{state,{L"state"}}},&unrelated);
+        present(state,&unrelated,false);
+    }
+    assert(adopted==3&&presented==1);
+    assert(parentPresentation.Changed({false,{{L"state",L"brush",L"diameter"}}}));
+    assert(!parentPresentation.Changed(unrelated));
+    present(state,&noChanges,true);assert(adopted==4&&presented==2);
+    present(state,nullptr,false);assert(adopted==5&&presented==3);
     auto initial=J::Parse(LR"({"state":{"revision":1,"histogram":{"status":"old"},"workspace":{"layout":{"extent":240}}},"catalog":{"01":"literal","a/b":"key"},"rows":[{"value":1},{"value":2}]})");
     assert(models.Read(initial)==CanvasAllSections);
     initial.Insert(L"localization",J::Parse(LR"({"generation":1})"));

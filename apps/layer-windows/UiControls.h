@@ -11,6 +11,7 @@
 #include "NativeHandles.h"
 #include "ChromeFrames.h"
 #include "NativePresentation.h"
+#include "NativeJson.h"
 #include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.UI.Text.h>
@@ -71,32 +72,6 @@ inline V N(double value){return JsonValue::CreateNumberValue(value);}
 inline V B(bool value){return JsonValue::CreateBooleanValue(value);}
 inline J O(std::initializer_list<std::pair<wchar_t const*,V>> fields){
     J value;for(auto const& [key,item]:fields)value.Insert(key,item);return value;
-}
-inline J object(J const& value,wchar_t const* key){
-    auto item=value.GetNamedValue(key,JsonValue::CreateNullValue());
-    return item.ValueType()==JsonValueType::Object?item.GetObject():J{};
-}
-inline A array(J const& value,wchar_t const* key){
-    auto item=value.GetNamedValue(key,JsonValue::CreateNullValue());
-    return item.ValueType()==JsonValueType::Array?item.GetArray():A{};
-}
-inline J objectAt(A const& values,int32_t index){
-    if(index<0||uint32_t(index)>=values.Size())return {};auto item=values.GetAt(index);return item.ValueType()==JsonValueType::Object?item.GetObject():J{};
-}
-inline hstring str(J const& value,wchar_t const* key,hstring fallback=L""){
-    auto item=value.GetNamedValue(key,JsonValue::CreateNullValue());
-    return item.ValueType()==JsonValueType::String?item.GetString():fallback;
-}
-inline double num(J const& value,wchar_t const* key,double fallback=0){
-    auto item=value.GetNamedValue(key,JsonValue::CreateNullValue());
-    return item.ValueType()==JsonValueType::Number?item.GetNumber():fallback;
-}
-inline bool flag(J const& value,wchar_t const* key,bool fallback=false){return value.GetNamedBoolean(key,fallback);}
-inline J find(A const& list,wchar_t const* key,hstring const& id){
-    for(auto value:list){auto row=value.GetObject();if(str(row,key)==id)return row;}return J{};
-}
-inline J findId(A const& list,double id){
-    for(auto value:list){auto row=value.GetObject();if(num(row,L"id")==id)return row;}return J{};
 }
 inline Windows::UI::Color color(hstring const& hex){
     auto text=to_string(hex);
@@ -274,13 +249,24 @@ inline J numeric(CapyLocalization  localization,J const& spec,double value,J con
     if(response.HasKey(L"error_reason"))throw NumericFailure(str(response,L"error"),object(response,L"error_reason"));
     return response;
 }
-using Bindings=std::vector<std::function<void()>>;
+using Bindings=std::vector<CanvasModelBinding>;
 using NumericAdmissions=std::vector<std::function<bool(bool)>>;
 struct LocalizedCopy : hstring {
     std::function<hstring()> current;
     LocalizedCopy(hstring value,std::function<hstring()> resolve):hstring(value),current(std::move(resolve)){}
 };
 struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
+    CanvasModelChanges changes{true};
+    CanvasModelInputs::Capture inputs(CanvasModelInputs& reads,bool force=false)const{
+        return CanvasModelInputs::Capture(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},&changes,force);
+    }
+    CanvasModelInputs::Presentation presentation(CanvasModelInputs& reads,bool force=false)const{
+        return CanvasModelInputs::Presentation(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},CanvasModelInputs::Capture::Changes(),force);
+    }
+    template<class Update> void apply(CanvasModelInputs& inputs,Update update,bool force=false){
+        if(!force&&!inputs.Changed(changes))return;
+        auto capture=this->inputs(inputs,force);update();
+    }
     NativeLocalization localization;
     uint64_t localizationGeneration=uint64_t(-1);
     std::vector<std::function<bool()>> copyViews;
@@ -298,7 +284,7 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         auto tag=to_string(str(bootstrap,L"active_tag"));
         NativeLocalization next(capy_localization_for_tag(tag.c_str()),capy_localization_free);
         if(!next)throw hresult_invalid_argument(L"Invalid localization presentation");
-        if(snapshot.HasKey(L"state")){model=snapshot;state=object(snapshot,L"state");}
+        if(snapshot.HasKey(L"state")){model=snapshot;state=branch(snapshot,L"state");}
         nextCatalog.Insert(L"bootstrap",bootstrap);catalog=nextCatalog;localization=std::move(next);localizationGeneration=generation;
         std::erase_if(copyViews,[](auto const& update){return !update();});
         return true;
@@ -335,14 +321,18 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         return closed;
     }
     J colorPreview;
+    CanvasModelInputs colorInputs;
     std::map<uint64_t,std::function<void()>> colorViews;uint64_t nextColorView=0,colorFieldPixels=0;bool colorQueued=false;
     std::function<void()> colorsPresented;
-    uint64_t colorView(std::function<void()> refresh){colorViews.emplace(++nextColorView,std::move(refresh));return nextColorView;}
+    uint64_t colorView(std::function<void()> refresh){auto id=++nextColorView;colorViews.emplace(id,std::move(refresh));queueColors();return id;}
     void queueColors(){
         if(std::exchange(colorQueued,true))return;
         Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock()){
-            self->colorQueued=false;auto views=self->colorViews;
-            for(auto const& [id,refresh]:views)refresh();
+            {
+                auto capture=self->inputs(self->colorInputs);
+                self->colorQueued=false;auto views=self->colorViews;
+                for(auto const& [id,refresh]:views)refresh();
+            }
             if(self->colorsPresented)self->colorsPresented();
         }});
     }
@@ -353,6 +343,7 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
     mutable std::map<std::pair<std::wstring,uint8_t>,SolidColorBrush> tintBrushes;
     mutable std::map<std::wstring,SolidColorBrush> glassBrushes;
     mutable std::map<std::pair<std::wstring,std::wstring>,SolidColorBrush> lineBrushes;
+    hstring paletteKey;
     ResourceDictionary controlResources=paletteResources();
     static Windows::UI::Color unitColor(A const& value){
         auto channel=[&](uint32_t i){return uint8_t(std::lround(std::clamp(value.GetNumberAt(i),0.,1.)*255));};
@@ -373,11 +364,14 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         return value.Size()==4?unitColor(value):Windows::UI::Color{};
     }
     void refreshPalette(){
-        auto palette=object(state,L"palette");
+        auto palette=object(state,L"palette");auto signature=palette.Stringify();
+        if(signature!=paletteKey){
         for(auto const& [role,brush]:paletteBrushes)brush.Color(paletteColor(role.c_str()));
         for(auto const& [role,brush]:glassBrushes)brush.Color(glassColor(role.c_str()));
         for(auto const& [key,brush]:lineBrushes)brush.Color(lineColor(key.first,key.second));
         for(auto const& [key,brush]:tintBrushes){auto value=color(str(palette,key.first.c_str(),L"#414141"));value.A=key.second;brush.Color(value);}
+        paletteKey=signature;
+        }
         refreshControlPalette(*this);
     }
     hstring caption(J const& request)const{
@@ -420,14 +414,17 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
     hstring language()const{return str(object(catalog,L"bootstrap"),L"active_tag");}
     hstring theme()const{return str(state,L"theme",L"dark");}
     SolidColorBrush brush(wchar_t const* role)const{
+        CanvasModelInputs::Capture::Read(state,L"palette");
         auto found=paletteBrushes.find(role);if(found!=paletteBrushes.end())return found->second;
         return paletteBrushes.emplace(role,fill(paletteColor(role))).first->second;
     }
     SolidColorBrush glass(wchar_t const* role)const{
+        CanvasModelInputs::Capture::Read(state,L"palette");
         auto found=glassBrushes.find(role);if(found!=glassBrushes.end())return found->second;
         return glassBrushes.emplace(role,fill(glassColor(role))).first->second;
     }
     SolidColorBrush line(wchar_t const* surface,wchar_t const* role)const{
+        CanvasModelInputs::Capture::Read(state,L"palette");
         auto key=std::make_pair(std::wstring(surface),std::wstring(role));
         if(auto found=lineBrushes.find(key);found!=lineBrushes.end())return found->second;
         return lineBrushes.emplace(key,fill(lineColor(key.first,key.second))).first->second;
@@ -435,6 +432,7 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
     SolidColorBrush line(wchar_t const* role)const{return line(L"",role);}
     bool transparent()const{return str(object(object(state,L"palette"),L"glass"),L"transparency",L"off")!=L"off";}
     SolidColorBrush tint(wchar_t const* role,uint8_t alpha)const{
+        CanvasModelInputs::Capture::Read(state,L"palette");
         auto key=std::make_pair(std::wstring(role),alpha);
         if(auto found=tintBrushes.find(key);found!=tintBrushes.end())return found->second;
         auto value=color(str(object(state,L"palette"),role,L"#414141"));value.A=alpha;

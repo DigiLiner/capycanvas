@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "NativeHandles.h"
 #include "FilterPreviews.h"
+#include "CanvasModelInputs.h"
 #include <functional>
 #include <memory>
 
@@ -14,7 +15,7 @@ public:
     WorkspaceView(Dispatch dispatch, Json catalog,NativeLocalization localization, PreviewTransport previews,std::function<void(bool)> popupChanged, Dispatch document, Dispatch input, EdgeTransport edges);
     ~WorkspaceView();
     winrt::Microsoft::UI::Xaml::Controls::Canvas Root() const;
-    bool Apply(Json const& snapshot,NativeLayoutInput input={});
+    bool Apply(Json const& snapshot,NativeLayoutInput input={},CanvasModelChanges const& changes={true});
     bool ApplyFields(Json const& snapshot,bool scopes);
     void Resize(float width,float height);
     static void MergeLayout(Json const& model,Json const& patch);

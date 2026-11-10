@@ -266,7 +266,7 @@ winrt::fire_and_forget CanvasWindow::AwaitLaunchPresent(std::weak_ptr<CanvasWind
 }
 void CanvasWindow::ApplyLaunchCover(Windows::Data::Json::JsonObject const& model) {
     using namespace CapyUi;
-    auto state=object(model,L"state"),launch=object(model,L"launch"),palette=object(state,L"palette");
+    auto state=branch(model,L"state"),launch=object(model,L"launch"),palette=object(state,L"palette");
     if(flag(launch,L"finished")&&launchCover.Visibility()==Visibility::Collapsed)return;
     auto theme=str(state,L"theme",L"dark");launchCover.RequestedTheme(theme==L"dark"?ElementTheme::Dark:ElementTheme::Light);
     launchCover.Background(SolidColorBrush(color(str(palette,L"bg",theme==L"dark"?L"#323232":L"#f4f4f4"))));
@@ -711,13 +711,13 @@ bool CanvasWindow::StartPrepared(CapyLaunch  prepared) {
     auto dropKind=std::make_shared<CapyUi::DropKind>(CapyUi::DropKind::Images);
     panel.DragEnter([dropKind](auto&&,DragEventArgs const& event){if(CapyUi::fileDrag(event))CapyUi::classifyDrop(event,dropKind);});
     panel.DragOver([weak=weak_from_this(),dropKind](auto&&,DragEventArgs const& event){if(auto self=weak.lock();self&&!self->closing&&CapyUi::fileDrag(event)){
-        auto kind=*dropKind;auto commands=CapyUi::array(CapyUi::object(self->lastModel,L"state"),L"commands");
+        auto kind=*dropKind;auto commands=CapyUi::array(CapyUi::branch(self->lastModel,L"state"),L"commands");
         bool enabled=kind!=CapyUi::DropKind::Mixed&&CapyUi::flag(CapyUi::find(commands,L"id",kind==CapyUi::DropKind::Drawings?L"open_document":L"import_image"),L"enabled");
         using winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation;
         event.AcceptedOperation(enabled?DataPackageOperation::Copy:DataPackageOperation::None);event.DragUIOverride().Caption(CapyUi::dropCaption(self->screenData,kind));event.Handled(true);
     }});
     panel.Drop([weak=weak_from_this()](auto&&,DragEventArgs const& event){if(auto self=weak.lock();self&&!self->closing&&CapyUi::fileDrag(event)){
-        auto action=CapyUi::imageDrop(CapyUi::object(self->lastModel,L"state"));auto point=event.GetPosition(self->panel);auto scale=self->panel.XamlRoot().RasterizationScale();
+        auto action=CapyUi::imageDrop(CapyUi::branch(self->lastModel,L"state"));auto point=event.GetPosition(self->panel);auto scale=self->panel.XamlRoot().RasterizationScale();
         action.Insert(L"screen",CapyUi::O({{L"x",CapyUi::N(point.X*scale)},{L"y",CapyUi::N(point.Y*scale)}}));
         CapyUi::receiveFileDrop(event,action,[weak](std::string json){if(auto self=weak.lock();self&&!self->closing)self->Send(std::move(json),CanvasCommandKind::Document);});
     }});
@@ -1201,7 +1201,7 @@ bool CanvasWindow::PenButtons(uint32_t id,bool primary){
 bool CanvasWindow::ClaimsDeviceKey(std::wstring const& name)const{
     using namespace CapyUi;
     if(object(object(lastModel,L"preferences"),L"capture").Size())return true;
-    auto stored=object(object(lastModel,L"state"),L"settings");
+    auto stored=object(branch(lastModel,L"state"),L"settings");
     for(auto hold:array(stored,L"hold_keys"))if(str(object(hold.GetObject(),L"key"),L"key")==name)return true;
     for(auto entry:object(stored,L"shortcuts"))
         if(entry.Value().ValueType()==JsonValueType::Array)
@@ -1545,7 +1545,7 @@ void CanvasWindow::ResetSurface() {
     CancelLaunchReveal();
     {std::lock_guard lock(mutex);if(closing)return;}
     auto native=panel.as<ISwapChainPanelNative>();
-    root.Background(SolidColorBrush(CapyUi::color(CapyUi::str(CapyUi::object(CapyUi::object(lastModel,L"state"),L"palette"),L"bg",L"#323232"))));
+    root.Background(SolidColorBrush(CapyUi::color(CapyUi::str(CapyUi::object(CapyUi::branch(lastModel,L"state"),L"palette"),L"bg",L"#323232"))));
     auto detached=native->SetSwapChain(nullptr);
     surfaceState.Reset(capy_surface_generation(host));surfaceHandle=capy_surface_handle(host);
     auto attached=SUCCEEDED(detached)&&surfaceHandle?S_OK:FAILED(detached)?detached:E_FAIL;
@@ -1703,7 +1703,7 @@ void CanvasWindow::Publish(std::string snapshot,CapySnapshotInfo const& info) {
         if(glassChanged)tracedModel.Insert(L"windows_glass",model.GetNamedValue(L"windows_glass"));
         if(full||info.layout||glassChanged)TraceState("ui-state",identity+",\"model\":"+to_string(tracedModel.Stringify())+"}");
         if(full||model.HasKey(L"command_search")){
-            auto search=full?CapyUi::object(model,L"state").GetNamedValue(L"command_search",Windows::Data::Json::JsonValue::CreateNullValue()):model.GetNamedValue(L"command_search");
+            auto search=full?CapyUi::branch(model,L"state").GetNamedValue(L"command_search",Windows::Data::Json::JsonValue::CreateNullValue()):model.GetNamedValue(L"command_search");
             TraceState("search-state",identity+",\"search\":"+to_string(search.Stringify())+"}");
         }
         auto view=CapyUi::CameraTracePayload(model,full,identity);
@@ -1754,11 +1754,13 @@ winrt::fire_and_forget CanvasWindow::DecodeSnapshots(std::shared_ptr<SnapshotSta
             auto model=parse(update.bytes);
             if(model.HasKey(L"localization"))state->pendingLocalization=CapyUi::object(model,L"localization");
             state->unappliedSections|=state->models.Read(model);
+            state->unappliedChanges.Merge(state->models.changes);
         }
         if(!raw.full.empty()){
             batch.full=state->models.Model();batch.sections=state->unappliedSections;
+            batch.changes=state->unappliedChanges;
             batch.localization=state->pendingLocalization;
-            if(batch.localization)batch.sections=CanvasAllSections;
+            if(batch.localization){batch.sections=CanvasAllSections;batch.changes.all=true;}
         }
         auto prepareInput=[&](Windows::Data::Json::JsonObject const& model){
             auto bytes=to_string(CapyUi::object(model,L"layout_input").Stringify());
@@ -1793,6 +1795,7 @@ winrt::fire_and_forget CanvasWindow::DecodeSnapshots(std::shared_ptr<SnapshotSta
             std::lock_guard lock(state->mutex);
             if(state->pending.Posted(sequence,applied,hasModel,state->unappliedSections)){
                 state->pendingLocalization=nullptr;
+                state->unappliedChanges={};
                 while(!state->replies.empty()&&state->pending.IsPosted(state->replies.front().first)){
                     replies.push_back(std::move(state->replies.front().second));state->replies.pop_front();
                 }
@@ -1817,7 +1820,7 @@ bool CanvasWindow::ApplyPending(PreparedSnapshots batch) {
         workspace->Resize(float(panel.ActualWidth()),float(panel.ActualHeight()));
         if(batch.full){
             if(batch.localization)batch.full.Insert(L"localization",batch.localization);
-            if(!ApplyModel(batch.full,std::move(batch.fullInput),batch.sections))return false;
+            if(!ApplyModel(batch.full,std::move(batch.fullInput),batch.sections,batch.changes))return false;
         }
         if(!closing&&batch.layout)workspace->Apply(batch.layout,std::move(batch.reflowInput));
         for(auto const& patch:{batch.workspace,batch.camera,batch.search,batch.glass})
@@ -1830,7 +1833,7 @@ bool CanvasWindow::ApplyPending(PreparedSnapshots batch) {
     return false;
 }
 
-void CanvasWindow::ApplyDialogs() {
+void CanvasWindow::ApplyDialogs(CanvasModelChanges const* changes) {
     if(closing){
         // Let the coroutine release its final dialog reference before tearing
         // down XAML. Completion callbacks may run before ShowAsync unwinds.
@@ -1838,6 +1841,8 @@ void CanvasWindow::ApplyDialogs() {
         return;
     }
     if(applyingDialogs||!settings||!documents||!workspaceDialogs||!canvasSize||!imageSize||!workspaceStorage||!workspaceManager||!lastModel.Size())return;
+    CanvasModelInputs inputs;CanvasModelChanges native{true};
+    CanvasModelInputs::Capture capture(inputs,{{lastModel,{}},{CapyUi::branch(lastModel,L"state"),{L"state"}}},changes?changes:&native,!changes);
     applyingDialogs=true;
     struct Reset{bool& flag;~Reset(){flag=false;}}reset{applyingDialogs};
     if(settings->IsOpen()||!ModalOpen())settings->Apply(lastModel);
@@ -1935,7 +1940,7 @@ void CanvasWindow::SendLaunchFiles(Windows::Data::Json::JsonObject const& model)
 void CanvasWindow::RefreshWorkspaceSwitcher() {
     if(!closing&&!closed)Send(R"({"operation":"input","input":{"type":"refresh_switcher"}})",CanvasCommandKind::Workspace);
 }
-bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,NativeLayoutInput input,uint32_t sections) {
+bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,NativeLayoutInput input,uint32_t sections,CanvasModelChanges const& changes) {
     using namespace CapyUi;
     auto launch=object(model,L"launch");
     if((launch.Size()&&(!flag(launch,L"finished")||flag(launch,L"visible")))
@@ -1951,12 +1956,13 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
     }
     auto focus=settings&&settings->IsOpen()?FocusManager::GetFocusedElement(root.XamlRoot()).try_as<Control>():nullptr;
     if(focus)if(auto owner=ItemsControl::ItemsControlFromItemContainer(focus))focus=owner;
-    if(sections&CanvasWorkspace){if(!workspace->Apply(model,std::move(input)))return false;}
+    if(sections&CanvasWorkspace){if(!workspace->Apply(model,std::move(input),changes))return false;}
     else if(!workspace->ApplyFields(model,(sections&CanvasScopes)!=0))return false;
     lastModel=model;
     ApplyLaunchCover(model);
     bool retheme=false;
-    auto state=object(model,L"state");auto theme=str(state,L"theme",L"dark");
+    auto state=branch(model,L"state");
+    screenData->adoptLocalization(model);screenData->model=model;screenData->state=state;
     auto workspaceReady=flag(state,L"workspace_ready");
     auto storage=object(model,L"windows_workspace");
     auto preferencesClose=object(model,L"windows_settings_close");
@@ -1977,7 +1983,9 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
         }
         status.Text(message);status.Visibility(message.empty()?Visibility::Collapsed:Visibility::Visible);
     }
-    if(sections&CanvasWindowState){
+    if((sections&CanvasWindowState)&&(windowInputs.Changed(changes)||!launchFiles.empty()||!surfaceState.Attached())){
+    CanvasModelInputs::Capture capture(windowInputs,{{model,{}},{state,{L"state"}}},&changes);
+    windowInputs.Add({L"state",L"workspace_ready"});windowInputs.Add({L"windows_workspace"});
     workspace->Root().Visibility(workspaceReady||flag(object(model,L"launch"),L"visible")?Visibility::Visible:Visibility::Collapsed);
     {std::lock_guard lock(mutex);penSources.Select(to_string(object(model,L"windows_tabs").GetNamedValue(L"selected",JsonValue::CreateNullValue()).Stringify()+L"/"+object(state,L"document_file").GetNamedValue(L"epoch",JsonValue::CreateNullValue()).Stringify()));}
     if(surfaceState.CanAttach(uint64_t(num(model,L"windows_gpu_generation")),flag(model,L"windows_surface_ready"))){
@@ -2009,7 +2017,8 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
         }
     }
     ApplyScreen(model);
-    auto nextTheme=theme==L"dark"?ElementTheme::Dark:ElementTheme::Light;
+    CanvasModelInputs::Capture::Apply(captionInputs,[&]{
+    auto nextTheme=str(state,L"theme",L"dark")==L"dark"?ElementTheme::Dark:ElementTheme::Light;
     retheme=root.RequestedTheme()!=nextTheme;root.RequestedTheme(nextTheme);
     // Artwork also reaches the caption area; keep the OS buttons readable on it.
     auto captionBackground=color(str(object(state,L"palette"),L"bg",L"#333333"));
@@ -2020,9 +2029,10 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
     foreground.A=128;window.AppWindow().TitleBar().ButtonInactiveForegroundColor(foreground);
     auto tabs=array(state,L"tabs");
     if(tabs.Size())window.Title((flag(object(state,L"document_file"),L"modified")?hstring(L"• "):hstring())+str(tabs.GetObjectAt(0),L"title")+L" · "+str(bootstrap,L"app_name"));
+    });
     }
-    if(sections&CanvasHeader)header->Apply(model);
-    if(sections&CanvasDialogs)ApplyDialogs();
+    if(sections&CanvasHeader)header->Apply(model,changes);
+    if(sections&CanvasDialogs)ApplyDialogs(&changes);
     header->Root().Visibility(workspaceReady||flag(object(model,L"launch"),L"visible")?Visibility::Visible:Visibility::Collapsed);
     // Workspace theme replacement must not take focus from retained Preferences.
     if(retheme&&focus)dispatcher.TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low,
@@ -2037,9 +2047,9 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
 
 void CanvasWindow::ApplyScreen(Windows::Data::Json::JsonObject const& model){
     using namespace CapyUi;
-    screenData->adoptLocalization(model);screenData->state=object(model,L"state");screenData->refreshPalette();
+    screenData->refreshPalette();
     screenChip.Background(headerSurface(screenData));buttonFeedback(screenChip,screenData->brush(L"text"),26,41);
-    auto state=object(model,L"state"),screen=object(state,L"screen"),chip=object(screen,L"chip"),details=object(screen,L"details");
+    auto state=branch(model,L"state"),screen=object(state,L"screen"),chip=object(screen,L"chip"),details=object(screen,L"details");
     auto catalog=object(object(model,L"localization"),L"catalog");auto updated=object(object(catalog,L"native_copy"),L"color");if(updated.Size())screenCopy=updated;if(catalog.Size())screenFontSize=num(catalog,L"text_size_pt",11)*4/3;
     auto key=screen.Stringify()+screenCopy.Stringify()+str(state,L"theme")+to_hstring(screenFontSize);if(screenKey==key)return;screenKey=key;
     auto colorCopy=screenCopy;screenChip.FontSize(screenFontSize);screenClipped.FontSize(screenFontSize);
