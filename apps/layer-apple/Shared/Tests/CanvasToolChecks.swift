@@ -60,7 +60,10 @@ extension XCTestCase {
             XCTFail("The native scroll needs a finite viewport inside its editor window")
             return false
         }
-        let x = (viewport.minX - frame.minX + viewport.width * 0.05) / frame.width
+        let cells = snapshot.children.filter { $0.elementType == .cell }.map { $0.frame.intersection(viewport) }
+            .filter { $0.width > 0 && $0.height > 0 }.reduce(CGRect.null) { $0.union($1) }
+        let content = cells.isNull ? viewport : cells
+        let x = (content.minX - frame.minX + content.width * 0.05) / frame.width
         let startY = (viewport.minY - frame.minY + viewport.height * (towardEnd ? 0.8 : 0.2)) / frame.height
         let endY = (viewport.minY - frame.minY + viewport.height * (towardEnd ? 0.2 : 0.8)) / frame.height
         let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: x, dy: startY))
@@ -123,13 +126,13 @@ extension XCTestCase {
             let window = XCUIApplication().windows.firstMatch, windowBounds = window.frame
             guard let target = nodes.first(where: {
                 let bounds = $0.frame
-                return $0.elementType == .button && !$0.identifier.isEmpty && bounds.width > 0 && bounds.height > 0
+                return !$0.identifier.isEmpty && bounds.width > 0 && bounds.height > 0
                     && bounds.midX.isFinite && bounds.midY.isFinite
                     && viewport.contains(bounds) && windowBounds.contains(bounds)
             }) else {
                 return XCTFail("The scroll viewport must contain a visible wheel target inside its editor window: \(scroll.identifier)")
             }
-            let bounds = target.frame, targetID = target.identifier
+            let bounds = target.frame, targetID = target.identifier, targetType = target.elementType
             let wheel = nodes.first { $0.elementType == .staticText && $0.frame.width > 0 && $0.frame.height > 0
                 && viewport.contains($0.frame) && windowBounds.contains($0.frame) }?.frame ?? viewport
             let point = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
@@ -140,7 +143,7 @@ extension XCTestCase {
                 guard let next = try? scroll.snapshot() else { return false }
                 let nextNodes = descendants(next)
                 let movedRequest = nextNodes.first { $0.elementType == type && identity($0) == key }?.frame
-                let movedTarget = nextNodes.first { $0.elementType == .button && $0.identifier == targetID }?.frame
+                let movedTarget = nextNodes.first { $0.elementType == targetType && $0.identifier == targetID }?.frame
                 return movedRequest.map { $0.width > 0 && $0.height > 0 && $0 != frame } == true
                     || movedTarget.map { $0.width > 0 && $0.height > 0 && $0 != bounds } == true
             }, evaluatedWith: scroll)
