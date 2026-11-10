@@ -40,8 +40,8 @@ struct ExportForm: View {
             } }
             EditorScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if editor.loaded { choices.disabled(editor.busy || readingProfile) }
-                    if editor.busy { ProgressView(copy["preparing"].string) }
+                    if editor.loaded { choices.disabled(editor.working || readingProfile) }
+                    if editor.working { ProgressView(copy["preparing"].string) }
                     if let error = editor.error ?? (view["error"].isNull ? nil : view["error"].string) {
                         Text(error).foregroundStyle(.red).accessibilityIdentifier("export-error")
                     }
