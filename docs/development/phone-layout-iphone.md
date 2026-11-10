@@ -368,3 +368,11 @@ no regression. If a physical iPhone is available, record the same rows there.
   that command. iOS must treat those as explicit text-entry requests, like
   rename, while browsing pickers remain unfocused after touch opening. Verify
   that each requested search focuses and raises the keyboard with one tap.
+
+- **Open phone tile menus when the hold arms.** Shared `PhoneBarContact::arm`
+  returns Menu; a held release returns Pending. GTK, Web and Android open
+  touch/pen menus at arm, retain the original contact, close on drag or cancel
+  and leave the menu open on release. iOS phone menus are unavailable until
+  `PhoneBarInput.swift` consumes Menu at arm instead of finish and dismisses
+  it on drag. Mouse holds only arm pickup. Verify menu visibility before Up,
+  retained menu after Up, same-contact reorder, cancellation and mouse pickup.

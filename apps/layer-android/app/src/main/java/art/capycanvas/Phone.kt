@@ -63,6 +63,7 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
     var capy = false
     var geometryKey: String? = null
     var held = false
+    var heldContext = false
     var suppressed = false
     var pointerDown = false
     val active get() = capy || contact != null || jobs.isNotEmpty()
@@ -79,6 +80,8 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
         (contact?.let { phoneUi(obj("kind" to "bar_valid", "layout" to layout, "tiles" to tiles, "contact" to it)) == true } ?: true)
     fun cancel() {
         generation++
+        if (heldContext) { heldContext = false; dock.closeContext() }
+        dock.contactHeld = false
         if (capy && held) host.phone(obj("kind" to "capy_drop", "position" to JSONArray(listOf(-1, -1))))
         suppressed = true; capy = false; held = false; contact = null; preview = null
     }
@@ -139,10 +142,16 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
                 if (event == null) {
                     if (cancelled) continue
                     if (input.capy) { input.held = true; input.suppressed = true; host.phone(obj("kind" to "capy_hold")) }
-                    else when (input.step(obj("kind" to "arm")).getJSONObject("outcome").getString("kind")) {
-                        "held" -> { input.held = true; input.suppressed = true }
-                        "cancel" -> { input.cancel(); cancelled = true }
-                        else -> cancelled = true
+                    else {
+                        val outcome = input.step(obj("kind" to "arm")).getJSONObject("outcome")
+                        when (outcome.getString("kind")) {
+                            "menu" -> {
+                                input.held = true; input.suppressed = true; dock.contactHeld = true
+                                if(down.type != PointerType.Mouse) { input.heldContext = true; menu(outcome.opt("value")) }
+                            }
+                            "cancel" -> { input.cancel(); cancelled = true }
+                            else -> cancelled = true
+                        }
                     }
                     continue
                 }
@@ -158,7 +167,11 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
                     if (input.capy) {
                         if (pastSlop && !input.held) { input.cancel(); cancelled = true }
                     } else when (input.step(obj("kind" to "motion", "position" to JSONArray(listOf(point.x, point.y)), "past_slop" to pastSlop)).getJSONObject("outcome").getString("kind")) {
-                        "dragging", "held" -> input.suppressed = true
+                        "dragging" -> {
+                            if(input.heldContext) { input.heldContext = false; dock.closeContext() }
+                            input.suppressed = true
+                        }
+                        "held" -> input.suppressed = true
                         "window_move", "cancel" -> { input.cancel(); cancelled = true }
                     }
                 }
@@ -172,7 +185,6 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
                             val outcome = input.step(obj("kind" to "finish", "position" to JSONArray(listOf(point.x, point.y)))).getJSONObject("outcome")
                             when (outcome.getString("kind")) {
                                 "move" -> host.phone(outcome.getJSONObject("value").copy().put("kind", "move_tool"))
-                                "menu" -> if (down.type != PointerType.Mouse) menu(outcome.opt("value"))
                                 "cancel" -> input.suppressed = true
                             }
                         }
@@ -182,6 +194,7 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
             }
         } finally {
             if (!released) input.cancel()
+            input.heldContext = false; dock.contactHeld = false
             input.capy = false; input.held = false; input.contact = null; input.preview = null
             input.jobs.remove(job);input.releaseClick()
         }

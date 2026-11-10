@@ -1238,21 +1238,20 @@ export async function checkPhoneAudit({call,evaluate,reload,settle,canvasPixels,
       const hold=async position=>{
         const start=await evaluate('performance.now()');await touch('touchStart',position);
         await wait(`performance.now()-${start}>=900&&document.querySelector("#phone-frame").dataset.contact==="held"`);
-        assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),false,'Holding lifts without opening a menu before release');
+        assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),true,'A touch hold opens its menu while the contact remains down');
       };
       const release=async()=>{await touch('touchEnd');await settle();};
       const menu=async(tile)=>{
         const position=await point(`#phone-tool-${tile}`);await hold(position);await release();
-        await wait('document.querySelector(".panel-context-menu")?.matches(":popover-open")');
+        assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),true,'Releasing the held contact keeps its menu open');
       };
       const heldPointer=async(position,pointerType)=>{
         const start=await evaluate('performance.now()');
         await call('Input.dispatchMouseEvent',{type:'mousePressed',...position,button:'left',buttons:1,clickCount:1,pointerType});
         await wait(`performance.now()-${start}>=900&&document.querySelector("#phone-frame").dataset.contact==="held"`);
-        assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),false,`${pointerType} hold arms before release`);
+        assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),pointerType==='pen',`${pointerType} hold menu admission before release`);
         await call('Input.dispatchMouseEvent',{type:'mouseReleased',...position,button:'left',buttons:0,clickCount:1,pointerType});await settle();
-        if(pointerType==='pen')await wait('!!document.querySelector(".panel-context-menu:popover-open")');
-        assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),pointerType==='pen',`${pointerType} release menu`);
+        assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),pointerType==='pen',`${pointerType} release preserves held-menu admission`);
       };
       const menuAction=async label=>{
         await wait(`!![...document.querySelectorAll('.panel-context-menu:popover-open button')].find(n=>n.menuItem?.label===${JSON.stringify(label)})`);
@@ -1319,6 +1318,7 @@ export async function checkPhoneAudit({call,evaluate,reload,settle,canvasPixels,
       to[await evaluate('layerApp.app.layout(innerWidth,innerHeight).phone.edge==="top"?"x":"y"')]+=1;
       const moveHistory=await history();await hold(from);await touch('touchMove',to);
       await wait('document.querySelector("#phone-frame").dataset.contact==="dragging"');
+      assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),false,'The same held contact dismisses its menu when dragging starts');
       const paint=await evaluate(`(()=>{const n=document.querySelector('#phone-tool-${sequence[0].id}').parentElement,s=getComputedStyle(n);return{lifted:n.classList.contains('header-drag-preview'),shadow:s.boxShadow,background:s.backgroundColor};})()`);
       assert.equal(paint.lifted,true,JSON.stringify(paint));assert.ok(paint.shadow.includes('inset')&&paint.shadow.includes('2px'),JSON.stringify(paint));assert.notEqual(paint.background,'rgba(0, 0, 0, 0)');
       assert.deepEqual(await history(),moveHistory,'Reorder preview never enters shared history');
@@ -1330,9 +1330,11 @@ export async function checkPhoneAudit({call,evaluate,reload,settle,canvasPixels,
       await hold(from);await touch('touchMove',outside);await release();assert.deepEqual(await history(),cancelled);
       await captureCustom('customize-offbar-cancelled');
       await hold(from);await escape();await release();assert.deepEqual(await history(),cancelled,'Escape cancels a held contact');
+      assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),false,'Escape closes the held menu');
       const empty=await durable();empty.layout.phone=[];await send({type:'restore_workspace',workspace:empty});
       const blank=await evaluate(`(()=>{const p=layerApp.app.layout(innerWidth,innerHeight).phone,occupied=[...p.tool_hits,...p.tools,...p.controls,p.capy_hit,p.settings_hit,p.size,p.strength];for(const bar of p.bars)for(let y=Math.ceil(bar.y);y<Math.floor(bar.y+bar.height);y++)for(let x=Math.ceil(bar.x);x<Math.floor(bar.x+bar.width);x++){const point={x:x+.5,y:y+.5};if(!occupied.some(b=>b.width>0&&b.height>0&&point.x>=b.x&&point.x<b.x+b.width&&point.y>=b.y&&point.y<b.y+b.height))return point;}throw Error('The shared phone bars have no free background contact');})()`);
-      await hold(blank);await release();await wait('document.querySelector(".panel-context-menu")?.matches(":popover-open")');
+      await hold(blank);await release();
+      assert.equal(await evaluate('!!document.querySelector(".panel-context-menu:popover-open")'),true,'The empty-toolbar hold keeps Add Tools open on release');
       assert.deepEqual(await evaluate('[...document.querySelectorAll(".panel-context-menu:popover-open button")].map(n=>n.menuItem.label)'),['Add Tools…']);
       await captureCustom('customize-empty-toolbar');await menuAction('Add Tools…');await escape();
       assert.deepEqual((await durable()).layout.phone,[],'Cancelling Add Tools preserves an explicit empty toolbar');

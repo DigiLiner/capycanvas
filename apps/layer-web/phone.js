@@ -109,6 +109,7 @@ export function createPhone({app,state,workspace,capy,header,element,button,icon
     if(!previous)return;
     suppressClick=true;
     clearTimeout(previous.timer);
+    if(previous.menu)customization.dismissContext(previous.menu);
     if(previous.capy)send({kind:'capy_drop',position:[-1,-1]});
     previous.bar?.free();
     if(root.hasPointerCapture(previous.id))root.releasePointerCapture(previous.id);
@@ -128,7 +129,13 @@ export function createPhone({app,state,workspace,capy,header,element,button,icon
       if(contact!==current)return;
       if(current.capy){current.held=true;send({kind:'capy_hold'});capture();suppressClick=true;return;}
       const reply=app.phone_bar_input(current.bar,{kind:'arm'});
-      if(reply.outcome.kind==='held'){current.held=true;root.dataset.contact='held';capture();placePreview(reply);suppressClick=true;}
+      if(reply.outcome.kind==='menu'){
+        current.held=true;root.dataset.contact='held';capture();placePreview(reply);suppressClick=true;
+        const source=reply.outcome.value==null?parts['bar-tools']:tools.get(reply.outcome.value)?.root;
+        if(source&&['touch','pen'].includes(current.pointerType)){
+          current.menu=source;customization.showContext(source,[event.clientX,event.clientY],source,undefined,event);
+        }
+      }
       else if(reply.outcome.kind==='cancel')cancelContact();
     },app.touch_hold_ms());
   },true);
@@ -142,6 +149,7 @@ export function createPhone({app,state,workspace,capy,header,element,button,icon
     if(reply.outcome.kind==='window_move'){
       clearTimeout(contact.timer);contact.cancelled=true;capture();suppressClick=true;placePreview();
     } else if(reply.outcome.kind==='dragging'){
+      if(contact.menu){customization.dismissContext(contact.menu);contact.menu=null;}
       event.preventDefault();root.dataset.contact='dragging';placePreview(reply);suppressClick=true;
     } else if(reply.outcome.kind==='cancel'){suppressClick=true;cancelContact();}
   },true);
@@ -154,13 +162,10 @@ export function createPhone({app,state,workspace,capy,header,element,button,icon
     const {outcome}=app.phone_bar_input(current.bar,{kind:'finish',position});current.bar.free();
     if(current.cancelled)return;
     if(outcome.kind==='move'){send({kind:'move_tool',...outcome.value});suppressClick=true;}
-    else if(outcome.kind==='menu'){
-      const source=outcome.value==null?parts['bar-tools']:tools.get(outcome.value)?.root;
-      if(source&&['touch','pen'].includes(current.pointerType))customization.showContext(source,[event.clientX,event.clientY]);suppressClick=true;
-    } else if(outcome.kind==='cancel')suppressClick=true;
+    else if(outcome.kind==='cancel')suppressClick=true;
   },true);
   window.addEventListener('pointercancel',event=>{if(contact?.id===event.pointerId){suppressClick=true;cancelContact();}},true);
-  root.addEventListener('lostpointercapture',event=>{if(contact?.id===event.pointerId){suppressClick=true;cancelContact();}});
+  root.addEventListener('lostpointercapture',event=>{if(contact?.id===event.pointerId&&!root.hasPointerCapture(event.pointerId)){suppressClick=true;cancelContact();}});
   root.addEventListener('click',event=>{if(suppressClick&&event.detail){suppressClick=false;event.preventDefault();event.stopImmediatePropagation();}},true);
   window.addEventListener('blur',()=>{suppressClick=true;cancelContact();});
   window.addEventListener('keydown',event=>{

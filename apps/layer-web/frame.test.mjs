@@ -939,7 +939,7 @@ test('phone contacts preview locally, commit once and retire on cancellation',t=
   let next=0,valid=true,outcome={kind:'pending'},capture;
   const app={phone_tools:()=>[view,view],phone_settings:()=>view,toolbar_component:()=>({}),header_view:()=>({capy:view,sizes:[{id:'medium',tile:32}]}),capy_caption:()=>'',
     touch_hold_ms:()=>500,phone_bar_contact:()=>{const id=++next;return{id,free:()=>freed.push(id)};},phone_bar_valid:()=>valid,
-    phone_bar_input:(bar,input)=>{inputs.push([bar.id,input.kind]);return{outcome,geometry:geometry.tools,lifted:outcome.kind==='held'||outcome.kind==='dragging'?0n:null};}};
+    phone_bar_input:(bar,input)=>{inputs.push([bar.id,input.kind]);return{outcome,geometry:geometry.tools,lifted:['menu','held','dragging'].includes(outcome.kind)?0n:null};}};
   const workspace=element('div'),capy=element('button');doc.body.append(workspace);workspace.append(capy);
   const createElement=(...args)=>{const n=element(...args);n.style.setProperty=()=>{};n.querySelector=()=>null;n.hasPointerCapture=id=>capture===id;n.setPointerCapture=id=>capture=id;n.releasePointerCapture=()=>capture=null;return n;};
   const context={window:{addEventListener:(type,listener)=>{const list=listeners.get(type)??[];list.push(listener);listeners.set(type,list);}},document:doc,
@@ -951,8 +951,8 @@ test('phone contacts preview locally, commit once and retire on cancellation',t=
     customization:{target(){},variationMarker:()=>element('span'),showContext:()=>sent.push('menu')},dispatch:action=>sent.push(action),place(){},changed(){}});
   host.layout({phone:geometry});
   const root=workspace.children.find(n=>n.id==='phone-frame'),tool=doc.body.descendants().find(n=>n.id==='phone-tool-8');
-  const event=(type,x=2,y=2)=>{for(const fn of listeners.get(type)??[])fn({target:tool,button:0,isPrimary:true,pointerId:1,clientX:x,clientY:y,preventDefault(){},stopPropagation(){}});};
-  const arm=()=>{outcome={kind:'held'};for(const fn of [...timers.values()])fn();};
+  const event=(type,x=2,y=2)=>{for(const fn of listeners.get(type)??[])fn({target:tool,button:0,isPrimary:true,pointerType:'mouse',pointerId:1,clientX:x,clientY:y,preventDefault(){},stopPropagation(){}});};
+  const arm=()=>{outcome={kind:'menu',value:8};for(const fn of [...timers.values()])fn();};
   event('pointerdown');arm();assert.equal(root.dataset.contact,'held');
   assert.equal(tool.parentNode.classList.contains('header-drag-preview'),true,'A Wasm usize index marks the lifted control');
   outcome={kind:'dragging'};event('pointermove',42);assert.equal(sent.length,0);assert.equal(root.dataset.contact,'dragging');

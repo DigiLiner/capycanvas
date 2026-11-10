@@ -215,7 +215,7 @@ impl PhoneBarContact {
         (0..self.count).all(|i| ids.next() == Some(self.ids[i])) && ids.next().is_none()
     }
     pub fn hold(&mut self) { self.held = true; }
-    pub fn arm(&mut self) -> PhoneBarOutcome { self.hold(); if self.editable { PhoneBarOutcome::Held } else { PhoneBarOutcome::Pending } }
+    pub fn arm(&mut self) -> PhoneBarOutcome { self.hold(); if self.editable { PhoneBarOutcome::Menu(self.index.map(|i| self.ids[i])) } else { PhoneBarOutcome::Pending } }
     pub fn cancel(&mut self) -> PhoneBarOutcome { self.key = None; PhoneBarOutcome::Cancel }
     pub fn move_window(&self, past_slop: bool) -> bool { past_slop && !self.held }
     pub fn motion(&mut self, layout: &PhoneLayout, tiles: &[crate::ToolbarTile], point: [f32; 2], past_slop: bool) -> PhoneBarOutcome {
@@ -242,8 +242,7 @@ impl PhoneBarContact {
             if !(Bounds { x: b.x-t, y: b.y-t, width: b.width+2.*t, height: b.height+2.*t }).contains(point[0],point[1]) { return PhoneBarOutcome::Cancel; }
             return PhoneBarOutcome::Move { tile: self.ids[self.index.unwrap()], before: self.destination(layout) };
         }
-        if self.held && self.editable { PhoneBarOutcome::Menu(self.index.map(|i| self.ids[i])) }
-        else if !self.held { self.index.map_or(PhoneBarOutcome::Pending, |i| PhoneBarOutcome::Tap(self.ids[i])) }
+        if !self.held { self.index.map_or(PhoneBarOutcome::Pending, |i| PhoneBarOutcome::Tap(self.ids[i])) }
         else { PhoneBarOutcome::Pending }
     }
     pub fn geometry(&self, layout: &PhoneLayout) -> [Bounds; PhoneLayout::MAX_TILES] {

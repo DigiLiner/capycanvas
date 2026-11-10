@@ -148,6 +148,95 @@ class AndroidPhoneAuditTest {
         }
     }
 
+    @Test fun phoneHeldMenusPreserveTouchPenAndMouseContacts() {
+        val scenario = launchCapy(180_000,compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val decor = activity.window.decorView
+        val original = activity.requestedOrientation
+        fun tiles() = host.snapshot!!.getJSONObject("state").getJSONObject("workspace").getJSONObject("layout").array("phone").objects()
+        fun point(tile: Int): Offset {
+            compose.waitForIdle()
+            val (root,node) = checkNotNull(findTag("phone-tool-$tile"))
+            val origin = IntArray(2)
+            instrumentation.runOnMainSync { root.view.getLocationOnScreen(origin) }
+            return node.boundsInRoot.center+Offset(origin[0].toFloat(),origin[1].toFloat())
+        }
+        fun event(tool: Int,phase: Int,at: Offset,down: Long) {
+            val input = motion(tool,phase,at,down)
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(input,true)) } finally { input.recycle() }
+        }
+        fun hold(tool: Int,at: Offset): Long {
+            val down = SystemClock.uptimeMillis()
+            event(tool,MotionEvent.ACTION_DOWN,at,down)
+            host.awaitFrame("The original contact opens its held menu") {
+                host.workspaceInteraction?.phone?.held == true && host.workspaceInteraction?.contactHeld == true &&
+                    (tool == MotionEvent.TOOL_TYPE_MOUSE || findTag("workspace-menu")?.second?.let { it.layoutInfo.isPlaced && it.size.width>0 && it.size.height>0 } == true)
+            }
+            compose.waitForIdle()
+            if(tool != MotionEvent.TOOL_TYPE_MOUSE) {
+                val committed = java.util.concurrent.CountDownLatch(1)
+                instrumentation.runOnMainSync {
+                    val view = checkNotNull(findTag("workspace-menu")).first.view
+                    view.viewTreeObserver.registerFrameCommitCallback { committed.countDown() }
+                    view.invalidate()
+                }
+                assertTrue("The held menu commits its own window frame before Up",committed.await(5,java.util.concurrent.TimeUnit.SECONDS))
+            }
+            return down
+        }
+        fun closeMenu() {
+            instrumentation.runOnMainSync { host.workspaceInteraction!!.closeContext() }
+            host.awaitFrame("The editing menu closes") { findTag("workspace-menu") == null && activity.hasWindowFocus() }
+        }
+        try {
+            host.awaitFrame("The launch cover releases input") { findTag("launch-splash") == null }
+            for((name,orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
+                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+                val rotation = when(orientation) { 0 -> 1;8 -> 3;else -> 0 }
+                host.awaitFrame("$name held-menu viewport") { activity.display!!.rotation == rotation && (decor.width>decor.height) == (rotation != 0) }
+                for(theme in listOf("light","dark")) {
+                    host.drain(obj("type" to "set_theme","theme" to theme))
+                    val ids = tiles().map { it.getInt("id") }
+                    val at = point(ids[0])
+                    for((device,tool) in listOf("touch" to MotionEvent.TOOL_TYPE_FINGER,"pen" to MotionEvent.TOOL_TYPE_STYLUS,"mouse" to MotionEvent.TOOL_TYPE_MOUSE)) {
+                        val down = hold(tool,at)
+                        if(tool == MotionEvent.TOOL_TYPE_MOUSE)assertNull("A mouse hold only arms pickup",findTag("workspace-menu"))
+                        screenshot("fix2-$name-$theme-$device-held.png")
+                        event(tool,MotionEvent.ACTION_UP,at,down)
+                        host.awaitFrame("Up retires only contact ownership") { host.workspaceInteraction?.contactHeld == false }
+                        if(tool != MotionEvent.TOOL_TYPE_MOUSE) {
+                            assertNotNull("Up leaves the held menu open",findTag("workspace-menu"))
+                            closeMenu()
+                        } else assertNull(findTag("workspace-menu"))
+                        assertEquals("Hold and release cannot activate a row",ids,tiles().map { it.getInt("id") })
+                    }
+                    val target = point(ids[2])+if(decor.width>decor.height)Offset(0f,1f) else Offset(1f,0f)
+                    val down = hold(MotionEvent.TOOL_TYPE_FINGER,at)
+                    event(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.ACTION_MOVE,target,down)
+                    host.awaitFrame("Dragging closes the menu and keeps the same contact") {
+                        findTag("workspace-menu") == null && host.workspaceInteraction?.phone?.preview?.objectOrNull("outcome")?.optString("kind") == "dragging"
+                    }
+                    screenshot("fix2-$name-$theme-dragging.png")
+                    event(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.ACTION_UP,target,down)
+                    host.awaitFrame("The same contact reorders once") { tiles()[2].getInt("id") == ids[0] }
+                    host.drain(obj("type" to "invoke","command" to "undo_workspace"))
+                    host.awaitFrame("Undo restores the toolbar") { tiles().map { it.getInt("id") } == ids }
+                    val cancelled = hold(MotionEvent.TOOL_TYPE_FINGER,point(ids[0]))
+                    pressKey(KeyEvent.KEYCODE_ESCAPE)
+                    host.awaitFrame("Escape closes the menu and cancels the contact") { findTag("workspace-menu") == null && host.workspaceInteraction?.phone?.contact == null }
+                    event(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.ACTION_UP,at,cancelled)
+                    assertEquals("Cancelled release changes nothing",ids,tiles().map { it.getInt("id") })
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.requestedOrientation = original }
+            scenario.close()
+        }
+    }
+
     @Test fun pickerSearchFollowsNativeInputMode() {
         val scenario = launchCapy(180_000, compose)
         val activity = scenario.activity()
@@ -696,6 +785,7 @@ class AndroidPhoneAuditTest {
                 assertNotEquals("CPU adapter is forbidden", 4, gpu.getInt("deviceType"))
                 assertFalse("Software adapter is forbidden: $adapter", listOf("swiftshader", "llvmpipe", "lavapipe").any { adapter.contains(it, ignoreCase = true) })
             }
+            if (!admissionOnly) startupTheme()
             scenario = androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
             val activity = scenario.activity()
             val host = activity.host
@@ -780,7 +870,7 @@ class AndroidPhoneAuditTest {
                     collect(if(family in listOf("pagesD1","pagesD2","pagesA4","sourcePages","fileProgress"))root.first.semanticsOwner.unmergedRootSemanticsNode else root.second, allocations)
                     report.put("phone_active", host.snapshot?.getJSONObject("layout")?.objectOrNull("phone") != null)
                     report.put("revision", host.snapshot?.getJSONObject("state")?.getLong("revision"))
-                    assertEquals("System theme", expectedTheme, host.snapshot?.getJSONObject("state")?.getString("theme"))
+                    assertEquals("Fixture theme", expectedTheme, host.snapshot?.getJSONObject("state")?.getString("theme"))
                     assertEquals("Configured density", expectedDensity, metrics.densityDpi)
                     assertEquals("Configured font scale", expectedFont, activity.resources.configuration.fontScale, .001f)
                     assertEquals("App viewport width in pixels", size[0], decor.width)
@@ -2569,9 +2659,9 @@ class AndroidPhoneAuditTest {
                 val dock = host.workspaceInteraction
                 "at=$at; enabled=${dock?.enabled}; popup=${dock?.popupOpen}; windowFocus=${activity.hasWindowFocus()}; contact=${dock?.phone?.contact != null}; outcome=${dock?.phone?.preview?.opt("outcome")}"
             }) { host.workspaceInteraction?.phone?.held == true }
-            assertNull("The editing menu opens on release",findTag("workspace-menu"))
+            host.awaitFrame("The editing menu opens before release") { findTag("workspace-menu") != null }
             event(MotionEvent.ACTION_UP,at)
-            host.awaitFrame("Hold release opens the editing menu") { findTag("workspace-menu") != null }
+            assertNotNull("Hold release keeps the editing menu open",findTag("workspace-menu"))
             compose.waitForIdle()
             val presentation = checkNotNull(host.workspaceInteraction?.contextPresentation)
             assertEquals("contact",presentation.getString("anchor"))
@@ -2657,7 +2747,9 @@ class AndroidPhoneAuditTest {
         val to = point("phone-tool-${tiles()[2].getInt("id")}")+if(host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getString("edge") == "top")Offset(1f,0f) else Offset(0f,1f)
         event(MotionEvent.ACTION_DOWN,from)
         host.awaitFrame("Reorder pickup is armed") { host.workspaceInteraction?.phone?.held == true }
-        event(MotionEvent.ACTION_MOVE,to);state("customize-reorder-held") {}
+        event(MotionEvent.ACTION_MOVE,to)
+        host.awaitFrame("Dragging closes its held menu") { findTag("workspace-menu") == null }
+        state("customize-reorder-held") {}
         event(MotionEvent.ACTION_UP,to);host.drain()
         host.awaitFrame("Reorder moves the first tile after two peers") { tiles()[2].getInt("id") == first }
         invoke("undo_workspace");assertEquals(beforeMove,jsonValue(layout()))

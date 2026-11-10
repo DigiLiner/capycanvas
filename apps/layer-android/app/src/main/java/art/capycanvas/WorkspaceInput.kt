@@ -355,7 +355,7 @@ internal class DockInteraction(val host: CanvasHost) {
         contextGeneration++
         if (contextMenu == null) { contextTarget = null; contextOwner = null }
     }
-    fun closeContext() { retireContextRequest(); contextTarget = null; contextOwner = null; contextMenu = null; contextRequest = null; contextPresentation = null; refresh() }
+    fun closeContext() { if(phone?.heldContext == true) { phone?.cancel(); return }; retireContextRequest(); contextTarget = null; contextOwner = null; contextMenu = null; contextRequest = null; contextPresentation = null; refresh() }
     fun doubleClickHandle(item: JSONObject) {
         host.query(obj("type" to "panel_handle_target", "item" to item)) { group ->
             if (group is Number) host.dispatch(obj("type" to "double_click_panel_handle", "group" to group, "viewport" to viewport))
