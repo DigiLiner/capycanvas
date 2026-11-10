@@ -35,7 +35,7 @@ extension XCTestCase {
         XCTAssertTrue(transparent.exists)
         XCTAssertEqual(transparent.frame.width, background.frame.width, accuracy: 1)
         XCTAssertEqual(transparent.frame.height, background.frame.height, accuracy: 1)
-        workspaceActivate(background); expectIcon([255, 255, 255])
+        colorControlPoint(background, in: app).clickOrTap(); expectIcon([255, 255, 255])
         workspaceActivate(transparent); expectIcon([255, 255, 255])
         workspaceActivate(app.buttons["color-foreground"]); expectIcon(green)
         workspaceActivate(app.buttons["paint-edit-color"].firstMatch)

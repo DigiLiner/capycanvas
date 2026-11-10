@@ -210,9 +210,6 @@ extension XCTestCase {
         XCTAssertTrue(select.waitForNonExistence(timeout: 10))
         attachEditor(in: app, name: "sdr-new-options")
         workspaceActivate(create)
-        #if os(iOS)
-        if !create.waitForNonExistence(timeout: 2) { workspaceActivate(create) }
-        #endif
         XCTAssertTrue(create.waitForNonExistence(timeout: 30))
         let title = editorDocumentTitle(in: app)
         expectation(for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "79 × 53", "79 × 53"), evaluatedWith: title)

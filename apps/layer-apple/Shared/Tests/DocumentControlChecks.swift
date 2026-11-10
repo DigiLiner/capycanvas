@@ -667,22 +667,25 @@ extension XCTestCase {
         XCTAssertTrue(preview.waitForExistence(timeout: 15))
         XCTAssertEqual(preview.label, "Preview Output")
         let exportScroll = app.scrollViews.containing(.button, identifier: "export-preview").firstMatch
+        let sizePage = app.buttons["export-page-size"]
+        revealEditorControl(sizePage, in: exportScroll); activate(sizePage)
+        let sizeScroll = app.scrollViews.containing(.switch, identifier: "export-fit").firstMatch
         let fit = app.switches["export-fit"]
-        revealEditorControl(fit, in: exportScroll)
+        revealEditorControl(fit, in: sizeScroll)
         if fit.value as? String != "1" { workspaceActivate(fit) }
         let exportWidth = app.textFields["export-width"], exportHeight = app.textFields["export-height"]
-        replaceEditorText(exportWidth, with: "7.5", in: app)
+        replaceEditorText(exportWidth, with: "7 +", in: app)
         dismissEditorKeyboard(in: app)
-        revealEditorControl(preview, in: exportScroll); workspaceActivate(preview)
-        let integerError = app.staticTexts["export-error"]
+        let expressionError = app.staticTexts["export-error"]
         expectation(for: NSPredicate { _, _ in
-            integerError.exists && (integerError.label == "Maximum width (px) needs a whole number." || integerError.value as? String == "Maximum width (px) needs a whole number.")
+            expressionError.exists && (expressionError.label == "Enter a valid mathematical expression." || expressionError.value as? String == "Enter a valid mathematical expression.")
         }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
-        XCTAssertEqual(exportWidth.value as? String, "7.5")
+        XCTAssertEqual(exportWidth.value as? String, "7 +")
         replaceEditorText(exportWidth, with: "32", in: app)
         replaceEditorText(exportHeight, with: "32", in: app)
         dismissEditorKeyboard(in: app)
+        activate(app.buttons["export-back"])
         revealEditorControl(preview, in: exportScroll); workspaceActivate(preview)
         let outputSize = app.staticTexts["export-output-size"]
         expectation(for: NSPredicate { _, _ in

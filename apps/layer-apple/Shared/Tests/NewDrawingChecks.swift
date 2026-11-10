@@ -470,7 +470,7 @@ extension XCTestCase {
         #endif
         workspaceActivate(app.buttons["new-drawing-paper-cancel"])
         XCTAssertTrue(useTexture.waitForNonExistence(timeout: 10))
-        expectNewDrawingValue("new-drawing-texture", none, in: app)
+        expectNewDrawingValue("new-drawing-texture", "None", in: app)
 
         pickColdPress()
         replaceEditorText(relief, with: "150", in: app)

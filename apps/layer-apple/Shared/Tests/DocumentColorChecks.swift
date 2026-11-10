@@ -68,7 +68,7 @@ extension XCTestCase {
         command("Change Bit Depth…");choose("document-color-depth","16-bit SDR");compare();workspaceActivate(apply)
         XCTAssertTrue(apply.waitForNonExistence(timeout:30))
         command("Document Properties…")
-        XCTAssertTrue(app.staticTexts["16-bit integer SDR"].waitForExistence(timeout:15))
+        XCTAssertTrue(app.staticTexts["16-bit SDR"].waitForExistence(timeout:15))
         XCTAssertTrue(app.staticTexts["ProPhoto RGB"].exists)
         attachEditor(in:app,name:"document-properties-after-depth")
         workspaceActivate(app.buttons["Done"].firstMatch)

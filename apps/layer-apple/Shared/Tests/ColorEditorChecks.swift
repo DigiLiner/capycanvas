@@ -6,6 +6,8 @@ import AppKit
 extension XCTestCase {
     @MainActor func editColorValue(_ name: String, _ text: String, in app: XCUIApplication) {
         let value = app.descendants(matching: .any)["color-value-" + name].firstMatch
+        let scroll = app.scrollViews.containing(.any, identifier: "color-value-" + name).firstMatch
+        if scroll.exists { revealEditorControl(value, in: scroll) }
         workspaceActivate(value)
         let field = app.textFields["color-entry-" + name]
         guard field.waitForExistence(timeout: 5) else { XCTFail("Tapping a value opens it for typing"); return }

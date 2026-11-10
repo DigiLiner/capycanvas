@@ -239,7 +239,7 @@ extension XCTestCase {
                 let entry = app.textFields["number-entry-tool-tolerance"]
                 XCTAssertTrue(entry.waitForExistence(timeout: 5))
                 entry.typeText("\(percent)\n")
-                expectation(for: NSPredicate(format: "value == %@", "\(percent).0 %"),
+                expectation(for: NSPredicate(format: "value == %@", "\(percent) %"),
                     evaluatedWith: app.buttons["number-value-tool-tolerance"])
                 waitForExpectations(timeout: 5)
             }
@@ -249,7 +249,8 @@ extension XCTestCase {
             for value in ["2", "-2", "0"] {
                 let entry = app.textFields["number-entry-tool-edge_offset"]
                 revealEditorControl(entry, in: app.scrollViews.containing(.textField, identifier: entry.identifier).firstMatch)
-                workspaceActivate(entry); entry.typeText(value + "\n")
+                replaceEditorText(entry, with: value, in: app)
+                entry.typeText("\n")
                 editorTool("Paint Brush", in: app); editorTool(tool, in: app)
                 expectation(for: NSPredicate(format: "value == %@", value + " px"), evaluatedWith: entry)
                 waitForExpectations(timeout: 5)
