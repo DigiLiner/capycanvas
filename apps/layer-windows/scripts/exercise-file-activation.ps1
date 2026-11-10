@@ -31,12 +31,17 @@ public static class CapyFileDrag {
   Send(0,sx,sy);Send(2,sx,sy);
   Failure=null;
   var glide=new Thread(()=>{
+   var dpi=SetThreadDpiAwarenessContext(new IntPtr(-4));
    try{
+    if(dpi==IntPtr.Zero)throw new Exception("The file drag thread could not use physical coordinates.");
     Thread.Sleep(400);
     for(int step=1;step<=16;step++){Send(0,sx+(x-sx)*step/16,sy+(y-sy)*step/16);Thread.Sleep(40);}
     for(int dwell=0;dwell<12;dwell++){Send(0,x+dwell%2,y);Thread.Sleep(60);}
    }catch(Exception error){Failure=error;}
-   finally{try{Send(4,x,y);}catch(Exception error){Failure=Failure??error;}}
+   finally{
+    try{Send(4,x,y);}catch(Exception error){Failure=Failure??error;}
+    finally{if(dpi!=IntPtr.Zero&&SetThreadDpiAwarenessContext(dpi)==IntPtr.Zero)Failure=Failure??new Exception("The file drag thread did not restore its DPI context.");}
+   }
   });
   glide.Start();return glide;
  }

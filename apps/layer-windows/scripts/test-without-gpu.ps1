@@ -18,6 +18,9 @@ if($LASTEXITCODE -ne 0){throw 'Renderer health regression failed.'}
 & (Join-Path $PSScriptRoot '../tests/capture-dpi.ps1')
 & (Join-Path $PSScriptRoot '../tests/uia-owned-search.ps1')
 foreach($shell in @((Get-Process -Id $PID).Path,(Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'))|Select-Object -Unique){
+    [IO.Directory]::CreateDirectory($testBuildDirectory)|Out-Null
+    & $shell -NoProfile -File (Join-Path $PSScriptRoot '../tests/file-drag-dpi.ps1') -Output (Join-Path $testBuildDirectory ('file-drag-dpi-'+[IO.Path]::GetFileNameWithoutExtension($shell)+'.json'))
+    if($LASTEXITCODE -ne 0){throw 'File drag glide-thread DPI regression failed.'}
     & $shell -NoProfile -File (Join-Path $PSScriptRoot '../tests/clipboard-owner.ps1')
     if($LASTEXITCODE -ne 0){throw 'Clipboard owner lifetime regression failed.'}
     & $shell -NoProfile -File (Join-Path $PSScriptRoot '../tests/fixture-owner-census.ps1') -Helper (Join-Path $PSScriptRoot 'CapyUia.ps1') -Output (Join-Path $testBuildDirectory ('fixture-owner-'+[guid]::NewGuid().ToString('N')))

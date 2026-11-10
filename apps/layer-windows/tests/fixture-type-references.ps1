@@ -6,6 +6,27 @@ if($PSVersionTable.PSEdition -ne 'Core'){
 }
 Add-Type -Path (Join-Path $PSHOME 'Microsoft.CodeAnalysis.dll')
 Add-Type -Path (Join-Path $PSHOME 'Microsoft.CodeAnalysis.CSharp.dll')
+function Read-FixtureTypeExport($Tree,[IO.FileInfo]$File,$Command,$Value){
+    $mode=@($Tree.ParamBlock.Parameters|Where-Object {$_.Name.VariablePath.UserPath -eq 'TypeSourceOnly' -and $_.StaticType -eq [switch]})
+    if(!$mode.Count){return}
+    if($Value -isnot [Management.Automation.Language.VariableExpressionAst]){throw "Type source export must compile one variable in $($File.Name)"}
+    $name=$Value.VariablePath.UserPath
+    $bindings=@($Tree.FindAll({param($node)$node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and $node.Left.VariablePath.UserPath -eq $name}.GetNewClosure(),$true))
+    $branches=@($Tree.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.IfStatementAst] -and $_.Clauses.Count -eq 1 -and !$_.ElseClause -and $_.Clauses[0].Item1.Extent.Text -eq '$TypeSourceOnly'})
+    if($bindings.Count -ne 1 -or $branches.Count -ne 1 -or $bindings[0].Extent.StartOffset -gt $branches[0].Extent.StartOffset -or $branches[0].Extent.StartOffset -gt $Command.Extent.StartOffset){throw "Type source export has no unique precompile binding in $($File.Name)"}
+    $body=@($branches[0].Clauses[0].Item2.Statements)
+    if($body.Count -ne 1 -or $body[0] -isnot [Management.Automation.Language.ReturnStatementAst]){throw "Type source export must return the compiled variable in $($File.Name)"}
+    $returned=$body[0].Pipeline.GetPureExpression()
+    if($returned -isnot [Management.Automation.Language.VariableExpressionAst] -or $returned.VariablePath.UserPath -cne $name){throw "Type source export must return the compiled variable in $($File.Name)"}
+    $prefix=$branches[0].Extent.StartOffset
+    $modeUses=@($Tree.FindAll({param($node)$node -is [Management.Automation.Language.VariableExpressionAst] -and $node.Parent -isnot [Management.Automation.Language.ParameterAst] -and $node.VariablePath.UserPath -in @('TypeSourceOnly','PSBoundParameters','args','MyInvocation')},$true)|Where-Object {$_.Extent.StartOffset -lt $prefix})
+    if($modeUses.Count){throw "Type source export mode affects its producer in $($File.Name)"}
+    $earlier=@($Tree.FindAll({param($node)$node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Add-Type'},$true)|Where-Object {$_.Extent.StartOffset -lt $prefix})
+    if($earlier.Count){throw "Type source export follows Add-Type in $($File.Name)"}
+    $output=@(& $File.FullName -TypeSourceOnly)
+    if($output.Count -ne 1 -or $output[0] -isnot [string] -or [string]::IsNullOrWhiteSpace($output[0])){throw "Type source export must produce exactly one C# source string in $($File.Name)"}
+    $output[0]
+}
 function Test-FixtureTypeReferences([IO.FileInfo[]]$Files,[string[]]$RequiredTypes=@()){
 $asts=@{};$definitions=@{};$imports=@{};$unresolved=[Collections.Generic.List[string]]::new();$replays=@()
 foreach($file in $files){
@@ -23,15 +44,19 @@ foreach($file in $files){
             if($parameter -notin @('TypeDefinition','MemberDefinition','Path')){continue}
             $value=if($parts[$i].Argument){$parts[$i].Argument}else{$parts[$i+1]}
             if($parameter -in @('TypeDefinition','MemberDefinition')){
-                if($value -is [Management.Automation.Language.VariableExpressionAst]){
+                $exported=if($parameter -eq 'TypeDefinition'){Read-FixtureTypeExport $ast $file $command $value}
+                if($exported){$source=$exported;$replays+="$($file.Name):$($command.Extent.StartLineNumber): actual compiled source export"}
+                elseif($value -is [Management.Automation.Language.VariableExpressionAst]){
                     $name=$value.VariablePath.UserPath
                     $binding=@($ast.FindAll({param($n)$n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [Management.Automation.Language.VariableExpressionAst] -and $n.Left.VariablePath.UserPath -eq $name}.GetNewClosure(),$true))
                     if($binding.Count -eq 1){$value=$binding[0].Right.Find({param($n)$n -is [Management.Automation.Language.StringConstantExpressionAst] -or $n -is [Management.Automation.Language.ExpandableStringExpressionAst]},$true)}
                 }
-                if($value -is [Management.Automation.Language.StringConstantExpressionAst]){$source=$value.Value}
-                elseif($value -is [Management.Automation.Language.ExpandableStringExpressionAst] -and !$value.NestedExpressions.Count){$source=$value.Value}
-                elseif($value -is [Management.Automation.Language.MemberExpressionAst] -and $value.Member.Value -eq 'Value'){$replays+="$($file.Name):$($command.Extent.StartLineNumber): AST source replay; references checked against original declarations"}
-                else{$unresolved.Add("$($file.Name):$($command.Extent.StartLineNumber): nonliteral Add-Type source")}
+                if(!$exported){
+                    if($value -is [Management.Automation.Language.StringConstantExpressionAst]){$source=$value.Value}
+                    elseif($value -is [Management.Automation.Language.ExpandableStringExpressionAst] -and !$value.NestedExpressions.Count){$source=$value.Value}
+                    elseif($value -is [Management.Automation.Language.MemberExpressionAst] -and $value.Member.Value -eq 'Value'){$replays+="$($file.Name):$($command.Extent.StartLineNumber): AST source replay; references checked against original declarations"}
+                    else{$unresolved.Add("$($file.Name):$($command.Extent.StartLineNumber): nonliteral Add-Type source")}
+                }
                 if($source -and $parameter -eq 'MemberDefinition'){
                     $wrapper=@{Namespace='Microsoft.PowerShell.Commands.AddType.AutoGeneratedTypes'}
                     for($j=1;$j -lt $parts.Count;$j++){
@@ -155,5 +180,33 @@ try{
     [IO.File]::AppendAllText($real,"`n[Guard.GuardOwner]::Hidden")
     $failure=$null;try{$null=Test-FixtureTypeReferences @(Get-Item $real)}catch{$failure=$_.Exception.Message}
     if(!$failure -or !$failure.Contains('missing public static member [Guard.GuardOwner]::Hidden')){throw 'MemberDefinition private member control was accepted'}
-    'Fixture type guard controls passed: nested types, static visibility, constructors, duplicate mocks and MemberDefinition.'
+    $export=Join-Path $directory 'export.ps1'
+    foreach($case in @(
+        @{reference='[ExportOwner]::Good()';returned='$compiled';error=$null},
+        @{reference='[ExportOwner+Missing]::new()';returned='$compiled';error='missing custom type [ExportOwner+Missing]'},
+        @{reference='[ExportOwner]::Hidden()';returned='$compiled';error='missing public static member [ExportOwner]::Hidden'},
+        @{reference='[ExportOwner]::Good()';returned='$different';error='must return the compiled variable'},
+        @{reference='[ExportOwner]::Good()';returned='@($compiled,$compiled)';error='must return the compiled variable'},
+        @{reference='[ExportOwner]::Good()';returned='$compiled';prefix='$compiled="changed"';error='unique precompile binding'},
+        @{reference='[ExportOwner]::Good()';returned='$compiled';prefix='if(-not $TypeSourceOnly){$suffix="changed"}';error='mode affects its producer'}
+    )){
+        $text=@'
+param([switch]$TypeSourceOnly)
+$prefix='public static class ExportOwner { public static void Good() {} private static void Hidden() {} '
+$suffix='}'
+$compiled=$prefix+$suffix
+PREFIX
+if($TypeSourceOnly){return RETURNED}
+Add-Type -TypeDefinition $compiled
+REFERENCE
+'@
+        [IO.File]::WriteAllText($export,$text.Replace('RETURNED',$case.returned).Replace('REFERENCE',$case.reference).Replace('PREFIX',[string]$case.prefix))
+        $failure=$null;try{$null=Test-FixtureTypeReferences @(Get-Item $export)}catch{$failure=$_.Exception.Message}
+        if($case.error){if(!$failure -or !$failure.Contains($case.error)){throw "Type export control did not reject $($case.reference): $failure"}}
+        elseif($failure){throw $failure}
+    }
+    [IO.File]::WriteAllText($export,'$prefix="public static class ExportOwner {";$suffix="}";Add-Type -TypeDefinition ($prefix+$suffix)')
+    $failure=$null;try{$null=Test-FixtureTypeReferences @(Get-Item $export)}catch{$failure=$_.Exception.Message}
+    if(!$failure -or !$failure.Contains('nonliteral Add-Type source')){throw 'Undeclared dynamic type source was accepted'}
+    'Fixture type guard controls passed: nested types, static visibility, constructors, duplicate mocks, MemberDefinition and actual source exports.'
 }finally{[IO.Directory]::Delete($directory,$true)}
