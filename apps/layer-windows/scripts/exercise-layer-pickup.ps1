@@ -80,13 +80,13 @@ function Verify-PendingDropFixture {
     $fixture=(Resolve-Path -LiteralPath $DropFixture).Path
     if($fixture -eq $Executable){throw 'DropFixture must be the separate LayerDrop control executable'}
     $shell=[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-    $parentContext=if($env:CAPY_FIXTURE_CONTEXT -and (Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT)){Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json}
+    $parentContext=if($env:CAPY_FIXTURE_CONTEXT -and (Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT)){Read-CapyFixtureContext}
     try {
         & $shell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Executable $fixture -Device $Device -Theme $Theme -PendingDropOnly -DropRun (Join-Path $run 'pending-drop')
         $childExit=$LASTEXITCODE
     }finally{
         if($parentContext){
-            $childContext=Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json
+            $childContext=Read-CapyFixtureContext
             Update-CapyFixtureContext ({
                 param($context)
                 $context.Clear()

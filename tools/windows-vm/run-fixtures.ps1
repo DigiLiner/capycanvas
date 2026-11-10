@@ -294,7 +294,7 @@ function Reviews([string]$ContextPath,[Collections.Generic.List[object]]$Failure
     }
     $files=if($ContextPath){Get-Item -LiteralPath $ContextPath}else{Get-ChildItem -LiteralPath $Output -Filter '*-context.json' -File}
     $contexts=@(foreach($file in $files){
-        try{Get-Content -LiteralPath $file.FullName -Raw|ConvertFrom-Json}
+        try{Get-Content -LiteralPath $file.FullName -Encoding UTF8 -Raw|ConvertFrom-Json}
         catch{if($null -eq $Failures){throw};$Failures.Add($_)}
     })
     $closed=@($contexts|ForEach-Object {$_.closes}|Where-Object {$_.result -ceq 'pass' -and $_.window_only -is [bool] -and !$_.window_only -and $_.process_start_utc})
@@ -374,7 +374,7 @@ function Save-Evidence([string]$Log,[bool]$Renders=$true) {
         if ($rendered) { throw "Missing fixture context: $Log-context.json" }
         return
     }
-    $context = Get-Content "$Log-context.json" -Raw | ConvertFrom-Json
+    $context = Get-Content "$Log-context.json" -Encoding UTF8 -Raw | ConvertFrom-Json
     New-Item -ItemType Directory -Force $evidence | Out-Null
     $owners = @($context.process_id) + @($context.windows | ForEach-Object { $_.process_id }) + @(Reviews | ForEach-Object {try{$_.Id}finally{$_.Dispose()}})
     $folders = @($context.trace_directory, $context.run, (Split-Path $Executable)) + @($context.windows | ForEach-Object { $_.trace_directory }) | Where-Object { $_ } | Select-Object -Unique

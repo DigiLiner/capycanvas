@@ -62,7 +62,7 @@ function Start-CapyDebugger([Diagnostics.Process]$Process,[string]$DebuggerPath,
     [CapyWindowApi]::GetWindowThreadProcessId($Drawing.Handle,[ref]$owner)|Out-Null
     $profile=[IO.Path]::GetFullPath($env:CAPY_STORAGE_DIR)
     $fixtureRoot=[IO.Path]::GetFullPath($Run).TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
-    $context=Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json
+    $context=Read-CapyFixtureContext
     $owned=@($context.windows|Where-Object {$_.process_id -eq $Process.Id -and $_.hwnd -eq $Drawing.Handle.ToInt64() -and $_.executable -eq $Process.Path})
     if(!$env:CAPY_PRIVATE_DESKTOP -or !$profile.StartsWith($fixtureRoot,[StringComparison]::OrdinalIgnoreCase) -or $owned.Count -ne 1 -or $Process.HasExited -or
         $Drawing.Handle -eq [IntPtr]::Zero -or $owner -ne $Process.Id -or $Drawing.Root.Current.ProcessId -ne $Process.Id){
@@ -95,10 +95,11 @@ function Start-CapyDebugger([Diagnostics.Process]$Process,[string]$DebuggerPath,
     }
     $debugger
 }
+function Read-CapyFixtureContext{Read-Snapshot $env:CAPY_FIXTURE_CONTEXT}
 function Update-CapyFixtureContext([scriptblock]$Update){
     if(!$env:CAPY_FIXTURE_CONTEXT){return}
     $context=@{}
-    if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){foreach($property in (Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json).PSObject.Properties){$context[$property.Name]=$property.Value}}
+    if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){foreach($property in (Read-CapyFixtureContext).PSObject.Properties){$context[$property.Name]=$property.Value}}
     & $Update $context
     $temporary=$env:CAPY_FIXTURE_CONTEXT+'.tmp-'+[guid]::NewGuid().ToString('N')
     $stream=[IO.FileStream]::new($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
@@ -110,7 +111,7 @@ function Register-CapyFixtureWindow([Diagnostics.Process]$Process,[long]$WindowH
     $owner=[uint32]0;[CapyWindowApi]::GetWindowThreadProcessId([IntPtr]$WindowHandle,[ref]$owner)|Out-Null
     if($WindowHandle -eq 0 -or $owner -ne $Process.Id){throw 'Fixture census window is not owned by the review'}
     $executable=$Process.Path
-    $context=if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json}else{$null}
+    $context=if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){Read-CapyFixtureContext}else{$null}
     $known=@($context.windows|Where-Object {$_.process_id -eq $Process.Id -and $_.hwnd -eq $WindowHandle})
     if($known.Count -gt 1 -or ($known.Count -eq 1 -and $known[0].executable -ne $executable)){throw 'Fixture census owner changed'}
     if(!$TraceDirectory){$TraceDirectory=if($known.Count){$known[0].trace_directory}elseif($script:CapyTraceDirectory){$script:CapyTraceDirectory}else{Split-Path -Parent $executable}}

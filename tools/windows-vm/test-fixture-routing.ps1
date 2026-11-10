@@ -943,8 +943,9 @@ namespace CapyLocalDumpsTest {
     }
     $helper=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../../apps/layer-windows/scripts/CapyUia.ps1'),[ref]$tokens,[ref]$errors)
     if($errors.Count){throw 'Fixture context helper did not parse'}
-    foreach($name in 'Update-CapyFixtureContext','Record-CapyFixtureClose'){
+    foreach($name in 'Read-Snapshot','Read-CapyFixtureContext','Update-CapyFixtureContext','Record-CapyFixtureClose'){
         $node=$helper.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
+        if(!$node){throw "Missing actual fixture context helper: $name"}
         . ([scriptblock]::Create($node.Extent.Text))
     }
     Add-Type -TypeDefinition @'
@@ -1075,7 +1076,7 @@ public static class CapyReviewOwnershipTest {
         @{windows=@();closes=@()}|ConvertTo-Json|Set-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT
         Finish-OwnershipChild $entry
         Record-CapyFixtureClose $entry.id 7 $false -ProcessStartUtc $entry.start
-        $close=(Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json).closes[0]
+        $close=(Read-CapyFixtureContext).closes[0]
         if($close.process_id -ne $entry.id -or ([DateTime]$close.process_start_utc).ToUniversalTime() -ne $entry.start -or $close.window_only -ne $false -or $close.result -cne 'pass'){throw 'Terminal close receipt lost the original process creation identity'}
         & {
             $Output=Join-Path $directory 'natural-exit';[IO.Directory]::CreateDirectory($Output)|Out-Null
