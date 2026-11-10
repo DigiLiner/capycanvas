@@ -234,7 +234,6 @@ fn native_canvas_quick_pinch_and_held_history() {
         d.input.perform(serde_json::json!([
             {"touch":"down","slot":0,"point":[center[0] - from, center[1]]},
             {"touch":"down","slot":1,"point":[center[0] + from, center[1]]},
-            {"wait_ms":60},
             {"touch":"move","slot":0,"point":[center[0] - to, center[1]]},
             {"touch":"move","slot":1,"point":[center[0] + to, center[1]]},
             {"touch":"up","slot":0}, {"touch":"up","slot":1}
