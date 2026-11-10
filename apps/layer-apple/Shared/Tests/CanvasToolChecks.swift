@@ -6,6 +6,11 @@ import UIKit
 #endif
 
 extension XCTestCase {
+    @MainActor func editorValue(_ element: XCUIElement) -> String? {
+        let value = element.value
+        return (value as? NSNumber)?.stringValue ?? value as? String
+    }
+
     @MainActor func editorText(_ element: XCUIElement) -> String {
         element.label.isEmpty ? element.value as? String ?? "" : element.label
     }
@@ -766,13 +771,23 @@ extension XCTestCase {
         app.launch(); capturePaintEditor(in: app)
         workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
             "toolbar-tile-toolbar-", "Straight")).firstMatch)
-        let show = app.buttons["tool-action-show_rulers"]
-        let snap = app.buttons["tool-action-snap_rulers"]
+        #if os(macOS)
+        let show = app.checkBoxes["tool-action-show_rulers"]
+        let snap = app.checkBoxes["tool-action-snap_rulers"]
+        #else
+        let show = app.switches["tool-action-show_rulers"]
+        let snap = app.switches["tool-action-snap_rulers"]
+        #endif
         let delete = app.buttons["tool-action-delete_ruler"]
-        XCTAssertTrue(show.isSelected && snap.isSelected)
+        func toggle(_ control: XCUIElement, to value: String) {
+            workspaceActivate(control)
+            expectation(for: NSPredicate { _, _ in self.editorValue(control) == value }, evaluatedWith: control)
+            waitForExpectations(timeout: 5)
+        }
+        XCTAssertTrue(editorValue(show) == "1" && editorValue(snap) == "1")
         XCTAssertFalse(delete.isEnabled)
-        workspaceActivate(snap); XCTAssertFalse(snap.isSelected)
-        workspaceActivate(snap); XCTAssertTrue(snap.isSelected)
+        toggle(snap, to: "0")
+        toggle(snap, to: "1")
         for kind in ["Straight", "Parallel", "Radial"] {
             let choice = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
                 "tool-subtool-", kind)).firstMatch
@@ -798,11 +813,9 @@ extension XCTestCase {
             }
             drag(start, end)
             waitGuides(true); XCTAssertTrue(delete.isEnabled)
-            workspaceActivate(show)
-            XCTAssertFalse(show.isSelected); XCTAssertFalse(snap.isEnabled)
+            toggle(show, to: "0"); XCTAssertFalse(snap.isEnabled)
             waitGuides(false)
-            workspaceActivate(show)
-            XCTAssertTrue(show.isSelected); XCTAssertTrue(snap.isEnabled)
+            toggle(show, to: "1"); XCTAssertTrue(snap.isEnabled)
             waitGuides(true)
             let original = samples()
             drag(handle, moved)

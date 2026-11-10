@@ -51,16 +51,28 @@ extension XCTestCase {
 
     @MainActor private func revealTransform(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
-        let scroll = app.scrollViews.containing(.button, identifier: element.identifier).firstMatch
+        let scroll = app.scrollViews.containing(.any, identifier: element.identifier).firstMatch
         if scroll.exists { revealEditorControl(element, in: scroll) }
         else { XCTAssertTrue(element.isHittable && workspaceViewport(in: app).frame.contains(element.frame)) }
     }
     @MainActor private func transformMode(_ mode: String, in app: XCUIApplication) {
-        let button = app.buttons["tool-action-transform_" + mode]
+        let button = app.buttons["tool-action-transform_" + (mode == "uniform" ? "free" : mode)]
         revealTransform(button, in: app)
         if !button.isSelected { workspaceActivate(button) }
         expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: button)
         waitForExpectations(timeout: 5)
+        if mode == "free" || mode == "uniform" {
+            #if os(macOS)
+            let lock = app.checkBoxes["tool-action-transform_uniform"]
+            #else
+            let lock = app.switches["tool-action-transform_uniform"]
+            #endif
+            revealTransform(lock, in: app)
+            let expected = mode == "uniform" ? "1" : "0"
+            if editorValue(lock) != expected { workspaceActivate(lock) }
+            expectation(for: NSPredicate { _, _ in self.editorValue(lock) == expected }, evaluatedWith: lock)
+            waitForExpectations(timeout: 5)
+        }
     }
     @MainActor private func editTransform(_ id: String, _ expression: String, in app: XCUIApplication) {
         let entry = app.textFields["number-entry-tool-transform_" + id]
