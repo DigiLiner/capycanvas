@@ -154,7 +154,7 @@ void WorkspaceBubbles::Impl::down(PointerRoutedEventArgs const& e){
             c->recognizer.Holding([weak,owner](auto&&,NativeInput::HoldingEventArgs const& event){if(auto self=weak.lock())if(auto c=owner.lock();c&&self->contact==c&&c->recognizing&&event.HoldingState()==NativeInput::HoldingState::Started){
                 c->holdAt=c->started+(milliseconds()-c->started)*(c->wheel?2:1);self->holdTimer.Start();self->hold();
             }});
-            c->recognizing=true;c->recognizer.Begin(nullptr,p,NativeInput::GestureSettings::Hold|NativeInput::GestureSettings::HoldWithMouse);
+            c->recognizing=true;c->recognizer.Begin(nullptr,p,NativeInput::GestureSettings::Hold|NativeInput::GestureSettings::HoldWithMouse,workspace);
         }
         if(!native){r->hovered=h;r->pressed=true;e.Handled(true);}contactSurface();wake();return;
     }

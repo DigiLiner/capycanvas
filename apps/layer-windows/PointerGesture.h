@@ -1,16 +1,19 @@
 #pragma once
 #include "PointerCompletion.h"
+#include <windows.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <memory>
+#include <algorithm>
 #include <vector>
 
 namespace CapyUi {
 class PointerGesture : public winrt::Microsoft::UI::Input::GestureRecognizer {
-    std::shared_ptr<bool> motion=std::make_shared<bool>(false);
+    struct Motion {bool mouse=false;PointerMovement movement;};
+    std::shared_ptr<Motion> motion=std::make_shared<Motion>();
     static void ownHolding(winrt::Microsoft::UI::Xaml::DependencyObject const& node){
         using namespace winrt::Microsoft::UI::Xaml;
         if(node.try_as<Controls::TextBox>())return;
@@ -82,22 +85,35 @@ public:
     }
     PointerGesture(){
         Dragging([motion=motion](auto&&,auto const& event){
-            if(event.DraggingState()==winrt::Microsoft::UI::Input::DraggingState::Started)*motion=true;
+            if(!motion->mouse&&event.DraggingState()==winrt::Microsoft::UI::Input::DraggingState::Started)motion->movement.Recognize();
         });
-        ManipulationStarted([motion=motion](auto&&,auto&&){*motion=true;});
+        ManipulationStarted([motion=motion](auto&&,auto&&){if(!motion->mouse)motion->movement.Recognize();});
     }
     void Begin(winrt::Microsoft::UI::Xaml::UIElement const& source,winrt::Microsoft::UI::Input::PointerPoint const& point,
-        winrt::Microsoft::UI::Input::GestureSettings settings=winrt::Microsoft::UI::Input::GestureSettings::Hold){
+        winrt::Microsoft::UI::Input::GestureSettings settings=winrt::Microsoft::UI::Input::GestureSettings::Hold,
+        winrt::Microsoft::UI::Xaml::UIElement const& dpiReference=nullptr){
         using Settings=winrt::Microsoft::UI::Input::GestureSettings;
         if(source)ownHolding(source);
-        *motion=false;
+        motion->mouse=point.PointerDeviceType()==winrt::Microsoft::UI::Input::PointerDeviceType::Mouse;
+        motion->movement.Reset();
+        if(motion->mouse){
+            auto coordinates=source?source:dpiReference;auto xaml=coordinates?coordinates.XamlRoot():winrt::Microsoft::UI::Xaml::XamlRoot{nullptr};
+            double scale=xaml?xaml.RasterizationScale():1.;auto dpi=UINT(std::lround(scale*96.));auto at=point.Position();
+            motion->movement.Begin(at.X,at.Y,scale,std::max(1,GetSystemMetricsForDpi(SM_CXDRAG,dpi)),std::max(1,GetSystemMetricsForDpi(SM_CYDRAG,dpi)));
+        }
         GestureSettings(settings|Settings::Tap|Settings::Drag|Settings::ManipulationTranslateX|Settings::ManipulationTranslateY);
         ProcessDownEvent(point);
     }
     void Move(winrt::Microsoft::UI::Xaml::UIElement const& source,winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& event){
-        if(!event.IsGenerated())if(auto points=event.GetIntermediatePoints(source))ProcessMoveEvents(points);
+        if(event.IsGenerated())return;
+        auto points=event.GetIntermediatePoints(source);
+        if(motion->mouse){
+            if(points&&points.Size())motion->movement.Move(points);
+            else{auto at=event.GetCurrentPoint(source).Position();motion->movement.Sample(at.X,at.Y);}
+        }
+        if(points)ProcessMoveEvents(points);
     }
-    bool Moved()const{return *motion;}
+    bool Moved()const{return motion->movement.Moved();}
 };
 class ControlCapture:public std::enable_shared_from_this<ControlCapture>{
     using Element=winrt::Microsoft::UI::Xaml::FrameworkElement;

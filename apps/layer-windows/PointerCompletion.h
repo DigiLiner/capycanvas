@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <optional>
@@ -23,6 +24,22 @@ inline bool CanceledCompletion(PointerCompletion completion,bool canceled,bool i
     return canceled||completion==PointerCompletion::Canceled||
         (completion==PointerCompletion::CaptureLost&&(loss==PointerCaptureLoss::Cancel||inContact));
 }
+class PointerMovement {
+    double originX=0,originY=0,scale=1;
+    int width=0,height=0;
+    bool moved=false;
+public:
+    void Reset(){moved=false;}
+    void Begin(double x,double y,double pixelScale,int dragWidth,int dragHeight){
+        originX=x;originY=y;scale=pixelScale;width=dragWidth;height=dragHeight;Reset();
+    }
+    void Recognize(){moved=true;}
+    void Sample(double x,double y){
+        moved=moved||std::abs(std::round((x-originX)*scale))>width||std::abs(std::round((y-originY)*scale))>height;
+    }
+    template<class Points> void Move(Points const& points){for(auto const& point:points){auto at=point.Position();Sample(at.X,at.Y);}}
+    bool Moved()const{return moved;}
+};
 class PointerClick {
     std::optional<uint32_t> pointer,completed;
     bool suppressed=false,released=false;

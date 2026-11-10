@@ -26,9 +26,9 @@ arm reordering before subsequent movement starts the drag. Waiting alone does
 not move anything or create an undo entry. Use native long-press timing and slop
 where available; a larger distance threshold is not a substitute for a hold.
 
-Windows uses native drag recognition for mouse and pen and native manipulation
-recognition for touch. Tab selection remains available until that recognition
-admits a drag; mouse drag-distance metrics do not define pen tap tolerance.
+Windows uses its DPI-aware mouse drag rectangle, native drag recognition for pen,
+and native manipulation recognition for touch. Tab selection remains available
+until that input admits a drag; mouse drag-distance metrics do not define pen tap tolerance.
 
 Saved palette color tiles are an explicit exception: they reorder immediately
 after native movement slop with every device. A short tap selects the color;

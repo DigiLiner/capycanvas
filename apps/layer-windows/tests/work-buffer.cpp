@@ -279,6 +279,31 @@ int main() {
     }
     std::cout<<"Thumbnail owners retain independent pending targets, deduplicate shared rows and retire changed sources\n";
 
+    {
+        struct Point {double X,Y;Point Position()const{return *this;}};
+        PointerMovement movement;
+        movement.Begin(76,813.33331298828125,1.5,6,6);
+        movement.Move(std::vector<Point>{{78.66666412353516,816}});
+        assert(!movement.Moved());
+        for(double scale:{1.,1.5,2.}){
+            movement.Begin(21.25,35.75,scale,6,8);
+            movement.Move(std::vector<Point>{{21.25+4/scale,35.75+4/scale},{21.25,35.75}});
+            assert(!movement.Moved());
+            movement.Sample(21.25+6/scale,35.75+8/scale);assert(!movement.Moved());
+            movement.Move(std::vector<Point>{{21.25,35.75},{21.25+7/scale,35.75},{21.25,35.75}});
+            assert(movement.Moved());
+            movement.Begin(21.25,35.75,scale,6,8);
+            movement.Move(std::vector<Point>{{21.25,35.75},{21.25,35.75-9/scale},{21.25,35.75}});
+            assert(movement.Moved());
+            movement.Begin(21.25,35.75,scale,6,8);
+            movement.Move(std::vector<Point>{{21.25,35.75},{21.25-7/scale,35.75},{21.25,35.75}});
+            assert(movement.Moved());
+            movement.Reset();assert(!movement.Moved());
+            movement.Recognize();assert(movement.Moved());
+        }
+    }
+    std::cout<<"Pointer movement: recorded short mouse travel stays inside DPI-scaled native bounds; every history sample can latch movement\n";
+
     struct CompletionCase {PointerCompletion event;bool canceled,inContact,customCancel,nativeCancel;};
     for(auto test:{
         CompletionCase{PointerCompletion::Released,false,false,false,false},
