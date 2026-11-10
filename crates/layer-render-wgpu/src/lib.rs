@@ -3916,12 +3916,9 @@ impl CanvasRenderer for WgpuRasterizer {
     fn raster_dependencies_ready(&mut self, packet: FramePacket<'_>, preview: Option<&layer_render::TransformPreview>) -> bool {
         self.activate_presentation(packet.scene);
         if self.retained_transition_frame(packet, preview) { return true; }
-        if let Some(preview) = preview {
-            if preview.transform.validate().is_err() { return true; }
-            let installed = self.transform_preview.replace(preview.clone());
-            self.begin_frame_memory(packet);
-            self.transform_preview = installed;
-        } else { self.begin_frame_memory(packet); }
+        if preview.is_some_and(|preview| preview.transform.validate().is_err()) { return true; }
+        let installed = preview.map(|preview| self.transform_preview.replace(preview.clone()));
+        self.begin_frame_memory(packet);
         if self.bake_preflight.as_ref().is_some_and(|state|!state.matches(packet,self.document_color())) {self.bake_preflight=None;}
         if self.fill_edges_preflight.as_ref().is_some_and(|state|!state.matches(packet,self.document_color())) {self.fill_edges_preflight=None;}
         let mut required = compile::Needs::default();
@@ -3941,10 +3938,12 @@ impl CanvasRenderer for WgpuRasterizer {
             self.compilation.require([&self.scene_pipelines.pipeline[pipeline],&self.layer_masks.initialize],startup::BRUSH)
                 & self.compilation.require(self.selection_clip.pipelines(),startup::BRUSH)
         }else{true};
-        fill_ready && transforms_ready && scene_ready && self.scene_scale_ready() && self.startup.as_ref().is_none_or(|s| s.document.ready() && s.current.ready())
+        let ready = fill_ready && transforms_ready && scene_ready && self.scene_scale_ready() && self.startup.as_ref().is_none_or(|s| s.document.ready() && s.current.ready())
             && self.brush_batches_ready(packet)
             && self.prepare_raster_restores(packet) && self.bake_analyses_ready(packet) && self.retouch_analyses_ready(packet)
-            && self.bake_vectors_ready(packet) && self.prepare_bakes(packet) && self.prepare_fill_edges(packet) && self.prepare_transform_preview(packet,preview)
+            && self.bake_vectors_ready(packet) && self.prepare_bakes(packet) && self.prepare_fill_edges(packet) && self.prepare_transform_preview(packet,preview);
+        if let Some(installed) = installed { self.transform_preview = installed; }
+        ready
     }
     fn has_pending_submission(&self) -> bool { self.settling.is_some() }
     fn poll_pending(&mut self, view: layer_render::ViewState) -> Result<(), Self::Error> {
