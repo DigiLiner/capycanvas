@@ -39,7 +39,6 @@ extension XCTestCase {
             app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "toolbar-tile-", name)).firstMatch
         }
         let undo = command("Undo"), redo = command("Redo")
-        #if os(macOS)
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: undo)
         waitForExpectations(timeout: 5)
         let painted = settledEditorPixels(capturing: { pixels(overview, "navigator-painted") })
@@ -52,12 +51,6 @@ extension XCTestCase {
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: undo)
         waitForExpectations(timeout: 5)
         XCTAssertEqual(pixels(overview, "navigator-redone"), painted, "Redo must restore the final ink in the overview")
-        #else
-        // XCTest delivers a finger here. The shared single-finger policy must
-        // keep ink unchanged; it cannot stand in for a physical Pencil check.
-        XCTAssertFalse(undo.isEnabled)
-        XCTAssertEqual(pixels(overview, "navigator-after-finger"), blank)
-        #endif
         let status = app.buttons["camera-status"]
         let original = text(status)
         XCTAssertFalse(original.isEmpty, "The native camera readout must be accessible")
@@ -75,7 +68,7 @@ extension XCTestCase {
         #endif
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
         workspaceActivate(app.buttons["panel-tab-stats"])
-        let frames = app.staticTexts["stats-value-2"]
+        let frames = app.staticTexts["stats-value-3"]
         XCTAssertTrue(frames.waitForExistence(timeout: 10))
         XCTAssertGreaterThan(Int(text(frames)) ?? 0, 0)
         workspaceActivate(app.buttons["panel-tab-navigator"])

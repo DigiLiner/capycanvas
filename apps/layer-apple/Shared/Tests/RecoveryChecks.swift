@@ -11,6 +11,7 @@ extension XCTestCase {
         let ready = app.staticTexts["recovery-status"]
         expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Recovery ready", "Recovery ready"), evaluatedWith: ready)
         waitForExpectations(timeout: 30)
+        editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
         // Fill through the enabled native menus after startup, not through
         // initial actions that can run before canvas commands are available.
         editorMenu(in: app, menu: "Select", id: "select_all", label: "Select all pixels")

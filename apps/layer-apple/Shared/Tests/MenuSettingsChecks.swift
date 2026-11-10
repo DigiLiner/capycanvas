@@ -634,9 +634,11 @@ extension XCTestCase {
         activate(app.buttons["settings-done"])
         let title = editorDocumentTitle(in: app)
         XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let enabledTitle = app.buttons.matching(identifier: title.identifier).matching(NSPredicate(format: "enabled == YES")).firstMatch
+        XCTAssertTrue(enabledTitle.exists)
         app.typeKey("z", modifierFlags: .command)
-        XCTAssertTrue(title.waitForNonExistence(timeout: 10), "The new shortcut must execute Zen after the editor closes")
+        XCTAssertTrue(enabledTitle.waitForNonExistence(timeout: 10), "The new shortcut must execute Zen after the editor closes")
         app.typeKey("z", modifierFlags: .command)
-        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertTrue(enabledTitle.waitForExistence(timeout: 10))
     }
 }
