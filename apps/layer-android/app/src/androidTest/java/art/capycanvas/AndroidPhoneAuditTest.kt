@@ -123,16 +123,127 @@ class AndroidPhoneAuditTest {
     private fun awaitEditorPage(activity: MainActivity,host: CanvasHost,tag: String) {
         val decor = activity.window.decorView
         val density = activity.resources.displayMetrics.density
-        val visible = obj("x" to 0,"y" to 0,"width" to decor.width/density,
-            "height" to (decor.height-decor.rootWindowInsets.getInsets(WindowInsets.Type.ime()).bottom).coerceAtLeast(0)/density)
-        val presentation = runBlocking { host.awaitQuery(obj("type" to "dialog_presentation","role" to "editor","visible" to visible)) }!!
-        assertEquals("IME preserves the shared page presentation","page",presentation.getString("kind"))
-        val expected = presentation.getJSONObject("bounds").rect()
+        var expected = Rect.Zero
+        var visible = JSONObject()
         host.awaitFrame("$tag uses its shared visible bounds",diagnostics = { "expected=$expected; actual=${findTag(tag)?.second?.boundsInRoot}; visible=$visible" }) {
+            val blocked = (host.windowInsets ?: decor.rootWindowInsets).getInsets(WindowInsets.Type.ime() or WindowInsets.Type.navigationBars())
+            visible = obj("x" to blocked.left/density,"y" to blocked.top/density,"width" to (decor.width-blocked.left-blocked.right).coerceAtLeast(0)/density,
+                "height" to (decor.height-blocked.top-blocked.bottom).coerceAtLeast(0)/density)
+            val layout = host.snapshot!!.getJSONObject("layout")
+            val presentation = JSONObject(Native.dialogUi(obj("kind" to "presentation","role" to "editor","viewport" to layout.getJSONArray("viewport"),
+                "insets" to host.snapshot!!.getJSONObject("state").getJSONObject("phone").getJSONArray("insets"),
+                "work_area" to layout.getJSONObject("phone").getJSONObject("work_area"),"visible" to visible).toString()))
+            assertEquals("IME preserves the shared page presentation","page",presentation.getString("kind"))
+            expected = presentation.getJSONObject("bounds").rect()
             findTag(tag)?.second?.boundsInRoot?.let { actual ->
                 kotlin.math.abs(actual.left-expected.left*density)<=1f && kotlin.math.abs(actual.top-expected.top*density)<=1f &&
                     kotlin.math.abs(actual.width-expected.width*density)<=1f && kotlin.math.abs(actual.height-expected.height*density)<=1f
             } == true
+        }
+    }
+
+    @Test fun phoneSafeInsetsIgnoreHiddenGestureStrips() {
+        val scenario = launchCapy(180_000, compose)
+        var content: CanvasContent? = null
+        var original: WindowInsets? = null
+        try {
+            val host = scenario.activity().host
+            instrumentation.runOnMainSync {
+                content = checkNotNull(semanticsRoots().first().view.rootView.descendant<CanvasContent>())
+                original = content!!.rootWindowInsets
+            }
+            val insets = checkNotNull(original)
+            val cutout = insets.getInsets(WindowInsets.Type.displayCutout())
+            val waterfall = insets.displayCutout?.waterfallInsets ?: android.graphics.Insets.NONE
+            val density = instrumentation.targetContext.resources.displayMetrics.density
+            val expected = listOf(maxOf(cutout.left, waterfall.left), maxOf(cutout.top, waterfall.top),
+                maxOf(cutout.right, waterfall.right), maxOf(cutout.bottom, waterfall.bottom)).map { it/density }
+            val before = jsonValue(host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONArray("bars"))
+            val injected = WindowInsets.Builder(insets)
+                .setInsets(WindowInsets.Type.mandatorySystemGestures(), android.graphics.Insets.of(80, 120, 160, 200))
+                .setInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.statusBars(), android.graphics.Insets.NONE)
+                .setVisible(WindowInsets.Type.navigationBars() or WindowInsets.Type.statusBars(), false).build()
+            instrumentation.runOnMainSync { content!!.dispatchApplyWindowInsets(injected) }
+            compose.waitForIdle()
+            host.drain()
+            val reported = host.snapshot!!.getJSONObject("state").getJSONObject("phone").getJSONArray("insets")
+            expected.forEachIndexed { i, value -> assertEquals("Only cutout and waterfall belong to side $i", value.toDouble(), reported.getDouble(i), .01) }
+            assertEquals("Hidden gesture strips cannot move either phone bar", before,
+                jsonValue(host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONArray("bars")))
+        } finally {
+            instrumentation.runOnMainSync { original?.let { content?.dispatchApplyWindowInsets(it) } }
+            scenario.close()
+        }
+    }
+
+    @Test fun immersivePhoneWindowsKeepBarsAtSensorEdges() {
+        val scenario = launchCapy(180_000, compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val decor = activity.window.decorView
+        val original = activity.requestedOrientation
+        fun bars() = jsonValue(host.snapshot!!.getJSONObject("layout").getJSONObject("phone").getJSONArray("bars"))
+        fun hidden(before: Any?, name: String) {
+            compose.waitForIdle()
+            assertFalse("$name keeps navigation hidden", decor.rootWindowInsets.isVisible(WindowInsets.Type.navigationBars()))
+            assertEquals("$name cannot move the phone bars", before, bars())
+        }
+        try {
+            for ((name, orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
+                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+                val rotation = when (orientation) { 0 -> 1; 8 -> 3; else -> 0 }
+                host.awaitFrame("$name phone viewport") { activity.display!!.rotation == rotation &&
+                    (decor.width > decor.height) == (rotation != 0) &&
+                    host.snapshot!!.getJSONObject("layout").getJSONArray("viewport").let {
+                        kotlin.math.abs(it.getDouble(0)*activity.resources.displayMetrics.density-decor.width)<1 &&
+                            kotlin.math.abs(it.getDouble(1)*activity.resources.displayMetrics.density-decor.height)<1 } }
+                for (theme in listOf("light", "dark")) {
+                    host.drain(obj("type" to "set_theme", "theme" to theme))
+                    val before = bars()
+                    val tile = host.snapshot!!.getJSONObject("state").getJSONObject("workspace").getJSONObject("layout").getJSONArray("phone").getJSONObject(0).getInt("id")
+                    host.awaitFrame("Phone tile anchor") { findTag("phone-tool-$tile") != null }
+                    instrumentation.runOnMainSync { host.workspaceInteraction!!.context(obj("kind" to "phone_tile", "tile" to tile)) }
+                    host.awaitFrame("Native tile menu opens") { findTag("workspace-menu") != null }
+                    hidden(before, "$name tile menu")
+                    screenshot("fix1-$name-$theme-tile-menu.png")
+                    instrumentation.runOnMainSync { host.workspaceInteraction!!.closeContext() }
+                    host.awaitFrame("Tile menu closes") { findTag("workspace-menu") == null }
+                    host.drain(obj("type" to "open_settings", "page" to "appearance"))
+                    host.awaitFrame("Preferences page opens") { findTag("setting-choice-theme") != null }
+                    hidden(before, "$name page")
+                    screenshot("fix1-$name-$theme-page.png")
+                    compose.onNodeWithTag("setting-choice-theme", useUnmergedTree = true).performScrollTo().performClick()
+                    host.awaitFrame("Native theme popup opens") { findTag("setting-choice-menu-theme") != null }
+                    hidden(before, "$name theme popup")
+                    screenshot("fix1-$name-$theme-theme-popup.png")
+                    pressKey(KeyEvent.KEYCODE_ESCAPE)
+                    host.awaitFrame("Theme popup closes") { findTag("setting-choice-menu-theme") == null }
+                    host.drain(obj("type" to "close_settings"))
+                    host.awaitFrame("Preferences page closes") { findTag("preferences-dialog") == null }
+                    host.drain(obj("type" to "phone", "action" to obj("kind" to "insert_tools", "before" to null)))
+                    host.awaitFrame("Keyboard page opens") { findTag("tool-picker-search") != null }
+                    compose.onNodeWithTag("tool-picker-search", useUnmergedTree = true).performClick()
+                    host.awaitFrame("Native keyboard is visible") { decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()) }
+                    awaitEditorPage(activity, host, "tool-picker")
+                    compose.onNodeWithTag("tool-picker-confirm", useUnmergedTree = true).assertIsDisplayed()
+                    val primary = checkNotNull(findTag("tool-picker-confirm")).second.boundsInRoot
+                    val blocked = decor.rootWindowInsets.getInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.ime())
+                    assertTrue("The primary action clears visible navigation and IME: $primary vs $blocked",
+                        primary.left>=blocked.left-1 && primary.top>=blocked.top-1 &&
+                            primary.right<=decor.width-blocked.right+1 && primary.bottom<=decor.height-blocked.bottom+1)
+                    assertEquals("IME cannot move phone bars", before, bars())
+                    screenshot("fix1-$name-$theme-keyboard.png")
+                    instrumentation.runOnMainSync { decor.windowInsetsController?.hide(WindowInsets.Type.ime()) }
+                    host.awaitFrame("The keyboard closes") { !decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()) }
+                    instrumentation.runOnMainSync { host.customize(obj("type" to "cancel_tools")) }
+                    host.awaitFrame("Keyboard page closes") { findTag("tool-picker") == null }
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.requestedOrientation = original }
+            scenario.close()
         }
     }
 
@@ -413,24 +524,23 @@ class AndroidPhoneAuditTest {
                     val waterfall = insets.displayCutout?.waterfallInsets ?: android.graphics.Insets.NONE
                     val mandatory = insets.getInsets(WindowInsets.Type.mandatorySystemGestures())
                     val cutoutInsets = listOf(maxOf(safe.left,waterfall.left),maxOf(safe.top,waterfall.top),maxOf(safe.right,waterfall.right),maxOf(safe.bottom,waterfall.bottom))
-                    val actualInsets = cutoutInsets.zip(listOf(mandatory.left,mandatory.top,mandatory.right,mandatory.bottom)).map { (a,b) -> maxOf(a,b) }
                     report.put("mandatory_system_gesture_insets",JSONArray(listOf(mandatory.left,mandatory.top,mandatory.right,mandatory.bottom)))
                     report.put("cutout_waterfall_insets",JSONArray(cutoutInsets))
                     report.put("reported_insets",host.snapshot!!.getJSONObject("state").getJSONObject("phone").getJSONArray("insets"))
                     val phone = host.snapshot!!.getJSONObject("layout").getJSONObject("phone")
-                    val clear = androidx.compose.ui.geometry.Rect(mandatory.left.toFloat()/density,mandatory.top.toFloat()/density,
-                        (decor.width-mandatory.right)/density,(decor.height-mandatory.bottom)/density)
+                    val clear = androidx.compose.ui.geometry.Rect(cutoutInsets[0]/density,cutoutInsets[1]/density,
+                        (decor.width-cutoutInsets[2])/density,(decor.height-cutoutInsets[3])/density)
                     val controls = phone.array("bars").objects()+phone.array("tools").objects()+listOf("size","strength","settings","capy").map { phone.getJSONObject(it) }
                     controls.filter { it.number("width")>0 && it.number("height")>0 }.forEach { control ->
                         val rect = control.rect()
-                        assertTrue("Visible phone control $rect avoids mandatory gestures $clear",rect.left>=clear.left-.05f && rect.top>=clear.top-.05f && rect.right<=clear.right+.05f && rect.bottom<=clear.bottom+.05f)
+                        assertTrue("Visible phone control $rect avoids the camera cutout $clear",rect.left>=clear.left-.05f && rect.top>=clear.top-.05f && rect.right<=clear.right+.05f && rect.bottom<=clear.bottom+.05f)
                     }
-                    actualInsets.forEachIndexed { side,value ->
+                    cutoutInsets.forEachIndexed { side,value ->
                         assertEquals("Reported phone inset $side is the native safe maximum",value/density,
                             host.snapshot!!.getJSONObject("state").getJSONObject("phone").getJSONArray("insets").getDouble(side).toFloat(),.05f)
                     }
-                    report.put("insets_pixels", JSONArray(actualInsets))
-                    report.put("insets", JSONArray(actualInsets.map { it / density }))
+                    report.put("insets_pixels", JSONArray(cutoutInsets))
+                    report.put("insets", JSONArray(cutoutInsets.map { it / density }))
                         report.put("ime_bottom_pixels", insets.getInsets(WindowInsets.Type.ime()).bottom)
                     report.put("crop", obj("x" to crop[0], "y" to crop[1], "width" to crop[2], "height" to crop[3]))
                     val surface = checkNotNull(decor.descendant<CanvasSurfaceView>())
@@ -451,7 +561,7 @@ class AndroidPhoneAuditTest {
                     assertEquals("App viewport height in dp", size[1] * 160f / expectedDensity, decor.height / density, .01f)
                     if (cutout == "none") assertEquals("No cutout/waterfall insets",listOf(0,0,0,0),cutoutInsets)
                     else assertTrue("Corner cutout produces safe insets",cutoutInsets.any { it > 0 })
-                    args.getString("insets")?.split(",")?.map(String::toInt)?.let { assertEquals("Configured cutout insets", it, actualInsets) }
+                    args.getString("insets")?.split(",")?.map(String::toInt)?.let { assertEquals("Configured cutout insets", it, cutoutInsets) }
                     val axis = display.getInt("surface_quarter_turns") % 2
                     assertEquals("Native surface width", surface.width, display.getJSONArray("extent").getInt(axis))
                     assertEquals("Native surface height", surface.height, display.getJSONArray("extent").getInt(1-axis))

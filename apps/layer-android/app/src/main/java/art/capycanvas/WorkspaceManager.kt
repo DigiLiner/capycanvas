@@ -29,7 +29,6 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import org.json.JSONObject
@@ -244,7 +243,6 @@ internal fun workspaceSwitcherMenu(view: JSONObject?): JSONObject = view?.optJSO
     val window=(view.parent as? DialogWindowProvider)?.window
     DisposableEffect(window) {
         window?.apply {
-            enterCanvasFullscreen()
             addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             setDimAmount(.18f)
         }

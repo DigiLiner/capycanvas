@@ -13,9 +13,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : ComponentActivity() {
     internal val launchSplash by lazy { LaunchSplashWindow(this) }
@@ -179,14 +176,6 @@ class MainActivity : ComponentActivity() {
         val size = if (android.os.Build.VERSION.SDK_INT >= 30) windowManager.maximumWindowMetrics.bounds.let { it.width() to it.height() }
         else android.util.DisplayMetrics().also { @Suppress("DEPRECATION") windowManager.defaultDisplay.getRealMetrics(it) }.let { it.widthPixels to it.heightPixels }
         host.deviceClass(minOf(size.first, size.second) / density < 600f)
-    }
-}
-
-/** Apply the same immersive chrome policy to the editor and its native dialogs. */
-internal fun android.view.Window.enterCanvasFullscreen() {
-    WindowCompat.getInsetsController(this, decorView).apply {
-        systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        hide(WindowInsetsCompat.Type.systemBars())
     }
 }
 

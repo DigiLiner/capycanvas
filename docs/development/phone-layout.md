@@ -104,7 +104,9 @@ Brush controls.
   portrait have no band. Sliders scrub and native window buttons keep their actions.
 - **Safe area:** each bar sits 8 from its edge, or past the platform's safe inset
   where that is larger, and its ends follow the same rule. Android reports a
-  camera cutout only on its own edge and, from Android 12, the rounded corners.
+  camera cutout and waterfall edges, without hidden system-bar or gesture strips,
+  and, from Android 12, the rounded corners. Visible navigation and keyboard
+  insets reduce phone page bounds without moving the bars.
   iPhone reports 59 pt on both sides in landscape and 59/34 top and bottom in
   portrait; the bars follow it as reported, since iOS publishes no corner radius.
   Web reads `env(safe-area-inset-*)`. The canvas still runs edge to edge.

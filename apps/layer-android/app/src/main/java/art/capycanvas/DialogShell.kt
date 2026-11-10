@@ -46,7 +46,6 @@ import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import org.json.JSONArray
@@ -145,8 +144,13 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
     BackHandler(phone == null && shown) { escape() }
     if (!visibility.currentState && !visibility.targetState) return@shell
     BoxWithConstraints(Modifier.fillMaxSize().zIndex(500f).semantics { paneTitle = title },contentAlignment = AbsoluteAlignment.TopLeft) {
-        val visible = obj("x" to 0,"y" to 0,"width" to maxWidth.value,
-            "height" to (maxHeight.value-WindowInsets.ime.getBottom(density)/density.density).coerceAtLeast(0f))
+        val unavailable = WindowInsets.navigationBars.union(WindowInsets.ime)
+        val left = unavailable.getLeft(density, androidx.compose.ui.unit.LayoutDirection.Ltr)/density.density
+        val top = unavailable.getTop(density)/density.density
+        val right = unavailable.getRight(density, androidx.compose.ui.unit.LayoutDirection.Ltr)/density.density
+        val bottom = unavailable.getBottom(density)/density.density
+        val visible = obj("x" to left,"y" to top,"width" to (maxWidth.value-left-right).coerceAtLeast(0f),
+            "height" to (maxHeight.value-top-bottom).coerceAtLeast(0f))
         var presentation by remember { mutableStateOf<JSONObject?>(null) }
         LaunchedEffect(intent.getString("role"),visible.toString(),phone?.toString()) {
             if(shown)presentation = host.awaitQuery(obj("type" to "dialog_presentation","role" to intent.getString("role"),"visible" to visible))

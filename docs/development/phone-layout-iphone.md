@@ -329,3 +329,14 @@ no regression. If a physical iPhone is available, record the same rows there.
   body. Check the iOS callout/popover implementation: the arrow must not consume
   the first or last row's body padding. Verify equal first/last row gaps within
   1 pt for arrows above and below, in both themes and all phone rotations.
+
+- **Keep immersive phone bars at the sensor edges.** Android reports cutout
+  and waterfall insets, omitting hidden system-bar and mandatory-gesture strips.
+  Every native popup and dialog keeps immersive chrome through its own window;
+  visible navigation and keyboard insets reduce page bounds, never bar bounds.
+  iOS must report only the sensor-housing edge for the current interface
+  orientation, omit the home-indicator inset, defer system gestures at the bar
+  edges, and auto-hide the home indicator. Verify unchanged bar bounds when
+  opening menus, pages and the keyboard, plus visible page actions in portrait
+  and both landscapes. Before iOS 26, reported corner radii are zero; verify
+  controls near the corners now that the bars can sit only 8 pt from an edge.

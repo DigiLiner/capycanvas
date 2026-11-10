@@ -287,7 +287,7 @@ private fun Modifier.phoneFocus(host: CanvasHost,focus: FocusRequester) = focusR
 @Composable private fun PhoneMetrics(host: CanvasHost, state: JSONObject) {
     val density = LocalDensity.current
     val view = LocalView.current
-    val safe = WindowInsets.displayCutout.union(WindowInsets.waterfall).union(WindowInsets.mandatorySystemGestures)
+    val safe = WindowInsets.displayCutout.union(WindowInsets.waterfall)
     val insets = listOf(safe.getLeft(density, androidx.compose.ui.unit.LayoutDirection.Ltr), safe.getTop(density),
         safe.getRight(density, androidx.compose.ui.unit.LayoutDirection.Ltr), safe.getBottom(density)).map { it / density.density }
     val report by rememberUpdatedState(newValue = {

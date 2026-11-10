@@ -36,7 +36,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import org.json.JSONObject
@@ -81,7 +80,6 @@ import org.json.JSONObject
         val window = (root.parent as DialogWindowProvider).window
         DisposableEffect(window) {
             window.setDimAmount(0f)
-            window.enterCanvasFullscreen()
             onDispose { }
         }
         // A stable native window avoids a WindowManager resize for every result
