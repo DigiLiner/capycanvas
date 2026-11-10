@@ -355,3 +355,10 @@ no regression. If a physical iPhone is available, record the same rows there.
   leave the software keyboard closed after touch opening and focus search
   when opened from keyboard input. Verify both opening paths, plus requested
   rename/value editing, in both themes and all phone rotations.
+
+- **Keep one full picker result above the keyboard.** Android measures the
+  picker body and omits its selection count when that line would leave less
+  than one complete 58 dp result row. iOS must use the same count-line rule
+  with its measured row height, including short windows without a keyboard.
+  Verify search, a complete result, close and primary actions above the
+  keyboard in portrait and both landscape rotations, in both themes.

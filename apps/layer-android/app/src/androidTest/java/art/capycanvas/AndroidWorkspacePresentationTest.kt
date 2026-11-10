@@ -2,6 +2,7 @@ package art.capycanvas
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -20,6 +21,8 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
@@ -37,6 +40,23 @@ class AndroidWorkspacePresentationTest {
     private val motion=object:MotionDurationScale { override var scaleFactor=1f }
     @get:Rule(order=0) val device=CapyDeviceRule()
     @get:Rule(order=1) val compose=createComposeRule(effectContext=motion)
+
+    @Test fun pickerCountYieldsToOneCompleteRowWithoutIme() {
+        var height by mutableStateOf(112.dp)
+        compose.setContent {
+            ToolPickerBody(Modifier.size(280.dp,height),header = { Box(Modifier.size(240.dp,36.dp)) },choices = {
+                androidx.compose.foundation.layout.Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()).testTag("results")) {
+                    repeat(3) { Box(Modifier.size(240.dp,58.dp)) }
+                }
+            },count = { Box(Modifier.size(240.dp,24.dp).testTag("count")) })
+        }
+        compose.onNodeWithTag("count").assertIsNotDisplayed()
+        val density = compose.density.density
+        assertTrue(compose.onNodeWithTag("results").fetchSemanticsNode().boundsInRoot.height >= 58*density)
+        compose.runOnIdle { height = 160.dp }
+        compose.onNodeWithTag("count").assertIsDisplayed()
+        assertTrue(compose.onNodeWithTag("results").fetchSemanticsNode().boundsInRoot.height >= 58*density)
+    }
 
     @androidx.compose.runtime.Composable private fun MeasurementOriginProbe(dock:DockInteraction,panel:String,
         onOrigin:(PanelMeasurementOrigin?)->Unit) {

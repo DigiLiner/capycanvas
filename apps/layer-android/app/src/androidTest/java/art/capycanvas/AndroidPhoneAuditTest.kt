@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -206,6 +207,62 @@ class AndroidPhoneAuditTest {
             }
         } finally {
             instrumentation.runOnMainSync { activity.requestedOrientation = original }
+            scenario.close()
+        }
+    }
+
+    @Test fun pickerKeepsOneCompleteResultAboveTheKeyboard() {
+        val scenario = launchCapy(180_000,compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val decor = activity.window.decorView
+        val originalOrientation = activity.requestedOrientation
+        val density = activity.resources.displayMetrics.density
+        try {
+            for ((name,orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
+                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+                val rotation = when(orientation) { 0 -> 1;8 -> 3;else -> 0 }
+                host.awaitFrame("$name picker viewport") { activity.display!!.rotation == rotation && (decor.width>decor.height) == (rotation != 0) }
+                for(theme in listOf("light","dark")) {
+                    host.drain(obj("type" to "set_theme","theme" to theme))
+                    host.drain(obj("type" to "phone","action" to obj("kind" to "insert_tools","before" to null)))
+                    host.awaitFrame("The picker search opens") { findTag("tool-picker-search") != null }
+                    compose.onNodeWithTag("tool-picker-search",useUnmergedTree = true).performClick()
+                    host.awaitFrame("The real keyboard is visible") { decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()) }
+                    fun checkResults(mode: String) {
+                        awaitEditorPage(activity,host,"tool-picker")
+                        val insets = (host.windowInsets ?: decor.rootWindowInsets).getInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.ime())
+                        val list = checkNotNull(findTag("tool-picker-list")).second.boundsInRoot
+                        val label = host.snapshot!!.getJSONObject("picker").array("choices").objects().first().getString("label")
+                        val first = checkNotNull(findTag("tool-picker-choice-$label")).second.boundsInRoot
+                        assertTrue("$mode list has a complete row: $list / $first",first.height>=58*density-1 && first.top>=list.top-1 && first.bottom<=list.bottom+1)
+                        for(tag in listOf("tool-picker-search","tool-picker-cancel","tool-picker-confirm")) {
+                            compose.onNodeWithTag(tag,useUnmergedTree = true).assertIsDisplayed()
+                            val bounds = checkNotNull(findTag(tag)).second.boundsInRoot
+                            assertTrue("$mode $tag clears visible system UI: $bounds vs $insets",bounds.left>=insets.left-1 && bounds.right<=decor.width-insets.right+1 && bounds.bottom<=decor.height-insets.bottom+1)
+                        }
+                        if(rotation != 0)compose.onNodeWithTag("tool-picker-count",useUnmergedTree = true).assertIsNotDisplayed()
+                        screenshot("fix4c-$name-$theme-$mode.png")
+                    }
+                    checkResults("native")
+                    if(rotation != 0) {
+                        val view = checkNotNull(decor.descendant<CanvasContent>())
+                        val original = decor.rootWindowInsets
+                        try {
+                            instrumentation.runOnMainSync { view.dispatchApplyWindowInsets(WindowInsets.Builder(original)
+                                .setInsets(WindowInsets.Type.ime(),android.graphics.Insets.of(0,0,0,579)).setVisible(WindowInsets.Type.ime(),true).build()) }
+                            host.awaitFrame("The measured Note10 inset is applied") { host.windowInsets?.getInsets(WindowInsets.Type.ime())?.bottom == 579 }
+                            checkResults("injected")
+                        } finally { instrumentation.runOnMainSync { view.dispatchApplyWindowInsets(original) } }
+                    }
+                    host.drain(obj("type" to "customize","action" to obj("type" to "cancel_tools")))
+                    host.awaitFrame("The picker closes") { findTag("tool-picker") == null }
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.requestedOrientation = originalOrientation }
             scenario.close()
         }
     }

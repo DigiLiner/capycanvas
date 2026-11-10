@@ -71,6 +71,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.constrainWidth
+import androidx.compose.ui.unit.constrainHeight
 import org.json.JSONObject
 
 // This value changes on every open/close. Track its readers so unrelated
@@ -602,7 +605,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
         search = SearchState(focused,searchText.text,{ searchText = androidx.compose.ui.text.input.TextFieldValue("");search("") },focus),onCancel = cancel,onPrimary = confirm,
         primaryEnabled = picker.getBoolean("can_confirm"),primaryLabel = picker.getString("confirm_label"),tag = "tool-picker",naturalWidth = 560.dp,shown = current != null,scrollBody = false,
         body = { padding ->
-            Column(Modifier.fillMaxWidth().padding(padding),verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ToolPickerBody(Modifier.fillMaxWidth().padding(padding),header = {
                 picker.optString("name").takeIf { !picker.isNull("name") }?.let { name ->
                     CoreTextField(name, { host.customize(obj("type" to "picker_name", "name" to it)) }, Modifier.fillMaxWidth().testTag("toolbar-name"),
                         label = { Text(picker.getString("name_label")) }, background = LocalPalette.current.dialogField)
@@ -621,7 +624,8 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                         field()
                     } })
                 LaunchedEffect(Unit) { if (keyboardMode) focus.requestFocus() }
-                Column(Modifier.weight(1f,fill = false).verticalScroll(choicesScroll).testTag("tool-picker-list")) {
+            },choices = {
+                Column(Modifier.verticalScroll(choicesScroll).testTag("tool-picker-list")) {
                     picker.array("choices").objects().forEachIndexed { index,tool ->
                         if (index > 0) HorizontalDivider(color = LocalPalette.current.dialogSeparator)
                         val enabled = tool.getJSONObject("control").toString() !in disabled
@@ -640,12 +644,34 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                         }
                     }
                 }
+            },count = {
                 Text(picker.getString("selected_label"),Modifier.testTag("tool-picker-count"),color = LocalPalette.current.settingsSecondary)
-                picker.nullableString("error")?.let { Text(it,color = MaterialTheme.colorScheme.error) }
-            }
+            },error = picker.nullableString("error")?.let { message -> { Text(message,color = MaterialTheme.colorScheme.error) } })
         },actions = {
             Spacer(Modifier.weight(1f))
             DialogButton(common.getString("cancel"),"tool-picker-cancel",onClick = cancel)
             DialogButton(picker.getString("confirm_label"),"tool-picker-confirm",accent = true,enabled = picker.getBoolean("can_confirm"),onClick = confirm)
         })
+}
+
+@Composable internal fun ToolPickerBody(modifier: Modifier = Modifier,header: @Composable () -> Unit,
+    choices: @Composable () -> Unit,count: @Composable () -> Unit,error: (@Composable () -> Unit)? = null) {
+    Layout(contents = listOf({ Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { header() } },choices,count,{ error?.invoke();Unit }),modifier = modifier) { slots,constraints ->
+        val child = constraints.copy(minHeight = 0)
+        val head = slots[0].single().measure(child)
+        val label = slots[2].single().measure(child)
+        val failure = slots[3].singleOrNull()?.measure(child)
+        val gap = 12.dp.roundToPx()
+        val fixed = head.height + (failure?.height ?: 0) + gap * (if(failure == null)1 else 2)
+        val showCount = !constraints.hasBoundedHeight || constraints.maxHeight-fixed-label.height-gap >= 58.dp.roundToPx()
+        val reserved = fixed + if(showCount)label.height+gap else 0
+        val rows = slots[1].single().measure(child.copy(maxHeight = if(constraints.hasBoundedHeight)(constraints.maxHeight-reserved).coerceAtLeast(0) else Constraints.Infinity))
+        val placed = listOfNotNull(head,rows,label.takeIf { showCount },failure)
+        val width = constraints.constrainWidth(placed.maxOf { it.width })
+        val height = constraints.constrainHeight(placed.sumOf { it.height }+gap*(placed.size-1))
+        layout(width,height) {
+            var y = 0
+            placed.forEach { it.placeRelative(0,y);y += it.height+gap }
+        }
+    }
 }
