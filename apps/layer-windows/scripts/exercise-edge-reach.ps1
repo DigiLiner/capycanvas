@@ -195,9 +195,13 @@ function Check-ReachSweep([string]$Theme){
                     Start-Sleep -Milliseconds 180
                     $mid=Gesture;$claimed=[bool]$mid.edge.claimed
                 }
+                $release=Gesture
+                $terminalGeneration=[Math]::Max([long]$release.last_release.generation,[long]$release.last_cancel.generation)
                 if($claimed){Escape-Edge}
                 if([CapyRowPointer]::Active){[CapyRowPointer]::Cancel()}
-                Settled
+                Wait-NativeGestureRelease $release $terminalGeneration
+                if($eligible){Wait-Until {$m=Model;$m -and ($m.state.workspace.layout|ConvertTo-Json -Depth 90 -Compress) -ceq $baseline} 'Canceled edge sweep did not acknowledge its exact workspace layout'}else{Settled}
+                Wait-PresentedFrame
                 $after=Gesture
                 if($after.edge){throw 'Canceled edge sweep retained a contact'}
                 if((Reach-Geometry) -cne $geometry){throw 'Canceled edge sweep changed the arranged divider geometry'}

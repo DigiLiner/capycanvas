@@ -1522,6 +1522,79 @@ public static class CapyEdgeReleaseTest {
 }
 
 & {
+ Add-Type -TypeDefinition @'
+public static class CapyEdgeSweepTest {
+ public static int Phase,Downs,Cancels,Escapes;public static bool Active;
+ public static void Down(string device,int x,int y){Phase=1;Active=true;Downs++;}
+ public static void Move(int x,int y){}
+ public static void Cancel(){Phase=2;Active=false;Cancels++;}
+ public static void Key(int key){if(key!=27)throw new System.Exception("Unexpected sweep key");Phase=2;Escapes++;}
+ public static int GetDpiForWindow(object window){return 96;}
+ public static bool Exists(string path){return true;}
+}
+'@
+ $tokens=$null;$errors=$null
+ $helpers=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/CapyUia.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ foreach($name in 'Wait-NativeGestureRelease','Wait-PresentedFrame'){
+  $fn=$helpers.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq$name}.GetNewClosure(),$true)
+  if(!$fn){throw "Missing actual sweep helper $name"}
+  . ([scriptblock]::Create($fn.Extent.Text.Replace('[IO.File]','[CapyEdgeSweepTest]')))
+ }
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-edge-reach.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ foreach($name in 'Escape-Edge','Settled'){
+  $fn=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq$name}.GetNewClosure(),$true)
+  if(!$fn){throw "Missing actual sweep function $name"}
+  . ([scriptblock]::Create($fn.Extent.Text.Replace('[CapyRowPointer]','[CapyEdgeSweepTest]')))
+ }
+ $sweep=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Check-ReachSweep'},$true)
+ $geometryCheck=$sweep.Body.FindAll({param($n)$n-is[Management.Automation.Language.IfStatementAst]-and$n.Extent.Text.Contains("throw 'Canceled edge sweep changed the arranged divider geometry'")},$true)|Sort-Object {$_.Extent.StartOffset}|Select-Object -First 1
+ if(!$geometryCheck){throw 'Missing actual first sweep geometry assertion'}
+ $statements=@($geometryCheck.Parent.Statements);$last=[array]::IndexOf($statements,$geometryCheck)
+ $sequence=($statements[0..$last]|ForEach-Object {$_.Extent.Text})-join"`n"
+ $sequence=$sequence.Replace('[CapyRowPointer]','[CapyEdgeSweepTest]')
+ function Start-Sleep([int]$Milliseconds){}
+ function Wait-Until([scriptblock]$Condition,[string]$Message){for($poll=0;$poll-lt12;$poll++){if(& $Condition){return}};throw $Message}
+ function Gesture{
+  $ended=[CapyEdgeSweepTest]::Phase-eq2
+  if($ended){$script:sweepTerminalReads++}
+  $script:sweepAcknowledged=$ended-and$script:sweepMode-ne'stale-terminal'-and$script:sweepTerminalReads-ge4
+  @{edge=$(if(!$ended){@{serial=21;claimed=$true;contact='free';vertical=$false}});pointer_id=$null;edge_reply=@{serial=$(if($script:sweepAcknowledged){21}else{20});phase='cancel'};last_edge=@{phase='cancel';claimed=$true};last_release=@{generation=1};last_cancel=@{generation=2}}
+ }
+ function Model{
+  if(!$script:sweepAcknowledged){$script:sweepEarlyModelReads++}else{$script:sweepModelReads++}
+  if($script:sweepAcknowledged-and$script:sweepModelReads-ge6-and$script:sweepMode-ne'missing-layout'){$script:sweepPublished=101}
+  @{state=@{workspace=@{layout=$(if($script:sweepPublished-eq101){'restored'}else{'preview'})}}}
+ }
+ function State-File{'owned/ui-state-7-8.json'}
+ function Read-Snapshot([string]$Path){
+  if((Split-Path -Leaf $Path)-like'presentation-state-*'){
+   $script:sweepPresentationReads++
+   if($script:sweepPublished-eq101-and$script:sweepPresentationReads-ge3-and$script:sweepMode-ne'missing-presentation'){$script:sweepDisplayed=101}
+   return @{process_id=7;presentation_epoch=$script:sweepPublished;required=$script:sweepPublished;displayed=$script:sweepDisplayed}
+  }
+  @{process_id=7;presentation_epoch=$script:sweepPublished;presented=$script:sweepPublished}
+ }
+ function Reach-Geometry{
+  $script:sweepGeometryReads++
+  if($script:sweepDisplayed-eq101-and$script:sweepMode-ne'wrong-geometry'){'restored-divider'}else{'changed-divider'}
+ }
+ $Device='touch';$review=@{Id=7};$window=8;$at=@{x=10;y=20};$sample=@{axis='horizontal';dx=-6;dy=0};$baseline='"restored"';$geometry='restored-divider'
+ foreach($mode in 'delayed','stale-terminal','missing-layout','missing-presentation','wrong-geometry'){
+  $script:sweepMode=$mode;$script:sweepTerminalReads=0;$script:sweepAcknowledged=$false;$script:sweepEarlyModelReads=0;$script:sweepModelReads=0;$script:sweepPresentationReads=0;$script:sweepGeometryReads=0;$script:sweepPublished=100;$script:sweepDisplayed=100
+  [CapyEdgeSweepTest]::Phase=0;[CapyEdgeSweepTest]::Downs=0;[CapyEdgeSweepTest]::Cancels=0;[CapyEdgeSweepTest]::Escapes=0;[CapyEdgeSweepTest]::Active=$false
+  $failure=$null;try{. ([scriptblock]::Create($sequence))}catch{$failure=$_}
+  if([CapyEdgeSweepTest]::Downs-ne1-or[CapyEdgeSweepTest]::Cancels-ne1-or[CapyEdgeSweepTest]::Escapes-ne1){throw 'Sweep repeated or skipped native contact cancellation'}
+  $expected=switch($mode){'stale-terminal'{'Native gesture release was not acknowledged'}'missing-layout'{'Canceled edge sweep did not acknowledge its exact workspace layout'}'missing-presentation'{'The display did not show the latest canvas frame'}'wrong-geometry'{'Canceled edge sweep changed the arranged divider geometry'}}
+  if($mode-eq'delayed'){
+   if($failure-or$script:sweepEarlyModelReads-ne0-or$script:sweepGeometryReads-ne1-or$script:sweepDisplayed-ne101){throw "Actual edge sweep checked geometry before acknowledged rollback presentation: $failure"}
+  }elseif(!$failure-or$failure.Exception.Message-cne$expected-or($mode-ne'wrong-geometry'-and$script:sweepGeometryReads-ne0)){throw "Actual edge sweep accepted an unacknowledged or incorrect cancellation: $mode; $failure"}
+ }
+ 'Actual edge sweep: stale terminal and layout cannot satisfy cancellation; restored model epoch must display before exact geometry, which still rejects changed bounds.'
+}
+
+& {
  $tokens=$null;$errors=$null
  $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/LocalizationProperties.ps1'),[ref]$tokens,[ref]$errors)
  if($errors.Count){throw($errors|Out-String)}
