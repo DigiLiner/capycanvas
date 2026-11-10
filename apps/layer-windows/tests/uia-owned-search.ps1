@@ -1227,6 +1227,64 @@ namespace CapyBubbleOverlayTest {
     }finally{Remove-Item -LiteralPath $script:run -Recurse -Force -ErrorAction SilentlyContinue}
 }
 Write-Output 'Actual bubble overlay sequence waits for applied Fill before composed pixels, rejects missing and wrong owned phase, and retains its pressed pixel assertion.'
+& {
+    foreach($name in @('Assert-BubbleHdrFocus','Measure-BubbleVisualOverlay')){
+        $definition=@($bubbleAst.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}.GetNewClosure(),$true))
+        if($definition.Count -ne 1){throw "Missing actual $name fixture function"}
+        . ([scriptblock]::Create($definition[0].Extent.Text))
+    }
+    $scale=1.5;$run='unused';$hdrEvidence=[Collections.Generic.List[object]]::new()
+    $darkBaseline=@(@(164,149,136),@(122,92,70),@(190,140,101),@(204,149,108),@(205,150,109),@(205,150,109),@(206,151,110),@(207,151,110),@(208,152,110))
+    $darkFocused=@(@(164,149,136),@(122,92,70),@(190,140,101),@(228,202,184),@(243,236,231),@(245,240,237),@(222,187,162),@(209,155,116),@(208,152,110))
+    $lightBaseline=@(@(123,100,82),@(148,108,79),@(197,144,104),@(204,150,109),@(205,150,109),@(206,151,109),@(207,151,110),@(207,152,110),@(208,152,111))
+    $lightFocused=@(@(123,100,82),@(148,108,79),@(192,140,102),@(83,70,64),@(61,56,56),@(67,60,57),@(186,137,102),@(207,152,110),@(208,152,111))
+    function Packet([long]$Id){
+        if($case -eq 'retained-light'){return @{color=@{bounds=@{x=-108.28423309326172;y=-107.78117370605469};intensity=@{point=@(-48.07900619506836,110.57414245605469);geometry=@{marker_radius=8.062493324279785}}}}}
+        @{color=@{bounds=@{x=-108.2843017578125;y=-107.78123474121094};intensity=@{point=@(-48.079036712646484,110.57421875);geometry=@{marker_radius=8.062499046325684}}}}
+    }
+    function Relative([long]$Id,$Point){@{x=1485;y=974}}
+    function Control([string]$Id,[switch]$Arranged){
+        $control=[pscustomobject]@{Current=@{BoundingRectangle=@{X=$(if($case -eq 'retained-light'){1380.}else{1377.});Y=$(if($case -eq 'retained-light'){645.}else{646.})}}}
+        $control|Add-Member ScriptMethod SetFocus {};return $control
+    }
+    function Model{@{state=@{palette=@{text=$(if($case -eq 'retained-light'){'#2e2e32'}else{'#fafafb'})}}}}
+    function Focus-Keyboard($Element){}
+    function Assert-BubbleHdrNoTooltip([long]$Id,[string]$Stage){}
+    function Start-Sleep([int]$Milliseconds){}
+    function Settled-Capture([string]$Name){}
+    function Read-BubbleVisualPatch($Point,[string]$Path){
+        if($Point.x -ne $expectedAnchor[0] -or $Point.y -ne $expectedAnchor[1]){throw 'HDR focus capture lost its retained physical geometry'}
+        $row=if($Path -like '*after.png'){$focused}else{$baseline}
+        if($Path -like '*after.png' -and $case -eq 'absent'){$row=$baseline}
+        if($Path -like '*after.png' -and $case -eq 'wrong-color'){$row=@((0..8)|ForEach-Object {,@(250,100,237)})}
+        if($Path -like '*after.png' -and $case -eq 'wrong-alpha'){$row=@((0..8)|ForEach-Object {,@(228,200,180)})}
+        if($Path -like '*after.png' -and $case -eq 'outside-radius'){$row=@($baseline|ForEach-Object {,@($_)});$row[5]=$baseline[5];$row[7]=@(245,240,237)}
+        return ,@((0..80)|ForEach-Object {$rgb=$row[$_%9];@{r=$rgb[0];g=$rgb[1];b=$rgb[2]}})
+    }
+    function Bubble-HdrPixel($Point,[string]$Name){
+        if($Name -like 'hdr-focus-marker-*'){
+            if($Point.x -ne $expectedInterior[0] -or $Point.y -ne $expectedInterior[1]){throw 'HDR focus lost its retained marker interior'}
+            return @{r=$(if($Name -like '*after' -and $case -eq 'marker'){1}else{0});g=0;b=0}
+        }
+        (Read-BubbleVisualPatch $Point ($Name+'.png'))[40]
+    }
+    foreach($case in @('retained','retained-light','absent','wrong-color','wrong-alpha','outside-radius','marker')){
+        $baseline=if($case -eq 'retained-light'){$lightBaseline}else{$darkBaseline};$focused=if($case -eq 'retained-light'){$lightFocused}else{$darkFocused}
+        $expectedAnchor=if($case -eq 'retained-light'){@(1488,973)}else{@(1485,974)};$expectedInterior=if($case -eq 'retained-light'){@(1470,973)}else{@(1467,974)}
+        $failure=$null;try{Assert-BubbleHdrFocus 25}catch{$failure=$_}
+        if($case -in @('retained','retained-light')){
+            if($failure){throw $failure}
+            $receipt=$hdrEvidence[$hdrEvidence.Count-1]
+            if([Math]::Abs($receipt.overlay.maximum_error-.58823529411765) -gt 1e-10){throw 'HDR focus did not select its numeric minimum error'}
+            if($receipt.overlay.alpha -ne 230/255. -or $receipt.overlay.maximum_error -gt 4 -or $receipt.marker_interior.maximum_error -ne 0){throw 'HDR focus changed its color, alpha or marker-interior oracle'}
+        }else{
+            $message=if($case -eq 'marker'){'HDR focus ring changed its marker interior'}else{'HDR focus ring does not use its shared marker position and GTK text overlay'}
+            if(!$failure -or $failure.Exception.Message -cne $message){throw "HDR focus accepted $case or failed outside its oracle: $failure"}
+        }
+    }
+}
+Write-Output 'Actual HDR focus assertion selects the numeric minimum in both retained dark/light candidate orders and rejects absent, wrong-color, wrong-alpha, displaced rings and a changed marker interior.'
+
 
 & {
     foreach($name in 'Bubble-VisualBounds','Assert-BubbleVisualOrbitReturn'){
