@@ -607,12 +607,14 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
 @OptIn(ExperimentalLayoutApi::class)
 @Composable private fun PresetsDrawer(host: CanvasHost, copy: JSONObject, drawer: JSONObject, actions: NewDrawingActions, wide: Boolean) {
     val colors = LocalPalette.current
+    val keyboardMode = keyboardInputMode()
+    val searchFocus = remember { if (keyboardMode) 1L else 0L }
     val tiles = drawer.getJSONArray("tiles").objects()
     val sheets = rememberDisplayColors(host, tiles.map { it.getJSONObject("sheet").getJSONObject("color") })
     DrawerSheet("new-drawing-browser", head = {
         CoreTextField(drawer.getString("query"), { actions.send("search", "query" to it) }, Modifier.fillMaxWidth().semantics { contentDescription = copy.getString("search") }.testTag("new-drawing-search"),
             placeholder = { Text(copy.getString("search")) }, leadingIcon = { SharedIcon("search", null, Modifier.size(16.dp)) },
-            height = FieldHeight, shape = ControlShape, background = fieldColor(), focusRequest = 1)
+            height = FieldHeight, shape = ControlShape, background = fieldColor(), focusRequest = searchFocus)
     }, footer = {
         val controls=@Composable {PresetControls(copy,drawer,actions,false)}
         if (wide) {

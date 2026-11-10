@@ -147,6 +147,69 @@ class AndroidPhoneAuditTest {
         }
     }
 
+    @Test fun pickerSearchFollowsNativeInputMode() {
+        val scenario = launchCapy(180_000, compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val decor = activity.window.decorView
+        val original = activity.requestedOrientation
+        fun touchWorkspace() {
+            compose.waitForIdle()
+            val (root, node) = checkNotNull(findTag("workspace"))
+            val origin = IntArray(2)
+            instrumentation.runOnMainSync { root.view.getLocationOnScreen(origin) }
+            val point = node.boundsInRoot.center+Offset(origin[0].toFloat(), origin[1].toFloat())
+            val down = SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event = motion(MotionEvent.TOOL_TYPE_FINGER, action, point, down)
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+            }
+            host.drain()
+            assertTrue("A real touch selects native touch mode", root.view.isInTouchMode)
+        }
+        fun openPicker() {
+            host.drain(obj("type" to "phone", "action" to obj("kind" to "insert_tools", "before" to null)))
+            host.awaitFrame("Add Tools opens") { findTag("tool-picker-search") != null }
+            compose.waitForIdle()
+        }
+        fun focused() = findTag("tool-picker-search")?.second?.find { it.config.getOrNull(SemanticsProperties.Focused) == true } != null
+        fun closePicker() {
+            host.drain(obj("type" to "customize", "action" to obj("type" to "cancel_tools")))
+            host.awaitFrame("The picker and keyboard close") { findTag("tool-picker") == null && !decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()) }
+        }
+        try {
+            host.awaitFrame("The launch cover no longer owns input") { findTag("launch-splash") == null }
+            for ((name, orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
+                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+                val rotation = when (orientation) { 0 -> 1; 8 -> 3; else -> 0 }
+                host.awaitFrame("$name input viewport") { activity.display!!.rotation == rotation && (decor.width > decor.height) == (rotation != 0) }
+                for (theme in listOf("light", "dark")) {
+                    host.drain(obj("type" to "set_theme", "theme" to theme))
+                    touchWorkspace()
+                    openPicker()
+                    awaitEditorPage(activity, host, "tool-picker")
+                    assertFalse("Touch opening does not focus search", focused())
+                    assertFalse("Touch opening does not raise the keyboard", decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()))
+                    screenshot("fix4b-$name-$theme-touch.png")
+                    closePicker()
+                    pressKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+                    compose.waitForIdle()
+                    assertFalse("A native key selects keyboard mode", checkNotNull(findTag("workspace")).first.view.isInTouchMode)
+                    openPicker()
+                    host.awaitFrame("Keyboard opening focuses search") { focused() }
+                    awaitEditorPage(activity, host, "tool-picker")
+                    screenshot("fix4b-$name-$theme-keyboard.png")
+                    closePicker()
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.requestedOrientation = original }
+            scenario.close()
+        }
+    }
+
     @Test fun doneInPhonePagesPreservesDraftsAndValidation() {
         val scenario = launchCapy(180_000, compose)
         val activity = scenario.activity()
@@ -524,6 +587,7 @@ class AndroidPhoneAuditTest {
             "requested_density" to expectedDensity, "requested_font_scale" to expectedFont, "status" to "failed", "passed" to false)
         var captureName = if (admissionOnly) "admission" else "startup"
         var scenario: androidx.test.core.app.ActivityScenario<MainActivity>? = null
+        var originalOrientation: Int? = null
         try {
             wakeDevice()
             if (admissionOnly) {
@@ -542,6 +606,10 @@ class AndroidPhoneAuditTest {
             scenario = androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
             val activity = scenario.activity()
             val host = activity.host
+            originalOrientation = activity.requestedOrientation
+            instrumentation.runOnMainSync { activity.requestedOrientation = if (size[0] > size[1])
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+            host.awaitFrame("The fixture Activity uses its requested viewport") { activity.window.decorView.width == size[0] && activity.window.decorView.height == size[1] }
             instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "switch", "id" to "builtin:workspace:painter")) }
             host.awaitFrame("Painter fixture", 30_000) { host.workspaceManager?.optString("id") == "builtin:workspace:painter" && host.workspaceManager?.optBoolean("busy") == false }
             host.awaitFrame("first canvas surface", 180_000, { "$report" }) { host.surfaceReady }
@@ -665,6 +733,9 @@ class AndroidPhoneAuditTest {
             report.put("elapsed_seconds", (SystemClock.elapsedRealtime() - started) / 1000.0)
             if (!File(directory, "$captureName.json").exists()) File(directory, "$captureName.json").writeText(report.toString(2) + "\n")
             File(directory, "run.json").writeText(obj("passed" to !report.has("error"), "error" to report.opt("error")).toString(2) + "\n")
+            originalOrientation?.let { orientation ->
+                if (scenario?.state != androidx.lifecycle.Lifecycle.State.DESTROYED) scenario?.onActivity { it.requestedOrientation = orientation }
+            }
             scenario?.close()
         }
     }

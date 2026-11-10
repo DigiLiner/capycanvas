@@ -348,3 +348,10 @@ no regression. If a physical iPhone is available, record the same rows there.
   the owning dialog without implicitly confirming or closing the page. Verify
   keyboard dismissal and retained values for search, name and numeric fields,
   including rejected numeric input, in both themes and all phone rotations.
+
+- **Keep picker search unfocused after touch opening.** Android gates search
+  autofocus on the native Compose keyboard input mode. Explicit name/value
+  editing and type-to-search requests retain their focus. iOS pickers must
+  leave the software keyboard closed after touch opening and focus search
+  when opened from keyboard input. Verify both opening paths, plus requested
+  rename/value editing, in both themes and all phone rotations.

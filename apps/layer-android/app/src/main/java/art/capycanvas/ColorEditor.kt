@@ -557,10 +557,11 @@ private fun copyText(context: android.content.Context, text: String) {
     var shown by remember { mutableStateOf<JSONObject?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
+    val keyboardMode = keyboardInputMode()
     LaunchedEffect(query.text, revision) {
         host.query(obj("type" to "swatch_sheet", "query" to query.text, "current" to view.getJSONObject("value"))) { value -> shown = value as? JSONObject }
     }
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(Unit) { if (keyboardMode) focus.requestFocus() }
     Column(Modifier.fillMaxSize().background(colors.settingsBackground).padding(start = 20.dp, end = 20.dp, top = 20.dp).testTag("color-sheet")
         .onPreviewKeyEvent { event -> if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) { if (query.text.isNotEmpty()) { query = TextFieldValue(""); search("") } else close(); true } else false },
         verticalArrangement = Arrangement.spacedBy(10.dp)) {

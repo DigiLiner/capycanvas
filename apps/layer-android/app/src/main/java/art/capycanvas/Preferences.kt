@@ -586,6 +586,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
     if(current != null)SideEffect { retained = current }
     val scope = rememberCoroutineScope()
     val focus = remember { FocusRequester() }
+    val keyboardMode = keyboardInputMode()
     val bring = remember { BringIntoViewRequester() }
     val choicesScroll = rememberScrollState()
     LaunchedEffect(current != null,picker.getString("query")) { if(current != null)choicesScroll.scrollTo(0) }
@@ -619,7 +620,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                         if(searchText.text.isEmpty())Text(picker.getString("search_hint"),color = LocalPalette.current.secondary)
                         field()
                     } })
-                LaunchedEffect(Unit) { focus.requestFocus() }
+                LaunchedEffect(Unit) { if (keyboardMode) focus.requestFocus() }
                 Column(Modifier.weight(1f,fill = false).verticalScroll(choicesScroll).testTag("tool-picker-list")) {
                     picker.array("choices").objects().forEachIndexed { index,tool ->
                         if (index > 0) HorizontalDivider(color = LocalPalette.current.dialogSeparator)

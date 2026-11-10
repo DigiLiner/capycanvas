@@ -669,8 +669,9 @@ private fun DrawScope.checker(colors: Palette) {
     var query by remember { mutableStateOf("") }
     var shown by remember { mutableStateOf<JSONObject?>(null) }
     val focus = remember { FocusRequester() }
+    val keyboardMode = keyboardInputMode()
     var addBounds by remember { mutableStateOf(Rect.Zero) }
-    LaunchedEffect(Unit) { if (controller.keyboard) focus.requestFocus() }
+    LaunchedEffect(Unit) { if (keyboardMode) focus.requestFocus() }
     LaunchedEffect(query, view.array("palettes").toString()) {
         val text = query
         host.query(obj("type" to "palette_panel", "query" to text)) { value -> if (query == text) shown = value as? JSONObject }

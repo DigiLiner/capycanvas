@@ -78,6 +78,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -205,6 +207,8 @@ private data class ChromeFocusIndication(val color: Color) : IndicationNodeFacto
         }
     }
 }
+
+@Composable internal fun keyboardInputMode() = LocalInputModeManager.current.inputMode == InputMode.Keyboard
 
 private tailrec fun inputActivity(context: android.content.Context): android.app.Activity = when (context) {
     is android.app.Activity -> context
