@@ -551,7 +551,8 @@ fn native_default_workspace() {
             .committed_strokes,
         3
     );
-    let output = artifact_dir("../../artifacts/familiar-workspace/default");
+    let output = std::env::var("LAYER_TEST_ARTIFACTS").unwrap_or_else(|_| "../../artifacts/familiar-workspace/default".into());
+    let output = artifact_dir(&output);
     let initial = state(&w).workspace.layout;
     assert_eq!(initial.bands, DockLayout::editor_default().bands);
     assert_eq!(initial.panels, DockLayout::editor_default().panels);
@@ -640,15 +641,42 @@ fn native_default_workspace() {
                 assert!(!w.size_number.is_mapped());
                 let buttons = w.size_buttons.borrow();
                 assert_eq!(buttons.len(), 40);
-                let first = buttons[0].1.compute_bounds(&w.panel_widget(panel)).unwrap();
-                for (_, button) in &buttons[..6] {
-                    let bounds = button.compute_bounds(&w.panel_widget(panel)).unwrap();
-                    assert_eq!(bounds.y(), first.y());
-                    assert_eq!(bounds.height(), layer_ui::BRUSH_SIZE_TILE[1]);
+                for (_, button) in buttons.iter() {
+                    assert_eq!(button.height() as f32, layer_ui::BRUSH_SIZE_TILE[1]);
                 }
+                {
+                    struct RestoreDpi(gtk::Settings, i32);
+                    impl Drop for RestoreDpi {
+                        fn drop(&mut self) { self.0.set_gtk_xft_dpi(self.1); }
+                    }
+                    let settings = gtk::Settings::default().unwrap();
+                    let dpi = settings.gtk_xft_dpi();
+                    let _restore = RestoreDpi(settings.clone(), dpi);
+                    settings.set_gtk_xft_dpi(dpi * 3 / 2);
+                    pump(200);
+                    let width = buttons[0].1.width();
+                    for (value, button) in buttons.iter() {
+                        let label = descendant::<gtk::Label>(button).unwrap();
+                        let natural = label.measure(gtk::Orientation::Horizontal, -1).1
+                            - label.margin_start() - label.margin_end();
+                        let bounds = label.compute_bounds(button).unwrap();
+                        assert!(label.width() >= natural, "{value}: label {} < natural {natural}", label.width());
+                        assert!(bounds.x() >= 0. && bounds.y() >= 0.
+                            && bounds.x() + bounds.width() <= button.width() as f32
+                            && bounds.y() + bounds.height() <= button.height() as f32,
+                            "{value}: label {bounds:?} outside button {}×{}", button.width(), button.height());
+                        assert_eq!(button.width(), width, "{value}: uniform tile width");
+                    }
+                    buttons.last().unwrap().1.grab_focus();
+                    pump(100);
+                    capture_reference(&w, &format!("{output}/brush-size-tab-large-{theme:?}.png"), 1.);
+                }
+                pump(200);
                 for (value, button) in buttons.iter().filter(|(value, _)| [0.7, 1.5, 2.5, 2000.].contains(value)) {
                     click(button); assert_eq!(state(&w).brush.diameter, *value);
                 }
+                buttons.last().unwrap().1.grab_focus();
+                pump(100);
                 capture_reference(&w, &format!("{output}/brush-size-tab-{theme:?}.png"), 1.);
             }
             if panel == Panel::Stats {
