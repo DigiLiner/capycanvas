@@ -9,7 +9,7 @@ unchanged at a domain root or a subpath such as `/capycanvas/`. The
 `editor.capycanvas.art` runs the latest `main` instead: the **Deploy editor**
 workflow in [capycanvas-release](https://github.com/capyatelier/capycanvas-release)
 builds a chosen commit, `main` by default, with that repository's license and
-package checks and publishes it.
+package checks, and that repository's `release/cloudflare/deploy.mjs` publishes it.
 
 ## Build
 
