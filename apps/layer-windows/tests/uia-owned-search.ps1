@@ -822,6 +822,7 @@ namespace CapyRuntimePreviewTest {
 '@
 & {
     . ([scriptblock]::Create($runtimePreview[0].Extent.Text.Replace('[CapyRuntimeFilterCapture','[CapyRuntimePreviewTest.Capture')))
+    function Has-Tint{throw 'Preview geometry control unexpectedly requested tint analysis'}
     $registeredWindow=[pscustomobject]@{Handle=[IntPtr]::Zero}
     $geometry=@{finds=0;arranged=0;boundsReads=0;sleeps=0;pending=$true;emptyPending=$true;invalid=$false}
     function Start-Sleep([int]$Milliseconds){
@@ -1302,6 +1303,10 @@ Write-Output 'Actual bubble overlay sequence waits for applied Fill before compo
     function Wait-Until($Condition,$Message){if(!(& $Condition)){throw $Message}}
     function Tool-Tile($Command){$script:requestedNavigationTile=$Command;'tile-'+$Command}
     function Control($Id,[switch]$Arranged){throw 'navigation tile reached'}
+    function Model{throw 'Navigation tile control unexpectedly read a model'}
+    function Center{throw 'Navigation tile control unexpectedly measured a center'}
+    function Assert-Camera{throw 'Navigation tile control unexpectedly compared cameras'}
+    function Capture{throw 'Navigation tile control unexpectedly captured pixels'}
     $script:requestedNavigationTile=$null
     try{Navigation-Double 'zoom';throw 'Navigation did not request its tile'}catch{if($_.Exception.Message-ne'navigation tile reached'){throw}}
     if($script:requestedNavigationTile-ne'zoom'){throw 'Zoom double action selected another tool tile'}
@@ -1437,6 +1442,17 @@ public static class CapyImageDragPacingTest {
     if($errors.Count){throw ($errors|Out-String)}
     $actual=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Sketch-VectorRoutes'},$true)
     . ([scriptblock]::Create($actual.Extent.Text.Replace('[System.Windows.Automation.TogglePattern]','[CapyOwnedSearchTest.TogglePattern]')))
+    function Capture{throw 'Workspace route control unexpectedly captured pixels'}
+    function Use-PaintWorkspace{throw 'Workspace route control unexpectedly returned to Paint'}
+    function Reason-Hover{throw 'Workspace route control unexpectedly continued past its route'}
+    function Shortcut-Command{throw 'Workspace route control unexpectedly continued past its route'}
+    function Click{throw 'Workspace route control unexpectedly continued past its route'}
+    function Selected{throw 'Workspace route control unexpectedly continued past its route'}
+    function Key{throw 'Workspace route control unexpectedly continued past its route'}
+    function Park{throw 'Workspace route control unexpectedly continued past its route'}
+    function Take-Projection{throw 'Workspace route control unexpectedly continued past its route'}
+    function Active{throw 'Workspace route control unexpectedly continued past its route'}
+    function Fit-Canvas{throw 'Workspace route control unexpectedly fit the canvas'}
     $toggle=[pscustomobject]@{};$toggle|Add-Member ScriptMethod Toggle {}
     $lock=[pscustomobject]@{};$lock|Add-Member ScriptMethod GetCurrentPattern {param($p)$toggle}
     function Control($Id,[switch]$Arranged){if($Id-ne'layer-lock'){throw 'Unexpected control before workspace route'};$lock}
@@ -2086,6 +2102,7 @@ public static class CapyCaptionOriginTest {
   }
  }
  function Wait-Until([scriptblock]$Condition,[string]$Message){if(!(& $Condition)){throw $Message}}
+ function Model{throw 'Caption geometry control unexpectedly captured a model'}
  function Workspace-Root {$workspace}
  function Expect-CaptionFailure([scriptblock]$Action,[string]$Message){$caught=$null;try{& $Action|Out-Null}catch{$caught=$_.Exception.Message};if(!$caught -or !$caught.Contains($Message)){throw "Caption negative did not reach '$Message': $caught"}}
  $review=[pscustomobject]@{Id=7};$root=[pscustomobject]@{Current=[pscustomobject]@{NativeWindowHandle=19;ProcessId=7}}
@@ -2170,6 +2187,10 @@ public static class CapyCaptionOriginTest {
  $actual=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Drag'},$true)
  if(!$actual){throw 'Missing actual column Drag function'}
  . ([scriptblock]::Create($actual.Extent.Text.Replace('[CapyRowPointer]','[CapyEdgeReleaseTest]')))
+ function Presentation{throw 'Contact capture control unexpectedly read drag presentation'}
+ function Dock-Point{throw 'Contact capture control unexpectedly resolved a drop target'}
+ function Capture{throw 'Contact capture control unexpectedly captured pixels'}
+ function Model{throw 'Contact capture control unexpectedly read a model'}
  $Device='touch'
  function At($Id){@{x=10;y=20}}
  function Wait-Until([scriptblock]$Condition,[string]$Message){for($poll=0;$poll-lt8;$poll++){if(& $Condition){return}};throw $Message}
