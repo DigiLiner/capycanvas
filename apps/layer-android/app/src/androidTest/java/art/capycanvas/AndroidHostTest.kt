@@ -1929,6 +1929,30 @@ class AndroidHostTest {
         }
     }
 
+    @Test fun explicitlyRequestedEffectsSearchFocusesAfterTouch() {
+        action(obj("type" to "select_panel_tab","group" to group("adjustments").getLong("id"),"panel" to "adjustments"))
+        compose.waitForIdle()
+        val (root,node) = checkNotNull(findTag("filter-search-toggle"))
+        val origin = IntArray(2)
+        compose.runOnIdle { root.view.getLocationOnScreen(origin) }
+        val at = node.boundsInRoot.center+androidx.compose.ui.geometry.Offset(origin[0].toFloat(),origin[1].toFloat())
+        val down = SystemClock.uptimeMillis()
+        for(phase in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+            val event = motion(MotionEvent.TOOL_TYPE_FINGER,phase,at,down)
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event,true)) } finally { event.recycle() }
+        }
+        assertTrue("Effects search was requested by touch",root.view.isInTouchMode)
+        host.awaitMain("Requested Effects search focuses with IME",10_000,{ "" },compose) {
+            findTag("filter-search")?.second?.find { it.config.getOrNull(SemanticsProperties.Focused) == true } != null &&
+                compose.activity.window.decorView.rootWindowInsets.isVisible(android.view.WindowInsets.Type.ime())
+        }
+        capture("explicit-effects-search")
+        pressKey(KeyEvent.KEYCODE_BACK)
+        host.awaitMain("Back dismisses the Effects keyboard",10_000,{ "" },compose) {
+            !compose.activity.window.decorView.rootWindowInsets.isVisible(android.view.WindowInsets.Type.ime())
+        }
+    }
+
     @Test fun adjustmentPanelsUseSharedSchema() {
         action(obj("type" to "set_theme", "theme" to "dark"))
         action(obj("type" to "set_brush_size", "value" to 220))

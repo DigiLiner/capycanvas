@@ -56,7 +56,6 @@ import org.json.JSONObject
     val results = view.array("results").objects()
     val selected = view.optInt("selected")
     val configuration = LocalConfiguration.current
-    val keyboardMode = keyboardInputMode()
     val keyboard = LocalSoftwareKeyboardController.current
     val editor = LocalView.current
     val focus = remember { FocusRequester() }
@@ -97,7 +96,7 @@ import org.json.JSONObject
             val availableHeight = minOf(bounds.number("height").dp,(maxHeight-bounds.number("y").dp).coerceAtLeast(0.dp))
             var placed by remember { mutableStateOf(false) }
             LaunchedEffect(placed,bounds.toString(),parameterId) {
-                if(!placed || parameter == null && !keyboardMode)return@LaunchedEffect
+                if(!placed)return@LaunchedEffect
                 focus.requestFocus()
                 if (configuration.keyboard == Configuration.KEYBOARD_NOKEYS) keyboard?.show()
             }

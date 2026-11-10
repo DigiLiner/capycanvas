@@ -211,6 +211,42 @@ class AndroidPhoneAuditTest {
         }
     }
 
+    @Test fun explicitlyOpenedCommandSearchFocusesAfterTouch() {
+        val scenario = launchCapy(180_000,compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val decor = activity.window.decorView
+        fun touch(tag: String) {
+            compose.waitForIdle()
+            val (root,node) = checkNotNull(findTag(tag))
+            val origin = IntArray(2)
+            instrumentation.runOnMainSync { root.view.getLocationOnScreen(origin) }
+            val point = node.boundsInRoot.center+Offset(origin[0].toFloat(),origin[1].toFloat())
+            val down = SystemClock.uptimeMillis()
+            for(action in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                val event = motion(MotionEvent.TOOL_TYPE_FINGER,action,point,down)
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event,true)) } finally { event.recycle() }
+            }
+            compose.waitForIdle()
+            assertTrue("The search is requested by touch",root.view.isInTouchMode)
+        }
+        fun focusedWithKeyboard(tag: String) = findTag(tag)?.second?.find { it.config.getOrNull(SemanticsProperties.Focused) == true } != null &&
+            decor.rootWindowInsets.isVisible(WindowInsets.Type.ime())
+        try {
+            host.awaitFrame("The launch cover releases input") { findTag("launch-splash") == null }
+            host.drain(obj("type" to "set_theme","theme" to "light"))
+            touch("phone-capy")
+            host.awaitFrame("Search Commands is available") { findTag("phone-search") != null }
+            touch("phone-search")
+            host.awaitFrame("Requested Command Search focuses with IME") { focusedWithKeyboard("command-search") }
+            screenshot("explicit-command-search.png")
+            pressKey(KeyEvent.KEYCODE_BACK)
+            host.awaitFrame("Back dismisses the Command Search keyboard") { !decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()) }
+            compose.onNodeWithTag("command-close",useUnmergedTree = true).performClick()
+            host.awaitFrame("Command Search closes") { findTag("command-search") == null }
+        } finally { scenario.close() }
+    }
+
     @Test fun pickerKeepsOneCompleteResultAboveTheKeyboard() {
         val scenario = launchCapy(180_000,compose)
         val activity = scenario.activity()

@@ -69,10 +69,9 @@ private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dis
     val list = rememberLazyListState()
     val focus = remember { FocusRequester() }
     val cache = host.filterPreviewCache
-    val keyboardMode = keyboardInputMode()
     val search = picker.takeUnless { it.isNull("search") }?.getString("search")
     fun send(action: JSONObject) = host.dispatch(obj("type" to "filter_picker", "action" to action))
-    LaunchedEffect(search != null) { if (search != null && keyboardMode) focus.requestFocus() }
+    LaunchedEffect(search != null) { if (search != null) focus.requestFocus() }
     val previewView = remember { Any() }
     DisposableEffect(host, previewView) { onDispose { cache.remove(previewView) } }
     LaunchedEffect(host, previewView) {

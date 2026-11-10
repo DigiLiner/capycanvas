@@ -351,7 +351,7 @@ no regression. If a physical iPhone is available, record the same rows there.
 
 - **Keep picker search unfocused after touch opening.** Android gates search
   autofocus on the native Compose keyboard input mode. Explicit name/value
-  editing and type-to-search requests retain their focus. iOS pickers must
+  editing, explicitly requested searches and type-to-search retain focus. iOS pickers must
   leave the software keyboard closed after touch opening and focus search
   when opened from keyboard input. Verify both opening paths, plus requested
   rename/value editing, in both themes and all phone rotations.
@@ -362,3 +362,9 @@ no regression. If a physical iPhone is available, record the same rows there.
   with its measured row height, including short windows without a keyboard.
   Verify search, a complete result, close and primary actions above the
   keyboard in portrait and both landscape rotations, in both themes.
+
+- **Focus searches the person explicitly opens.** Android focuses Effects
+  search after tapping its search toggle and Command Search after opening
+  that command. iOS must treat those as explicit text-entry requests, like
+  rename, while browsing pickers remain unfocused after touch opening. Verify
+  that each requested search focuses and raises the keyboard with one tap.
