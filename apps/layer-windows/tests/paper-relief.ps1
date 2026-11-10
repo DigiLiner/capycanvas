@@ -4,6 +4,7 @@ $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/layer-paper.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Paper helper does not parse'}
 $function=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Relief-Comparison'},$true)
+if(!$function){throw 'Missing actual paper helper: Relief-Comparison'}
 . ([scriptblock]::Create($function.Extent.Text))
 $flat=[int[]]@(1..100|ForEach-Object {[Drawing.Color]::White.ToArgb()})
 $subtle=$flat.Clone()
@@ -21,9 +22,19 @@ try{Relief-Comparison $flat @(-1)|Out-Null}catch{$refused=$true}
 if(!$refused){throw 'Changed sample geometry was accepted'}
 'Paper relief appearance and exact fade: 7 passed'
 
-foreach($name in @('Texture-Open','Texture-Visible')){
+foreach($name in @('Texture-Begin','Texture-Observed','Texture-Open','Texture-Visible')){
     $function=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+    if(!$function){throw "Missing actual paper helper: $name"}
     . ([scriptblock]::Create($function.Extent.Text))
+}
+$review=[pscustomobject]@{Id=17}
+$script:textureWorkspace=[pscustomobject]@{Current=[pscustomobject]@{ProcessId=17;ItemStatus='{"snapshot_qpc":1,"texture_dialog":{}}'}}
+$script:textureWorkspace|Add-Member ScriptMethod GetRuntimeId {[int[]]@(1,17)}
+function Workspace-Root {$script:textureWorkspace}
+function Model {
+    [pscustomobject]@{windows_workspace=@{id='paint'};state=@{
+        layer_properties=@{layer=1};document_file=@{epoch=1};layers=@(@{id=1;paper=@{editable=$true}})
+    }}
 }
 $textureControls=@{
     'texture-apply'=[pscustomobject]@{Current=[pscustomobject]@{IsOffscreen=$false}}
@@ -39,7 +50,10 @@ function Control([string]$Value,[switch]$Arranged){
     if(!$item){throw "Missing control: $Value"}
     $item
 }
-function Invoke([string]$Value){}
+function Invoke([string]$Value){
+    if($Value -cne 'layer-texture-1'){throw 'Texture replay changed its original opener'}
+    $script:textureWorkspace.Current.ItemStatus='{"snapshot_qpc":2,"texture_dialog":{"id":"picker-1","epoch":1,"layer":1}}'
+}
 function Wait-Until([scriptblock]$Condition,[string]$Message){if(!(&$Condition)){throw $Message}}
 $script:CapyPopups=$false
 $entryTokens=$null;$entryErrors=$null
