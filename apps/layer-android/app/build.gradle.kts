@@ -141,9 +141,19 @@ val generateBrand by tasks.registering {
               </group>
             </vector>
         """.trimIndent())
-        output.resolve("drawable/capy_splash_mark.xml").writeText("""
+        output.resolve("drawable/capy_full_mark.xml").writeText("""
             <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="96dp" android:height="96dp" android:viewportWidth="${viewBox[2]}" android:viewportHeight="${viewBox[3]}">
               <group android:translateX="${-viewBox[0]}" android:translateY="${-viewBox[1]}">
+                <path android:fillColor="@color/capy_splash_foreground" android:fillType="evenOdd" android:pathData="$path" />
+              </group>
+            </vector>
+        """.trimIndent())
+        val splashScale = 95f / 232f
+        val splashX = 144f - 180.24f * splashScale
+        val splashY = 144f - 214.49f * splashScale
+        output.resolve("drawable/capy_splash_mark.xml").writeText("""
+            <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="288dp" android:height="288dp" android:viewportWidth="288" android:viewportHeight="288">
+              <group android:translateX="$splashX" android:translateY="$splashY" android:scaleX="$splashScale" android:scaleY="$splashScale">
                 <path android:fillColor="@color/capy_splash_foreground" android:fillType="evenOdd" android:pathData="$path" />
               </group>
             </vector>

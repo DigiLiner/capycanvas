@@ -84,7 +84,50 @@ int main() {
         assert(timing.CaptionRemaining(start+delay-std::chrono::milliseconds(1),delay)==std::chrono::milliseconds(1));
         assert(timing.CaptionRemaining(start+delay,delay).count()==0);
         assert(timing.CaptionRemaining(start+delay+std::chrono::seconds(1),delay).count()==0);
-        assert(CanvasLaunchTiming::FadeDuration>=std::chrono::milliseconds(150)&&CanvasLaunchTiming::FadeDuration<=std::chrono::milliseconds(200));
+    }
+    {
+        for(auto extent:std::vector<std::array<double,3>>{{1400,1000,252},{320,150,60},{150,320,60}}){
+            CanvasLaunchPlacement placement(extent[0],extent[1],extent[2]);
+            assert(placement.left>=0&&placement.top>=0);
+            assert(placement.left+placement.size/2==extent[0]/2&&placement.top+placement.size/2==extent[1]/2);
+            assert(placement.CaptionTop(18)>placement.top+placement.size);
+            assert(placement.CaptionTop(18)+20<=extent[1]);
+        }
+    }
+    {
+        CanvasLaunchPaint paint;
+        int surface;
+        auto request=paint.Request(&surface,1);
+        auto now=CanvasLaunchTiming::Clock::time_point{};
+        std::optional<CanvasLaunchTiming::Clock::time_point> began;
+        auto presented=[&](CanvasLaunchPaint::Receipt const& receipt){if(paint.Presented(receipt,&surface,1))began=now;};
+        presented(request);assert(!began);
+        now+=std::chrono::milliseconds(600);
+        assert(paint.Rendered(request));assert(!began);
+        assert(!paint.Request(&surface,1));assert(!paint.Rendered(request));
+        now+=std::chrono::milliseconds(16);
+        presented(request);assert(began==now);
+        auto duration=std::chrono::milliseconds(500);
+        assert(duration-(now-*began)==duration);
+        now+=duration/2;assert(duration-(now-*began)==duration/2);
+        presented(request);assert(*began+duration==now+duration/2);
+    }
+    {
+        CanvasLaunchPaint paint;
+        int first,second;
+        auto retired=paint.Request(&first,1);
+        assert(paint.Rendered(retired));paint.Cancel();
+        auto current=paint.Request(&first,1);
+        assert(current!=retired&&!paint.Rendered(retired));
+        assert(!paint.Presented(retired,&first,1));
+        assert(!paint.Presented(current,&first,1));
+        assert(paint.Rendered(current));
+        assert(!paint.Presented(current,&second,1)&&!paint.Presented(current,&first,2));
+        auto replacement=paint.Request(&second,2);
+        assert(!paint.Presented(current,&first,1));
+        assert(paint.Rendered(replacement)&&paint.Presented(replacement,&second,2));
+        auto closing=paint.Request(&second,2);paint.Cancel();
+        assert(!paint.Rendered(closing)&&!paint.Presented(closing,&second,2));
     }
     CanvasSurfaceState surface;
     surface.Reset(0);

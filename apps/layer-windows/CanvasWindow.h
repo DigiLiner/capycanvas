@@ -80,11 +80,18 @@ private:
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer launchCaptionTimer{nullptr};
     winrt::Microsoft::UI::Xaml::Media::Animation::Storyboard launchFade{nullptr},launchCaptionFade{nullptr};
     CanvasLaunchTiming launchTiming;
+    CanvasLaunchPaint launchPaint;
+    winrt::Microsoft::UI::Xaml::Media::CompositionTarget::Rendered_revoker launchFrame;
     bool launchLoaded=false;
     void CreateLaunchCover();
+    void LayoutLaunchCover();
     void ArmLaunchCaption();
     void ApplyLaunchCover(winrt::Windows::Data::Json::JsonObject const& model);
     void HideLaunchCover(bool animate);
+    void QueueLaunchReveal();
+    void CancelLaunchReveal();
+    static winrt::fire_and_forget AwaitLaunchPresent(std::weak_ptr<CanvasWindow>,
+        winrt::Microsoft::UI::Dispatching::DispatcherQueue,CanvasLaunchPaint::Receipt);
 
     std::shared_ptr<CapyUi::WorkspaceData> screenData;
     winrt::Microsoft::UI::Xaml::Controls::Button screenChip;

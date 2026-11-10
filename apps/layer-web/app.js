@@ -490,7 +490,7 @@ function refreshStartup() {
   if (frame && (!launchPresentation || frame[0] !== launchPresentation[0] || frame[1] !== launchPresentation[1])) {
     const epoch = compilerEpoch;
     launchPresentation = frame;
-    app.wait_for_canvas().then(() => {
+    app.wait_for_canvas().then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))).then(() => {
       if (epoch !== compilerEpoch || launchPresentation !== frame) return;
       app.launch_presented(BigInt(frame[0]), BigInt(frame[1]), launchChromeReady());
       if (launchPresentation === frame) launchPresentation = null;

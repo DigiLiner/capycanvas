@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+float capy_apple_launch_mark_size(float width, float height);
 
 typedef uint64_t CapyApple;
 typedef uint64_t CapyText;

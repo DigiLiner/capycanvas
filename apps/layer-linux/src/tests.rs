@@ -1325,24 +1325,57 @@ fn native_document_files() {
 #[ignore = "private Wayland desktop: startup timing and event-loop responsiveness"]
 fn native_startup_latency() {
     let app = native_test_app("art.capycanvas.StartupTest");
+    let mut capture = std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").map(|_| {
+        let input = RemoteInput::new().settle_ms(0);
+        input.ready();
+        input
+    });
     adw::StyleManager::default().set_color_scheme(if std::env::var("CAPY_NATIVE_TEST_THEME").is_ok_and(|theme| theme == "dark") {
         adw::ColorScheme::ForceDark
     } else { adw::ColorScheme::ForceLight });
     let started = Instant::now();
     let w = Workspace::new(&app);
+    apply_fixture_theme(&w);
     let built = started.elapsed().as_secs_f64() * 1000.;
     w.window.present();
     let presented = started.elapsed().as_secs_f64() * 1000.;
-    let mut capture = std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").map(|_| {
-        let input = RemoteInput::new();
-        input.ready();
-        input
-    });
-    let mut icon_captured = false;
-    let mut caption_captured = false;
+    fn cover_node(w: &Workspace) -> Option<gtk::gsk::RenderNode> {
+        let snapshot = gtk::Snapshot::new();
+        w.launch.root.parent().unwrap().snapshot_child(&w.launch.root, &snapshot);
+        snapshot.to_node()
+    }
+    let acknowledged = Rc::new(Cell::new(None));
+    let reveal = Rc::new(Cell::new(None));
+    let completed = Rc::new(Cell::new(None));
+    w.launch.root.connect_transition_duration_notify(glib::clone!(#[strong] acknowledged, move |root| {
+        if root.transition_duration() == layer_ui::LAUNCH_REVEAL_MS as u32 {
+            if let Some(clock) = root.frame_clock() { acknowledged.set(Some((clock.frame_counter(), glib::monotonic_time()))); }
+        }
+    }));
+    w.launch.root.connect_reveal_child_notify(glib::clone!(#[strong] acknowledged, #[strong] reveal, move |root| {
+        if !root.reveals_child() && root.transition_duration() == layer_ui::LAUNCH_REVEAL_MS as u32 {
+            if let (Some(clock), Some((counter, _))) = (root.frame_clock(), acknowledged.get()) {
+                let current = clock.frame_counter();
+                let presented = (counter..current).filter_map(|frame| clock.timings(frame))
+                    .filter(|timing| timing.is_complete()).map(|timing| timing.presentation_time()).max().unwrap_or(0);
+                reveal.set(Some((current, clock.frame_time(), glib::monotonic_time(), presented)));
+            }
+        }
+    }));
+    w.launch.root.connect_child_revealed_notify(glib::clone!(#[strong] reveal, #[strong] completed, move |root| {
+        if !root.is_child_revealed() && reveal.get().is_some() {
+            if let Some(clock) = root.frame_clock() { completed.set(Some(clock.frame_time())); }
+        }
+    }));
     let paint_start = glib::monotonic_time();
-    let frames = sample_after_paint(&w.surface, glib::clone!(#[strong] w, move || {
-        (w.workspaces.ready(), w.chrome_released.get(), w.chrome.revision(), glib::monotonic_time())
+    let fading_cover = Rc::new(RefCell::new(None));
+    let frames = sample_after_paint(&w.surface, glib::clone!(#[strong] w, #[strong] fading_cover, move || {
+        let node = cover_node(&w);
+        let opacity = node.as_ref().map_or(0., crate::glass::opacity);
+        if !w.launch.root.reveals_child() && w.launch.root.is_child_revealed() && fading_cover.borrow().is_none() {
+            *fading_cover.borrow_mut() = node;
+        }
+        (w.workspaces.ready(), w.chrome_released.get(), w.chrome.revision(), glib::monotonic_time(), opacity)
     }));
     let send = |phase, x| {
         let now = glib::monotonic_time() as u64 * 1000;
@@ -1362,6 +1395,10 @@ fn native_startup_latency() {
             .metrics()
             .committed_strokes
     };
+    if let Some(input) = capture.as_mut() {
+        until(|| w.window.is_active(), "startup window receives native activation");
+        input.perform(serde_json::json!([{"record_window":{"name":"cold-editor-reveal","maximized":w.window.is_maximized()}}]));
+    }
     let mut stages = [None; 3];
     let mut first_canvas = None;
     let mut contact_started = false;
@@ -1372,18 +1409,6 @@ fn native_startup_latency() {
         pump(1);
         max_pump_ms = max_pump_ms.max(tick.elapsed().as_secs_f64() * 1000.);
         assert!(started.elapsed() < Duration::from_secs(30), "startup never completed");
-        if let Some(input) = &mut capture {
-            let name = if !icon_captured && w.launch.covering() {
-                icon_captured = true;
-                Some("launch-icon")
-            } else if !caption_captured && started.elapsed() >= Duration::from_secs(1) && w.launch.covering() {
-                caption_captured = true;
-                Some("launch-caption")
-            } else { None };
-            if let Some(name) = name {
-                input.perform(serde_json::json!([{"capture_window":{"name":name,"maximized":w.window.is_maximized()}}]));
-            }
-        }
         if first_canvas.is_none()
             && w.gpu.borrow().as_ref().is_some_and(|g| {
                 !g.session
@@ -1399,8 +1424,7 @@ fn native_startup_latency() {
             first_canvas = Some(started.elapsed().as_secs_f64() * 1000.);
         }
         let Some(progress) = w.gpu.borrow().as_ref().map(|g| g.session.engine().backend().startup) else { continue; };
-        if !contact_started && w.workspaces.accepts_input(&w) {
-            apply_fixture_theme(&w);
+        if !contact_started && !w.launch.covering() && w.workspaces.accepts_input(&w) {
             w.dispatch(UiAction::SetBrushSize { value: 24. });
             contact_started = true;
         }
@@ -1427,11 +1451,37 @@ fn native_startup_latency() {
             painted = true;
         }
     }
+    if let Some(input) = capture.as_mut() { input.perform(serde_json::json!([{"record_stop":true}])); }
     eprintln!(
         "GTK startup: UI built {built:.3}ms, present returned {presented:.3}ms, first canvas feedback {first_canvas:.3?}ms, max event-loop slice {max_pump_ms:.3}ms"
     );
     eprintln!("GTK startup document/brush/all ready: {stages:.3?}ms");
     let frames = frames.finish();
+    let fade = fading_cover.borrow();
+    let opacity = fade.as_ref().unwrap().downcast_ref::<gtk::gsk::OpacityNode>()
+        .expect("the entire launch cover is inside the outer fade");
+    let mut child = opacity.child();
+    while let Some(inner) = child.downcast_ref::<gtk::gsk::OpacityNode>() { child = inner.child(); }
+    let content = child.downcast_ref::<gtk::gsk::ContainerNode>().unwrap();
+    let background = content.child(0);
+    let background = background.downcast_ref::<gtk::gsk::ColorNode>().unwrap();
+    assert_eq!(background.color().alpha(), 1.);
+    assert_eq!(background.bounds().width(), w.launch.root.width() as f32);
+    assert_eq!(background.bounds().height(), w.launch.root.height() as f32);
+    let mark = find_named(w.launch.root.upcast_ref(), "launch-mark").unwrap().compute_bounds(&w.launch.root).unwrap();
+    let ink = content.child(1).bounds();
+    assert!(ink.width() > 0. && ink.height() > 0.);
+    assert!(mark.contains_rect(&ink), "the mark and full background share the same fade");
+    assert!(frames.iter().any(|frame| (0.35..=0.65).contains(&frame.state.4)), "the cold first-window cover fades through half opacity");
+    let ack = acknowledged.get().expect("ready launch acknowledgment");
+    let start = reveal.get().expect("first-window reveal starts");
+    assert!(start.0 > ack.0, "reveal waits for the ready covered frame: ack={ack:?}, start={start:?}");
+    let covered = frames.iter().find(|frame| frame.state.3 >= ack.1 && frame.state.3 <= start.2 && frame.state.0 && frame.state.1 == frame.state.2)
+        .expect("ready editor paints under the cover before reveal");
+    if start.3 > 0 { assert!(start.3 <= start.2, "covered presentation precedes reveal"); }
+    assert!(completed.get().unwrap() - start.1 >= layer_ui::LAUNCH_REVEAL_MS as i64 * 1000, "the full reveal runs after prepaint");
+    assert!(crate::glass::opacity(fade.as_ref().unwrap()) > 0.95, "the first reveal frame does not jump to transparent");
+    eprintln!("GTK launch: acknowledged {}us/frame{}, ready paint {}us, fade started {}us/frame{}, prior presentation {}us; covered delay {:.3}ms", ack.1, ack.0, covered.state.3, start.2, start.0, start.3, (start.2-ack.1) as f64/1000.);
     let restored = frames.iter().find(|frame| frame.state.0 && frame.state.1 == frame.state.2)
         .expect("restored workspace chrome paints without waiting for shader preparation");
     let restored_ui_ms = presented + (restored.state.3 - paint_start) as f64 / 1000.;
@@ -1446,10 +1496,10 @@ fn native_startup_latency() {
     assert_eq!(strokes(), 2);
     assert!(!w.launch.covering(), "the ready frame reveals the working workspace");
     assert!(paper_pixels(&w) > 100_000);
-    if let Some(input) = &mut capture {
+    if let Some(input) = capture.as_mut() {
         input.perform(serde_json::json!([{"capture_window":{"name":"launch-ready","maximized":w.window.is_maximized()}}]));
-        input.finish();
     }
+    if let Some(input) = capture { input.finish(); }
     w.window.destroy();
     pump(20);
 }

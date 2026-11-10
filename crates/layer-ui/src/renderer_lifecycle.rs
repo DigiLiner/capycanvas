@@ -2,6 +2,14 @@
 use super::*;
 
 pub const LAUNCH_CAPTION_DELAY_MS: u64 = 5000;
+pub const LAUNCH_REVEAL_MS: u64 = 500;
+pub const LAUNCH_MARK_SIZE: f32 = 7. * crate::layout::TILE_SIZE;
+pub const LAUNCH_MARK_MAX_FRACTION: f32 = 0.4;
+pub const LAUNCH_CAPTION_GAP: f32 = crate::layout::TILE_SIZE * 0.5;
+
+pub fn launch_mark_size(viewport: [f32; 2]) -> f32 {
+    LAUNCH_MARK_SIZE.min(viewport[0].min(viewport[1]).max(0.) * LAUNCH_MARK_MAX_FRACTION)
+}
 
 pub(super) const PAINTING_UNAVAILABLE: &str = "Painting is unavailable. Save the drawing and reopen it.";
 

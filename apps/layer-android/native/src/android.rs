@@ -17,6 +17,11 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_art_capycanvas_Native_launchMarkSize(_: JNIEnv, _: JClass, width: jfloat, height: jfloat) -> jfloat {
+    layer_ui::launch_mark_size([width, height])
+}
+
 fn owner_callback(vm:Arc<jni::JavaVM>,reference:Arc<jni::objects::GlobalRef>,method:&'static str)->Arc<dyn Fn()+Send+Sync> {
     Arc::new(move || {
         let Ok(mut env)=vm.attach_current_thread() else {return;};

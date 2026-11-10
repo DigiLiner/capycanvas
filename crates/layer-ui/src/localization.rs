@@ -70,6 +70,10 @@ pub fn launch_localization(saved: &str, preferred_tags: &[&str]) -> Arc<Localize
 #[derive(Clone, Debug, Serialize)]
 pub struct BootstrapView {
     pub launch_caption_delay_ms: u64,
+    pub launch_reveal_ms: u64,
+    pub launch_mark_size: f32,
+    pub launch_mark_max_fraction: f32,
+    pub launch_caption_gap: f32,
     pub active_tag: &'static str,
     pub app_name: &'static str,
     pub common: crate::CommonCopy,
@@ -111,6 +115,10 @@ pub struct BootstrapView {
 pub fn bootstrap_view(l: &Localizer) -> BootstrapView {
     BootstrapView {
         launch_caption_delay_ms: crate::LAUNCH_CAPTION_DELAY_MS,
+        launch_reveal_ms: crate::LAUNCH_REVEAL_MS,
+        launch_mark_size: crate::LAUNCH_MARK_SIZE,
+        launch_mark_max_fraction: crate::LAUNCH_MARK_MAX_FRACTION,
+        launch_caption_gap: crate::LAUNCH_CAPTION_GAP,
         active_tag: l.language().tag(),
         app_name: l.language().app_name(),
         common: crate::CommonCopy::new(l),
@@ -501,6 +509,12 @@ mod tests {
         let first = bootstrap_view(&localization);
         let second = bootstrap_view(&localization);
         assert_eq!(serde_json::to_value(&first).unwrap()["launch_caption_delay_ms"], 5000);
+        assert_eq!(serde_json::to_value(&first).unwrap()["launch_reveal_ms"], 500);
+        assert_eq!(first.launch_mark_size, 7. * crate::layout::TILE_SIZE);
+        assert_eq!(crate::launch_mark_size([1300., 900.]), first.launch_mark_size);
+        assert_eq!(crate::launch_mark_size([400., 300.]), 120.);
+        assert_eq!(crate::launch_mark_size([844., 390.]), 156.);
+        assert_eq!(crate::launch_mark_size([0., 390.]), 0.);
         assert!(Arc::ptr_eq(&first.preparing_canvas, &second.preparing_canvas));
         assert_eq!(first.active_tag, "en");
         assert_eq!(first.shipped_tags, SHIPPED_LANGUAGES.iter().map(|language| language.tag()).collect::<Vec<_>>());

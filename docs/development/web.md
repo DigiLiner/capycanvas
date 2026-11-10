@@ -37,7 +37,8 @@ Chromium.
 Open `http://127.0.0.1:4173`. The launcher runs
 [`build.sh`](../../apps/layer-web/build.sh), which compiles the Wasm module with
 the `dev-perf` profile, generates the browser bindings in `apps/layer-web/pkg/`
-and the icon sprite, then serves `apps/layer-web` with Python.
+and the icon sprite and shared launch CSS (`layer-ui`'s `launch_style` example),
+then serves `apps/layer-web` with Python.
 `LAYER_WEB_PORT` changes the port, `LAYER_WASM_BINDGEN` selects the CLI and
 `CAPY_RUST_PROFILE` the profile. Rebuild with `bash apps/layer-web/build.sh`
 after Rust changes; the browser tests do not build.

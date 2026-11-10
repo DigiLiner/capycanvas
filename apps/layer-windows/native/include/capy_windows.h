@@ -49,6 +49,7 @@ typedef struct CapyPointer {
 /* Prepare on the startup worker; view returns an owned text handle.
    A launch is adopted at most once. */
 __declspec(dllimport) CapyLaunch capy_launch(const char* tags,const char* screen);
+__declspec(dllimport) float capy_launch_mark_size(float width,float height);
 __declspec(dllimport) CapyString capy_launch_view(CapyLaunch);
 __declspec(dllimport) void capy_launch_free(CapyLaunch);
 __declspec(dllimport) CapyLocalization capy_launch_localization(CapyLaunch);

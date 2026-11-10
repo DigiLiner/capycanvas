@@ -132,7 +132,7 @@ export function showGpuNotice({ container, error, restart, restartLabel }) {
   container.hidden = false;
 }
 
-export function createLaunchCover({ container, now = () => performance.now(), setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createLaunchCover({ container, now = () => performance.now(), setTimer = setTimeout }) {
   const content = container.querySelector('.launch-splash');
   const caption = content.querySelector('.launch-caption');
   const controls = blocked => {
@@ -140,32 +140,33 @@ export function createLaunchCover({ container, now = () => performance.now(), se
       if (node !== container && node.inert !== blocked) node.inert = blocked;
   };
   controls(true);
-  let fade, captionTimer;
+  container.addEventListener('transitionend', event => {
+    if (event.target === container && event.propertyName === 'opacity' && container.dataset.launch === 'leaving')
+      container.hidden = true;
+  });
+  let captionTimer;
   return {
     update(view, copy) {
       if (!view.visible && container.dataset.launch === undefined) return;
+      container.style.setProperty('--launch-reveal', `${Number(copy.launch_reveal_ms)}ms`);
+      container.style.setProperty('--launch-mark-size', `${copy.launch_mark_size}px`);
+      container.style.setProperty('--launch-mark-fit', `calc(${copy.launch_mark_max_fraction} * min(100vw, 100dvh))`);
+      container.style.setProperty('--launch-caption-gap', `${copy.launch_caption_gap}px`);
       captionTimer ??= setTimer(() => { caption.dataset.visible = ''; }, Math.max(0, Number(copy.launch_caption_delay_ms) - now()));
       controls(view.visible);
       if (view.visible) {
         caption.textContent = copy[`preparing_${view.notice}`];
-        if (fade !== undefined) clearTimer(fade);
-        fade = undefined;
         if (container.firstElementChild !== content) container.replaceChildren(content);
         container.hidden = false;
         container.dataset.launch = 'loading';
       } else if (!view.finished) {
-        if (fade !== undefined) clearTimer(fade);
-        fade = undefined;
         container.hidden = true;
       } else if (container.dataset.launch === 'loading') {
         container.dataset.launch = 'leaving';
-        fade = setTimer(() => { container.hidden = true; fade = undefined; }, 180);
       }
     },
     diagnostic() {
       controls(false);
-      if (fade !== undefined) clearTimer(fade);
-      fade = undefined;
       container.removeAttribute('data-launch');
       container.hidden = false;
     },

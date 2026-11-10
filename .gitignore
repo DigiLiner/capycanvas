@@ -5,6 +5,7 @@ __pycache__/
 /dist/
 /artifacts/
 /apps/layer-web/pkg/
+/apps/layer-web/launch.css
 
 # Android SDK paths, build products and signing material.
 .gradle/

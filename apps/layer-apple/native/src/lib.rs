@@ -33,6 +33,11 @@ use layer_host::{NativeHost, PointerBatch};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+#[unsafe(no_mangle)]
+pub extern "C" fn capy_apple_launch_mark_size(width: f32, height: f32) -> f32 {
+    layer_ui::launch_mark_size([width, height])
+}
+
 pub struct CapyApple {
     metal: metal::MetalHost,
     host: NativeHost,

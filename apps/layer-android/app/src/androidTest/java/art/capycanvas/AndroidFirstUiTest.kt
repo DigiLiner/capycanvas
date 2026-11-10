@@ -3,7 +3,6 @@ package art.capycanvas
 import android.graphics.Bitmap
 import android.os.SystemClock
 import android.provider.Settings
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.platform.WindowRecomposerFactory
@@ -25,6 +24,120 @@ import java.util.concurrent.TimeUnit
 class AndroidFirstUiTest {
     @get:Rule(order = 0) val device = CapyDeviceRule()
     @get:Rule(order = 1) val compose = createEmptyComposeRule()
+
+    @Test fun launchRevealWaitsForReadyDrawAndCommit() {
+        val reveal = LaunchReveal()
+        reveal.update(true, false)
+        assertNull(reveal.drawn())
+        reveal.update(false, true)
+        assertTrue(reveal.covered)
+        assertTrue(reveal.holding(false, true))
+        assertFalse(reveal.started)
+        val commit = checkNotNull(reveal.drawn())
+        assertTrue(reveal.holding(false, true))
+        assertNull(reveal.drawn())
+        reveal.update(false, true)
+        assertFalse(reveal.started)
+        commit()
+        assertTrue(reveal.started)
+        assertFalse(reveal.holding(false, true))
+        reveal.update(false, true)
+        commit()
+        assertTrue(reveal.started)
+        assertNull(reveal.drawn())
+    }
+
+    @Test fun launchRevealCancelsBypassAndClosedReceipts() {
+        val reveal = LaunchReveal()
+        reveal.update(true, false)
+        reveal.update(false, true)
+        val obsolete = checkNotNull(reveal.drawn())
+        assertFalse(reveal.holding(false, false))
+        reveal.update(false, false)
+        obsolete()
+        assertFalse(reveal.covered)
+        assertFalse(reveal.started)
+        reveal.native()
+        assertFalse(reveal.covered)
+        reveal.update(true, false)
+        reveal.update(false, true)
+        val current = checkNotNull(reveal.drawn())
+        obsolete()
+        assertFalse(reveal.started)
+        reveal.close()
+        current()
+        reveal.update(true, false)
+        reveal.native()
+        assertFalse(reveal.covered)
+        assertFalse(reveal.started)
+        assertNull(reveal.drawn())
+        assertFalse(reveal.holding(true, false))
+    }
+
+    @Test fun launchRevealPreservesInheritanceAndRearmsNativeOwnership() {
+        val reveal = LaunchReveal()
+        reveal.update(false, true)
+        assertFalse(reveal.covered)
+        assertFalse(reveal.holding(false, true))
+        assertNull(reveal.drawn())
+        reveal.native()
+        assertTrue(reveal.covered)
+        assertTrue(reveal.holding(false, true))
+        val obsolete = checkNotNull(reveal.drawn())
+        reveal.native()
+        obsolete()
+        assertFalse(reveal.started)
+        val current = checkNotNull(reveal.drawn())
+        current()
+        assertTrue(reveal.started)
+        reveal.native()
+        assertFalse(reveal.started)
+        current()
+        assertFalse(reveal.started)
+        checkNotNull(reveal.drawn())()
+        assertTrue(reveal.started)
+    }
+
+    @Test fun splashMarkFitsSystemSafeCircle() {
+        val size = 288
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        try {
+            val mark = instrumentation.targetContext.getDrawable(R.drawable.capy_splash_mark)!!
+            mark.setBounds(0, 0, size, size)
+            mark.draw(android.graphics.Canvas(bitmap))
+            instrumentation.targetContext.getExternalFilesDir(null)!!.resolve("splash-safe-circle.png").outputStream().use {
+                assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+            val pixels = IntArray(size * size)
+            bitmap.getPixels(pixels, 0, size, 0, 0, size, size)
+            val ink = BooleanArray(pixels.size) { android.graphics.Color.alpha(pixels[it]) > 0 }
+            val radius = pixels.indices.filter { ink[it] }.maxOf {
+                kotlin.math.hypot(it % size + .5 - size / 2, it / size + .5 - size / 2)
+            }
+            assertTrue("The whole mark fits the 192px safe circle: radius=$radius", radius <= 96)
+            assertTrue("The mark uses the safe circle: radius=$radius", radius >= 94)
+            val visited = BooleanArray(ink.size)
+            val queue = java.util.ArrayDeque<Int>()
+            var components = 0
+            for (start in ink.indices) {
+                if (!ink[start] || visited[start]) continue
+                components++
+                visited[start] = true
+                queue.add(start)
+                while (queue.isNotEmpty()) {
+                    val point = queue.removeFirst()
+                    for (dy in -1..1) for (dx in -1..1) {
+                        val x = point % size + dx
+                        val y = point / size + dy
+                        if (x !in 0 until size || y !in 0 until size) continue
+                        val next = y * size + x
+                        if (ink[next] && !visited[next]) { visited[next] = true; queue.add(next) }
+                    }
+                }
+            }
+            assertEquals("The full capy and both sparkles survive the mask", 3, components)
+        } finally { bitmap.recycle() }
+    }
 
     @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
     @Test fun removedSystemAnimationsStillReachTheFirstCanvas() {
@@ -121,10 +234,18 @@ class AndroidFirstUiTest {
             entered.countDown()
             check(resume.await(30, TimeUnit.SECONDS)) { "Test did not release GPU initialization" }
         }
+        val night = if (android.os.Build.VERSION.SDK_INT >= 31)
+            instrumentation.targetContext.getSystemService(android.app.UiModeManager::class.java) else null
+        val previousNight = if (android.os.Build.VERSION.SDK_INT >= 31) night?.nightMode else null
         var scenario: ActivityScenario<MainActivity>? = null
         try {
             val theme = startupTheme()
+            if (android.os.Build.VERSION.SDK_INT >= 31) night?.setApplicationNightMode(
+                if (theme == "dark") android.app.UiModeManager.MODE_NIGHT_YES else android.app.UiModeManager.MODE_NIGHT_NO)
             scenario = ActivityScenario.launch(MainActivity::class.java)
+            InstrumentationRegistry.getArguments().getString("size")?.split("x")?.map(String::toInt)?.let { size ->
+                if (size[0] < size[1]) device.portrait(scenario) else device.landscape(scenario)
+            }
             lateinit var host: CanvasHost
             lateinit var activity: MainActivity
             scenario.onActivity { activity = it; host = it.host }
@@ -135,41 +256,84 @@ class AndroidFirstUiTest {
                 assertTrue(canvas.isAttachedToWindow)
                 assertTrue(canvas.width > 0 && canvas.height > 0)
             }
-            compose.onNodeWithTag("launch-splash").assertIsDisplayed()
+            fun nativeCover(): android.window.SplashScreenView? = if (android.os.Build.VERSION.SDK_INT >= 31)
+                LaunchSplashWindow::class.java.getDeclaredField("view").apply { isAccessible = true }
+                    .get(activity.launchSplash) as? android.window.SplashScreenView else null
+            compose.waitUntil(5_000) {
+                activity.launchSplash.nativeActive || compose.onAllNodesWithTag("launch-splash").fetchSemanticsNodes().isNotEmpty()
+            }
             compose.runOnIdle {
                 assertFalse(host.snapshot!!.getBoolean("gpu_ready"))
                 assertFalse(host.surfaceReady)
                 assertNull(host.failure)
             }
-            val placeholder = compose.onNodeWithTag("launch-splash").fetchSemanticsNode().boundsInRoot
-            val point = Offset(placeholder.left + placeholder.width * .15f, placeholder.top + placeholder.height * .15f)
+            val cover = android.graphics.Rect()
+            val mark = android.graphics.Rect()
+            var expected = activity.launchSplash.background
+            scenario.onActivity {
+                val native = nativeCover()
+                if (it.launchSplash.nativeActive && native != null) {
+                    native.getGlobalVisibleRect(cover)
+                    assertTrue(native.iconView!!.getGlobalVisibleRect(mark))
+                    expected = (native.background as android.graphics.drawable.ColorDrawable).color
+                } else {
+                    it.window.decorView.getGlobalVisibleRect(cover)
+                    val density = it.resources.displayMetrics.density
+                    val size = it.launchSplash.legacyMarkSize?.toFloat()
+                        ?: Native.launchMarkSize(cover.width() / density, cover.height() / density) * density
+                    mark.set((cover.exactCenterX() - size / 2).toInt(), (cover.exactCenterY() - size / 2).toInt(),
+                        (cover.exactCenterX() + size / 2).toInt(), (cover.exactCenterY() + size / 2).toInt())
+                }
+            }
+            val point = Offset(cover.left + cover.width() * .15f, cover.top + cover.height() * .15f)
             compose.onNodeWithContentDescription("Main Menu").assertDoesNotExist()
             val captionDelay = host.bootstrap!!.getLong("launch_caption_delay_ms")
             val captionAt = activity.launchSplash.shownAt + captionDelay
             fun beforeCaption(): Boolean {
                 val captions = compose.onAllNodesWithTag("launch-splash-caption").fetchSemanticsNodes()
                 val before = SystemClock.uptimeMillis() < captionAt
-                if (before) assertTrue("The shared delay has not elapsed", captions.isEmpty())
+                if (before) {
+                    assertTrue("The shared delay has not elapsed", captions.isEmpty())
+                    scenario.onActivity {
+                        val caption = LaunchSplashWindow::class.java.getDeclaredField("caption").apply { isAccessible = true }
+                            .get(it.launchSplash) as? android.widget.TextView
+                        assertTrue(caption == null || caption.text.isEmpty())
+                    }
+                }
                 return before
             }
+            fun awaitSplashFrame() {
+                val committed = CountDownLatch(1)
+                scenario.onActivity {
+                    val owner = nativeCover() ?: it.window.decorView
+                    owner.viewTreeObserver.registerFrameCommitCallback { committed.countDown() }
+                    owner.invalidate()
+                }
+                assertTrue("The splash capture follows its rendered frame", committed.await(5, TimeUnit.SECONDS))
+            }
             fun splashScreenshot(name: String, captionShown: Boolean) {
+                awaitSplashFrame()
+                scenario.onActivity {
+                    if (it.launchSplash.nativeActive) {
+                        val current = android.graphics.Rect()
+                        assertTrue(nativeCover()!!.iconView!!.getGlobalVisibleRect(current))
+                        assertEquals("The retained platform icon keeps its original bounds", mark, current)
+                    }
+                }
                 val bitmap = instrumentation.uiAutomation.takeScreenshot()!!
                 try {
                     instrumentation.targetContext.getExternalFilesDir(null)!!.resolve(name).outputStream().use {
                         bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
                     }
-                    val state = host.snapshot!!.getJSONObject("state")
-                    val expected = Palette(state.getString("theme") != "light", state.getJSONObject("palette")).surround.toArgb()
                     assertEquals("Splash covers the native canvas before Vulkan exists", expected, bitmap.getPixel(point.x.toInt(), point.y.toInt()))
-                    val center = placeholder.center
-                    val radius = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
-                    val markPixels = (center.y.toInt() - radius until center.y.toInt() + radius).sumOf { y ->
-                        (center.x.toInt() - radius until center.x.toInt() + radius).count { x -> bitmap.getPixel(x, y) != expected }
+                    val markPixels = (mark.top until mark.bottom).sumOf { y ->
+                        (mark.left until mark.right).count { x -> bitmap.getPixel(x, y) != expected }
                     }
-                    assertTrue("The centered capy mark is visible", markPixels > 100)
+                    assertTrue("The capy mark is visible at its launch bounds", markPixels > 100)
                     val density = instrumentation.targetContext.resources.displayMetrics.density
-                    val captionPixels = ((center.y + 64 * density).toInt() until (center.y + 96 * density).toInt()).sumOf { y ->
-                        ((center.x - 120 * density).toInt() until (center.x + 120 * density).toInt()).count { x -> bitmap.getPixel(x, y) != expected }
+                    val top = mark.bottom + (host.bootstrap!!.getDouble("launch_caption_gap") * density).toInt()
+                    val captionPixels = (top until (top + 32 * density).toInt().coerceAtMost(bitmap.height)).sumOf { y ->
+                        (cover.left until cover.right).count { x -> bitmap.getPixel(x, y) != expected }
                     }
                     if (captionShown) assertTrue("The delayed caption is visible", captionPixels > 0)
                     else assertEquals("Only the capy appears before the shared caption delay", 0, captionPixels)
@@ -184,23 +348,62 @@ class AndroidFirstUiTest {
             assertTrue(beforeCaption())
             compose.waitUntil(captionDelay) { !beforeCaption() }
             compose.mainClock.advanceTimeBy(captionDelay)
-            compose.waitUntil(captionDelay) { compose.onAllNodesWithTag("launch-splash-caption").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("launch-splash-caption").assertIsDisplayed()
+            compose.waitUntil(captionDelay) {
+                if (activity.launchSplash.nativeActive) {
+                    var showing = false
+                    scenario.onActivity {
+                        val caption = LaunchSplashWindow::class.java.getDeclaredField("caption").apply { isAccessible = true }
+                            .get(it.launchSplash) as? android.widget.TextView
+                        showing = caption != null && caption.text.isNotEmpty() && caption.alpha > 0f
+                    }
+                    showing
+                } else compose.onAllNodesWithTag("launch-splash-caption").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
             splashScreenshot("startup-splash-without-gpu-$theme.png", true)
             resume.countDown()
             compose.waitUntil(60_000) { host.snapshot?.objectOrNull("launch")?.optBoolean("finished") == true }
-            compose.waitUntil(5_000) { compose.onAllNodesWithTag("launch-splash").fetchSemanticsNodes().isEmpty() }
+            compose.waitUntil(5_000) {
+                !activity.launchSplash.nativeActive && compose.onAllNodesWithTag("launch-splash").fetchSemanticsNodes().isEmpty()
+            }
             compose.runOnIdle {
                 assertTrue(host.snapshot!!.getJSONObject("state").getBoolean("workspace_ready"))
-                assertTrue(host.snapshot!!.getJSONObject("layout").array("groups").length() > 0)
+                val layout = host.snapshot!!.getJSONObject("layout")
+                val phone = layout.objectOrNull("phone")
+                if (phone == null) assertTrue(layout.array("groups").length() > 0)
+                else {
+                    assertTrue(phone.getJSONObject("capy").getDouble("width") > 0)
+                    assertTrue(phone.getJSONObject("capy").getDouble("height") > 0)
+                }
                 assertEquals("builtin:workspace:painter", host.workspaceManager!!.getString("id"))
                 assertEquals("Sketch", host.workspaceManager!!.getString("name"))
+                InstrumentationRegistry.getArguments().getString("size")?.let { size ->
+                    val pixels = size.split("x").map(String::toDouble)
+                    val density = activity.resources.displayMetrics.density
+                    for (axis in 0..1) assertEquals("Phone viewport axis $axis", pixels[axis] / density,
+                        layout.getJSONArray("viewport").getDouble(axis), .01)
+                }
             }
-            compose.onNodeWithContentDescription("Main Menu").assertIsDisplayed().performClick()
+            awaitSplashFrame()
+            val phone = host.snapshot!!.getJSONObject("layout").objectOrNull("phone") != null
+            val menu = if (phone) compose.onNodeWithTag("phone-capy", useUnmergedTree = true)
+                else compose.onNodeWithContentDescription("Main Menu")
+            menu.assertIsDisplayed().performClick()
             host.drain();compose.waitForIdle()
-            compose.onNodeWithText("View", useUnmergedTree = true).performScrollTo().assertIsDisplayed().performClick()
+            val menuItems = hasAnyAncestor(hasTestTag(if (phone) "phone-menu" else "workspace-menu"))
+            val viewItem = hasText("View") and menuItems
+            compose.waitUntil(5_000) { compose.onAllNodes(viewItem, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            val view = compose.onNode(viewItem, useUnmergedTree = true).performScrollTo()
+            compose.waitUntil(5_000) { view.isDisplayed() }
+            view.assertIsDisplayed()
+            view.performClick()
             host.drain();compose.waitForIdle()
-            compose.onNodeWithText("Fit canvas").assertIsDisplayed()
+            val fitItem = hasText("Fit canvas") and menuItems
+            compose.waitUntil(5_000) { compose.onAllNodes(fitItem, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            val fit = compose.onNode(fitItem, useUnmergedTree = true).performScrollTo()
+            compose.waitUntil(5_000) { fit.isDisplayed() }
+            fit.assertIsDisplayed()
             android.util.Log.i("CapyStartupTest", "splash_ui_without_gpu boot_ns=${SystemClock.elapsedRealtimeNanos()}")
             compose.waitUntil(60_000) { host.surfaceReady || host.failure != null }
             compose.runOnIdle { assertNull(host.failure) }
@@ -216,6 +419,7 @@ class AndroidFirstUiTest {
             resume.countDown()
             CanvasHost.beforeGpuAttachForTest = null
             scenario?.close()
+            if (android.os.Build.VERSION.SDK_INT >= 31 && previousNight != null) night?.setApplicationNightMode(previousNight)
         }
     }
 

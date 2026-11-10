@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <sstream>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -36,6 +37,7 @@ using namespace Microsoft::UI::Xaml::Media;
 using Microsoft::UI::Xaml::Automation::AutomationProperties;
 using namespace Microsoft::UI::Windowing;
 using namespace Windows::Foundation;
+static constexpr double LaunchCoverOpacity=254./255.;
 static bool SameRegions(std::vector<Windows::Graphics::RectInt32> const& a,std::vector<Windows::Graphics::RectInt32> const& b){
     return a.size()==b.size()&&std::equal(a.begin(),a.end(),b.begin(),[](auto x,auto y){return x.X==y.X&&x.Y==y.Y&&x.Width==y.Width&&x.Height==y.Height;});
 }
@@ -177,24 +179,36 @@ CanvasWindow::~CanvasWindow() {
 }
 void CanvasWindow::CreateLaunchCover() {
     launchTiming=CanvasLaunchTiming();
+    launchCover.Opacity(LaunchCoverOpacity);
     auto dark=uiSettings.GetColorValue(Windows::UI::ViewManagement::UIColorType::Foreground).R>128;
     launchCover.Background(SolidColorBrush(CapyUi::color(dark?L"#323232":L"#f4f4f4")));
     Canvas::SetZIndex(launchCover,1200);
     AutomationProperties::SetAutomationId(launchCover,L"launch-splash");
-    launchMark=CapyUi::icon(L"zen-looking-up",dark?L"dark":L"light",72);
-    launchMark.HorizontalAlignment(HorizontalAlignment::Center);launchMark.VerticalAlignment(VerticalAlignment::Center);
-    launchCaption.HorizontalAlignment(HorizontalAlignment::Center);launchCaption.VerticalAlignment(VerticalAlignment::Center);
-    launchCaption.Margin({20,144,20,0});launchCaption.Opacity(0);launchCaption.IsHitTestVisible(false);
+    launchMark.HorizontalAlignment(HorizontalAlignment::Left);launchMark.VerticalAlignment(VerticalAlignment::Top);
+    launchCaption.HorizontalAlignment(HorizontalAlignment::Center);launchCaption.VerticalAlignment(VerticalAlignment::Top);
+    launchCaption.TextWrapping(TextWrapping::Wrap);launchCaption.TextAlignment(TextAlignment::Center);
+    launchCaption.Opacity(0);launchCaption.IsHitTestVisible(false);
     AutomationProperties::SetAutomationId(launchCaption,L"launch-caption");
     launchCover.Children().Append(launchMark);launchCover.Children().Append(launchCaption);root.Children().Append(launchCover);
     launchCaptionTimer=dispatcher.CreateTimer();launchCaptionTimer.IsRepeating(false);
     launchCaptionTimer.Tick([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock();self&&self->launchCover.Visibility()==Visibility::Visible){
         if(!self->uiSettings.AnimationsEnabled()){self->launchCaption.Opacity(.45);return;}
-        Animation::DoubleAnimation opacity;opacity.From(0.);opacity.To(.45);opacity.Duration(DurationHelper::FromTimeSpan(CanvasLaunchTiming::FadeDuration));
+        Animation::DoubleAnimation opacity;opacity.From(0.);opacity.To(.45);opacity.Duration(DurationHelper::FromTimeSpan(CanvasLaunchTiming::CaptionFadeDuration));
         Animation::Storyboard::SetTarget(opacity,self->launchCaption);Animation::Storyboard::SetTargetProperty(opacity,L"Opacity");
         self->launchCaptionFade=Animation::Storyboard();self->launchCaptionFade.Children().Append(opacity);self->launchCaptionFade.Begin();
     }});
-    launchCover.Loaded([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){self->launchLoaded=true;self->launchTiming=CanvasLaunchTiming();self->ArmLaunchCaption();}});
+    launchCover.SizeChanged([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->LayoutLaunchCover();});
+    launchCover.Loaded([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){self->launchLoaded=true;self->launchTiming=CanvasLaunchTiming();self->LayoutLaunchCover();self->ArmLaunchCaption();self->QueueLaunchReveal();}});
+}
+void CanvasWindow::LayoutLaunchCover() {
+    auto width=launchCover.ActualWidth(),height=launchCover.ActualHeight();
+    if(width<=0||height<=0)return;
+    CanvasLaunchPlacement placement(width,height,capy_launch_mark_size(float(width),float(height)));
+    auto dark=uiSettings.GetColorValue(Windows::UI::ViewManagement::UIColorType::Foreground).R>128;
+    auto theme=CapyUi::str(CapyUi::object(lastModel,L"state"),L"theme",dark?L"dark":L"light");
+    CapyUi::setIcon(launchMark,L"zen-looking-up",theme,placement.size);
+    launchMark.Margin({placement.left,placement.top,0,0});
+    if(bootstrap.Size())launchCaption.Margin({20,placement.CaptionTop(bootstrap.GetNamedNumber(L"launch_caption_gap")),20,0});
 }
 void CanvasWindow::ArmLaunchCaption() {
     if(!launchLoaded||!bootstrap.Size()||launchCover.Visibility()!=Visibility::Visible)return;
@@ -204,16 +218,51 @@ void CanvasWindow::ArmLaunchCaption() {
     else{launchCaptionTimer.Interval(remaining);launchCaptionTimer.Start();}
 }
 void CanvasWindow::HideLaunchCover(bool animate) {
+    CancelLaunchReveal();
     if(launchCaptionTimer)launchCaptionTimer.Stop();
     if(launchCaptionFade)launchCaptionFade.Stop();
     if(launchCover.Visibility()!=Visibility::Visible)return;
     if(!animate||!uiSettings.AnimationsEnabled()){if(launchFade)launchFade.Stop();launchCover.Visibility(Visibility::Collapsed);return;}
     if(launchFade)return;
     launchCover.IsHitTestVisible(false);
-    Animation::DoubleAnimation opacity;opacity.From(launchCover.Opacity());opacity.To(0.);opacity.Duration(DurationHelper::FromTimeSpan(CanvasLaunchTiming::FadeDuration));
+    auto duration=std::chrono::milliseconds(static_cast<int64_t>(bootstrap.GetNamedNumber(L"launch_reveal_ms")));
+    Animation::DoubleAnimation opacity;opacity.From(launchCover.Opacity());opacity.To(0.);opacity.Duration(DurationHelper::FromTimeSpan(duration));
     Animation::Storyboard::SetTarget(opacity,launchCover);Animation::Storyboard::SetTargetProperty(opacity,L"Opacity");
     launchFade=Animation::Storyboard();launchFade.Children().Append(opacity);
     launchFade.Completed([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->launchCover.Visibility(Visibility::Collapsed);});launchFade.Begin();
+}
+void CanvasWindow::CancelLaunchReveal() {
+    launchFrame.revoke();launchPaint.Cancel();
+}
+void CanvasWindow::QueueLaunchReveal() {
+    auto launch=CapyUi::object(lastModel,L"launch");
+    if(closing||closed||statusFailed||launchFade||!root.IsLoaded()||IsIconic(Handle())||!surfaceState.Attached()||launchCover.Visibility()!=Visibility::Visible
+        ||!CapyUi::flag(launch,L"finished")||CapyUi::flag(launch,L"visible"))return;
+    auto receipt=launchPaint.Request(surfaceHandle,surfaceState.MinimumGeneration());
+    if(!receipt)return;
+    launchFrame.revoke();
+    launchFrame=Microsoft::UI::Xaml::Media::CompositionTarget::Rendered(auto_revoke,
+        [weak=weak_from_this(),receipt](auto&&,auto&&){if(auto self=weak.lock()){
+            if(self->closing||self->closed||!self->launchPaint.Rendered(receipt))return;
+            self->launchFrame.revoke();
+            AwaitLaunchPresent(weak,self->dispatcher,receipt);
+        }});
+}
+winrt::fire_and_forget CanvasWindow::AwaitLaunchPresent(std::weak_ptr<CanvasWindow> owner,
+    Microsoft::UI::Dispatching::DispatcherQueue queue,CanvasLaunchPaint::Receipt receipt) {
+    HRESULT result=E_FAIL;
+    try{co_await winrt::resume_background();result=DwmFlush();}catch(...){}
+    queue.TryEnqueue([owner,receipt,result]{if(auto self=owner.lock();self&&!self->closing&&!self->closed){
+        auto launch=CapyUi::object(self->lastModel,L"launch");
+        if(self->statusFailed||!self->root.IsLoaded()||IsIconic(self->Handle())||!self->surfaceState.Attached()||self->launchCover.Visibility()!=Visibility::Visible
+            ||!CapyUi::flag(launch,L"finished")||CapyUi::flag(launch,L"visible")){self->CancelLaunchReveal();return;}
+        if(!self->launchPaint.Presented(receipt,self->surfaceHandle,self->surfaceState.MinimumGeneration()))return;
+        if(FAILED(result)){
+            std::ostringstream cause;cause<<"0x"<<std::hex<<uint32_t(result)<<": "<<to_string(hresult_error(result).message());
+            self->statusFailed=true;self->Fail(to_string(CapyUi::str(self->bootstrap,L"canvas_init_failed"))+"\n\n"+cause.str());return;
+        }
+        self->HideLaunchCover(true);
+    }});
 }
 void CanvasWindow::ApplyLaunchCover(Windows::Data::Json::JsonObject const& model) {
     using namespace CapyUi;
@@ -221,16 +270,19 @@ void CanvasWindow::ApplyLaunchCover(Windows::Data::Json::JsonObject const& model
     if(flag(launch,L"finished")&&launchCover.Visibility()==Visibility::Collapsed)return;
     auto theme=str(state,L"theme",L"dark");launchCover.RequestedTheme(theme==L"dark"?ElementTheme::Dark:ElementTheme::Light);
     launchCover.Background(SolidColorBrush(color(str(palette,L"bg",theme==L"dark"?L"#323232":L"#f4f4f4"))));
-    setIcon(launchMark,L"zen-looking-up",theme,72);launchCaption.Foreground(SolidColorBrush(color(str(palette,L"text",L"#fafafb"))));
+    LayoutLaunchCover();launchCaption.Foreground(SolidColorBrush(color(str(palette,L"text",L"#fafafb"))));
     launchCaption.Text(str(bootstrap,(L"preparing_"+str(launch,L"notice",L"canvas")).c_str()));
     AutomationProperties::SetName(launchCover,launchCaption.Text());
     if(statusFailed||!str(model,L"error").empty()||!str(state,L"host_error").empty()){HideLaunchCover(false);return;}
     if(!launch.Size())return;
-    if(!flag(launch,L"visible")){HideLaunchCover(flag(launch,L"finished"));return;}
+    if(!flag(launch,L"visible")){if(!flag(launch,L"finished"))HideLaunchCover(false);return;}
+    CancelLaunchReveal();
+    if(launchFade){launchFade.Stop();launchFade=nullptr;}
     if(launchCover.Visibility()!=Visibility::Visible){
-        launchCover.Visibility(Visibility::Visible);launchCover.Opacity(1);launchCover.IsHitTestVisible(true);
+        launchCover.Visibility(Visibility::Visible);launchCover.IsHitTestVisible(true);
         ArmLaunchCaption();
     }
+    launchCover.Opacity(LaunchCoverOpacity);
 }
 void CanvasWindow::Open() {
     try {
@@ -380,7 +432,8 @@ void CanvasWindow::Open() {
                         self->Send(R"({"type":"blur"})",CanvasCommandKind::Input);
                     }
                 }});
-            }else{self->Resize();self->Send(R"({"operation":"input","input":{"type":"focus"}})",CanvasCommandKind::Workspace);}
+            }else{self->Resize();self->Send(R"({"operation":"input","input":{"type":"focus"}})",CanvasCommandKind::Workspace);
+                self->dispatcher.TryEnqueue([weak]{if(auto self=weak.lock())self->QueueLaunchReveal();});}
         }
     });
     window.AppWindow().Closing([weak=weak_from_this()](auto&&,AppWindowClosingEventArgs const& e) {
@@ -554,6 +607,7 @@ bool CanvasWindow::StartPrepared(CapyLaunch  prepared) {
     Automation::AutomationProperties::SetHelpText(canvasFocus,CapyUi::str(bootstrap,L"drawing_canvas_help"));
     Automation::AutomationProperties::SetName(root,CapyUi::str(bootstrap,L"drawing_workspace"));
     launchCaption.Text(CapyUi::str(bootstrap,L"preparing_canvas"));
+    LayoutLaunchCover();
     ArmLaunchCaption();
     Resize();
     host=capy_create(desired.width,desired.height,desired.scale,prepared);
@@ -1488,6 +1542,7 @@ void CanvasWindow::SaveAfterGpuFailure(std::string const& reason) {
     }
 }
 void CanvasWindow::ResetSurface() {
+    CancelLaunchReveal();
     {std::lock_guard lock(mutex);if(closing)return;}
     auto native=panel.as<ISwapChainPanelNative>();
     root.Background(SolidColorBrush(CapyUi::color(CapyUi::str(CapyUi::object(CapyUi::object(lastModel,L"state"),L"palette"),L"bg",L"#323232"))));
@@ -1527,6 +1582,7 @@ void CanvasWindow::Stop() {
     {std::lock_guard lock(mutex);if(closing)return;}
     if(settings)settings->CommitEdits();
     {std::lock_guard lock(mutex);closing=true;}
+    CancelLaunchReveal();
     {std::lock_guard lock(snapshots->mutex);snapshots->Close();}
     CancelCanvasTouch(xamlCanvasTouch);xamlCanvasTouch.recognizer=nullptr;xamlCanvasTouch.contacts.clear();xamlContacts.clear();
     CapyLifecycle("close_authorized");
@@ -1575,6 +1631,7 @@ void CanvasWindow::Finish() {
     });
 }
 void CanvasWindow::CloseViews() {
+    CancelLaunchReveal();
     if(renderer.joinable())renderer.join();
     // XAML controls and their retained bindings must be released while this
     // window still owns a live XAML context, not later from App destruction.
@@ -1880,6 +1937,9 @@ void CanvasWindow::RefreshWorkspaceSwitcher() {
 }
 bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,NativeLayoutInput input,uint32_t sections) {
     using namespace CapyUi;
+    auto launch=object(model,L"launch");
+    if((launch.Size()&&(!flag(launch,L"finished")||flag(launch,L"visible")))
+        ||!str(model,L"error").empty()||!str(object(model,L"state"),L"host_error").empty())CancelLaunchReveal();
     auto presentation=object(model,L"localization");
     if(presentation.Size()){
         bootstrap=object(presentation,L"bootstrap");auto tag=to_string(str(bootstrap,L"active_tag"));
@@ -1971,6 +2031,7 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
                 if(auto control=target.get();control&&control.IsLoaded())control.Focus(FocusState::Programmatic);
         });
     if(workspaceReady&&!discoveryReady){if(CapyUi::WindowDiscoveryEnabled())CapyUi::ReadyRegisteredWindow(nativeWindow,true);discoveryReady=true;}
+    QueueLaunchReveal();
     return true;
 }
 

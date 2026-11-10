@@ -2,6 +2,14 @@
 use super::*;
 use serde_json::{Value, json};
 
+#[test]
+fn apple_launch_mark_geometry_is_available_before_a_native_owner() {
+    for (window, expected) in [([1300., 900.], 252.), ([390., 844.], 156.),
+        ([844., 390.], 156.), ([180., 120.], 48.), ([0., 0.], 0.)] {
+        assert_eq!(capy_apple_launch_mark_size(window[0], window[1]), expected);
+    }
+}
+
 fn photo_limits() -> layer_color::photo::DecodeLimits {
     layer_color::photo::DecodeLimits::from_memory_budget(layer_color::photo::PhotoMemoryBudget::from_limit(layer_core::MemoryBudget::process().import_headroom_bytes()))
 }
@@ -2058,6 +2066,10 @@ fn apple_launch_resolves_saved_preference_before_native_session() {
         let localization = app.borrow().host.session.localization().clone();
         assert_eq!(localization.language(), layer_ui::UiLanguage::English);
         let bootstrap = app.request(2, json!({"type": "bootstrap"})).unwrap();
+        assert_eq!(bootstrap["launch_reveal_ms"], layer_ui::LAUNCH_REVEAL_MS);
+        assert_eq!(bootstrap["launch_mark_size"], layer_ui::LAUNCH_MARK_SIZE);
+        assert_eq!(bootstrap["launch_mark_max_fraction"], json!(layer_ui::LAUNCH_MARK_MAX_FRACTION));
+        assert_eq!(bootstrap["launch_caption_gap"], layer_ui::LAUNCH_CAPTION_GAP);
         assert_eq!(bootstrap["active_tag"], "en");
         assert_eq!(bootstrap["shipped_tags"], json!(layer_ui::localization::SHIPPED_LANGUAGES.iter().map(|language| language.tag()).collect::<Vec<_>>()));
         assert_eq!(bootstrap["preparing_canvas"], localization.text(layer_ui::MessageId::COMMON_PREPARING_CANVAS).as_ref());

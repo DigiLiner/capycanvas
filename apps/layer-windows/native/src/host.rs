@@ -648,6 +648,10 @@ pub unsafe extern "C" fn capy_launch(tags: *const c_char, screen: *const c_char)
         Err(_) => { fail("Windows launch panic"); 0 },
     }
 }
+#[unsafe(no_mangle)]
+pub extern "C" fn capy_launch_mark_size(width:f32,height:f32)->f32 {
+    layer_ui::launch_mark_size([width,height])
+}
 /// # Safety
 /// The launch remains alive and exclusively owned until this call returns.
 #[unsafe(no_mangle)]

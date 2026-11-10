@@ -83,7 +83,7 @@ struct EditorView<Canvas: View>: View {
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .animation(.easeOut(duration: 0.18), value: store.snapshot["launch"]["finished"].bool)
+        .animation(.easeOut(duration: store.bootstrap["launch_reveal_ms"].number / 1000), value: store.snapshot["launch"]["finished"].bool)
         .modifier(EditorPopoverHost())
         .coordinateSpace(name: "editor-workspace")
         .onKeyPress(keys: [.escape], phases: [.down, .repeat]) { [store] press in
@@ -203,12 +203,19 @@ private struct LaunchCover: View {
     private var captionDelay: UInt64 { store.bootstrap["launch_caption_delay_ms"].uint }
     private var notice: String { store.snapshot["launch"]["notice"].string == "brush" ? "brush" : "canvas" }
     var body: some View {
-        ZStack {
-            SharedIcon(name: "layer-zen-looking-up-symbolic", size: 96)
-            Text(store.bootstrap["preparing_\(notice)"].string)
-                .font(.callout).opacity(captionVisible ? 0.55 : 0)
-                .accessibilityHidden(!captionVisible)
-                .multilineTextAlignment(.center).padding(.horizontal, 24).offset(y: 76)
+        GeometryReader { geometry in
+            let size = CGFloat(capy_apple_launch_mark_size(Float(geometry.size.width), Float(geometry.size.height)))
+            ZStack(alignment: .topLeading) {
+                SharedIcon(name: "layer-zen-looking-up-symbolic", size: size)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                Text(store.bootstrap["preparing_\(notice)"].string)
+                    .font(.callout).opacity(captionVisible ? 0.55 : 0)
+                    .accessibilityHidden(!captionVisible)
+                    .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    .frame(width: geometry.size.width).fixedSize(horizontal: false, vertical: true)
+                    .offset(y: (geometry.size.height + size) / 2 + CGFloat(store.bootstrap["launch_caption_gap"].number))
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .foregroundStyle(store.state.isNull ? Color.primary : palette["text"])
         .frame(maxWidth: .infinity, maxHeight: .infinity)

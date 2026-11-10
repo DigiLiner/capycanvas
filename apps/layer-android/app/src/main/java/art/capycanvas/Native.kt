@@ -4,6 +4,7 @@ import android.view.Surface
 
 /** Only CanvasHost's render Looper can access a native session handle. */
 internal object Native {
+    @JvmStatic external fun launchMarkSize(width: Float, height: Float): Float
     @JvmStatic external fun workspaceNameError(name: String, language: String): String
     @JvmStatic external fun profileMatches(entries: String, query: String, language: String): String
     @JvmStatic external fun nativeCaption(request: String, language: String = ""): String
