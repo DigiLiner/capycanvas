@@ -775,7 +775,7 @@ extension XCTestCase {
         workspaceActivate(snap); XCTAssertTrue(snap.isSelected)
         for kind in ["Straight", "Parallel", "Radial"] {
             let choice = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
-                "tool-group-", kind)).firstMatch
+                "tool-subtool-", kind)).firstMatch
             workspaceActivate(choice)
             expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: choice)
             waitForExpectations(timeout: 5)

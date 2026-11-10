@@ -133,7 +133,7 @@ extension XCTestCase {
         app.launch(); capturePaintEditor(in: app)
         editorTool("Hand", in: app)
         let hand = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
-            "tool-group-", "Hand")).firstMatch
+            "tool-subtool-", "Hand")).firstMatch
         expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: hand)
         waitForExpectations(timeout: 5)
         let viewport = workspaceViewport(in: app)
