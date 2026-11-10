@@ -276,7 +276,7 @@ extension XCTestCase {
     }
 
     @MainActor func checkTitleBarSystemStatus(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"customize_workspace_ui"}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:illustrator"}},{"type":"invoke","command":"customize_workspace_ui"}]"#
         app.launch()
         func activate(_ element: XCUIElement) {
             XCTAssertTrue(element.waitForExistence(timeout: 15))
@@ -323,7 +323,7 @@ extension XCTestCase {
 
 extension XCTestCase {
     @MainActor func checkTitleBarCustomization(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"customize_workspace_ui"}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:illustrator"}},{"type":"invoke","command":"customize_workspace_ui"}]"#
         app.launch()
         func item(_ label: String) -> XCUIElement {
             app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "header-item-", label)).firstMatch

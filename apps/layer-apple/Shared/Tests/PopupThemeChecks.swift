@@ -7,7 +7,7 @@ extension XCTestCase {
         #endif
         let app = editorCaptureApplication()
         app.launchEnvironment["CAPY_PERSISTENCE_PROBE"] = "1"
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":null}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":null},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:illustrator"}}]"#
         app.launch()
         let status = app.staticTexts["persistence-status"]
         XCTAssertTrue(status.waitForExistence(timeout: 30))
