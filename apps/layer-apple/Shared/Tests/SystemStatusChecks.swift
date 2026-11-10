@@ -386,7 +386,7 @@ extension XCTestCase {
         XCTAssertTrue(app.buttons["header-done"].exists, "Dismissing the picker returns to title-bar editing")
         workspaceActivate(app.buttons["header-cancel"])
         #if os(iOS)
-        workspaceActivate(app.buttons.matching(NSPredicate(format: "label == %@", "Main Menu")).firstMatch)
+        workspaceActivate(app.buttons["application-menus"])
         let menu = app.descendants(matching: .any)["application-menu-content"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         workspaceActivate(menu.buttons["File"])
