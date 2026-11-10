@@ -240,7 +240,7 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
     hstring shown,pending;
     std::optional<J> renaming,importing;
     uint64_t listener=0;
-    bool chosen=false,accepting=false,finished=false,focusPending=false;
+    bool chosen=false,accepting=false,finished=false,focusPending=false,opened=false;
     XamlRoot::Changed_revoker resized;
 
     void init(XamlRoot const& xaml){
@@ -262,8 +262,9 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
         root.Height(TextureDialogHeight);
         root.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&e.Key()==Windows::System::VirtualKey::Enter){e.Handled(true);self->close(true);}});
         resized=xaml.Changed(auto_revoke,[weak](auto&&,auto&&){if(auto self=weak.lock())fitPicker(self->root);});
-        dialog.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){fitPicker(self->root);self->focusPending=true;self->focus();}});
+        dialog.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){fitPicker(self->root);self->opened=true;self->focusPending=true;self->focus();}});
         dialog.Closed([weak](auto&&,auto&&){if(auto self=weak.lock()){
+            self->opened=false;if(self->data->colorsPresented)self->data->colorsPresented();
             self->data->popup(false);
             if(auto action=std::exchange(self->renaming,std::nullopt))self->rename(*action);else self->finish();
         }});
@@ -293,7 +294,7 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
         tiles->mark(pending);focus();
     }
     void focus(){
-        if(focusPending&&tiles->focus(pending))focusPending=false;
+        if(focusPending&&tiles->focus(pending)){focusPending=false;if(opened&&data->colorsPresented)data->colorsPresented();}
     }
     void act(J action){
         if(finished||!current())return;
@@ -320,7 +321,7 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
     }
     void present(){
         if(finished)return;
-        data->popup(true);focusPending=true;
+        opened=false;data->popup(true);focusPending=true;
         try{dialog.ShowAsync();}catch(hresult_error const&){data->popup(false);finish();}
     }
     void close(bool accept){accepting=accept;dialog.Hide();}
@@ -350,7 +351,7 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
 
 J TextureDialogState(std::shared_ptr<WorkspaceData> const& owner){
     for(auto const& picker:openDialogs())if(picker->data==owner)return O({
-        {L"id",S(to_hstring(reinterpret_cast<uintptr_t>(get_abi(picker->dialog))))},{L"epoch",N(picker->epoch)},{L"layer",N(picker->layer)}});
+        {L"id",S(to_hstring(reinterpret_cast<uintptr_t>(get_abi(picker->dialog))))},{L"epoch",N(picker->epoch)},{L"layer",N(picker->layer)},{L"ready",B(picker->opened&&!picker->focusPending)}});
     return {};
 }
 

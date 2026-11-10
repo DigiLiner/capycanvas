@@ -816,6 +816,7 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         auto invoke=[](FrameworkElement const& element){auto peer=Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(element);
             peer.GetPattern(Automation::Peers::PatternInterface::Invoke).as<Automation::Provider::IInvokeProvider>().Invoke();};
         ChooseTexture(source,anchor,1);
+        co_await wait([source]{return flag(TextureDialogState(source),L"ready");},L"Paper native chooser did not acknowledge Opened and initial focus");
         co_await wait([this]{auto tile=workspaceElement(L"texture-tile-0").try_as<Button>();return tile&&tile.IsLoaded()&&tile.ActualWidth()>0;},L"Paper fixture tile did not arrange");
         auto tile=workspaceElement(L"texture-tile-0").as<Button>();auto menu=tile.ContextFlyout().as<MenuFlyout>();auto command=menu.Items().GetAt(0).as<MenuFlyoutItem>();
         auto opened=std::make_shared<bool>(false);menu.Opened([opened](auto&&,auto&&){*opened=true;});menu.ShowAt(tile);
