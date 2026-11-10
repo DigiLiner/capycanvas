@@ -9,8 +9,9 @@ substitutes for another: injected input does not exercise the OS pen driver, a
 software adapter or small desktop fixture does not qualify hardware rendering or
 a tier's performance, and window-free tests do not establish host coverage.
 
-Ordinary CI runs the window-free shared suites, the Wasm check, the Apple project
-check and the license check. The release workflow adds platform builds,
+Ordinary CI runs only when dispatched (`gh workflow run ci.yml --ref <branch>`).
+It runs the window-free shared suites, the Wasm check, the Apple project check
+and the license check. The release workflow adds platform builds,
 packaging, script suites and software-adapter tests
 ([release validation](releasing.md#release-validation)). Neither replaces the
 hardware checks and journeys for your change.
@@ -185,10 +186,10 @@ reserved tablet; there is no Android compatibility job in GitHub Actions.
 `layer-core`, `layer-ui` and `layer-host` opens released inputs through the real
 store, import and recovery readers and compares reviewed authored values and
 resource/preview digests, including save/reopen and session history.
-Push CI enables the native workspace cases and runs the paper compatibility
-tests separately without a GPU. It also runs the released-input guard over the
-pushed commit range, or the range since `origin/main` for a new branch, with full
-history so intermediate input edits cannot hide behind a later restore.
+CI enables the native workspace cases and runs the paper compatibility tests
+separately without a GPU. The pre-push hook runs the released-input guard over
+every pushed range, and CI runs it over the commits since `origin/main`, both
+with full history so intermediate input edits cannot hide behind a later restore.
 
 `generated_compat_fixtures_load_without_expectations` runs the workspace fixture
 generator in private temporary storage and reads every generated input through

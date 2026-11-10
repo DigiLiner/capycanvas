@@ -77,6 +77,7 @@ Set these variables to that version and commit, not a later moving `main`:
 CAPY_RELEASE_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)
 CAPY_RELEASE_TAG="v$CAPY_RELEASE_VERSION"
 CAPY_RELEASE_COMMIT=$(git rev-parse HEAD)
+gh workflow run ci.yml --repo capyatelier/capycanvas --ref main
 gh run list --repo capyatelier/capycanvas --workflow ci.yml \
   --commit "$CAPY_RELEASE_COMMIT" --json databaseId,status,conclusion,url
 ```
@@ -419,12 +420,16 @@ its own numbers from it at build time:
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and pull request: the window-free
-shared Rust suites, including the localization catalogs, the Wasm consumer check,
-a check that the generated Xcode project matches `project.py`, the Git hook tests
-and `cargo deny`. Expensive platform builds and the Arch development/runtime
-check run in the release workflow rather than on every push. The same ordinary
-CI workflow is also called by release validation.
+Workflows run only on demand: push a version tag to release, or dispatch a
+workflow with `gh workflow run <file> --ref <branch>`. Commits and pull requests
+start nothing.
+
+`.github/workflows/ci.yml` runs the window-free shared Rust suites, including the
+localization catalogs, the Wasm consumer check, a check that the generated Xcode
+project matches `project.py`, the Git hook tests and `cargo deny`. Expensive
+platform builds and the Arch development/runtime check run in the release
+workflow instead. Release validation calls the same CI workflow, and
+`codeql.yml` runs code scanning when dispatched.
 
 ### Release validation
 
