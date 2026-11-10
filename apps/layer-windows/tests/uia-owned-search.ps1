@@ -2858,3 +2858,102 @@ namespace CapyNumericHoverTest {
  }
  'Actual Paper open/close consumer requires Apply absence and fresh owned native registry removal.'
 }
+& {
+ Add-Type -TypeDefinition @'
+using System;using System.Collections.Generic;
+namespace CapyEditorRegrowTest {
+ public class Rect {
+  public double X,Y,Width,Height;public double Left{get{return X;}}public double Top{get{return Y;}}public double Right{get{return X+Width;}}public double Bottom{get{return Y+Height;}}
+  public Rect(double x,double y,double width,double height){X=x;Y=y;Width=width;Height=height;}
+  public bool Contains(Rect other){return other.Left>=Left&&other.Top>=Top&&other.Right<=Right&&other.Bottom<=Bottom;}
+ }
+ public enum WindowVisualState {Normal,Maximized}
+ public static class WindowPattern {public static object Pattern="window";}
+ public static class TransformPattern {public static object Pattern="transform";}
+ public static class State {
+  public static int Dpi,MaxTrackHeight,MaxTrackWidth,Moves,ResizeCount;public static bool PerMonitor;
+  public static double FullSide=232,ShortSide=190;public static bool ReplaceWheel;
+  public static Rect Work,Bounds;public static WindowVisualState VisualState;
+  public static List<Rect> Requests=new List<Rect>(),Arranged=new List<Rect>();
+  public static void Reset(int dpi,Rect work,int maxHeight){Dpi=dpi;Work=work;MaxTrackHeight=maxHeight;MaxTrackWidth=(int)work.Width;Bounds=new Rect(work.Left+120,work.Top+180,1000,700);Moves=ResizeCount=0;PerMonitor=false;FullSide=232;ShortSide=190;ReplaceWheel=false;VisualState=WindowVisualState.Maximized;Requests.Clear();Arranged.Clear();}
+  public static void Resize(int width,int height){
+   Requests.Add(new Rect(Bounds.X,Bounds.Y,width,height));ResizeCount++;
+   Bounds=new Rect(Bounds.X,Bounds.Y,Math.Min(width,MaxTrackWidth),Math.Min(height,MaxTrackHeight));
+   if(Bounds.Width!=width||Bounds.Height!=height)throw new InvalidOperationException("Owned resize did not acknowledge requested "+width+"x"+height+"; Win32 maximum tracking size produced "+Bounds.Width+"x"+Bounds.Height);
+  }
+ }
+ public static class Driver {
+  public static int GetDpiForWindow(IntPtr window){return State.Dpi;}
+  public static IntPtr SetThreadDpiAwarenessContext(IntPtr value){State.PerMonitor=value==new IntPtr(-4);return IntPtr.Zero;}
+ }
+ public class Screen {
+  public Rect WorkingArea{get{return State.Work;}}
+  public static Screen FromHandle(IntPtr handle){if(!State.PerMonitor)throw new InvalidOperationException("Work area queried before PMv2 awareness");return new Screen();}
+ }
+ public class Window {
+  public Window Current{get{return this;}}public WindowVisualState WindowVisualState{get{return State.VisualState;}}public Rect BoundingRectangle{get{return State.Bounds;}}
+  public object GetCurrentPattern(object pattern){if(Object.Equals(pattern,WindowPattern.Pattern))return this;if(Object.Equals(pattern,TransformPattern.Pattern))return new Transform();throw new InvalidOperationException("Unexpected native window pattern");}
+  public void SetWindowVisualState(WindowVisualState value){State.VisualState=value;}
+ }
+ public class Transform {
+  public Transform Current{get{return this;}}public bool CanMove{get{return true;}}
+  public void Move(double x,double y){State.Moves++;State.Bounds=new Rect(x,y,State.Bounds.Width,State.Bounds.Height);}
+ }
+ public class Wheel {
+  public Wheel Current{get{return this;}}
+  public Rect BoundingRectangle{get{double scale=State.Dpi/96.0,side=State.Bounds.Height/scale<500?State.ShortSide:State.FullSide;return new Rect(State.Bounds.Left+20*scale,State.Bounds.Top+100*scale,side*scale,side*scale);}}
+  public int[] GetRuntimeId(){return new int[]{7,State.ReplaceWheel&&State.ResizeCount>1?102:101};}
+ }
+}
+'@
+ $tokens=$null;$errors=$null
+ $source=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/exercise-color-editor.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw($errors|Out-String)}
+ $actual=$source.Find({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-ceq'Check-EditorRegrow'},$true)
+ if(!$actual){throw 'Missing actual Edit Color regrow journey'}
+ $definition=$actual.Extent.Text.Replace('[System.Windows.Automation.','[CapyEditorRegrowTest.').Replace('[System.Windows.Forms.Screen]','[CapyEditorRegrowTest.Screen]').Replace('[Windows.Forms.Screen]','[CapyEditorRegrowTest.Screen]').Replace('[CapyRowPointer]','[CapyEditorRegrowTest.Driver]')
+ . ([scriptblock]::Create($definition))
+ $root=[CapyEditorRegrowTest.Window]::new();$review=[pscustomobject]@{Id=17};$drawingWindow=[IntPtr]17;$editorFrame='owned-editor';$run='regrow-test';$Theme='dark'
+ function Join-Path([string]$Path,[string]$ChildPath){if($ChildPath-ceq'exercise-window.ps1'){'Invoke-RegrowResize'}else{Microsoft.PowerShell.Management\Join-Path $Path $ChildPath}}
+ function Invoke-RegrowResize([int]$ProcessId,[long]$WindowHandle,[string]$Action,[int]$Width,[int]$Height){
+  if($ProcessId-ne17-or$WindowHandle-ne17-or$Action-cne'Resize'){throw 'Regrow changed its owned resize route'}
+  [CapyEditorRegrowTest.State]::Resize($Width,$Height)
+ }
+ function Open-Editor{$script:regrowOpens++}
+ function Control($Id,$Within,[switch]$Arranged){
+  if($Id-cne'edit-color-wheel'-or$Within-cne'owned-editor'){throw 'Regrow read outside its owned wheel'}
+  $wheel=[CapyEditorRegrowTest.Wheel]::new()
+  if($Arranged){
+   $bounds=$wheel.Current.BoundingRectangle
+   if(![CapyEditorRegrowTest.State]::Work.Contains([CapyEditorRegrowTest.State]::Bounds)-or![CapyEditorRegrowTest.State]::Work.Contains($bounds)){throw 'The regrow window or wheel lies outside its monitor work area'}
+   [CapyEditorRegrowTest.State]::Arranged.Add($bounds)
+  }
+  $wheel
+ }
+ function Wait-Until([scriptblock]$Condition,[string]$Message){if(!(&$Condition)){throw $Message}}
+ function Set-Content {
+  param([Parameter(Position=0)][string]$Path,[Parameter(ValueFromPipeline)]$Value)
+  process{if($Path-notlike'*wheel-regrow-sdr-dark.json'){throw 'Regrow wrote an unexpected receipt'};$script:regrowReceipt=$Value|ConvertFrom-Json}
+ }
+ function Capture([string]$Name,[switch]$WithModel){if(!$WithModel){throw 'Regrow dropped its model evidence'};$script:regrowCaptures.Add($Name)}
+ function Invoke($Id){if($Id-cne'edit-color-cancel'){throw 'Regrow changed its close action'};$script:regrowCancels++}
+ function Closed-Editor($Message){if($script:regrowCancels-ne1){throw $Message}}
+ foreach($profile in @(@{dpi=144;work=[CapyEditorRegrowTest.Rect]::new(-1920,96,1920,1008);max=1106},@{dpi=96;work=[CapyEditorRegrowTest.Rect]::new(64,80,1600,1000);max=1106})){
+  foreach($case in 'ready','full-small','full-large','short-small','short-large','replaced'){
+   [CapyEditorRegrowTest.State]::Reset($profile.dpi,$profile.work,$profile.max)
+   switch($case){'full-small'{[CapyEditorRegrowTest.State]::FullSide=230.9}'full-large'{[CapyEditorRegrowTest.State]::FullSide=233.1}'short-small'{[CapyEditorRegrowTest.State]::ShortSide=158.9}'short-large'{[CapyEditorRegrowTest.State]::ShortSide=231}'replaced'{[CapyEditorRegrowTest.State]::ReplaceWheel=$true}}
+   $script:regrowOpens=0;$script:regrowCancels=0;$script:regrowReceipt=$null;$script:regrowCaptures=[Collections.Generic.List[string]]::new()
+   $failure=$null;try{Check-EditorRegrow 'sdr'}catch{$failure=$_}
+   if($case-eq'ready'){
+    if($failure){throw $failure}
+    if([CapyEditorRegrowTest.State]::ResizeCount-ne5-or[CapyEditorRegrowTest.State]::Arranged.Count-ne4-or[CapyEditorRegrowTest.State]::Moves-lt1-or$script:regrowOpens-ne1-or$script:regrowCancels-ne1-or[CapyEditorRegrowTest.State]::VisualState-ne[CapyEditorRegrowTest.WindowVisualState]::Maximized){throw 'Actual regrow omitted an owned stage, movement, close or window restore'}
+    if(($script:regrowReceipt.stage.name-join',')-cne'tall,short,regrown,wider'-or($script:regrowCaptures-join',')-cne'wheel-sdr-tall-dark,wheel-sdr-short-dark,wheel-sdr-regrown-dark,wheel-sdr-wider-dark'){throw 'Actual regrow dropped its retained stage receipts or captures'}
+    foreach($request in [CapyEditorRegrowTest.State]::Requests){if($request.Width-gt$profile.work.Width-or$request.Height-gt$profile.work.Height){throw 'Regrow requested a physical size beyond the monitor work area'}}
+   }else{
+    $expected=if($case-eq'replaced'){'Edit Color resize rebuilt its wheel control'}else{'Edit Color wheel did not shrink and regain its full available size'}
+    if(!$failure-or$failure.Exception.Message-cne$expected){throw "Actual regrow lost its wheel size/identity oracle: $case, $failure"}
+   }
+  }
+ }
+ 'Actual Edit Color regrow:144dpi workarea-fit and96dpi offset monitor pass;232 full/159..231 short and retained native wheel reject invalid output.'
+}

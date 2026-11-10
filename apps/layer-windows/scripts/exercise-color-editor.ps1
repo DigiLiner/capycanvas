@@ -5,6 +5,7 @@ $layoutOnly=$Theme.StartsWith('layout-');if($layoutOnly){$Theme=$Theme.Substring
 $CapyFind='visible'
 $CapyCaptureDelay=250
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+Add-Type -AssemblyName System.Windows.Forms
 if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)}
 $CapyEach={if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)};[CapyRowPointer]::Verify()}
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -126,13 +127,16 @@ function Numeric-Input([string]$Device,[ValidateSet('cancel','outside','modifier
 function Check-EditorRegrow([string]$Kind){
     $window=$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
     $window.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal)
+    $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    $work=[System.Windows.Forms.Screen]::FromHandle($drawingWindow).WorkingArea
+    $root.GetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern).Move($work.Left,$work.Top)
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int](1000*$scale)) -Height ([int](900*$scale))
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int][Math]::Min(1000*$scale,$work.Width)) -Height ([int][Math]::Min(900*$scale,$work.Height))
     Open-Editor
     $retained=(Control 'edit-color-wheel' -Within $editorFrame).GetRuntimeId() -join ':'
     $receipts=[Collections.Generic.List[object]]::new()
     foreach($stage in @(@{name='tall';width=1000;height=900},@{name='short';width=1000;height=360},@{name='regrown';width=1000;height=900},@{name='wider';width=1180;height=900})){
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int]($stage.width*$scale)) -Height ([int]($stage.height*$scale))
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int][Math]::Min($stage.width*$scale,$work.Width)) -Height ([int][Math]::Min($stage.height*$scale,$work.Height))
         $arranged=@{box=$null}
         Wait-Until {
             $arranged.box=(Control 'edit-color-wheel' -Within $editorFrame -Arranged).Current.BoundingRectangle
