@@ -60,6 +60,9 @@ impl PaintTransforms {
     pub fn placement_pipelines(&self) -> [Deferred<wgpu::ComputePipeline>; 2] {
         [self.placement_pipeline(false, &Default::default()), self.placement_pipeline(true, &Default::default())]
     }
+    pub fn linear_affine_placement_pipeline(&self) -> Deferred<wgpu::ComputePipeline> {
+        self.0[0].color.linear_affine_placement_pipeline()
+    }
     pub fn placement_pipeline(&self, scalar: bool, transform: &layer_core::ImageTransform) -> Deferred<wgpu::ComputePipeline> {
         let state = &self.0[0];
         let pass = if scalar { &state.scalar } else { &state.color };

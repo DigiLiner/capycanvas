@@ -101,6 +101,9 @@ enum Mapping { Copy, Affine, Projective, Mesh }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Key { mapping: Mapping, filter: u8, area: bool }
 impl Key {
+    fn linear_affine() -> Self {
+        Self { mapping: Mapping::Affine, filter: Interpolation::Linear as u8, area: false }
+    }
     fn new(transform: &ImageTransform, taps: u32) -> Self {
         if transform.is_identity() { return Self { mapping: Mapping::Copy, filter: 0, area: false }; }
         Self {
@@ -228,7 +231,10 @@ impl PixelTransform {
         self.kernels.render(Key::new(transform, taps))
     }
     pub(super) fn linear_affine_pipeline(&self) -> Deferred<wgpu::RenderPipeline> {
-        self.kernels.render(Key {mapping: Mapping::Affine, filter: Interpolation::Linear as u8, area: false})
+        self.kernels.render(Key::linear_affine())
+    }
+    pub(super) fn linear_affine_placement_pipeline(&self) -> Deferred<wgpu::ComputePipeline> {
+        self.kernels.compute(Key::linear_affine(), false)
     }
     #[cfg(test)]
     pub(super) fn bound_pipeline(&self) -> (String, Deferred<wgpu::RenderPipeline>) {

@@ -185,8 +185,10 @@ impl Needs {
         }
     }
     pub(super) fn transform(&mut self, r: &WgpuRasterizer) {
-        self.render.extend(r.transforms.as_ref().unwrap().pipelines());
-        self.compute.extend(r.transforms.as_ref().unwrap().display_pipelines());
+        let transforms = r.transforms.as_ref().unwrap();
+        self.render.extend(transforms.pipelines());
+        self.compute.extend(transforms.display_pipelines());
+        self.compute.push(transforms.linear_affine_placement_pipeline());
         self.render.extend([4, 5].map(|i| r.scene_pipelines.resample.mesh[i].clone()));
         self.compute.extend(r.selection_clip.pipelines().into_iter().cloned());
     }
