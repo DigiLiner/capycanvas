@@ -885,7 +885,7 @@ def claim(machine):
 
 def sync_machine(machine):
     require_running(machine)
-    listing = run("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",
+    listing = run("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--exclude=target",
                   cwd=ROOT, capture_output=True).stdout
     hashes = {}
     for name in listing.decode().split("\0"):

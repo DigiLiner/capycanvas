@@ -19,6 +19,49 @@ vm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vm)
 
 
+class SyncTests(unittest.TestCase):
+    def test_sync_excludes_untracked_target_links_and_preserves_source(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, destination, state = (root / name for name in ("source", "destination", "state"))
+            for path in (source, destination, state):
+                path.mkdir()
+            subprocess.run(["git", "init", "--quiet", str(source)], check=True)
+            (source / ".gitignore").write_text("target/\n")
+            (source / "tracked.rs").write_text("tracked source")
+            tracked_target = source / "vendor/tracked/target/keep.rs"
+            tracked_target.parent.mkdir(parents=True)
+            tracked_target.write_text("tracked target source")
+            subprocess.run(["git", "add", "-f", ".gitignore", "tracked.rs", "vendor/tracked/target/keep.rs"],
+                           cwd=source, check=True)
+            untracked = source / "vendor/source/new.rs"
+            untracked.parent.mkdir(parents=True)
+            untracked.write_text("untracked source")
+            (source / "vendor/source-link").symlink_to("source/new.rs")
+            generated = root / "generated"
+            generated.mkdir()
+            (generated / "output").write_text("generated build output")
+            targets = [f"vendor/{name}/target" for name in ("heif-oxide", "rust_h265")]
+            for name in targets:
+                link = source / name
+                link.parent.mkdir(parents=True)
+                link.symlink_to(generated, target_is_directory=True)
+            machine = SimpleNamespace(directory=state)
+            with patch.object(vm, "ROOT", source), patch.object(vm, "require_running"), \
+                    patch.object(vm, "ssh_command", return_value=["tar", "--extract", "--file=-", "--directory", str(destination)]):
+                hashes = vm.sync_machine(machine)
+            self.assertEqual(set(hashes), {".gitignore", "tracked.rs", "vendor/tracked/target/keep.rs",
+                                          "vendor/source/new.rs", "vendor/source-link"})
+            for name in targets:
+                self.assertFalse(os.path.lexists(destination / name))
+            self.assertEqual((destination / "tracked.rs").read_text(), "tracked source")
+            self.assertEqual((destination / "vendor/tracked/target/keep.rs").read_text(), "tracked target source")
+            self.assertEqual((destination / "vendor/source/new.rs").read_text(), "untracked source")
+            self.assertTrue((destination / "vendor/source-link").is_symlink())
+            self.assertEqual(os.readlink(destination / "vendor/source-link"), "source/new.rs")
+            self.assertEqual(json.loads((state / "synced.json").read_text()), hashes)
+
+
 class CredentialTests(unittest.TestCase):
     def test_setup_restricts_existing_state_directory(self):
         with TemporaryDirectory() as directory:
