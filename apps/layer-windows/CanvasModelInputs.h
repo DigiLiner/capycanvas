@@ -182,8 +182,8 @@ public:
     CanvasModelInputs::Presentation presentation(CanvasModelInputs& reads,bool force=false,CanvasModelChanges const* changed=nullptr)const{
         return CanvasModelInputs::Presentation(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},changed?changed:CanvasModelInputs::Capture::Changes(),force);
     }
-    template<class Update> void apply(CanvasModelInputs& inputs,Update update,bool force=false){
-        auto scope=presentation(inputs,force,&changes);if(scope)update();
+    template<class Update> bool apply(CanvasModelInputs& inputs,Update update,bool force=false){
+        auto scope=presentation(inputs,force,&changes);if(scope)update();return bool(scope);
     }
 };
 

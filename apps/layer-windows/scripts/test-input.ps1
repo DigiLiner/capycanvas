@@ -364,3 +364,64 @@ int main(){
     & $executable
     if($LASTEXITCODE -ne 0){throw 'Layer contact generation trace stayed stale before contact validation'}
 }
+
+& {
+    $native=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '../WorkspaceView.cpp'))
+    $gate=[regex]::Matches($native,'(?m)^ +[^\r\n]*data->apply\(configurationInputs,[^\r\n]*')
+    if($gate.Count -ne 1){throw 'Workspace configuration gate is missing'}
+    $source=Join-Path $OutputDirectory 'configuration-gate.cpp'
+    $object=Join-Path $OutputDirectory 'configuration-gate.obj'
+    $executable=Join-Path $OutputDirectory 'configuration-gate-test.exe'
+    $harness=@'
+#include <windows.h>
+#include "NativeJson.h"
+#include "CanvasModelUpdate.h"
+#include <cassert>
+#include <memory>
+using namespace CapyUi;
+struct Expansion {
+    std::shared_ptr<CanvasModelSource> data;
+    J geometry;
+    int applied=0;
+    void Apply(double){
+        assert(!CanvasModelInputs::Capture::Active());++applied;
+        geometry=str(object(data->state,L"customization"),L"expanded").empty()?J{}:J::Parse(LR"({"group":1})");
+    }
+};
+struct View {
+    std::shared_ptr<CanvasModelSource> data=std::make_shared<CanvasModelSource>();
+    CanvasModelInputs configurationInputs;
+    std::unique_ptr<Expansion> expansion=std::make_unique<Expansion>(Expansion{data});
+    bool configured=false;
+    int presented=0;
+    double configurationHeight()const{return 0;}
+    void updateConfiguration(){configured=!str(object(data->state,L"customization"),L"expanded").empty()||(configured&&expansion->geometry.Size());}
+    void present(){
+        assert(!CanvasModelInputs::Capture::Active());++presented;
+        if(!expansion->geometry.Size()&&str(object(data->state,L"customization"),L"expanded").empty())configured=false;
+    }
+    void applyState(bool layoutChanged){
+'@
+    $harness+="`n"+$gate[0].Value+"`n    }`n};`n"+@'
+int main(){
+    winrt::init_apartment();
+    View view;CanvasModelUpdate models;
+    auto publish=[&](wchar_t const* packet,bool layoutChanged){
+        models.Read(J::Parse(packet));CanvasModelSource::Adoption adoption(*view.data,models.Model(),models.changes);view.applyState(layoutChanged);
+    };
+    publish(LR"({"state":{"customization":{"expanded":"brush_size"},"brush":{"diameter":9}}})",true);
+    assert(view.configured&&!view.expansion->applied&&!view.presented);
+    view.expansion->Apply(0);view.present();
+    publish(LR"({"model_update":[[["state","brush","diameter"],12]]})",false);
+    assert(view.configured&&view.expansion->applied==1&&view.presented==1);
+    publish(LR"({"model_update":[[["state","customization","expanded"],null]]})",false);
+    assert(view.expansion->applied==2&&view.presented==2);
+    assert(!view.configured&&!view.expansion->geometry.Size());
+}
+'@
+    [IO.File]::WriteAllText($source,$harness)
+    & cl /nologo /std:c++20 /EHsc /W4 /WX $optimization ('/I'+(Join-Path $PSScriptRoot '..')) $source "/Fo$object" "/Fe$executable" windowsapp.lib /link @manifest
+    if($LASTEXITCODE -ne 0){throw 'Workspace configuration gate test build failed'}
+    & $executable
+    if($LASTEXITCODE -ne 0){throw 'A state-only configuration close kept the expanded panel configuration'}
+}

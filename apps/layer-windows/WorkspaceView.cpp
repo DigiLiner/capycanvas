@@ -605,7 +605,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         tracePresentation();if(full&&requestInputs.Changed(data->changes))colorRequests();return true;
     }
     void applyState(bool layoutChanged){
-        data->apply(configurationInputs,[&]{updateConfiguration();},layoutChanged);
+        if(data->apply(configurationInputs,[&]{updateConfiguration();},layoutChanged)&&!layoutChanged){expansion->Apply(configurationHeight());present();}
         data->apply(searchInputs,[&]{commandSearch->Apply(data->state);});
         data->apply(barInputs,[&]{canvasBar->Apply(data->state);});
         data->apply(previewInputs,[&]{for(auto const& panel:previewPanels)panel->Publish(data->state);});
