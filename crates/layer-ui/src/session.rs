@@ -3289,6 +3289,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let host_report=action.is_host_report();
         let (mut changed, mut wake) = match action {
             UiAction::Phone { action } => {
+                let mut cancelled = 0;
                 match action {
                     PhoneAction::MenuActivate { .. } => unreachable!(),
                     PhoneAction::MenuSelect { route } => {
@@ -3382,18 +3383,22 @@ impl<R: CanvasRenderer> UiSession<R> {
                         if native.iter().chain(&insets).chain(&corners).chain([&keyboard]).any(|v| !v.is_finite() || *v < 0.) || native_counts.iter().any(|n| *n > 4) {
                             return Err("Invalid native control metrics".into());
                         }
+                        let before = self.phone_layout().map(|p| p.edge);
+                        let viewport = self.workspace_viewport();
                         let state = &mut self.state.phone;
                         if (state.native, state.native_counts, state.insets, state.corners, state.movable, state.keyboard) == (native, native_counts, insets, corners, movable, keyboard) { return Ok(UiChange::default()); }
+                        state.keyboard_phone = (keyboard > 0.).then(|| state.keyboard_phone.unwrap_or_else(|| crate::phone_window(viewport)));
                         state.native = native;
                         state.native_counts = native_counts;
                         state.insets = insets;
                         state.corners = corners;
                         state.movable = movable;
                         state.keyboard = keyboard;
+                        if self.phone_layout().map(|p| p.edge) != before { cancelled = self.cancel_phone_presentation()?; }
                     }
                 }
                 self.refresh_chrome();
-                (LAYOUT | CUSTOMIZATION | COMMANDS, false)
+                (LAYOUT | CUSTOMIZATION | COMMANDS | cancelled, false)
             }
             UiAction::ColorSlotMenu { slot, library } => {
                 self.color_slot_menu(slot)?;
@@ -4942,21 +4947,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let before = self.phone_layout().map(|p| p.edge);
         let after = self.state.phone_presentation(logical).map(|p| p.edge);
-        let transition = before != after;
-        if transition {
-            self.cancel_phone_slider()?;
-            self.state.phone.capy_drag = false;
-            self.state.toolbar_context_generation += 1;
-            self.workspace_history.cancel(&mut self.state.workspace);
-            self.workspace_drag = None;
-            self.workspace_tab_drag = None;
-            self.divider_drag = None;
-            self.floating_resize = None;
-            self.state.customization.cancel_header(&mut self.state.workspace.layout);
-            self.state.customization.drawer = None;
-            self.state.customization.column_drawers.clear();
-            self.state.phone.menu = false;
-        }
+        let transition = if before != after { self.cancel_phone_presentation()? } else { 0 };
         let old_scale = self
             .logical_viewport
             .map_or(1.0, |v| self.state.camera.viewport[0] as f32 / v[0]);
@@ -4982,10 +4973,25 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         self.automatic_camera_revision=self.state.camera.revision.checked_sub(navigation).ok_or("Camera revision moved backwards")?;
         Ok(self.changed(
-            (if resized || fit || bounds_changed { regions::CAMERA } else { 0 })
-                | if transition { regions::LAYOUT | regions::CUSTOMIZATION | regions::COMMANDS | regions::BUBBLES | regions::BRUSH } else { 0 },
+            (if resized || fit || bounds_changed { regions::CAMERA } else { 0 }) | transition,
             resized || fit || followed,
         ))
+    }
+
+    fn cancel_phone_presentation(&mut self) -> Result<u32, String> {
+        self.cancel_phone_slider()?;
+        self.state.phone.capy_drag = false;
+        self.state.toolbar_context_generation += 1;
+        self.workspace_history.cancel(&mut self.state.workspace);
+        self.workspace_drag = None;
+        self.workspace_tab_drag = None;
+        self.divider_drag = None;
+        self.floating_resize = None;
+        self.state.customization.cancel_header(&mut self.state.workspace.layout);
+        self.state.customization.drawer = None;
+        self.state.customization.column_drawers.clear();
+        self.state.phone.menu = false;
+        Ok(regions::LAYOUT | regions::CUSTOMIZATION | regions::COMMANDS | regions::BUBBLES | regions::BRUSH)
     }
 
     fn fit_initial_view(&mut self) -> bool {

@@ -1395,3 +1395,23 @@ fn phone_keyboard_metrics_validate_roundtrip_and_preserve_authored_state() {
     assert_eq!(s.capture_workspace().unwrap(), saved);
     assert_eq!(s.state.camera, camera);
 }
+
+#[test]
+fn keyboard_viewport_changes_keep_the_phone_class_and_its_drawer() {
+    let keyboard = |keyboard| UiAction::Phone { action: PhoneAction::Metrics { keyboard, native: [0.; 2], native_counts: [0; 2], insets: [0.; 4], corners: [0.; 4], movable: false } };
+    let transition = regions::LAYOUT | regions::CUSTOMIZATION | regions::COMMANDS | regions::BUBBLES | regions::BRUSH;
+    let mut s = phone_session([891, 308]);
+    let saved = s.capture_workspace().unwrap();
+    s.dispatch(UiAction::Phone { action: PhoneAction::ToolSettings }).unwrap();
+    s.dispatch(keyboard(196.)).unwrap();
+    for viewport in [[891, 528], [891, 308]] {
+        s.set_viewport(viewport.map(|v| v as f32), viewport).unwrap();
+        assert!(s.layout(viewport.map(|v| v as f32)).phone.is_some(), "{viewport:?}");
+        assert!(s.state.customization.drawer.is_some(), "{viewport:?}");
+    }
+    s.set_viewport([891., 528.], [891, 528]).unwrap();
+    assert_eq!(s.dispatch(keyboard(0.)).unwrap().regions & transition, transition);
+    assert!(s.phone_layout().is_none());
+    assert!(s.state.customization.drawer.is_none());
+    assert_eq!(s.capture_workspace().unwrap(), saved);
+}

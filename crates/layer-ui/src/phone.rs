@@ -62,6 +62,8 @@ pub struct PhoneState {
     pub insets: [f32; 4],
     pub corners: [f32; 4],
     pub keyboard: f32,
+    #[serde(skip)]
+    pub(crate) keyboard_phone: Option<bool>,
     pub native: [f32; 2],
     pub native_counts: [u32; 2],
     pub movable: bool,
@@ -112,6 +114,7 @@ impl PhoneState {
     pub fn resolve(&self, layout: &DockLayout, viewport: [f32; 2]) -> Option<PhoneLayout> {
         if !self.platform.is_some_and(crate::Platform::presents_phone_layout) { return None; }
         layout.phone.as_ref()?;
+        if !self.keyboard_phone.unwrap_or_else(|| phone_window(viewport)) { return None; }
         let scale = (viewport[0].min(viewport[1]) / 320.).min(1.);
         let [left, top, right, bottom] = self.insets.map(|inset| inset.max(8. * scale));
         let end = |r: f32, e: f32| if e >= r { 0. } else { r - (r * r - (r - e).powi(2)).sqrt() };
@@ -123,7 +126,7 @@ impl PhoneState {
             [left, top.max(end(nw, left)).max(end(ne, right)), right,
                 bottom.max(end(sw, left)).max(end(se, right))]
         };
-        let mut phone = PhoneLayout::resolve(layout, viewport, insets, self.native, self.native_counts, self.swapped, self.movable)?;
+        let mut phone = PhoneLayout::place(layout, viewport, insets, self.native, self.native_counts, self.swapped, self.movable)?;
         phone.keyboard = self.keyboard;
         if self.hidden {
             phone.capy_hit = Bounds::default();
@@ -413,9 +416,13 @@ impl PhoneLayout {
         if !phone_window(viewport) {
             return None;
         }
+        Self::place(layout, viewport, insets, native, native_counts, swapped, movable)
+    }
+    fn place(layout: &DockLayout, viewport: [f32; 2], insets: [f32; 4], native: [f32; 2],
+        native_counts: [u32; 2], swapped: bool, movable: bool) -> Option<Self> {
         let scale = (viewport[0].min(viewport[1]) / 320.).min(1.);
         if scale < 1. {
-            let mut p = Self::resolve(layout, viewport.map(|v| (v / scale).max(320.)), insets.map(|v| v / scale), native, native_counts, swapped, movable)?;
+            let mut p = Self::place(layout, viewport.map(|v| (v / scale).max(320.)), insets.map(|v| v / scale), native, native_counts, swapped, movable)?;
             let scaled = |b: &mut Bounds| { b.x *= scale; b.y *= scale; b.width *= scale; b.height *= scale; };
             for b in [&mut p.capy, &mut p.capy_hit, &mut p.capy_target, &mut p.size, &mut p.strength, &mut p.settings, &mut p.settings_hit, &mut p.work_area, &mut p.title]
                 .into_iter().chain(&mut p.tools).chain(&mut p.tool_hits).chain(&mut p.chips).chain(&mut p.controls).chain(&mut p.bars) { scaled(b); }

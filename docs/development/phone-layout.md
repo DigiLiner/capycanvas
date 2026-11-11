@@ -44,7 +44,8 @@ toolbar panels use the same existing phone drawer path.
 - Crossing the line or rotating cancels chrome drags (toolbar reorders, slider
   drags, panel moves) without saving and closes drawers and menus whose openers
   move. A stroke in progress continues to its end. The test uses the window's size,
-  never the space an on-screen keyboard leaves.
+  never the space an on-screen keyboard leaves. Opening or closing the keyboard
+  never changes the result; a resize while it is open applies when it closes.
 - The supported minimum short side is 320: Android's smallest phone width, an
   iPhone SE with Display Zoom (320 × 568 pt) and narrow iPad windows. Narrower
   windows (browsers, freely resized windows; the first Galaxy Fold's cover screen
