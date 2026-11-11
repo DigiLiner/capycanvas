@@ -1409,6 +1409,21 @@ fn phone_layout_swatches(d: &mut Driver) {
     assert!(failures.is_empty(),"{}",failures.join("\n"));
 }
 
+fn phone_layout_choices(d: &mut Driver) {
+    let mut failures = Vec::new();
+    d.w.dispatch(UiAction::OpenSettings {page:SettingsPage::Appearance});
+    let (dialog,frame)=dialog_frame(d);
+    capture(d,"appearance-choices");
+    for name in ["setting-transparency","setting-dark-base","setting-light-base","setting-language","setting-theme"] {
+        let row=find_named(&frame,name).unwrap();
+        let label=descendants::<gtk::Label>(&row).into_iter().find(|label|label.is_mapped() && !label.text().is_empty()).unwrap();
+        let word = label.text().split_whitespace().map(|word|label.create_pango_layout(Some(word)).pixel_size().0).max().unwrap();
+        if label.width()<word { failures.push(format!("{name} title fragments in {}px below a word width {word}",label.width())); }
+    }
+    close(d,&dialog);
+    assert!(failures.is_empty(),"{}",failures.join("\n"));
+}
+
 #[test]
 #[ignore = "private compositor and storage; phone viewport/theme external"]
 fn native_phone_layout_image() {
@@ -1422,6 +1437,14 @@ fn native_phone_layout_image() {
 fn native_phone_layout_swatches() {
     let mut d = super::phone_motion::setup("art.capycanvas.PhoneLayoutSwatches");
     phone_layout_swatches(&mut d);
+    d.finish();
+}
+
+#[test]
+#[ignore = "private compositor and storage; phone viewport/theme external"]
+fn native_phone_layout_choices() {
+    let mut d = super::phone_motion::setup("art.capycanvas.PhoneLayoutChoices");
+    phone_layout_choices(&mut d);
     d.finish();
 }
 
