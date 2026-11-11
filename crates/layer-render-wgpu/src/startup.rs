@@ -188,7 +188,7 @@ impl Needs {
         let transforms = r.transforms.as_ref().unwrap();
         self.render.extend(transforms.pipelines());
         self.compute.extend(transforms.display_pipelines());
-        self.compute.push(transforms.linear_affine_placement_pipeline());
+        self.compute.extend(transforms.linear_affine_placement_pipelines());
         self.render.extend([4, 5].map(|i| r.scene_pipelines.resample.mesh[i].clone()));
         self.compute.extend(r.selection_clip.pipelines().into_iter().cloned());
     }

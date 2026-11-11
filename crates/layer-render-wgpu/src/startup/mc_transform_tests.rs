@@ -3,7 +3,7 @@ use layer_render::CanvasRenderer;
 
 #[test]
 fn first_rotate_binds_the_transform_recipe_declared_before_input() {
-    {
+    for scale in [1., 0.5] {
         let extent = [128; 2];
         let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
@@ -37,15 +37,15 @@ fn first_rotate_binds_the_transform_recipe_declared_before_input() {
             transaction: 1, moving: true,
             target: crate::layer_tests::placement::target(&document), selection: None,
             transform: layer_core::ImageTransform::affine(layer_core::Affine::around(
-                layer_core::Point { x: 64., y: 64. }, [1.; 2], 0.3,
+                layer_core::Point { x: 64., y: 64. }, [scale; 2], 0.3,
                 layer_core::Point { x: 0., y: 0. })),
         };
         renderer.set_transform_preview(Some(&preview)).unwrap();
         assert!(renderer.raster_dependencies_ready(packet, Some(&preview)), "a warmed first rotation cannot defer");
         renderer.submit(packet).unwrap();
         let (key, pipeline) = renderer.transforms.as_ref().unwrap().bound_color_pipeline();
-        assert_eq!(key, format!("Key {{ mapping: Affine, filter: {}, area: false }}",
-            layer_core::Interpolation::Linear as u8));
+        assert_eq!(key, format!("Key {{ mapping: Affine, filter: {}, area: {} }}",
+            layer_core::Interpolation::Linear as u8, scale < 1.));
         assert!(pipeline.ready());
         assert!(declared.contains(&pipeline.identity()),
             "first rotate bound {key}, recipe {}, absent from transform preparation {declared:?}", pipeline.identity());
@@ -57,7 +57,7 @@ fn first_rotate_binds_the_transform_recipe_declared_before_input() {
         let geometry = plan.plane_geometry(plan.target);
         assert!(!geometry.is_identity() && geometry.as_affine().is_some());
         assert_eq!(geometry.placement.interpolation, layer_core::Interpolation::Linear);
-        assert_eq!(crate::pixel_transform::exact_taps(&geometry), 1);
+        assert_eq!(crate::pixel_transform::exact_taps(&geometry) > 1, scale < 1.);
         let placement = renderer.transforms.as_ref().unwrap().placement_pipeline(false, &geometry);
         assert!(placement.ready(), "first rotate Apply must not compile its color affine placement recipe synchronously");
         assert!(declared_compute.contains(&placement.identity()),
