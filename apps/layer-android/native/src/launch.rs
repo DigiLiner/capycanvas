@@ -61,10 +61,8 @@ pub(crate) fn start_workspaces(host: &mut layer_host::NativeHost, directory: &st
     wake: Arc<dyn Fn() + Send + Sync>) -> Result<layer_workspace::WorkspaceController<layer_workspace::StoreWorker>, String> {
     let store = layer_workspace::StoreWorker::shared(directory).map_err(|e| e.to_string())?;
     host.session.set_workspace_read_only(true);
-    let mut controller = layer_workspace::WorkspaceController::new_localized(store, layer_ui::Platform::Android, now,
-        host.session.localization().clone());
-    controller.set_wake(wake);
-    Ok(controller)
+    Ok(layer_workspace::WorkspaceController::new_localized(store, layer_ui::Platform::Android, now,
+        host.session.localization().clone(), wake))
 }
 
 #[cfg(test)]

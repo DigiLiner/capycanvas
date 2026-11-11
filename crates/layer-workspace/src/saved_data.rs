@@ -157,10 +157,10 @@ pub fn check_saved_data(roots: &StorageRoots) -> SavedDataReport {
         if let Ok(Some(settings)) = settings {
             host.session.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) })?;
         }
-        let mut controller = WorkspaceController::new_localized(StoreWorker::shared(&roots.workspaces())
-            .map_err(|error| error.to_string())?, Platform::Gtk, crate::sqlite::SystemClock.now_ms(), Localizer::shared(UiLanguage::English));
         let (sender, wake) = mpsc::channel();
-        controller.set_wake(Arc::new(move || { let _ = sender.send(()); }));
+        let mut controller = WorkspaceController::new_localized(StoreWorker::shared(&roots.workspaces())
+            .map_err(|error| error.to_string())?, Platform::Gtk, crate::sqlite::SystemClock.now_ms(), Localizer::shared(UiLanguage::English),
+            Arc::new(move || { let _ = sender.send(()); }));
         let adopted = advance(&mut controller, &mut host, &wake, false);
         report.editing_dropped = controller.manager.editing_dropped();
         if let Some(WorkspaceNotice { copy: WorkspaceNoticeCopy::Messages(ids), .. }) = &controller.notice {

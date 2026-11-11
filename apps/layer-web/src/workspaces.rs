@@ -171,6 +171,7 @@ impl WebApp {
             serde_json::from_str(&owner).map_err(js)?,
             js_sys::Date::now() as u64,
             self.session.localization().clone(),
+            std::sync::Arc::new(|| {}),
         ).with_mobile_browser(self.mobile_browser));
         Ok(())
     }

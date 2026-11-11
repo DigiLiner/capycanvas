@@ -1331,9 +1331,11 @@ impl App {
         app
     }
     fn unbound(platform: u32) -> Self {
+        extern "C" fn wake(_: *mut c_void) {}
         layer_core::temp_files::set_directory(std::env::temp_dir()).unwrap();
         let app = Self::from_handle(capy_apple_create(platform));
         assert!(!(app.0==0));
+        assert_eq!(unsafe { capy_apple_set_workspace_wake(app.0, std::ptr::null_mut(), Some(wake)) }, 0);
         assert_eq!(unsafe { capy_apple_resize(app.0, 1200, 900, 1.) }, 0);
         app
     }

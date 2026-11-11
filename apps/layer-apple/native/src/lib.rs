@@ -49,7 +49,7 @@ pub struct CapyApple {
     chrome_facts: layer_ui::ChromeFacts,
     dismissed_contacts: std::collections::BTreeSet<u64>,
     workspaces: Option<layer_workspace::WorkspaceController<layer_workspace::StoreWorker>>,
-    workspace_wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+    workspace_wake: Option<layer_host::PreparationWake>,
     language: layer_ui::LanguageTransition,
     published_language: Option<u64>,
     scopes: scopes::Cache,
@@ -295,10 +295,11 @@ pub unsafe extern "C" fn capy_apple_set_workspace_wake(app:u64,context:*mut std:
         let context=context as usize;
         std::sync::Arc::new(move ||wake(context as *mut std::ffi::c_void)) as std::sync::Arc<dyn Fn()+Send+Sync>
     });
-    if let Some(controller)=&mut owner.workspaces {
-        match &wake {Some(wake)=>controller.set_wake(wake.clone()),None=>controller.stop()}
+    if let Some(wake)=wake {
+        owner.workspace_wake.get_or_insert_with(Default::default).set_notify(wake);
+    } else if let Some(registration)=&owner.workspace_wake {
+        registration.close();
     }
-    owner.workspace_wake=wake;
     0
 }
 /// # Safety

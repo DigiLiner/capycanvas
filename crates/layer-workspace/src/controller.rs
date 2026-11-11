@@ -345,8 +345,8 @@ impl<S: WorkspaceStore + 'static> Drop for WorkspaceController<S> {
     fn drop(&mut self) { self.stop(); }
 }
 impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
-    pub fn new_localized(store: S, platform: Platform, now: u64, localization: Arc<layer_ui::Localizer>) -> Self {
-        Self::new_owned_localized(store, platform, Owner::fresh(), now, localization)
+    pub fn new_localized(store: S, platform: Platform, now: u64, localization: Arc<layer_ui::Localizer>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
+        Self::new_owned_localized(store, platform, Owner::fresh(), now, localization, wake)
     }
     pub fn localization(&self) -> &Arc<layer_ui::Localizer> {
         &self.localization
@@ -411,7 +411,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
             })
         };
     }
-    pub fn new_owned_localized(store: S, platform: Platform, owner: Owner, now: u64, localization: Arc<layer_ui::Localizer>) -> Self {
+    pub fn new_owned_localized(store: S, platform: Platform, owner: Owner, now: u64, localization: Arc<layer_ui::Localizer>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         let mut manager = WorkspaceManager::new_localized(store, platform, localization.clone());
         manager.owner = owner;
         manager.clock.set(now);
@@ -420,7 +420,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
             localization_generation: 0,
             manager: Rc::new(manager),
             view: Default::default(),
-            wake: Default::default(),
+            wake: Arc::new(Mutex::new(Some(wake))),
             task: None,
             quiet: false,
             preferences: None,
@@ -478,13 +478,6 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         self.manager.tablet.set(matches!(self.manager.platform, Platform::Android | Platform::Ios)
             || (self.manager.platform == Platform::Web && mobile));
         self
-    }
-    /// Storage replies call `wake` from any thread; the host then schedules
-    /// `tick` on its editor owner.
-    pub fn set_wake(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
-        if let Ok(mut slot) = self.wake.lock() {
-            *slot = Some(wake);
-        }
     }
     /// After `stop` returns, no storage reply calls the wake callback.
     pub fn stop(&mut self) {
@@ -2097,10 +2090,10 @@ mod lifetime_tests {
 
     #[test]
     fn dropping_controller_disarms_retained_storage_wakers() {
-        let mut controller=WorkspaceController::new_localized(UnusedStore,Platform::Windows,0,
-            layer_ui::Localizer::shared(layer_ui::UiLanguage::English));
         let calls=Arc::new(AtomicUsize::new(0));let observed=calls.clone();
-        controller.set_wake(Arc::new(move|| {observed.fetch_add(1,Ordering::SeqCst);}));
+        let controller=WorkspaceController::new_localized(UnusedStore,Platform::Windows,0,
+            layer_ui::Localizer::shared(layer_ui::UiLanguage::English),
+            Arc::new(move|| {observed.fetch_add(1,Ordering::SeqCst);}));
         let retained=Waker::from(Arc::new(Signal {ready:AtomicBool::new(false),wake:controller.wake.clone()}));
         retained.wake_by_ref();assert_eq!(calls.load(Ordering::SeqCst),1);
         drop(controller);

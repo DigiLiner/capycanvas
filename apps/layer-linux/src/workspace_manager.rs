@@ -194,11 +194,10 @@ impl NativeWorkspaces {
             if let Some(change) = change { w.changed(Ok(change)); }
             return;
         };
-        let mut controller = Controller::new_localized(store, Platform::Gtk, now_ms(), w.localization().clone());
-        let owner = controller.manager.owner.id.clone();
+        let owner = layer_workspace::Owner::fresh();
         let pending = Arc::new(AtomicBool::new(false));
-        let target = owner.clone();
-        controller.set_wake(Arc::new(move || {
+        let target = owner.id.clone();
+        let wake = Arc::new(move || {
             if !pending.swap(true, Ordering::AcqRel) {
                 let pending = pending.clone();
                 let target = target.clone();
@@ -209,8 +208,9 @@ impl NativeWorkspaces {
                     }
                 });
             }
-        }));
-        WINDOWS.with(|windows| windows.borrow_mut().insert(owner, Rc::downgrade(w)));
+        });
+        let controller = Controller::new_owned_localized(store, Platform::Gtk, owner, now_ms(), w.localization().clone(), wake);
+        WINDOWS.with(|windows| windows.borrow_mut().insert(controller.manager.owner.id.clone(), Rc::downgrade(w)));
         *self.controller.borrow_mut() = Some(controller);
         self.tick(w);
     }

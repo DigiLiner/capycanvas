@@ -3,6 +3,7 @@ use layer_ui::{Localizer, Platform, UiAction, UiLanguage};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::Arc,
 };
 
 #[derive(Default)]
@@ -785,8 +786,8 @@ fn controllers_begin_with_independent_languages() {
     use std::sync::Arc;
     let japanese = Localizer::shared(UiLanguage::Japanese);
     let korean = Localizer::shared(UiLanguage::Korean);
-    let first = WorkspaceController::new_localized(Store(Rc::new(Backend::default())), Platform::Gtk, 0, japanese.clone());
-    let second = WorkspaceController::new_owned_localized(Store(Rc::new(Backend::default())), Platform::Gtk, Owner::fresh(), 0, korean.clone());
+    let first = WorkspaceController::new_localized(Store(Rc::new(Backend::default())), Platform::Gtk, 0, japanese.clone(), Arc::new(|| {}));
+    let second = WorkspaceController::new_owned_localized(Store(Rc::new(Backend::default())), Platform::Gtk, Owner::fresh(), 0, korean.clone(), Arc::new(|| {}));
     assert!(Arc::ptr_eq(first.localization(), &japanese));
     assert!(Arc::ptr_eq(second.localization(), &korean));
     assert_eq!(first.localization().language(), UiLanguage::Japanese);
@@ -803,6 +804,9 @@ impl Fixture {
         Self::for_platform(Platform::Web)
     }
     fn for_platform(platform: Platform) -> Self {
+        Self::with_wake(platform, Arc::new(|| {}))
+    }
+    fn with_wake(platform: Platform, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         let backend = Rc::new(Backend::default());
         backend.now.set(1000);
         let mut host = layer_host::NativeHost::new(platform).unwrap();
@@ -819,7 +823,7 @@ impl Fixture {
         )
         .unwrap();
         pollster::block_on(Store(backend.clone()).execute(StoreRequest::Commit { batch })).unwrap();
-        let controller = WorkspaceController::new_localized(Store(backend.clone()), platform, 1000, Localizer::shared(UiLanguage::English));
+        let controller = WorkspaceController::new_localized(Store(backend.clone()), platform, 1000, Localizer::shared(UiLanguage::English), wake);
         let mut f = Self {
             backend,
             controller,
@@ -871,7 +875,7 @@ fn restoring_a_bound_window_claims_without_republishing_its_selection() {
     let deliveries = f.backend.deliveries.borrow().len();
     f.backend.now.set(2000);
     f.controller =
-        WorkspaceController::new_owned_localized(Store(f.backend.clone()), Platform::Web, owner.clone(), 2000, Localizer::shared(UiLanguage::English));
+        WorkspaceController::new_owned_localized(Store(f.backend.clone()), Platform::Web, owner.clone(), 2000, Localizer::shared(UiLanguage::English), Arc::new(|| {}));
     f.pump();
     assert!(f.controller.view.ready, "{:?}", f.controller.view.error);
     assert_eq!(f.controller.view.id.as_deref(), Some(id.as_str()));
@@ -903,7 +907,7 @@ fn startup_with_an_occupied_window_binding_reuses_an_available_default() {
     let claimed = pollster::block_on(other.prepare_switch(&original, 1_000)).unwrap();
     other.activate(claimed);
     f.controller =
-        WorkspaceController::new_owned_localized(Store(f.backend.clone()), Platform::Web, owner, 1_000, Localizer::shared(UiLanguage::English));
+        WorkspaceController::new_owned_localized(Store(f.backend.clone()), Platform::Web, owner, 1_000, Localizer::shared(UiLanguage::English), Arc::new(|| {}));
     f.pump();
     assert!(f.controller.view.ready, "{:?}", f.controller.view.error);
     assert_eq!(
@@ -1356,7 +1360,7 @@ fn new_workspaces_are_pinned_without_repinning_hidden_workspaces() {
 fn closing_before_adoption_drains_claims() {
     let mut f = Fixture::new();
     f.input(serde_json::json!({"type":"suspend"}));
-    let mut closing = WorkspaceController::new_localized(Store(f.backend.clone()), Platform::Web, 1000, Localizer::shared(UiLanguage::English));
+    let mut closing = WorkspaceController::new_localized(Store(f.backend.clone()), Platform::Web, 1000, Localizer::shared(UiLanguage::English), Arc::new(|| {}));
     closing
         .input(&mut f.host.session, WorkspaceInput::Close, 1000)
         .unwrap();
@@ -1928,15 +1932,37 @@ fn discard_close_releases_claims_without_saving_and_resume_cancels() {
 }
 
 #[test]
+fn constructor_wakes_the_first_pending_startup_reply() {
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    let backend = Rc::new(Backend::default());
+    backend.now.set(1000);
+    let (release, gate) = async_channel::bounded(1);
+    *backend.editing_gate.borrow_mut() = Some(gate);
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let counter = wakes.clone();
+    let mut controller = WorkspaceController::new_localized(
+        Store(backend), Platform::Web, 1000, Localizer::shared(UiLanguage::English),
+        Arc::new(move || { counter.fetch_add(1, Ordering::SeqCst); }),
+    );
+    let mut host = layer_host::NativeHost::new(Platform::Web).unwrap();
+    controller.tick(&mut host.session, 1000);
+    assert!(!controller.view.ready);
+    assert_eq!(wakes.load(Ordering::SeqCst), 0);
+    release.try_send(()).unwrap();
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    controller.tick(&mut host.session, 1000);
+    assert!(controller.view.ready);
+}
+
+#[test]
 fn wake_fires_on_store_reply_and_stop_disarms() {
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
-    let mut f = Fixture::new();
     let wakes = Arc::new(AtomicUsize::new(0));
     let counter = wakes.clone();
-    f.controller.set_wake(Arc::new(move || {
+    let mut f = Fixture::with_wake(Platform::Web, Arc::new(move || {
         counter.fetch_add(1, Ordering::SeqCst);
     }));
     f.input(serde_json::json!({"type":"open","page":"workspaces"}));
@@ -2016,7 +2042,7 @@ fn resume_key_restores_the_scene_workspace_before_last_used() {
         }
     };
     let start = |f: &Fixture| {
-        WorkspaceController::new_localized(Store(f.backend.clone()), Platform::Web, now, Localizer::shared(UiLanguage::English))
+        WorkspaceController::new_localized(Store(f.backend.clone()), Platform::Web, now, Localizer::shared(UiLanguage::English), Arc::new(|| {}))
             .with_resume_key(key.clone(), now)
     };
     let mut scene = start(&f);
@@ -2130,7 +2156,7 @@ fn start<S: WorkspaceStore + 'static>(
     platform: Platform,
 ) -> (WorkspaceController<S>, layer_host::NativeHost) {
     let mut host = layer_host::NativeHost::new(platform).unwrap();
-    let mut controller = WorkspaceController::new_localized(store, platform, 1000, Localizer::shared(UiLanguage::English));
+    let mut controller = WorkspaceController::new_localized(store, platform, 1000, Localizer::shared(UiLanguage::English), Arc::new(|| {}));
     for _ in 0..20 {
         if controller.view.ready {
             break;
@@ -2408,7 +2434,7 @@ fn mobile_browsers_start_in_sketch_and_desktop_browsers_start_in_paint() {
     for (mobile, expected) in [(false, "Paint"), (true, "Sketch")] {
         let store = Store(Rc::new(Backend::default()));
         let mut host = layer_host::NativeHost::new(Platform::Web).unwrap();
-        let mut controller = WorkspaceController::new_localized(store, Platform::Web, 1000, Localizer::shared(UiLanguage::English))
+        let mut controller = WorkspaceController::new_localized(store, Platform::Web, 1000, Localizer::shared(UiLanguage::English), Arc::new(|| {}))
             .with_mobile_browser(mobile);
         assert!(!host.session.state().workspace_ready);
         for _ in 0..20 { controller.tick(&mut host.session, 1000); }
@@ -2436,7 +2462,7 @@ fn workspace_controls_become_ready_with_the_restored_layout_on_every_platform() 
         let (release, hold) = async_channel::bounded(1);
         *store.0.switcher_gate.borrow_mut() = Some(hold);
         let mut host = layer_host::NativeHost::new(platform).unwrap();
-        let mut controller = WorkspaceController::new_localized(store, platform, 1000, Localizer::shared(UiLanguage::English));
+        let mut controller = WorkspaceController::new_localized(store, platform, 1000, Localizer::shared(UiLanguage::English), Arc::new(|| {}));
         for _ in 0..20 {
             controller.tick(&mut host.session, 1000);
             assert!(!controller.view.ready, "{platform:?}");
@@ -2538,7 +2564,7 @@ pub(crate) fn start_native(
 ) -> (WorkspaceController<StoreWorker>, layer_host::NativeHost) {
     let mut host = layer_host::NativeHost::new(Platform::Gtk).unwrap();
     let mut controller =
-        WorkspaceController::new_localized(StoreWorker::shared(directory).unwrap(), Platform::Gtk, 1000, Localizer::shared(UiLanguage::English));
+        WorkspaceController::new_localized(StoreWorker::shared(directory).unwrap(), Platform::Gtk, 1000, Localizer::shared(UiLanguage::English), Arc::new(|| {}));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while !controller.view.ready && std::time::Instant::now() < deadline {
         controller.tick(&mut host.session, 1000);
