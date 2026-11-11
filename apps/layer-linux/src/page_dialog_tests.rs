@@ -1377,6 +1377,21 @@ fn w9_failed_drawing_recovery() {
     d.finish();
 }
 
+fn phone_layout_image(d: &mut Driver) {
+    let mut failures = Vec::new();
+    for (command,name) in [(CommandId::ImageSize,"image-size"),(CommandId::CanvasSize,"canvas-size")] {
+        d.w.dispatch(UiAction::Invoke {command});
+        let (dialog,frame)=dialog_frame(d);
+        capture(d,name);
+        let bounds=frame.compute_bounds(&d.w.window).unwrap();
+        if bounds.x()<0. || bounds.x()+bounds.width()>d.w.window.width() as f32 {
+            failures.push(format!("{name} page exceeds viewport: {bounds:?}"));
+        }
+        close(d,&dialog);
+    }
+    assert!(failures.is_empty(),"{}",failures.join("\n"));
+}
+
 fn phone_layout_swatches(d: &mut Driver) {
     let mut failures = Vec::new();
     crate::color_editor::show(&d.w,layer_ui::ColorSlot::Foreground);
@@ -1392,6 +1407,14 @@ fn phone_layout_swatches(d: &mut Driver) {
     }
     close(d,&dialog);
     assert!(failures.is_empty(),"{}",failures.join("\n"));
+}
+
+#[test]
+#[ignore = "private compositor and storage; phone viewport/theme external"]
+fn native_phone_layout_image() {
+    let mut d = super::phone_motion::setup("art.capycanvas.PhoneLayoutImage");
+    phone_layout_image(&mut d);
+    d.finish();
 }
 
 #[test]
