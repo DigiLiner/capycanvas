@@ -73,6 +73,7 @@ extension EditorLaunchTests {
             canvas.pinch(withScale: 1.6, velocity: 1)
             expectation(for: NSPredicate { _, _ in self.editorPaper(in: app).frame != paper }, evaluatedWith: app)
             waitForExpectations(timeout: 15)
+            phoneAlertCommand("View", label: "Reset rotation", in: app)
             phoneAlertCommand("View", label: "Fit canvas", in: app)
             expectation(for: NSPredicate { _, _ in self.editorPaper(in: app).frame == paper }, evaluatedWith: app)
             waitForExpectations(timeout: 15)

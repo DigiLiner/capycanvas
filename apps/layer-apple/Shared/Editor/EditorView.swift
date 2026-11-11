@@ -54,7 +54,9 @@ struct EditorView<Canvas: View>: View {
                 if !store.snapshot["layout"]["phone"].isNull { PhoneMenu(store: store).zIndex(220) }
                 PenResponseCalibration(store: store)
             }
-            FillGestureOverlay(view: store.snapshot["color_preview"]["fill_gesture"], palette: palette)
+            if !store.snapshot["color_preview"]["fill_gesture"].isNull {
+                FillGestureOverlay(view: store.snapshot["color_preview"]["fill_gesture"], palette: palette)
+            }
             HStack {
                 ToneStatusLabel(store: store, palette: palette)
                 ProofIndicator(model: store.proof, palette: palette)
