@@ -155,14 +155,17 @@ measured on low and mid tiers:
   seven modes do not. See the [Low](performance/low-tier.md#retained-map-liquify),
   [Mid](performance/mid-tier.md#retained-map-liquify) and
   [Top](performance/top-tier.md#retained-map-liquify) profiles.
-- Galaxy Note 10 phone chrome (2026-11-11, minified APKs `f6c90479` →
-  `207c7fdb`, 12 MP at Fit plus Paint, inherited font scale 1.1): SurfaceFlinger
-  actual presentations improve from 10/12 to 12/12 drawer trials meeting 57 fps
-  and 33.3 ms p99. The parent's first Tool close reaches 42.90 fps/66.61 ms p99
-  and first Color open 30.03 fps/99.88 ms; all candidate cases reach 60.06–60.09 fps
-  with 16.66–16.88 ms p99. Opening action→first moving present remains 191–304 ms,
-  a separate latency measurement. Size's HWUI window p90 improves from
-  15.07–35.93 to 13.37–14.71 ms; its presented cadence remains unmeasured.
+- Galaxy Note 10 phone chrome (2026-11-11, minified `.fix` APKs, 12 MP at Fit
+  plus Paint, inherited font scale 1.1): by SurfaceFlinger actual presentations,
+  the 12 drawer trials (Tool and Color, three column counts, open and close) meet
+  57 fps and 33.3 ms p99 in 18/24 over two ABBA runs both on `d529d8784`
+  (`292d137d`) and with drawer glass only at rest (`1480a523`); thermal status
+  stays 0. The first Tool close misses in every run of both builds (33–83 ms
+  gaps) and the first Color open in three of four: RenderThread compiles HWUI
+  shaders on first use. The other misses are single late presents; passing
+  trials reach 60.02–60.08 fps with 16.66–16.79 ms p99. Size's HWUI window p90
+  improves from 15.07–35.93 to 13.37–14.71 ms (`f6c90479` → `207c7fdb`); its
+  presented cadence remains unmeasured.
 
 The tier tables identify the exact frozen builds and measurement conditions.
 Exact GPU bounds queries on the top-tier 61 MP canvas take 95–135 ms for a

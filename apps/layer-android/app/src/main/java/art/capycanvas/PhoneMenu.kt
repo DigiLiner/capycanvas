@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -24,6 +25,7 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInRoot
@@ -206,10 +208,12 @@ private fun Modifier.menuGestures(input: PhoneMenuInteraction, width: Float, rtl
     }
     val layout = snapshot.getJSONObject("layout").getJSONObject("phone")
     val density = LocalDensity.current.density
+    val glass=rememberDrawerGlass(host,dock)
     var target by remember { mutableStateOf<JSONObject?>(null) }
     LaunchedEffect(target?.toString(), open) {
         val to = target ?: return@LaunchedEffect
         val from = input.frame?.getJSONObject("placement")
+        glass.hide()
         workspaceFrames(200) { p ->
             val current = JSONObject(Native.drawerFrame(obj("from" to from, "to" to to,
                 "progress" to (1f-(1f-p)*(1f-p)*(1f-p)), "closing" to !open, "clip_contents" to true).toString()))
@@ -220,7 +224,7 @@ private fun Modifier.menuGestures(input: PhoneMenuInteraction, width: Float, rtl
             } ?: dock.drawerSources.remove("menu")
             dock.refresh()
         }
-        if (!open) model = null
+        if (!open) model = null else input.frame?.let {glass.show(it)}
     }
     DisposableEffect(dock) { onDispose { dock.drawerSources.remove("menu"); input.frame = null; dock.refresh() } }
     SubcomposeLayout(Modifier.fillMaxSize().zIndex(220f)) { constraints ->
@@ -240,7 +244,7 @@ private fun Modifier.menuGestures(input: PhoneMenuInteraction, width: Float, rtl
         val destination = next ?: target
         val shown = input.frame
         val body = if (shown != null && destination != null) subcompose("body") {
-            key(host.phoneContactEpoch) { PhoneMenuSurface(host, dock, view, page, parent, input, destination, shown, rowHeight, rtl) }
+            key(host.phoneContactEpoch) { PhoneMenuSurface(host, dock, view, page, parent, input, destination, shown, rowHeight, rtl, glass) }
         }.single().measure(constraints) else null
         layout(constraints.maxWidth, constraints.maxHeight) { body?.place(0,0) }
     }
@@ -254,7 +258,7 @@ private fun Modifier.menuGestures(input: PhoneMenuInteraction, width: Float, rtl
 }
 
 @Composable private fun PhoneMenuSurface(host: CanvasHost, dock: DockInteraction, model: JSONObject, page: JSONObject, parent: JSONObject?,
-    input: PhoneMenuInteraction, target: JSONObject, frame: JSONObject, rowHeight: Float, rtl: Boolean) {
+    input: PhoneMenuInteraction, target: JSONObject, frame: JSONObject, rowHeight: Float, rtl: Boolean, glass: DrawerGlass) {
     val density = LocalDensity.current.density
     val scope = rememberCoroutineScope()
     val active = rememberMenuActivation(host)
@@ -272,9 +276,10 @@ private fun Modifier.menuGestures(input: PhoneMenuInteraction, width: Float, rtl
         input.list = geometry.getJSONObject("list").let { Rect(it.number("x")*density,it.number("y")*density,(it.number("x")+it.number("width"))*density,(it.number("y")+it.number("height"))*density) }
     }
     Box(Modifier.fillMaxSize(), contentAlignment = AbsoluteAlignment.TopLeft) {
-        connection?.let { DrawerBridge(it, dock, 219f) }
+        connection?.let { DrawerBridge(it, dock, 219f, glass=glass) }
         Box(Modifier.placedAbsolute(bounds, density).testTag("phone-menu").chromeRegion(dock).panelSurface(6.dp, panelShape)
-            .glass(panelShape, colors.onGlass.panelFill).semantics { paneTitle = page.getString("title") }
+            .drawWithContent {drawOutline(panelShape.createOutline(size,layoutDirection,this),if(glass.presented)colors.onGlass.panelFill else colors.panel);drawContent()}
+            .semantics { paneTitle = page.getString("title") }
             .menuGestures(input, geometry.getJSONObject("list").number("width")*density, rtl, scope), contentAlignment = AbsoluteAlignment.TopLeft) {
             Box(Modifier.requiredSize(targetBounds.number("width").dp,targetBounds.number("height").dp), contentAlignment = AbsoluteAlignment.TopLeft) {
                 val scroll = rememberScrollState()

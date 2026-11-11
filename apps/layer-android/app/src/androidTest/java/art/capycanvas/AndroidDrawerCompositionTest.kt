@@ -27,12 +27,14 @@ class AndroidDrawerCompositionTest {
         val dock=checkNotNull(host.workspaceInteraction)
         val initialChrome=compose.runOnIdle { dock.chromeRegions.keys.toSet() }
         val initialSources=compose.runOnIdle { dock.regions.keys.toSet() }
+        val initialGlass=compose.runOnIdle { host.glassBoxesForTest.map { it.take(4) }.toSet() }
+        val initialConnections=compose.runOnIdle { host.glassConnectionsForTest.map { it.toString() }.toSet() }
         val counts=compose.runOnIdle { CompositionCounts { info ->
             if(info.substringBefore(" (")=="art.capycanvas.ContentDrawer")"DrawerContent"
             else "PalettePanel".takeIf { info.startsWith("art.capycanvas.PalettePanel") }
         } }
         data class Frame(val order:Int,val size:IntSize?,val placed:Boolean,val outer:Rect?,val published:Boolean,val contentCompositions:Int,
-            val chrome:List<Rect>,val sources:List<Rect>)
+            val chrome:List<Rect>,val sources:List<Rect>,val glass:List<Rect>,val connections:List<String>)
         data class Draw(val order:Int,val size:IntSize)
         val sequence=AtomicInteger()
         val frames=mutableListOf<Frame>()
@@ -50,7 +52,9 @@ class AndroidDrawerCompositionTest {
             frames.add(Frame(sequence.incrementAndGet(),size,placed,outer?.boundsInRoot?.translate(-dock.origin),
                 bounds != null && bounds.number("width")>0f && bounds.number("height")>0f,counts["DrawerContent"],
                 dock.chromeRegions.filterKeys { it !in initialChrome }.values.map { it.bounds },
-                dock.regions.filterKeys { it !in initialSources }.values.map { it.bounds }))
+                dock.regions.filterKeys { it !in initialSources }.values.map { it.bounds },
+                host.glassBoxesForTest.filter { it.take(4) !in initialGlass }.map { Rect(it[0],it[1],it[0]+it[2],it[1]+it[3]) },
+                host.glassConnectionsForTest.map { it.toString() }.filter { it !in initialConnections }))
             if(placed && size != null && size.width>0 && size.height>0) {
                 val callback=Runnable { draws.add(Draw(sequence.incrementAndGet(),size)) }
                 callbacks.add(callback)
@@ -85,8 +89,19 @@ class AndroidDrawerCompositionTest {
                         before.published && after.published && before.outer?.isEmpty==false && after.outer?.isEmpty==false && before.outer!=after.outer
                     }.map { it.second }
                     assertTrue("The opening has multiple actual moving frames",moving.size>=2)
+                    val opening=moving.filter { it.outer!!.width<target.width-1 || it.outer.height<target.height-1 }
+                    assertTrue("Opening frames have no native drawer glass: ${opening.map { it.glass }}",opening.isNotEmpty() && opening.all { it.glass.isEmpty() })
+                    assertTrue("Opening frames have no native bridge glass: ${opening.map { it.connections }}",opening.all { it.connections.isEmpty() })
                     assertEquals("Moving frames retain the drawer content body",0,moving.last().contentCompositions-moving.first().contentCompositions)
                 }
+                host.awaitMain("Settled drawer glass matches the pane",30_000,{ "frame=${frames.lastOrNull()}" },compose) {
+                    val pane=findTag("tool-drawer")?.second?.boundsInRoot?.translate(-host.surfaceOrigin) ?: return@awaitMain false
+                    host.glassBoxesForTest.any { box ->
+                        kotlin.math.abs(box[0]-pane.left)<=1f && kotlin.math.abs(box[1]-pane.top)<=1f &&
+                            kotlin.math.abs(box[2]-pane.width)<=1f && kotlin.math.abs(box[3]-pane.height)<=1f
+                    }
+                }
+                val closeStart=compose.runOnIdle { frames.size }
                 host.drain(obj("type" to "customize","action" to obj("type" to "close_expanded")))
                 compose.mainClock.advanceTimeByFrame()
                 compose.waitForIdle()
@@ -113,6 +128,9 @@ class AndroidDrawerCompositionTest {
                         frame.sources.all { it.isEmpty || it.left>=bounds.left-1 && it.top>=bounds.top-1 && it.right<=bounds.right+1 && it.bottom<=bounds.bottom+1 }
                     })
                     assertEquals("Geometry-only frames retain palette content",0,counts["PalettePanel"])
+                    val moving=frames.drop(closeStart).zipWithNext().filter { (before,after) -> before.outer!=after.outer }.map { it.second }
+                    assertTrue("Closing frames have no native drawer glass: ${moving.map { it.glass }}",moving.isNotEmpty() && moving.all { it.glass.isEmpty() })
+                    assertTrue("Closing frames have no native bridge glass: ${moving.map { it.connections }}",moving.all { it.connections.isEmpty() })
                 }
             } finally {
                 instrumentation.runOnMainSync {
@@ -135,9 +153,20 @@ class AndroidDrawerCompositionTest {
         val color=host.snapshot!!.getJSONObject("state").getJSONObject("workspace").getJSONObject("layout")
             .array("phone").objects().first { it.getJSONObject("control").getString("kind")=="color" }.getInt("id")
         val counts=compose.runOnIdle { CompositionCounts { info -> "PalettePanel".takeIf { info.startsWith("art.capycanvas.PalettePanel") } } }
+        val initialGlass=compose.runOnIdle { host.glassBoxesForTest.map { it.take(4) }.toSet() }
+        val initialConnections=compose.runOnIdle { host.glassConnectionsForTest.map { it.toString() }.toSet() }
+        val frames=mutableListOf<Triple<Rect?,List<List<Float>>,List<String>>>()
+        val root=compose.activity.window.decorView
+        val observer=ViewTreeObserver.OnPreDrawListener {
+            frames.add(Triple(findTag("tool-drawer")?.second?.boundsInRoot,host.glassBoxesForTest
+                .filter { it.take(4) !in initialGlass }.map { it.toList() },
+                host.glassConnectionsForTest.map { it.toString() }.filter { it !in initialConnections }))
+            true
+        }
         val originalAdvance=compose.mainClock.autoAdvance
         counts.use {
             try {
+                compose.runOnIdle { root.viewTreeObserver.addOnPreDrawListener(observer) }
                 compose.mainClock.autoAdvance=false
                 host.drain(obj("type" to "phone","action" to obj("kind" to "tool_settings")))
                 var partial:Rect?=null
@@ -157,6 +186,7 @@ class AndroidDrawerCompositionTest {
                 }
                 assertNotNull("Tool Settings is actually partially open before retarget: ${dock.drawer}",partial)
                 assertTrue("The partial viewport is smaller than its measured content",partial!!.height<targetHeight-1f)
+                val retargetStart=compose.runOnIdle { frames.size }
                 host.drain(obj("type" to "phone","action" to obj("kind" to "tool","tile" to color)))
                 repeat(30) {host.drain();compose.mainClock.advanceTimeByFrame();compose.waitForIdle()}
                 compose.runOnIdle {
@@ -168,8 +198,22 @@ class AndroidDrawerCompositionTest {
                     val palette=findTag("drawer-panel-palettes")
                     assertTrue("Retarget composes both new columns: partial=$partial; targetHeight=$targetHeight; drawer=$placement; model=$model; palette=${palette!=null}; compositions=${counts["PalettePanel"]}",
                         findTag("drawer-panel-color")!=null && palette!=null && counts["PalettePanel"]>0 && placement?.array("columns")?.length()==2)
+                    val moving=frames.drop(retargetStart).zipWithNext().filter { (before,after) -> before.first!=after.first }.map { it.second }
+                    assertTrue("Retarget changes the actual drawer bounds",moving.isNotEmpty())
+                    val settled=findTag("tool-drawer")!!.second.boundsInRoot
+                    val retargeting=frames.drop(retargetStart).filter { it.first?.isEmpty==false && it.first!=settled }
+                    assertTrue("Retarget frames have no native drawer glass: $retargeting",retargeting.all { it.second.isEmpty() })
+                    assertTrue("Retarget frames have no native bridge glass: $retargeting",retargeting.all { it.third.isEmpty() })
+                }
+                host.awaitMain("Retargeted glass matches the settled pane",30_000,{ "drawer=${dock.drawer}; glass=${host.glassBoxesForTest.map { it.toList() }}" },compose) {
+                    val pane=findTag("tool-drawer")?.second?.boundsInRoot?.translate(-host.surfaceOrigin) ?: return@awaitMain false
+                    host.glassBoxesForTest.any { box ->
+                        kotlin.math.abs(box[0]-pane.left)<=1f && kotlin.math.abs(box[1]-pane.top)<=1f &&
+                            kotlin.math.abs(box[2]-pane.width)<=1f && kotlin.math.abs(box[3]-pane.height)<=1f
+                    }
                 }
             } finally {
+                instrumentation.runOnMainSync { root.viewTreeObserver.removeOnPreDrawListener(observer) }
                 compose.mainClock.autoAdvance=originalAdvance
                 compose.waitForIdle()
             }

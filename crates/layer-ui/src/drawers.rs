@@ -122,7 +122,12 @@ pub struct DrawerColorMeasure { pub fixed_height: f32, pub hdr: bool }
 #[derive(Deserialize)]
 pub struct DrawerMenuMeasurement { pub width: f32, pub height: f32, pub row_height: f32 }
 #[derive(Serialize)]
-pub struct DrawerFrame { pub connection: Option<DrawerConnection>, pub placement: DrawerPlacement, pub color_fit: Option<crate::ColorPanelFit> }
+pub struct DrawerFrame { pub connection: Option<DrawerConnection>, pub placement: DrawerPlacement, pub glass: Option<Bounds>, pub color_fit: Option<crate::ColorPanelFit> }
+impl DrawerFrame {
+    fn new(placement: DrawerPlacement, progress: f32, closing: bool, color_fit: Option<crate::ColorPanelFit>) -> Self {
+        Self { connection: placement.connection(), glass: (progress >= 1. && !closing).then_some(placement.bounds), placement, color_fit }
+    }
+}
 
 impl<R: layer_render::CanvasRenderer> crate::UiSession<R> {
     fn drawer_for_column(&self, column: Option<u32>) -> Option<&ContentDrawer> {
@@ -150,7 +155,7 @@ impl<R: layer_render::CanvasRenderer> crate::UiSession<R> {
         }?;
         let from = query.from.unwrap_or_else(|| end.closed());
         let placement = end.interpolate_from(&from, query.progress);
-        Some(DrawerFrame { connection: placement.connection(), placement, color_fit })
+        Some(DrawerFrame::new(placement, query.progress, query.closing, color_fit))
     }
     pub fn drawer_measurement(&self, viewport: [f32; 2], column: Option<u32>, tiles: Vec<DrawerTileMeasurement>) -> Result<serde_json::Value, String> {
         use serde_json::json;
@@ -236,7 +241,7 @@ pub fn drawer_frame(source: &str) -> Result<serde_json::Value, String> {
         if !scale.is_finite() || scale<=0. {return Err("Invalid drawer pixel scale".into());}
         placement=placement.snapped(scale);
     }
-    Ok(serde_json::json!({"connection": placement.connection(), "placement": placement, "color_fit": color_fit}))
+    Ok(serde_json::json!(DrawerFrame::new(placement, request.progress, request.closing, color_fit)))
 }
 
 /// A tab-like bridge between the tile and drawer. The affine transform maps

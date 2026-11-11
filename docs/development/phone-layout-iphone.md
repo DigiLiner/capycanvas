@@ -431,3 +431,5 @@ no regression. If a physical iPhone is available, record the same rows there.
   measurement plan for missing bounds. Verify Tool Settings→Color during a
   partial opening reaches Color and Palettes in two columns, then settles in
   both themes; retargeting to fewer columns must still work.
+
+- **Show separate-layer drawer glass only at rest.** Consume `drawer_frame.glass`; keep the moving pane opaque, await glass removal before closing or retargeting, and reveal its translucent fill only after the settled glass is presented.

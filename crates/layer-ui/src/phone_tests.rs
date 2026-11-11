@@ -6,6 +6,40 @@ fn phone_session(viewport: [u32; 2]) -> UiSession<Recorder> {
 }
 
 #[test]
+fn drawer_glass_is_present_only_at_rest() {
+    for viewport in [[412, 891], [891, 412]] {
+        let mut s = phone_session(viewport);
+        for panel in [Some(Panel::Brushes), Some(Panel::Color), Some(Panel::Navigator), None] {
+            if let Some(panel) = panel { s.reveal_panel(panel).unwrap(); }
+            s.state.phone.menu = panel.is_none();
+            let heights = vec![340.; s.state.customization.drawer.as_ref().unwrap().columns.len()];
+            let query = |from: Option<DrawerPlacement>, progress, closing| serde_json::from_value(serde_json::json!({
+                "viewport":viewport,"heights":heights,"from":from,"progress":progress,"closing":closing,
+                "menu":{"width":280.,"height":400.,"row_height":36.},
+            })).unwrap();
+            let to = s.drawer_frame_for(query(None, 1., false)).unwrap().placement;
+            let retarget = DrawerPlacement {bounds:Bounds {height:to.bounds.height / 2., ..to.bounds}, ..to.clone()};
+            for (from, closing) in [(None, false), (Some(retarget), false), (Some(to.clone()), true)] {
+                for step in 0..=12 {
+                    let progress = step as f32 / 12.;
+                    let session_frame = serde_json::to_value(s.drawer_frame_for(query(from.clone(), progress, closing)).unwrap()).unwrap();
+                    for scale in [1., 2.625] {
+                        let frame = drawer_frame(&serde_json::json!({
+                            "from":from,"to":to,"progress":progress,"closing":closing,"pixel_scale":scale,
+                        }).to_string()).unwrap();
+                        for frame in [&session_frame, &frame] {
+                            let expected = if step == 12 && !closing { &frame["placement"]["bounds"] }
+                                else { &serde_json::Value::Null };
+                            assert_eq!(frame.get("glass"), Some(expected), "{panel:?} {viewport:?} step {step} closing {closing}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn transported_bar_contact_is_invalidated_by_a_phone_toolbar_move() {
     let mut s = phone_session([412,891]);
     let layout = s.phone_layout().unwrap();

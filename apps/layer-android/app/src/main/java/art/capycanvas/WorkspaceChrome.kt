@@ -18,7 +18,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.boundsInRoot
@@ -45,6 +44,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.launch
@@ -75,6 +77,64 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     return SquircleShape(topStart = if (square[0]) 0.dp else radius.dp,
         topEnd = if (square[1]) 0.dp else radius.dp, bottomEnd = if (square[2]) 0.dp else radius.dp,
         bottomStart = if (square[3]) 0.dp else radius.dp)
+}
+
+internal class DrawerGlass(private val host: CanvasHost, private val dock: DockInteraction,
+    private val density: Density, private val view: android.view.View) {
+    private val key=Any()
+    private var frame:JSONObject?=null
+    var presented by mutableStateOf(false)
+        private set
+    var strength=1f
+        set(value) {field=value;update()}
+    private fun update() {
+        val bounds=frame?.objectOrNull("glass")
+        val connection=frame?.objectOrNull("connection")
+        host.glassConnection(key,connection,dock.density,strength)
+        host.glassBox(key,bounds?.let {
+            val shape=dock.drawerContainerShape(it,joined=connection?.array("square_corners"))
+            val origin=dock.origin-host.surfaceOrigin
+            val width=(it.number("width")*dock.density).roundToInt().toFloat()
+            val height=(it.number("height")*dock.density).roundToInt().toFloat()
+            val size=androidx.compose.ui.geometry.Size(width,height)
+            floatArrayOf((it.number("x")*dock.density).roundToInt()+origin.x,
+                (it.number("y")*dock.density).roundToInt()+origin.y,width,height)+
+                listOf(shape.topStart,shape.topEnd,shape.bottomEnd,shape.bottomStart).map { corner -> corner.toPx(size,density) }.toFloatArray()
+        },strength)
+    }
+    fun clear() {frame=null;presented=false;update()}
+    private suspend fun awaitOpaqueCommit() = kotlinx.coroutines.suspendCancellableCoroutine<Unit> { continuation ->
+        val observer=view.viewTreeObserver
+        val callback=Runnable {view.post {if(continuation.isActive)continuation.resumeWith(Result.success(Unit))}}
+        observer.registerFrameCommitCallback(callback)
+        continuation.invokeOnCancellation {if(observer.isAlive)observer.unregisterFrameCommitCallback(callback)}
+        view.postInvalidateOnAnimation()
+    }
+    suspend fun hide() {
+        if(frame!=null) {
+            presented=false
+            awaitOpaqueCommit()
+        }
+        clear()
+        host.glassPresented()
+    }
+    suspend fun show(value:JSONObject) {
+        if(value.objectOrNull("glass")==null)return
+        awaitOpaqueCommit()
+        frame=value;update()
+        host.glassPresented()
+        presented=true
+    }
+}
+
+@Composable internal fun rememberDrawerGlass(host: CanvasHost, dock: DockInteraction): DrawerGlass {
+    val density=LocalDensity.current
+    val view=LocalView.current
+    val opacity=LocalWorkspaceOpacity.current
+    val glass=remember(host,dock,density,view) {DrawerGlass(host,dock,density,view)}
+    LaunchedEffect(glass,opacity) {snapshotFlow {(opacity?.value ?: 1f) to dock.drawerSources.values.toList()}.collect {glass.strength=it.first}}
+    DisposableEffect(glass) {onDispose {glass.clear()}}
+    return glass
 }
 
 @Composable internal fun CollapsedColumns(host: CanvasHost, columns: JSONArray, drawerModels: JSONArray, vectorGroups: Set<Int>, panels: Map<String, JSONObject>, dock: DockInteraction) {
@@ -174,6 +234,8 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
 @Composable private fun ContentDrawer(host: CanvasHost, snapshot: JSONObject, current: JSONObject?, retained: JSONObject,
     panels: Map<String, JSONObject>, dock: DockInteraction, id: String, closed: () -> Unit) {
     val model = current ?: retained
+    val glass=rememberDrawerGlass(host,dock)
+    val colors=LocalPalette.current
     val bodies = remember { mutableMapOf<String, JSONObject>() }.apply { putAll(panels) }
     val columns = model.array("columns").values().map { it as JSONArray }
     val tabs = model.objectOrNull("tabs")
@@ -297,6 +359,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
         if(anchor!=null)lastAnchor=anchor
         visible=true
         animation[0]=scope.launch(start=kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            glass.hide()
             workspaceFrames(200,animate) { progress ->
                 val eased=1f-(1f-progress)*(1f-progress)*(1f-progress)
                 val position=if(pageChange)pageFrom+(pageTarget-pageFrom)*eased else pageTarget
@@ -309,7 +372,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                 } else dock.drawerSources.remove(id)
                 if(id=="tool"){dock.drawer=reply;dock.refresh()}
             }
-            if(current==null)closed()
+            if(current==null)closed() else geometry.value?.let {glass.show(it)}
         }
     }
     SideEffect {placeMeasured()}
@@ -338,7 +401,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             snapshot.getJSONObject("state").getJSONObject("customization").array("column_drawers").objects()
                 .any { drawer -> drawer.array("columns").values().any { panel in (it as JSONArray).values() } }
         }
-        if (visible) DrawerChrome(geometry, dock, phone != null, nested, z)
+        if (visible) DrawerChrome(geometry, dock, phone != null, nested, z, glass)
         val opening = remember { PanelOpening() }
         val outerPosition = (if (phone != null) Modifier.absoluteOffset {
             val bounds=placement().getJSONObject("bounds")
@@ -357,7 +420,10 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                 .testTag(if (id == "tool") "tool-drawer" else "column-drawer-$id").chromeRegion(dock,active=visible)
                 .then(if (columnId != null) Modifier.columnDrawerBounds(dock, columnId, if (current != null) tabs?.getInt("group") else null) else Modifier)
                 .panelOpening(opening).graphicsLayer { clip=true; this.shape=shape() }
-                .glass(RectangleShape, if (tabbed || !visible) Color.Transparent else LocalPalette.current.panelFill,active=visible,nativeShape=shape)
+                .drawWithContent {
+                    drawRect(if(!visible || tabbed && glass.presented)Color.Transparent else if(glass.presented)colors.onGlass.panelFill else colors.panel)
+                    drawContent()
+                }
                 .then(if (together) Modifier.panelScroll(rememberScrollState()) else Modifier),content={
                 Box(Modifier.fillMaxSize().graphicsLayer().drawWithContent {
                     drawContent()
@@ -459,7 +525,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     }
 }
 
-@Composable private fun DrawerChrome(geometry: State<JSONObject?>, dock: DockInteraction, absolute: Boolean, nested: Boolean, z: Int) {
+@Composable private fun DrawerChrome(geometry: State<JSONObject?>, dock: DockInteraction, absolute: Boolean, nested: Boolean, z: Int, glass: DrawerGlass) {
     val frame=geometry.value ?: return
     val placement=frame.getJSONObject("placement")
     val bounds=placement.getJSONObject("bounds")
@@ -469,7 +535,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     Box((if(absolute)Modifier.placedAbsolute(bounds,dock.density) else Modifier.placed(bounds,dock.density))
         .zIndex(if(nested)199f else 99f)
         .panelSurface(12.dp,shape,cut=cut?.let { Rect(it.topLeft*dock.density,it.bottomRight*dock.density) }))
-    connection?.let { DrawerBridge(it,dock,z.toFloat()) }
+    connection?.let { DrawerBridge(it,dock,z.toFloat(),glass=glass) }
 }
 
 @Composable internal fun LayerInspector(host: CanvasHost, state: JSONObject, open: Boolean, position: Float,
@@ -559,9 +625,9 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     }
 }
 
-@Composable internal fun DrawerBridge(connection: JSONObject, dock: DockInteraction, z: Float, modifier: Modifier = Modifier) {
-    val color = LocalPalette.current.onGlass.panelFill
-    BridgeGlass(connection, dock)
+@Composable internal fun DrawerBridge(connection: JSONObject, dock: DockInteraction, z: Float, modifier: Modifier = Modifier, glass: DrawerGlass? = null) {
+    val colors = LocalPalette.current
+    if(glass==null)BridgeGlass(connection, dock)
     val bounds = connection.getJSONObject("bounds")
     val position = if (dock.phone != null) Modifier.placedAbsolute(bounds,dock.density) else Modifier.placed(bounds,dock.density)
     Canvas(position.then(modifier).zIndex(z).chromeRegion(dock)) {
@@ -577,6 +643,6 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
         move(0f,0f); line(length,0f); line(length,depth-r1)
         corner(Offset(length+r1,depth-r1), Offset(-r1,0f), Offset(0f,r1))
         line(-r0,depth); corner(Offset(-r0,depth-r0), Offset(0f,r0), Offset(r0,0f))
-        path.close(); drawPath(path,color)
+        path.close(); drawPath(path,if(glass==null || glass.presented)colors.onGlass.panelFill else colors.panel)
     }
 }
