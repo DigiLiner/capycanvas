@@ -6,6 +6,7 @@
 #include "WorkspaceManagerView.h"
 #include "WorkspaceDialogs.h"
 #include "WorkspaceView.h"
+#include "CanvasModelUpdate.h"
 #include "BubblePresentation.h"
 #include "PressureCalibration.h"
 #include "CanvasActionBar.h"
@@ -478,6 +479,52 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         settings->Hide();co_await wait([&]{return !settings->IsOpen()&&!workspaceElement(L"preference-choice-language");},L"Preferences Hide did not finish native dialog close");
         settings.reset();window.AppWindow().Resize(previous);++checks;
     }
+    winrt::Windows::Foundation::IAsyncAction backgroundAfterPartial(J original,J catalog,NativeLayoutInput layout){
+        auto model=J::Parse(original.Stringify());std::unique_ptr<WorkspaceView> view;Canvas surface{nullptr};bool attached=false;
+        try{
+            {
+                struct TraceSetting {
+                    std::wstring previous;DWORD length=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0);
+                    TraceSetting(){if(length){previous.resize(length);previous.resize(GetEnvironmentVariableW(L"CAPY_TRACE_UI",previous.data(),length));}check_bool(SetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr));}
+                    ~TraceSetting(){SetEnvironmentVariableW(L"CAPY_TRACE_UI",length?previous.c_str():nullptr);}
+                } tracing;
+                auto send=[](std::string){};
+                view=std::make_unique<WorkspaceView>(send,catalog,context.localization,[](CanvasQueryKind,std::string,PreviewReply){return false;},[](bool){},send,send,[](std::string,std::function<void(int32_t)>){ });
+                surface=view->Root();surface.Width(1000);surface.Height(700);root.Children().InsertAt(0,surface);attached=true;
+                require(view->Apply(model,layout),L"Background fixture initial model was rejected");view->Resize(1000,700);
+            }
+            auto group=find(array(object(model,L"layout"),L"groups"),L"active",L"layers");
+            require(group.Size()!=0,L"Background fixture floating Layers group is missing");
+            auto groupId=L"workspace-group-"+to_hstring(uint32_t(num(group,L"id")));
+            co_await wait([&]{auto frame=findElement(surface,groupId);return frame&&frame.IsLoaded()&&frame.ActualWidth()>0;},L"Background fixture group did not arrange");
+            require(view->Apply(model,layout),L"Background fixture measured model was rejected");
+            group=find(array(object(model,L"layout"),L"groups"),L"active",L"layers");
+            auto frame=findElement(surface,groupId).as<Border>();
+            A connections,arcs,colors,panels,overviews;
+            view->Glass(surface,connections,arcs,colors,panels,overviews);auto document=view->ChromeDocument();
+            auto revision=uint64_t(std::max(0.,num(object(model,L"windows_glass"),L"chrome_revision")))+1;
+            auto ack=[&](uint64_t value){A extent;extent.Append(N(num(document,L"width")));extent.Append(N(num(document,L"height")));return O({{L"chrome_revision",N(double(value))},{L"document",extent}});};
+            view->ChromeSent(revision);require(view->Apply(O({{L"windows_glass",ack(revision)}})),L"Initial background fixture ACK was rejected");
+            auto before=frame.CornerRadius(),expected=before;bool right=before.TopRight>0||before.BottomRight>0;
+            require(right||before.TopLeft>0||before.BottomLeft>0,L"Background fixture lacks a rounded source corner");
+            if(right)expected.TopRight=expected.BottomRight=0;else expected.TopLeft=expected.BottomLeft=0;
+            auto sources=view->DrawerSources();auto saved=A::Parse(sources.Stringify());
+            sources.Append(O({{L"anchor",O({{L"kind",S(L"tile")},{L"panel",S(str(group,L"active"))}})},{L"direction",S(right?L"right":L"left")},{L"bounds",object(group,L"bounds")}}));
+            CanvasModelUpdate pending;pending.Read(model);view->ChromeSent(revision+1);
+            A path,pair,updates;path.Append(S(L"windows_glass"));pair.Append(path);pair.Append(ack(revision+1));updates.Append(pair);
+            pending.Read(O({{L"model_update",updates}}));
+            auto applyTracked=[&]<class Update>(Update const& packet){
+                if constexpr(requires{packet.changes;})return view->Apply(packet.Model(),layout,packet.changes);
+                else return view->Apply(packet.Model(),layout);
+            };
+            require(applyTracked(pending),L"Equal-frame background fixture full model was rejected");
+            require(frame.CornerRadius()==expected,L"Equal-frame ACK skipped backgrounds after an out-of-band drawer-source change");
+            sources.Clear();for(auto source:saved)sources.Append(source);
+            require(view->Apply(model,layout),L"Background fixture restoration was rejected");
+            require(frame.CornerRadius()==before,L"Background fixture did not restore its source corners");
+            root.Children().RemoveAt(0);attached=false;view.reset();
+        }catch(...){if(attached)root.Children().RemoveAt(0);view.reset();throw;}
+    }
     winrt::fire_and_forget measureFixtureHeader(std::string snapshot,std::string catalog,double id,std::shared_ptr<std::promise<std::string>> result){
         auto self=shared_from_this();std::shared_ptr<HeaderView> header;bool attached=false;auto previousSize=window.AppWindow().Size();auto previousWidth=root.Width();
         try{
@@ -607,6 +654,13 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         auto groupId=L"workspace-group-"+to_hstring(uint32_t(num(group,L"id"))),entryId=L"layer-"+to_hstring(uint64_t(id))+L"-rename";
         auto entry=[&]{return findElement(findElement(surface,groupId),entryId).try_as<TextBox>();};
         co_await wait([&]{auto field=entry();return field&&field.IsLoaded()&&field.ActualWidth()>0&&field.Visibility()==Visibility::Visible;},L"Real WorkspaceView layer editor did not become arranged");
+        auto resizeHandles=array(group,L"resize_handles");require(resizeHandles.Size()>0,L"Floating layer fixture lacks a resize handle");
+        auto handleId=L"floating-"+to_hstring(uint32_t(num(group,L"id")))+L"-"+str(resizeHandles.GetObjectAt(0),L"edge");
+        auto resizeControl=findElement(surface,handleId).as<FrameworkElement>();auto tag=resizeControl.Tag();
+        auto cursor=resizeControl.as<IUIElementProtected>().ProtectedCursor();require(bool(cursor),L"Floating resize cursor is absent");
+        require(view->Apply(model,layout),L"Repeated full workspace model was rejected");
+        require(resizeControl.Tag()==tag&&resizeControl.as<IUIElementProtected>().ProtectedCursor()==cursor,L"Unchanged resize handle replaced its action or cursor");
+        co_await backgroundAfterPartial(model,copy,layout);
         auto field=entry();auto originalName=AutomationProperties::GetName(field);require(originalName==L"Layer name"&&localizedName==L"\u30ec\u30a4\u30e4\u30fc\u540d",L"Layer fixture needs English and Japanese accessibility text");captureTextComposition(field);require(field.Focus(FocusState::Keyboard),L"Layer draft focus failed");
         co_await wait([&]{return FocusManager::GetFocusedElement(root.XamlRoot())==field;},L"Real layer editor did not own focus");
         field.Text(L"\u65e5\u672c");field.Select(2,0);require(field.Text()==L"\u65e5\u672c"&&field.SelectionStart()==2&&field.SelectionLength()==0&&FocusManager::GetFocusedElement(root.XamlRoot())==field&&!textComposing(field),L"Layer draft must be focused, exact and unmarked before language publication");actions->clear();
@@ -1154,6 +1208,50 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
             tooltip(metadata,L"First metadata tooltip");tooltip(metadata,L"Second metadata tooltip");tooltip(metadata,L"");
             require(AutomationProperties::GetHelpText(metadata).empty(),L"Nonvisual tooltip-owned help did not update and clear");
             phase=L"primitives";
+            {
+                Button tab;tab.Content(box_value(L"Retained tab"));tab.Width(100);tab.Height(30);
+                auto shell=panelTabShell(tab,nullptr);root.Children().Append(shell);
+                co_await wait([tab]{return tab.IsLoaded()&&tab.ActualWidth()>0;},L"Retained tab did not arrange");
+                selectPanelTabShell(shell,true);
+                auto path=shell.Children().GetAt(0).as<Canvas>().Children().GetAt(0).as<Microsoft::UI::Xaml::Shapes::Path>();
+                auto selectedGeometry=path.Data();selectPanelTabShell(shell,true);
+                require(path.Data()==selectedGeometry,L"Unchanged tab presentation replaced its path geometry");
+                selectPanelTabShell(shell,false);auto unselectedGeometry=path.Data();
+                require(unselectedGeometry!=selectedGeometry,L"Changed tab corners retained the old path geometry");
+                selectPanelTabShell(shell,false);
+                require(path.Data()==unselectedGeometry,L"Unchanged unselected tab replaced its path geometry");
+                tab.Width(120);co_await wait([tab]{return tab.ActualWidth()==120;},L"Retained tab did not resize");
+                require(path.Data()!=unselectedGeometry,L"Resized tab retained the old path geometry");
+                root.Children().RemoveAtEnd();++checks;
+            }
+            {
+                Border element,extra;auto id=ChromeFrames::Id(element);ChromeFrames frames;
+                auto frame=[id]{
+                    ChromeFrames::Frame next;next.groups.insert(1);next.columns.insert(2);next.elements.insert(id);
+                    auto view=J::Parse(LR"({"bounds":[0,0,100,80],"clip":[0,0,100,80],"order":1})");
+                    next.views.emplace(id,view);next.overviews.Append(J::Parse(view.Stringify()));return next;
+                };
+                auto copy=[](ChromeFrames::Frame next){
+                    for(auto& [key,view]:next.views)view=J::Parse(view.Stringify());
+                    next.overviews=A::Parse(next.overviews.Stringify());return next;
+                };
+                auto document=O({{L"width",N(100)},{L"height",N(80)}});unsigned refreshes=0;bool retired=false;
+                frames.observers.emplace(id,[&]{++refreshes;});frames.current=frame();frames.Sent(1);
+                require(frames.Present(1,document),L"Initial chrome frame was unchanged");
+                frames.retiring.emplace(&retired,[&]{retired=true;});frames.current=frame();frames.Sent(2);
+                require(!frames.Present(2,document)&&frames.revision==2&&refreshes==2&&retired,L"Equal chrome did not acknowledge, retire and preserve presentation");
+                frames.current=copy(frames.current);frames.current.views.at(id).GetNamedArray(L"bounds").SetAt(0,N(1));frames.Sent(3);
+                require(frames.Present(3,document),L"Changed native overview view was ignored");
+                frames.current=copy(frames.current);frames.current.overviews.GetObjectAt(0).GetNamedArray(L"clip").SetAt(2,N(90));frames.Sent(4);
+                require(frames.Present(4,document),L"Changed chrome overview clip was ignored");
+                frames.Sent(5);document=O({{L"width",N(120)},{L"height",N(80)}});
+                require(frames.Present(5,document),L"Changed chrome document was ignored");
+                frames.current.groups.insert(3);frames.Sent(6);require(frames.Present(6,document),L"Changed chrome group was ignored");
+                frames.current.columns.insert(4);frames.Sent(7);require(frames.Present(7,document),L"Changed chrome column was ignored");
+                frames.current.elements.insert(ChromeFrames::Id(extra));frames.Sent(8);require(frames.Present(8,document),L"Changed chrome element was ignored");
+                require(!frames.Present(1,document)&&frames.revision==8,L"Stale chrome frame changed the acknowledgement");
+                frames.Close();++checks;
+            }
             ComboBox choice;comboOption(choice,L"One");auto selected=comboOption(choice,L"Two");choiceColors(data,choice,ControlSurface::Settings,ChoiceFeedbackMode::Field,Windows::UI::Text::FontWeights::Bold());
             require(choice.Background().as<SolidColorBrush>().Color()!=data->brush(L"settings").Color(),L"Settings choice has no visible face");
             selectIndex(choice,1);require(choice.SelectedIndex()==1,L"Valid choice was rejected");

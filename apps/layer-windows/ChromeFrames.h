@@ -34,6 +34,25 @@ struct ChromeFrames {
     bool Retains(winrt::Windows::Foundation::IInspectable const& element)const{return RetainsId(Id(element));}
     bool Group(uint32_t id)const{return current.groups.contains(id)&&presented.groups.contains(id);}
     bool Column(uint32_t id)const{return current.columns.contains(id)&&presented.columns.contains(id);}
+    static bool SameView(Object const& first,Object const& second){
+        for(auto name:{L"bounds",L"clip"}){
+            auto a=first.GetNamedArray(name,Array{nullptr}),b=second.GetNamedArray(name,Array{nullptr});
+            if(bool(a)!=bool(b))return false;
+            if(!a)continue;
+            if(a.Size()!=b.Size())return false;
+            for(uint32_t i=0;i<a.Size();++i)if(a.GetNumberAt(i)!=b.GetNumberAt(i))return false;
+        }
+        return first.GetNamedNumber(L"order",0)==second.GetNamedNumber(L"order",0)
+            &&first.GetNamedNumber(L"opacity",1)==second.GetNamedNumber(L"opacity",1);
+    }
+    static bool SameFrame(Frame const& first,Frame const& second,Object const& document){
+        if(first.groups!=second.groups||first.columns!=second.columns||first.elements!=second.elements
+            ||first.views.size()!=second.views.size()||first.overviews.Size()!=second.overviews.Size())return false;
+        for(auto const& [id,view]:first.views){auto found=second.views.find(id);if(found==second.views.end()||!SameView(view,found->second))return false;}
+        for(uint32_t i=0;i<first.overviews.Size();++i)if(!SameView(first.overviews.GetObjectAt(i),second.overviews.GetObjectAt(i)))return false;
+        return first.document.GetNamedNumber(L"width",0)==document.GetNamedNumber(L"width",0)
+            &&first.document.GetNamedNumber(L"height",0)==document.GetNamedNumber(L"height",0);
+    }
     bool Sent(uint64_t next){
         if(closed)return false;
         sentRevision=next;sent.insert_or_assign(next,current);
@@ -44,6 +63,7 @@ struct ChromeFrames {
     bool Present(uint64_t next,Object document){
         if(closed)return false;
         auto found=sent.find(next);if(found==sent.end()||next<revision)return false;
+        bool changed=!SameFrame(presented,found->second,document);
         presented=found->second;presented.document=document;revision=next;
         sent.erase(sent.begin(),found);
         std::vector<std::function<void()>> release;
@@ -52,7 +72,7 @@ struct ChromeFrames {
         }else ++it;
         for(auto& ready:release)ready();
         for(auto const& [id,refresh]:observers)refresh();
-        return true;
+        return changed;
     }
     void Reset(){presented=Frame{};revision=0;for(auto const& [id,refresh]:observers)refresh();}
     void Close(){if(closed)return;closed=true;current=Frame{};presented=Frame{};sent.clear();auto release=std::exchange(retiring,{});for(auto& [id,ready]:release)ready();observers.clear();}

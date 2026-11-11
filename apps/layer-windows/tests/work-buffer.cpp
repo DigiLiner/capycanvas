@@ -31,6 +31,31 @@
 #endif
 
 int main() {
+    {
+        CapyUi::TabShapeInputs shape{100,30,{-6,-6}};
+        auto resized=shape;resized.width=120;assert(resized!=shape);
+        auto corners=shape;corners.bottom[0]=0;assert(corners!=shape);
+        assert((shape==CapyUi::TabShapeInputs{100,30,{-6,-6}}));
+        using Inputs=CapyUi::TabSurfaceInputs<std::array<float,2>,std::array<unsigned char,4>>;
+        Inputs surface{100,30,0,4,{{0,0},{100,30}},{{6,0},{30,30}},{255,10,20,30},{255,40,50,60}};
+        assert(surface==Inputs(surface));
+        for(unsigned field=0;field<8;++field){
+            auto next=surface;
+            switch(field){
+                case 0:++next.width;break;case 1:++next.height;break;
+                case 2:++next.clipLeft;break;case 3:++next.clipRight;break;
+                case 4:++next.band[0][0];break;case 5:++next.tab[0][1];break;
+                case 6:++next.strip[0];break;case 7:++next.panel[2];break;
+            }
+            assert(surface!=next);
+        }
+        CapyUi::ResizeHandleInputs<std::wstring> handle{true,17,L"top_left",false};
+        for(unsigned field=0;field<4;++field){
+            auto next=handle;
+            switch(field){case 0:next.floating=false;break;case 1:++next.id;break;case 2:next.edge=L"bottom_right";break;case 3:next.resetColumn=true;break;}
+            assert(handle!=next);
+        }
+    }
 #ifdef _WIN32
     winrt::init_apartment();
     {
