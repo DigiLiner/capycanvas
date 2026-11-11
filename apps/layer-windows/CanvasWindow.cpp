@@ -299,7 +299,7 @@ void CanvasWindow::Open() {
     titlebar.ButtonBackgroundColor(transparent);
     titlebar.ButtonInactiveBackgroundColor(transparent);
     titlebar.ButtonForegroundColor(Windows::UI::Color{255,225,225,229});
-    titlebar.PreferredHeightOption(TitleBarHeightOption::Tall);
+    titlebar.PreferredHeightOption(TitleBarHeightOption::Standard);
     root.RequestedTheme(ElementTheme::Default);
     auto& pointerMode=CapyUi::MouseScrollbars::current();scrollbarInput=pointerMode.source;pointerMode.observe(root);
     root.PreviewKeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& event){if(auto self=weak.lock();self&&event.Key()==Windows::System::VirtualKey::Escape){
@@ -497,7 +497,7 @@ void CanvasWindow::Resize() {
         std::vector<Windows::Graphics::RectInt32> regions,inputRegions;
         if(header){
             header->SetFullscreen(!caption);
-            header->SetInsets(float(left)/scale,float(right)/scale);
+            header->SetInsets(float(left)/scale,float(right)/scale,float(height)/scale);
             if(caption){regions=header->DragRegions(scale,next.width);inputRegions=header->InputRegions(scale,next.width);}
         } else if(caption)regions.push_back(Windows::Graphics::RectInt32{
             left,0,std::max(0,int32_t(next.width)-left-right),int32_t(48*scale)});

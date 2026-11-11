@@ -73,7 +73,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
     std::vector<std::pair<uint32_t,uint32_t>> menuPath;
     MenuFlyout activeMenu{nullptr};std::function<void(MenuItems)> menuPopulate;hstring menuSource,hoveredMenu;
     bool scheduled=false,trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
-    float leftInset=0,rightInset=0;
+    float leftInset=0,rightInset=0,captionHeight=0;
     double tile=36,iconSize=20,itemGap=6,height=48,totalHeight=48,menuWidth=0,switchWidth=36;
     std::optional<uint64_t> menuGeneration;
     uint32_t focusedItem=0;
@@ -643,7 +643,8 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         bool navigation=false;
         for(auto const& [id,native]:items){auto kind=str(object(native.entry,L"item"),L"kind");navigation|=kind==L"capy"||kind==L"menu"||kind==L"menu_labels";}
         A insets;insets.Append(N(leftInset+(!editing&&!navigation?requestedTile+num(requestedSize,L"item_gap"):0)));insets.Append(N(rightInset));
-        return O({{L"op",S(L"geometry")},{L"model",model},{L"editing",B(editing)},{L"documents",N(count(branch(data->model,L"windows_tabs"),L"tabs"))},{L"width",N(width)},{L"insets",insets},{L"metrics",metrics}});
+        A captionInsets;captionInsets.Append(N(leftInset));captionInsets.Append(N(rightInset));captionInsets.Append(N(captionHeight));
+        return O({{L"op",S(L"geometry")},{L"model",model},{L"editing",B(editing)},{L"documents",N(count(branch(data->model,L"windows_tabs"),L"tabs"))},{L"width",N(width)},{L"insets",insets},{L"caption_insets",captionInsets},{L"metrics",metrics}});
     }
     void reflow(){
         if(!built||applying||root.ActualWidth()<=0)return;
@@ -846,7 +847,15 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             if(end>x)result.push_back({x,0,end-x,int32_t(std::lround(height*scale))});
         };
         for(auto [left,right]:controls){if(left>next)add(next,std::min(left,limit));next=std::max(next,right);}
-        if(next<limit)add(next,limit);return result;
+        if(next<limit)add(next,limit);
+        for(auto value:array(geometry,L"native_drag_regions")){
+            auto bounds=value.GetObject();
+            int32_t x=int32_t(std::ceil(num(bounds,L"x")*scale)),y=int32_t(std::ceil(num(bounds,L"y")*scale));
+            int32_t end=int32_t(std::floor((num(bounds,L"x")+num(bounds,L"width"))*scale));
+            int32_t bottom=int32_t(std::floor((num(bounds,L"y")+num(bounds,L"height"))*scale));
+            if(end>x&&bottom>y)result.push_back({x,y,end-x,bottom-y});
+        }
+        return result;
     }
 };
 HeaderView::HeaderView(Dispatch send,Json catalog,NativeLocalization localization,std::function<void(bool)> popup,std::function<void()> layout,
@@ -858,7 +867,7 @@ HeaderView::~HeaderView()=default;
 void HeaderView::SetCommit(std::function<void(std::string,bool,std::function<void()>)> commit){impl->data->commit=std::move(commit);}
 Grid HeaderView::Root()const{return impl->root;}
 void HeaderView::Apply(Json const& snapshot,CanvasModelChanges const& changes){impl->apply(snapshot,changes);}
-void HeaderView::SetInsets(float left,float right){if(left!=impl->leftInset||right!=impl->rightInset){impl->leftInset=left;impl->rightInset=right;impl->schedule();}}
+void HeaderView::SetInsets(float left,float right,float height){if(left!=impl->leftInset||right!=impl->rightInset||height!=impl->captionHeight){impl->leftInset=left;impl->rightInset=right;impl->captionHeight=height;impl->schedule();}}
 void HeaderView::SetFullscreen(bool active){
     if(active==impl->fullscreenActive)return;
     impl->fullscreenActive=active;
@@ -891,6 +900,7 @@ std::vector<winrt::Windows::Graphics::RectInt32> HeaderView::InputRegions(float 
     int32_t height=int32_t(std::lround(impl->height*scale));
     std::vector<winrt::Windows::Graphics::RectInt32> result;
     for(auto region:caption){
+        if(region.Y!=0||region.Height!=height)continue;
         if(region.X>next)result.push_back({next,0,region.X-next,height});
         next=std::max(next,region.X+region.Width);
     }

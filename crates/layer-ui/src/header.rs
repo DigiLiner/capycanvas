@@ -194,19 +194,28 @@ pub struct HeaderGeometryRequest {
     pub documents:usize,
     pub width:f32,
     pub insets:[f32;2],
+    #[serde(default)]
+    pub caption_insets:[f32;3],
     pub metrics:Vec<HeaderMetric>,
 }
 impl HeaderGeometryRequest {
     pub fn resolve(self)->Result<serde_json::Value,String> {
-        let Self {model,editing,documents,width,insets,metrics}=self;
+        let Self {model,editing,documents,width,insets,caption_insets,metrics}=self;
         model.validate()?;
         let measured=|value:f32|value.is_finite()&&(0.0..1_000_000.0).contains(&value);
-        if !measured(width)||width<=0.||!insets.into_iter().all(measured)||metrics.len()>128
+        if !measured(width)||width<=0.||!insets.into_iter().all(measured)||!caption_insets.into_iter().all(measured)||metrics.len()>128
             ||metrics.iter().enumerate().any(|(index,metric)|!measured(metric.width)||!measured(metric.compact)
                 ||metrics[..index].iter().any(|previous|previous.id==metric.id)) {
             return Err("Invalid title-bar measurements".into());
         }
-        serde_json::to_value(model.resolve_documents(width,insets,&metrics,editing,documents)).map_err(|error|error.to_string())
+        let mut geometry=model.resolve_documents(width,insets,&metrics,editing,documents);
+        let [left,right,caption_height]=caption_insets;
+        if !editing && caption_height>0. && caption_height<model.size.height() {
+            for (x,span) in [(0.,left.min(width)),((width-right).max(0.),right.min(width))] {
+                if span>0. {geometry.native_drag_regions.push(Bounds {x,y:caption_height,width:span,height:model.size.height()-caption_height});}
+            }
+        }
+        serde_json::to_value(geometry).map_err(|error|error.to_string())
     }
 }
 pub fn header_frame(source:&str)->Result<serde_json::Value,String> {
@@ -556,6 +565,7 @@ pub struct HeaderGeometry {
     pub overflow: [Option<Bounds>; 3],
     pub hidden: [Vec<u32>; 3],
     pub bars: Vec<HeaderBar>,
+    pub native_drag_regions: Vec<Bounds>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct HeaderBar {
@@ -1121,15 +1131,35 @@ pub fn header_drag_label(item: &str, localization: &Localizer) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn native_caption_remainder_stays_draggable_at_every_header_size() {
+        for (size,height) in [(HeaderSize::Small,16.),(HeaderSize::Medium,32.),(HeaderSize::Large,48.)] {
+            let mut model=HeaderLayout::default();model.size=size;
+            let mut request=serde_json::json!({"op":"geometry","model":model,"editing":false,"documents":1,
+                "width":960.,"insets":[42.,138.],"caption_insets":[0.,138.,32.],"metrics":[]});
+            let resolve=|request:&serde_json::Value|header_frame(&request.to_string()).unwrap()["native_drag_regions"].clone();
+            let right=serde_json::json!({"x":822.,"y":32.,"width":138.,"height":height});
+            assert_eq!(resolve(&request),serde_json::json!([right]),"{size:?}");
+            request["caption_insets"]=serde_json::json!([54.,138.,32.]);
+            assert_eq!(resolve(&request),serde_json::json!([
+                {"x":0.,"y":32.,"width":54.,"height":height},right]),"{size:?}");
+            for caption_insets in [[0.,138.,0.],[0.,138.,80.],[0.,0.,32.]] {
+                request["caption_insets"]=serde_json::json!(caption_insets);
+                assert_eq!(resolve(&request),serde_json::json!([]),"{size:?} {caption_insets:?}");
+            }
+            request["caption_insets"]=serde_json::json!([0.,138.,32.]);request["editing"]=serde_json::json!(true);
+            assert_eq!(resolve(&request),serde_json::json!([]),"{size:?} editing");
+        }
+    }
+    #[test]
     fn supplied_header_frame_rejects_ambiguous_or_invalid_native_measurements() {
         let layout=HeaderLayout::default();let id=layout.zones[1][0].id;
         let request=serde_json::json!({"op":"geometry","model":layout,"editing":false,"documents":1,
-            "width":960.,"insets":[0.,168.],"metrics":[{"id":id,"width":180.,"compact":80.}]});
+            "width":960.,"insets":[0.,168.],"caption_insets":[0.,168.,32.],"metrics":[{"id":id,"width":180.,"compact":80.}]});
         assert!(header_frame(&request.to_string()).is_ok());
-        for field in ["width","insets","metrics"] {
+        for field in ["width","insets","caption_insets","metrics"] {
             let mut invalid=request.clone();
             invalid[field]=match field {
-                "width"=>serde_json::json!(0.),"insets"=>serde_json::json!([-1.,168.]),
+                "width"=>serde_json::json!(0.),"insets"=>serde_json::json!([-1.,168.]),"caption_insets"=>serde_json::json!([0.,168.,-1.]),
                 _=>serde_json::json!([request["metrics"][0],request["metrics"][0]]),
             };
             assert!(header_frame(&invalid.to_string()).is_err(),"{invalid}");

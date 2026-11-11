@@ -16,7 +16,7 @@ public:
     ~HeaderView();
     winrt::Microsoft::UI::Xaml::Controls::Grid Root()const;
     void Apply(Json const& snapshot,CanvasModelChanges const& changes={true});
-    void SetInsets(float left,float right);
+    void SetInsets(float left,float right,float height);
     void SetFullscreen(bool active);
     void SetBlocked(bool blocked);
     void SetCommit(std::function<void(std::string,bool,std::function<void()>)> commit);
