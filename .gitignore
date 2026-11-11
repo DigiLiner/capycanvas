@@ -72,3 +72,4 @@ presentation-probe-*.json
 ui-state-*.json
 camera-state-*.json
 windows-*.json
+.wrangler/

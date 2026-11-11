@@ -4,6 +4,8 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$root"
 repository=babymastodon/capycanvas
 url=https://flatpak.capycanvas.art
+large_files=capycanvas-downloads/flatpak
+large_files_url=https://downloads.capycanvas.art/flatpak
 config=packaging/flatpak/cloudflare/wrangler.jsonc
 wrangler=(npx --yes wrangler@4.160.0)
 latest=$(gh api "repos/$repository/releases/latest" --jq .tag_name)
@@ -28,8 +30,9 @@ while IFS= read -r -d '' file; do
         echo "Only content-addressed repository files can be served from R2: $path" >&2
         exit 1
     fi
-    "${wrangler[@]}" r2 object put "capycanvas-flatpak/$path" --remote --file "$file" \
+    "${wrangler[@]}" r2 object put "$large_files/$path" --remote --file "$file" \
         --content-type application/octet-stream --cache-control 'public, max-age=31536000, immutable' --config "$config"
+    printf '/%s %s/%s 302\n' "$path" "$large_files_url" "$path" >> "$work/assets/_redirects"
     rm "$file"
 done < <(find "$work/assets" -type f -size +25M -print0)
 "${wrangler[@]}" deploy --config "$config"

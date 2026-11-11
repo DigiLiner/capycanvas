@@ -609,9 +609,11 @@ The repository archive contains the OSTree objects and metadata needed to serve
 updates. The bundle and reference alone cannot supply a Flatpak repository.
 When a GitHub Release is published, `.github/workflows/published.yml` runs
 `packaging/flatpak/publish.sh`, which downloads its repository archive, checks it against `SHA256SUMS`, writes the hosted
-`capycanvas.flatpakref` and deploys the Worker `capycanvas-flatpak` from
+`capycanvas.flatpakref` and deploys the static Worker `capycanvas-flatpak` from
 `packaging/flatpak/cloudflare/`. Files over Cloudflare's 25 MiB static-asset
-limit go to the R2 bucket `capycanvas-flatpak`. Only the latest published release
+limit go to `https://downloads.capycanvas.art/flatpak/<path>` in the R2 bucket
+`capycanvas-downloads`, and `_redirects` sends their repository paths there;
+Flatpak follows the redirect. Only the latest published release
 that is neither a draft nor a prerelease can deploy, so an older release cannot
 replace the update source. Installations from 1.0.15 or earlier recorded
 `https://capyatelier.github.io/capycanvas/flatpak`; they update again after
