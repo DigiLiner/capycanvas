@@ -848,11 +848,11 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         };
         for(auto [left,right]:controls){if(left>next)add(next,std::min(left,limit));next=std::max(next,right);}
         if(next<limit)add(next,limit);
+        auto pixel=[scale](double value){return int32_t(std::lround(value*scale));};
         for(auto value:array(geometry,L"native_drag_regions")){
             auto bounds=value.GetObject();
-            int32_t x=int32_t(std::ceil(num(bounds,L"x")*scale)),y=int32_t(std::ceil(num(bounds,L"y")*scale));
-            int32_t end=int32_t(std::floor((num(bounds,L"x")+num(bounds,L"width"))*scale));
-            int32_t bottom=int32_t(std::floor((num(bounds,L"y")+num(bounds,L"height"))*scale));
+            int32_t x=pixel(num(bounds,L"x")),y=pixel(num(bounds,L"y"));
+            int32_t end=pixel(num(bounds,L"x")+num(bounds,L"width")),bottom=pixel(num(bounds,L"y")+num(bounds,L"height"));
             if(end>x&&bottom>y)result.push_back({x,y,end-x,bottom-y});
         }
         return result;

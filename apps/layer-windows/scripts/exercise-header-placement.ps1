@@ -48,7 +48,7 @@ function Caption-Sample([string]$phase){
     $after=$bar.Current.ItemStatus;$current=Model
     if($before-cne$after-or$modelKey-cne(Header-Key $current)){return $null}
     $width=[int][math]::Round($origin.Width,[MidpointRounding]::AwayFromZero)
-    $expected=@(Get-HeaderCaptionOracle -ActualItems $actual -Entries @($model.header.model.zones|ForEach-Object {$_}) -Overflow $overflow -Recovery $recovery -Zen $zen -SingleDocument (@($model.windows_tabs.tabs).Count-lt2) -Editing ([bool]$p.editing) -LeftInset $model.titlebar_insets[0] -RightInset $model.titlebar_insets[1] -Height $p.height -Scale $scale -Width $width)
+    $expected=@(Get-HeaderCaptionOracle -ActualItems $actual -Entries @($model.header.model.zones|ForEach-Object {$_}) -Overflow $overflow -Recovery $recovery -Zen $zen -SingleDocument (@($model.windows_tabs.tabs).Count-lt2) -Editing ([bool]$p.editing) -LeftInset $model.titlebar_insets[0] -RightInset $model.titlebar_insets[1] -CaptionHeight $model.titlebar_insets[2] -Height $p.height -Scale $scale -Width $width)
     $sample=@{phase=$phase;expected=$expected;actual=$p.caption_regions;header=$p;model_key=$modelKey;overflow=$overflow;recovery=$recovery;zen=$zen;scale=$scale;origin=$origin;uia_origin=$uiaOrigin;width=$width;insets=$model.titlebar_insets;pass=((Region-Key $expected)-ceq(Region-Key $p.caption_regions))}
     $samples.Add($sample);$sample
 }
@@ -71,8 +71,9 @@ function Capy-Check([string]$phase){
     Check ($button.Current.Name-eq$model.header.capy.label-and$button.Current.IsEnabled-eq[bool]$model.header.capy.enabled-and[math]::Abs($bounds.Width-$spec.tile*$scale)-le1-and$image-and[math]::Abs($image.Current.BoundingRectangle.Width-$glyphWidth)-le1-and[math]::Abs($image.Current.BoundingRectangle.Height-$glyphHeight)-le1) ($phase+' Capy command, name, button and icon size') @{button=$bounds;image=if($image){$image.Current.BoundingRectangle}else{$null};spec=$spec;name=$button.Current.Name;enabled=$button.Current.IsEnabled;expected_glyph=@($glyphWidth,$glyphHeight)}
 }
 function Get-HeaderCaptionOracle {
-    param($ActualItems,$Entries,$Overflow,$Recovery,$Zen,[bool]$SingleDocument,[bool]$Editing,[double]$LeftInset,[double]$RightInset,[double]$Height,[double]$Scale,[int]$Width)
+    param($ActualItems,$Entries,$Overflow,$Recovery,$Zen,[bool]$SingleDocument,[bool]$Editing,[double]$LeftInset,[double]$RightInset,[double]$CaptionHeight,[double]$Height,[double]$Scale,[int]$Width)
     if($Editing){return @()}
+    $bottom=[int][math]::Round([single]([single]$Height*[single]$Scale),[MidpointRounding]::AwayFromZero);$top=[int][math]::Round($CaptionHeight*$Scale,[MidpointRounding]::AwayFromZero)
     $controls=[Collections.Generic.List[object]]::new()
     foreach($item in $ActualItems){
         $entry=@($Entries|Where-Object id -eq $item.id)[0]
@@ -90,13 +91,17 @@ function Get-HeaderCaptionOracle {
     foreach($control in @($controls|Sort-Object @{Expression={[double]$_.left}},@{Expression={[double]$_.right}})){
         if($control.left-gt$next){
             $x=[int][math]::Ceiling([single]([single]$next*[single]$Scale));$end=[int][math]::Floor([single]([single][math]::Min($control.left,$limit)*[single]$Scale))
-            if($end-gt$x){$result.Add(@{x=$x;y=0;width=$end-$x;height=[int][math]::Round([single]([single]$Height*[single]$Scale),[MidpointRounding]::AwayFromZero)})}
+            if($end-gt$x){$result.Add(@{x=$x;y=0;width=$end-$x;height=$bottom})}
         }
         $next=[math]::Max($next,$control.right)
     }
     if($next-lt$limit){
         $x=[int][math]::Ceiling([single]([single]$next*[single]$Scale));$end=[int][math]::Floor([single]([single]$limit*[single]$Scale))
-        if($end-gt$x){$result.Add(@{x=$x;y=0;width=$end-$x;height=[int][math]::Round([single]([single]$Height*[single]$Scale),[MidpointRounding]::AwayFromZero)})}
+        if($end-gt$x){$result.Add(@{x=$x;y=0;width=$end-$x;height=$bottom})}
+    }
+    if($CaptionHeight-gt0-and$CaptionHeight-lt$Height){
+        $left=[math]::Min($Width,[int][math]::Round($LeftInset*$Scale,[MidpointRounding]::AwayFromZero));$right=[math]::Max(0,$Width-[int][math]::Round($RightInset*$Scale,[MidpointRounding]::AwayFromZero))
+        foreach($span in @(@(0,$left),@($right,$Width))){if($span[1]-gt$span[0]-and$bottom-gt$top){$result.Add(@{x=$span[0];y=$top;width=$span[1]-$span[0];height=$bottom-$top})}}
     }
     @($result.ToArray())
 }
