@@ -8,6 +8,7 @@
 #include "StampPreview.h"
 #include "WorkspaceShadow.h"
 #include "PointerGesture.h"
+#include "PressRepeat.h"
 #include "ColorTouch.h"
 #include <chrono>
 #include <set>
@@ -170,7 +171,7 @@ struct WorkspaceBubbles::Impl:std::enable_shared_from_this<WorkspaceBubbles::Imp
     bool busy=false,active=false,stroke=false,releasing=false,disposed=false,hovering=false;
     bool pointerPen=false,pointerHidden=false;
     double restoreAt=-1;
-    std::optional<std::tuple<uint32_t,uint64_t,CapyUi::Point>> lastRing;
+    CapyUi::PressRepeat lastRing;
     CapyUi::ColorTouches colorTouches;
     ~Impl();
     void init();

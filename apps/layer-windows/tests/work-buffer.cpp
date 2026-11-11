@@ -9,6 +9,7 @@
 #include "../PointerModality.h"
 #include "../ThumbnailOwners.h"
 #include "../PointerScrub.h"
+#include "../PressRepeat.h"
 #include <limits>
 #include "../CanvasQueryQueue.h"
 #include "../CanvasLatencyTrace.h"
@@ -440,6 +441,18 @@ int main() {
         assert((values==std::vector<double>{251,195,255}));
     }
     std::cout<<"Stationary and generated pointer updates cannot reapply a scrub with new modifiers\n";
+
+    {
+        CapyUi::PressRepeat press;CapyUi::PressRepeat::Limits limits{500000,8};
+        assert(!press.Next(limits,1000000,0,-12));
+        assert(!press.Next(limits,1200000,-12,0));
+        assert(press.Next(limits,1300000,-10,3));
+        assert(!press.Next(limits,1400000,-10,3));
+        assert(!press.Next(limits,2000000,0,0,1)&&!press.Next(limits,2100000,0,0,2)&&press.Next(limits,2200000,1,1,2));
+        assert(!press.Next(limits,3000000,0,0)&&!press.Next(limits,3500001,0,0));
+        press.Reset();assert(!press.Next(limits,3600000,0,0));
+    }
+    std::cout<<"Double presses need the second press within the double-click time and rectangle of the first\n";
 
     for(uint32_t phase=0;phase<=4;++phase) {
         assert(CanvasPointerPhase(phase,false)==phase);

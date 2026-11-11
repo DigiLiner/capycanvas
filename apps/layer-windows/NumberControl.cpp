@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "PickerDialog.h"
 #include "PointerGesture.h"
+#include "PressRepeat.h"
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Provider.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
@@ -393,9 +394,9 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,ControlSurface surf
             dialRange->value=[local]{return local->value;};
             dialRange->text=[local,spec]{return str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),L"text");};
             dialRange->apply=[local,commit,turn](J const& operation){if(!local->dragging&&commit(false))turn(operation);};
-            auto pressed=std::make_shared<uint64_t>();
+            auto pressed=std::make_shared<PressRepeat>();
             auto dialCapture=captureControl(data,dialView,[local,restore,turn,point,finish,pressed,identity=presentation.identity](uint32_t,bool cancel,PointerRoutedEventArgs const* event){
-                if(cancel||(identity&&local->identity!=identity())){*pressed=0;restore();return;}
+                if(cancel||(identity&&local->identity!=identity())){pressed->Reset();restore();return;}
                 if(event)turn(point(*event));++local->contactGeneration;local->dragging=false;local->turning=false;
                 finish(L"up");if(event)event->Handled(true);
             });captures->push_back(dialCapture);
@@ -404,8 +405,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,ControlSurface surf
                 auto view=dialWeak.get();if(!view||local->dragging||!view.IsEnabled())return;
                 auto contact=e.GetCurrentPoint(view);
                 if(!PointerGesture::PrimaryContact(contact))return;
-                bool repeated=contact.Timestamp()-std::exchange(*pressed,contact.Timestamp())<=uint64_t(GetDoubleClickTime())*1000;
-                if(repeated){*pressed=0;view.Focus(FocusState::Pointer);resetValue();e.Handled(true);return;}
+                auto at=contact.Position();
+                if(pressed->Next(PressRepeat::System(view.XamlRoot().RasterizationScale()),contact.Timestamp(),at.X,at.Y)){view.Focus(FocusState::Pointer);resetValue();e.Handled(true);return;}
                 finish(L"up");if(!commit(false)||!dialCapture->Begin(e))return;
                 view.Focus(FocusState::Pointer);
                 local->origin=local->value;local->dragging=true;local->turning=true;
