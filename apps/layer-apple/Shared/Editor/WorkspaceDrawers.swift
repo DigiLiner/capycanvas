@@ -178,9 +178,9 @@ private struct WorkspaceContentDrawer: View {
     }
     private func columns(_ placement: JSON, together: Bool) -> some View {
         ZStack(alignment: .topLeading) {
-            ForEach(0..<min(placement["columns"].array.count, drawer.model["columns"].array.count), id: \.self) { index in
-                let bounds = placement["columns"][index]
-                Group {
+            ForEach(drawer.model["columns"].array.indices, id: \.self) { index in
+                let bounds = placement["columns"][index].isNull ? drawer.measurement["measure"]["placement"]["columns"][index] : placement["columns"][index]
+                if !bounds.isNull {
                     if together {
                         column(index, bounds: bounds, placement: placement, together: true)
                             .frame(width: bounds.rect.width).offset(x: bounds.rect.minX, y: bounds.rect.minY)

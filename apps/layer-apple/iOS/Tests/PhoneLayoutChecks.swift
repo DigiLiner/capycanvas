@@ -504,6 +504,13 @@ extension EditorLaunchTests {
         app.textFields["number-entry-tool-size"].typeText("\n")
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10))
         unchangedBars()
+        let color = try XCTUnwrap(phoneObservedTools(in: app)?.first(where: { ($0["control"] as? [String: Any])?["kind"] as? String == "color" })?["id"] as? Int)
+        workspaceActivate(app.buttons["phone-tool-\(color)"])
+        for id in ["drawer-panel-color", "drawer-panel-palettes"] {
+            XCTAssertTrue(app.descendants(matching: .any)[id].firstMatch.waitForExistence(timeout: 10), "Tool Settings retargets to Color with \(id)")
+        }
+        workspaceActivate(app.buttons["phone-tool-settings"])
+        XCTAssertTrue(app.descendants(matching: .any)["drawer-panel-tool_settings"].firstMatch.waitForExistence(timeout: 10))
         workspaceActivate(app.buttons["phone-tool-settings"])
         XCTAssertTrue(app.descendants(matching: .any)["tool-drawer"].firstMatch.waitForNonExistence(timeout: 10))
         phoneAlertCommand("File", label: "New…", in: app)
