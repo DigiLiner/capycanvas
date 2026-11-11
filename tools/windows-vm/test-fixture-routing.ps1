@@ -1,8 +1,9 @@
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'session-identity.ps1')
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'run-fixtures.ps1'),[ref]$tokens,[ref]$errors)
 if(@($errors).Count){throw ($errors|Out-String)}
-foreach($name in 'Get-FixtureProcessArguments','Write-FixturePlan','Get-NextFixture','Select-Fixtures','Control-Fixture','Reviews','Get-FixtureTimeoutSeconds','Get-FixtureVariantArguments','Get-FixtureCompanionArguments','Write-FixtureResult','ConvertTo-FixtureCommandLine','Save-Evidence','Assert-FixtureFiles','Build-ControlFixture'){
+foreach($name in 'Get-FixtureGraphicsFailure','Write-FixtureSessionRecord','Write-FixtureGraphicsWithdrawal','Wait-FixtureGraphicsEvidence','Get-FixtureProcessArguments','Write-FixturePlan','Get-NextFixture','Select-Fixtures','Control-Fixture','Reviews','Get-FixtureTimeoutSeconds','Get-FixtureVariantArguments','Get-FixtureCompanionArguments','Write-FixtureResult','ConvertTo-FixtureCommandLine','Save-Evidence','Assert-FixtureFiles','Build-ControlFixture'){
     $function=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$false)
     . ([scriptblock]::Create($function.Extent.Text))
 }
@@ -20,6 +21,55 @@ foreach($name in 'Get-FixtureProcessArguments','Write-FixturePlan','Get-NextFixt
     Invoke-Expression $routed[1]
     $launch=$ast.Find({param($node)$node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$arguments' -and $node.Right.Extent.Text -like '*Get-FixtureProcessArguments*'},$true)
     if(!$launch){throw 'Fixture launch bypasses desktop routing'}
+}
+& {
+    foreach($value in 'MILERR_NO_HARDWARE_DEVICE','0x8898008D','2291662989','-2003304307'){
+        if((Get-FixtureGraphicsFailure $value '') -cne 'MILERR_NO_HARDWARE_DEVICE' -or (Get-FixtureGraphicsFailure 1 ("Owned review exited with code ${value}: Review did not start")) -cne 'MILERR_NO_HARDWARE_DEVICE'){throw "Graphics withdrawal missed $value in an exit or nested fixture error"}
+    }
+    foreach($message in 'DXGI_ERROR_DEVICE_REMOVED','MILERR_NO_HARDWARE_DEVICE -2003304307','0x887A0006 2289696775'){if(Get-FixtureGraphicsFailure 0 $message){throw 'A passing row logged a handled graphics failure and was withdrawn'}}
+    foreach($message in 'DeviceLost','Unknown GPU failure','122916629890','0x8898008D0','NOT_DXGI_ERROR_DEVICE_RESET','MILERR_NO_HARDWARE_DEVICE_EXTRA'){
+        if(Get-FixtureGraphicsFailure 1 $message){throw "Graphics withdrawal classified an unrelated error: $message"}
+    }
+    if((Get-FixtureGraphicsFailure 1 'failure 0x008898008d') -cne 'MILERR_NO_HARDWARE_DEVICE'){throw 'Padded lowercase HRESULT was not classified'}
+    $directory=Join-Path ([IO.Path]::GetTempPath()) ('capy-graphics-withdrawal-'+[Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($directory)|Out-Null
+    $TimeoutMinutes=20;$HardwareGpu=$true
+    function Get-CapySessionIdentity{@{account='HOST\capy04';session_id=42;logon_sid='S-1-5-5-2-3';boot_utc='2026-11-11T09:00:00.0000000Z'}}
+    try{
+        Write-FixturePlan (Join-Path $directory 'plan.json') @('first')
+        $result=@{name='first';exit='evidence';message='Owned review exited with code -2003304307: Review did not start';infrastructure_cause='MILERR_NO_HARDWARE_DEVICE'}
+        $identity=Get-CapySessionIdentity
+        Write-FixtureGraphicsWithdrawal $directory $result $identity
+        $request=[IO.File]::ReadAllText((Join-Path $directory 'graphics-withdrawal.json'))|ConvertFrom-Json
+        if($request.name -cne $result.name -or $request.exit -cne $result.exit -or $request.error -cne $result.message -or $request.cause -cne $result.infrastructure_cause){throw 'Atomic graphics withdrawal lost the original fixture result'}
+        if($request.account -cne 'HOST\capy04' -or $request.session_id -ne 42 -or $request.logon_sid -cne 'S-1-5-5-2-3' -or $request.boot_utc -cne '2026-11-11T09:00:00.0000000Z' -or !$request.time_utc){throw 'Graphics withdrawal lost its worker boot/account/logon identity'}
+        if(Test-Path -LiteralPath (Join-Path $directory 'graphics-withdrawal.json.tmp')){throw 'Graphics withdrawal left an unpublished temporary request'}
+        Write-FixtureSessionRecord $directory 'graphics-identity.json' $identity
+        $header=[IO.File]::ReadAllText((Join-Path $directory 'graphics-identity.json'))|ConvertFrom-Json
+        if($header.account -cne $identity.account -or $header.session_id -ne $identity.session_id -or $header.logon_sid -cne $identity.logon_sid -or $header.boot_utc -cne $identity.boot_utc){throw 'Shared worker header lost the identity reused for withdrawal'}
+        foreach($entry in $identity.GetEnumerator()){if($entry.Key -in 'name','exit','cause','error','time_utc'){throw 'Withdrawal mutated the cached worker identity'}}
+        $startup=@($ast.EndBlock.Statements|Where-Object {$_.Extent.Text.StartsWith('$fixtureSessionIdentity=') -or $_.Extent.Text.StartsWith('if($fixtureSessionIdentity)')})
+        if($startup.Count -ne 2 -or @($startup|Where-Object {$_.Extent.Text.Contains('Get-CapySessionIdentity')}).Count -ne 1){throw 'Shared identity is not captured and published once outside the fixture loop'}
+    }finally{Remove-Item -LiteralPath $directory -Recurse -Force}
+}
+& {
+    $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-FixtureGraphicsEvidence'},$false)
+    . ([scriptblock]::Create($definition.Extent.Text.Replace('[Diagnostics.Stopwatch]::StartNew()','$script:watch')))
+    function Test-Path($LiteralPath){$script:acknowledged}
+    function Start-Sleep($Milliseconds){
+        if($Milliseconds -lt 0 -or $Milliseconds -gt 1000){throw 'Graphics evidence wait exceeded its bounded polling interval'}
+        $script:watch.ElapsedMilliseconds=360000
+    }
+    function Write-FixtureSessionRecord($Directory,$Name,$Record){
+        if($Name -cne 'graphics-evidence-wait.json'){throw 'Graphics barrier lost its wait receipt'}
+        $script:waitReceipt=$Record
+    }
+    foreach($acknowledged in @($true,$false)){
+        $script:acknowledged=$acknowledged;$script:watch=[pscustomobject]@{ElapsedMilliseconds=0};$script:waitReceipt=$null
+        Wait-FixtureGraphicsEvidence 'C:\owned'
+        if(!$script:waitReceipt.started_utc -or !$script:waitReceipt.completed_utc -or $script:waitReceipt.timeout_seconds -ne 360 -or $script:waitReceipt.timeout -ne !$acknowledged){throw 'Graphics evidence barrier lost its bounded acknowledgement or timeout outcome'}
+        if(!$acknowledged -and $script:watch.ElapsedMilliseconds -ne 360000){throw 'Missing graphics evidence acknowledgement did not reach the bounded timeout'}
+    }
 }
 & {
     $helper=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../../apps/layer-windows/scripts/test-desktop.ps1'),[ref]$tokens,[ref]$errors)
@@ -93,7 +143,7 @@ foreach($name in 'Get-FixtureProcessArguments','Write-FixturePlan','Get-NextFixt
     $directory=Join-Path ([IO.Path]::GetTempPath()) ('capy-fixture-evidence-'+[guid]::NewGuid().ToString('N'))
     $HardwareGpu=$false
     function Reviews{$process=[pscustomobject]@{Id=42};$process|Add-Member ScriptMethod Dispose {};$process}
-    function Stop-Review{}
+    function Stop-Review{$script:evidenceStops++}
     function Get-ChildItem($LiteralPath,[switch]$File){
         $files=@(Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -File:$File)
         if(!$publication.done){
@@ -104,7 +154,7 @@ foreach($name in 'Get-FixtureProcessArguments','Write-FixturePlan','Get-NextFixt
         $files
     }
     try{
-        foreach($mode in 'rename','unpublished','missing-final'){
+        foreach($mode in 'rename','unpublished','preserve','missing-final'){
             $trace=Join-Path $directory $mode
             [IO.Directory]::CreateDirectory($trace)|Out-Null
             $Executable=Join-Path $trace 'CapyCanvas.exe';$log=Join-Path $directory $mode
@@ -122,7 +172,9 @@ foreach($name in 'Get-FixtureProcessArguments','Write-FixturePlan','Get-NextFixt
             if($mode -eq 'rename'){[IO.File]::WriteAllText($final,'{"complete":false}')}
             foreach($name in 'ui-state-410-7.json','latency-43.csv'){[IO.File]::WriteAllText((Join-Path $trace $name),'foreign owner')}
             $publication=@{mode=$mode;done=$false};$failure=$null
-            try{Save-Evidence $log}catch{$failure=$_}
+            $script:evidenceStops=0
+            try{Save-Evidence $log -PreserveReviews:($mode -eq 'preserve')}catch{$failure=$_}
+            if($script:evidenceStops -ne $(if($mode -in 'preserve','missing-final'){0}else{1})){throw 'Evidence stopped a preserved review or failed ordinary review cleanup'}
             if($mode -eq 'missing-final'){
                 if(!$failure -or $failure.CategoryInfo.Category -ne 'ObjectNotFound' -or $failure.Exception.Message -notlike '*presentation-state-41-7.json*'){throw 'A disappearing final trace must fail evidence collection'}
                 continue
@@ -582,6 +634,70 @@ try{
                 if($failure -notlike 'Session retired after timeout:*' -or $script:rowResults.Count -ne 1 -or $script:rowResults[0].message -notlike '*Session retired after timeout:*'){throw 'Lingering review did not write its timeout result and retirement reason before stopping'}
                 if($script:events[-1] -ne 'result'){throw 'Retired session touched the queue after writing its result'}
             }elseif($failure -or $script:claims -ne 3 -or $script:rowResults.Count -ne 2 -or $script:rowResults[1].exit -ne 0){throw 'An exited review did not let the next selector run once'}
+        }
+    }
+    & {
+        function Get-NextFixture($Planned,$Queue,$Claimed){$script:events.Add('claim');$script:claims++;if($script:claims -le 2){'fixture'}}
+        function Get-Content{if($script:graphicsText){$script:graphicsText}}
+        function Start-Process{
+            $script:events.Add('child')
+            $child=[pscustomobject]@{Id=123;Handle=1;PriorityClass='Normal';ExitCode=$script:graphicsExit}
+            $child|Add-Member ScriptMethod WaitForExit {param($timeout)$true};$child
+        }
+        function Save-Evidence($Log,$Renders,[switch]$PreserveReviews){
+            $script:events.Add('evidence');$script:preserved=$PreserveReviews.IsPresent
+            if($script:evidenceFails){throw 'Hardware fixture runtime scale differs from the round display'}
+        }
+        function Write-FixtureResult($Path,$Json){$script:events.Add('result');$script:rowResults.Add(($Json|ConvertFrom-Json))}
+        function Write-FixtureGraphicsWithdrawal($Directory,$Result,$Identity){$script:events.Add('withdrawal');$script:withdrawal=$Result}
+        function Wait-FixtureGraphicsEvidence($Directory){$script:events.Add('barrier')}
+        foreach($case in @(
+            @{exit=-2003304307;text='';cause='MILERR_NO_HARDWARE_DEVICE'},
+            @{exit=-2005270523;text='';cause=$null},
+            @{exit=-2005270522;text='';cause=$null},
+            @{exit=-2005270521;text='';cause=$null},
+            @{exit=1;text='Owned review exited with code 2289696773: failed';cause=$null},
+            @{exit=1;text='DXGI_ERROR_DEVICE_RESET';cause=$null},
+            @{exit=1;text='Error 0x887A0006';cause=$null},
+            @{exit=1;text='ordinary assertion';cause=$null},
+            @{exit=0;text='Handled DXGI_ERROR_DEVICE_REMOVED and MILERR_NO_HARDWARE_DEVICE';cause=$null}
+        )){
+          foreach($shared in @($false,$true)){
+            foreach($evidenceFails in @($false,$true)){
+                $SharedSession=$shared;$script:graphicsExit=$case.exit;$script:graphicsText=$case.text;$script:evidenceFails=$evidenceFails
+                $script:scale=[pscustomobject]@{exists=$false;kind=$null;value=$null};$script:runtimeScale=1.0
+                $script:mode='unchanged';$script:restoreFails=$false;$script:readFails=$false;$script:pendingReads=0
+                $script:events=[Collections.Generic.List[string]]::new();$script:claims=0;$script:reads=0
+                $script:rowResults=[Collections.Generic.List[object]]::new();$script:withdrawal=$null;$script:preserved=$false
+                & $execute
+                $withdraw=$shared -and $case.cause
+                if($script:claims -ne $(if($withdraw){1}else{3}) -or $script:rowResults.Count -ne $(if($withdraw){1}else{2})){throw "Graphics classification changed queue progress: exit=$($case.exit), message=$($case.text), shared=$shared, cause=$($case.cause), claims=$($script:claims), rows=$($script:rowResults.Count)"}
+                $row=$script:rowResults[0]
+                if($row.exit -cne $(if($evidenceFails -and !$case.cause){'evidence'}else{$case.exit}) -or $row.message -cne ($case.text+$(if($evidenceFails){' Hardware fixture runtime scale differs from the round display'}else{''}))){throw 'Graphics failure changed the original row exit or error evidence'}
+                if($case.cause){
+                    if(!$row.infrastructure_invalid -or $row.infrastructure_cause -cne $case.cause){throw 'Graphics failure lost its infrastructure-invalid result when evidence collection failed'}
+                }elseif($row.infrastructure_invalid -or $row.infrastructure_cause){throw 'An ordinary assertion was marked infrastructure-invalid'}
+                if([bool]$script:withdrawal -ne [bool]$withdraw -or $script:preserved -ne [bool]$withdraw){throw 'Withdrawal or live review preservation escaped the failing shared worker'}
+                if($withdraw -and ((($script:events|Where-Object {$_ -ne 'read'}) -join ',') -cne 'claim,child,evidence,result,withdrawal,barrier' -or $script:withdrawal.name -cne $row.name)){throw 'Withdrawal did not follow exactly one result before the next claim'}
+            }
+          }
+        }
+        foreach($case in @(
+            @('DXGI_ERROR_DEVICE_REMOVED','0x887A0005','2289696773','-2005270523'),
+            @('DXGI_ERROR_DEVICE_HUNG','0x887A0006','2289696774','-2005270522'),
+            @('DXGI_ERROR_DEVICE_RESET','0x887A0007','2289696775','-2005270521')
+        )){
+            foreach($value in $case){
+                if((Get-FixtureGraphicsFailure $value '') -or (Get-FixtureGraphicsFailure 1 ("Owned review exited with code ${value}: failed"))){throw "Product graphics failure was classified as infrastructure: $value"}
+            }
+        }
+        $tail=@($ast.EndBlock.Statements|Where-Object {$_.Extent.StartOffset -gt $loop.Extent.EndOffset})
+        function Stop-Review{$script:events.Add('stop')}
+        function Set-Content($Path,$Value){$script:events.Add('complete')}
+        foreach($bad in @($false,$true)){
+            $SharedSession=$true;$graphicsCause=if($bad){'MILERR_NO_HARDWARE_DEVICE'}else{$null};$script:events=[Collections.Generic.List[string]]::new()
+            . ([scriptblock]::Create(($tail.Extent.Text -join "`n")))
+            if(($script:events -join ',') -cne 'stop,complete'){throw 'Withdrawal lost cleanup after its evidence barrier or lost its completion marker'}
         }
     }
     foreach($leaked in 150,130){
@@ -1249,3 +1365,5 @@ public static class CapyReviewOwnershipTest {
         if($failure -ne 'Hardware fixture runtime scale differs from the round display'){throw 'A helper-only row supplied editor scale evidence'}
     }finally{Remove-Item -LiteralPath $directory -Recurse -Force}
 }
+
+& (Join-Path $PSScriptRoot 'test-session-graphics.ps1')

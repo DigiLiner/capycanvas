@@ -1617,11 +1617,54 @@ def host_alive(machine):
     return False
 
 
+def write_session_health(machine, name, value):
+    directory = machine.runtime / "session-health"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = directory / (name + ".json")
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(value))
+    temporary.replace(path)
+
+
+def initialize_session_health(machine):
+    result = guest(machine, "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')",
+                   stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    boot = result.stdout.strip()
+    if not boot:
+        raise RuntimeError("The shared guest boot identity is unavailable")
+    directory = machine.runtime / "session-health"
+    try:
+        previous = json.loads((directory / "boot.json").read_text())
+    except (OSError, ValueError):
+        previous = None
+    if previous != boot:
+        for account in shared_accounts():
+            (directory / (account + ".json")).unlink(missing_ok=True)
+    write_session_health(machine, "boot", boot)
+
+
+def withdrawn_accounts(machine):
+    directory = machine.runtime / "session-health"
+    return {account for account in shared_accounts() if (directory / (account + ".json")).exists()}
+
+
+def session_evidence_pending(machine):
+    for account in withdrawn_accounts(machine):
+        try:
+            value = json.loads((machine.runtime / "session-health" / (account + ".json")).read_text())
+            if value.get("evidence_state") == "pending" and value["evidence_deadline"] > time.time():
+                return True
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return False
+
+
 def ready_accounts(machine):
     if not host_alive(machine):
         return []
     try:
-        return json.loads((machine.runtime / "sessions.json").read_text())
+        return [account for account in json.loads((machine.runtime / "sessions.json").read_text())
+                if account not in withdrawn_accounts(machine)]
     except (OSError, ValueError):
         return []
 
@@ -1764,6 +1807,7 @@ def shared_host(args):
         if fresh:
             fixture_memory_admission(machine.runtime, "shared-vm", [settings["cpu_slots"] * cpu_pool.configuration(STATE)["runner_memory_gib"]])
         boot(machine, gui=False, gpu="auto")
+        initialize_session_health(machine)
         if fresh:
             guest(machine, f"Get-ChildItem {SHARED_ROOT} -ErrorAction SilentlyContinue|Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
                   stdin=subprocess.DEVNULL)
@@ -1787,9 +1831,9 @@ def shared_host(args):
                 shells = None
             if shells is not None:
                 temporary = record.with_suffix(".tmp")
-                temporary.write_text(json.dumps([account for account in accounts if account in shells]))
+                temporary.write_text(json.dumps([account for account in accounts if account in shells and account not in withdrawn_accounts(machine)]))
                 temporary.replace(record)
-            if pool.holders(machine.name, accounts):
+            if pool.holders(machine.name, accounts) or session_evidence_pending(machine):
                 idle_since = time.monotonic()
             elif time.monotonic() - idle_since >= settings["idle_minutes"] * 60:
                 with pool.closed(machine.name, accounts) as closed:
@@ -1827,6 +1871,9 @@ class SharedSession:
         self.results = []
         self.progress = time.monotonic()
         self.evidence = None
+        self.graphics_withdrawal = None
+        self.graphics_identity = None
+        self.last_passed = None
 
 
 def session_status_command(sessions):
@@ -1844,7 +1891,7 @@ $rows=@{}
 foreach($row in @(""" + rows + r""")){
     $state=[string](Get-ScheduledTask $row.task).State
     $complete=Test-Path "$($row.output)\complete"
-    $rows[$row.id]=@{state=$state;complete=$complete;log=Read-FixtureText "$($row.output)\results.jsonl";error=Read-FixtureText "$($row.output)\runner-error.txt"}
+    $rows[$row.id]=@{state=$state;complete=$complete;log=Read-FixtureText "$($row.output)\results.jsonl";error=Read-FixtureText "$($row.output)\runner-error.txt";graphics_withdrawal=Read-FixtureText "$($row.output)\graphics-withdrawal.json";graphics_identity=Read-FixtureText "$($row.output)\graphics-identity.json"}
 }
 ConvertTo-Json -InputObject $rows -Depth 4 -Compress
 """
@@ -1958,30 +2005,63 @@ if((Test-Path -LiteralPath '{session.root}\\output') -and (Test-Path -LiteralPat
         for session in self.sessions:
             if session.started and session.started.done() and not session.started.exception() and not session.closing:
                 groups.setdefault(session.machine.name, (session.machine, []))[1].append(session)
-        for machine, group in groups.values():
-            try:
-                result = guest(machine, session_status_command(group), stdin=subprocess.DEVNULL,
-                               capture_output=True, text=True, timeout=120)
-                statuses = json.loads(result.stdout)
-                self.poll_failures[machine.name] = 0
-            except (subprocess.SubprocessError, ValueError, OSError) as error:
-                self.poll_failures[machine.name] = self.poll_failures.get(machine.name, 0) + 1
-                if self.poll_failures[machine.name] >= 30 or not running(machine):
-                    for session in group:
-                        self.fail_session(session, f"lost contact with {machine.name}: {error}")
-                        session.closing = executor.submit(self.close_session, session)
-                continue
+        if not groups:
+            return
+        completed = []
+        with ThreadPoolExecutor(max_workers=len(groups)) as queries:
+            pending = [(machine, group, queries.submit(guest, machine, session_status_command(group),
+                        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120))
+                       for machine, group in groups.values()]
+            for machine, group, future in pending:
+                try:
+                    result = future.result()
+                    statuses = json.loads(result.stdout)
+                    self.poll_failures[machine.name] = 0
+                except (subprocess.SubprocessError, ValueError, OSError) as error:
+                    self.poll_failures[machine.name] = self.poll_failures.get(machine.name, 0) + 1
+                    if self.poll_failures[machine.name] >= 30 or not running(machine):
+                        for session in group:
+                            self.fail_session(session, f"lost contact with {machine.name}: {error}")
+                            session.closing = executor.submit(self.close_session, session)
+                    continue
+                for session in group:
+                    status = statuses[session.id]
+                    rows = (status["log"] or "").splitlines()
+                    for line in rows[len(session.results):]:
+                        try:
+                            result = json.loads(line)
+                        except ValueError:
+                            break
+                        session.results.append(result)
+                        session.progress = time.monotonic()
+                        if result["exit"] == 0:
+                            session.last_passed = dict(result, observed_utc=time.time())
+                        verdict = "infrastructure-invalid" if result.get("infrastructure_invalid") else "pass" if result["exit"] == 0 else "FAIL"
+                        print(f"{verdict} {result['seconds']:5.0f}s {result['name']} [{session.id}]", flush=True)
+                    identity = status.get("graphics_identity")
+                    if identity:
+                        session.graphics_identity = json.loads(identity)
+                completed.append((group, statuses))
+        withdrawals = []
+        for group, statuses in completed:
             for session in group:
                 status = statuses[session.id]
-                rows = (status["log"] or "").splitlines()
-                for line in rows[len(session.results):]:
-                    try:
-                        result = json.loads(line)
-                    except ValueError:
-                        break
-                    session.results.append(result)
-                    session.progress = time.monotonic()
-                    print(f"{'pass' if result['exit'] == 0 else 'FAIL'} {result['seconds']:5.0f}s {result['name']} [{session.id}]", flush=True)
+                withdrawal = json.loads(status["graphics_withdrawal"]) if status.get("graphics_withdrawal") else None
+                if not withdrawal and session.results and session.results[-1].get("infrastructure_invalid") and session.graphics_identity:
+                    row = session.results[-1]
+                    withdrawal = dict(session.graphics_identity, name=row["name"], exit=row["exit"],
+                                      error=row["message"], cause=row["infrastructure_cause"])
+                if withdrawal and session.graphics_withdrawal is None:
+                    withdrawals.append((session, withdrawal,
+                                        [peer for peer in group if not statuses[peer.id].get("graphics_withdrawal")]))
+        if withdrawals:
+            with ThreadPoolExecutor(max_workers=len(withdrawals)) as captures:
+                pending = [captures.submit(self.withdraw_graphics_session, *row) for row in withdrawals]
+                for future in pending:
+                    future.result()
+        for group, statuses in completed:
+            for session in group:
+                status = statuses[session.id]
                 if status["complete"]:
                     session.complete = True
                 elif status["state"] not in ("Running", "Queued"):
@@ -1991,6 +2071,92 @@ if((Test-Path -LiteralPath '{session.root}\\output') -and (Test-Path -LiteralPat
                 else:
                     continue
                 session.closing = executor.submit(self.close_session, session)
+
+    def capture_session_graphics(self, session, identity, target, role):
+        output = f"{session.root}\\output\\graphics-{target.id}-{role}.json"
+        task = f"capygraphics-{self.id}-{session.account}-{secrets.token_hex(4)}"
+        receipt = {"account": session.account, "identity": identity, "task": task,
+                   "role": role, "output": output, "limit_seconds": 180, "started": time.time()}
+        if role == "healthy":
+            receipt["passed_row"] = session.last_passed
+            receipt["passed_row_evidence"] = str(self.local / "sessions" / session.id / "output" / "results.jsonl")
+        directory = self.local / "graphics" / target.id
+        directory.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + 180
+        try:
+            arguments = (f"-File {session.repo}\\tools\\windows-vm\\session-graphics-evidence.ps1 "
+                         f'-Output {output} -ExpectedAccount "{identity["account"]}" '
+                         f'-ExpectedSessionId {int(identity["session_id"])} -ExpectedBootUtc "{identity["boot_utc"]}" '
+                         f'-ExpectedLogonSid "{identity["logon_sid"]}"')
+            if identity.get("user_sid"):
+                arguments += f' -ExpectedUserSid "{identity["user_sid"]}"'
+            desktop(session.machine, arguments, user=session.account, task=task, directory=session.repo)
+            while time.monotonic() < deadline:
+                result = guest(session.machine, f"$ProgressPreference='SilentlyContinue';"
+                               f"if(Test-Path -LiteralPath '{output}'){{Get-Content -LiteralPath '{output}' -Raw -Encoding UTF8}}",
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+                if result.stdout.strip():
+                    captured = json.loads(result.stdout)
+                    (directory / (role + ".json")).write_text(json.dumps(captured, indent=2))
+                    if captured.get("status") != "collected" or not captured.get("same_logon_verified"):
+                        raise RuntimeError("The graphics evidence did not verify the requested private logon; see its retained JSON")
+                    receipt["status"] = "retrieved"
+                    break
+                time.sleep(2)
+            else:
+                raise RuntimeError("The in-session graphics evidence exceeded its 180 s capture window")
+        except (Exception, SystemExit) as error:
+            receipt.update(status="unavailable", error=str(error))
+        finally:
+            receipt["finished"] = time.time()
+            (directory / (role + "-receipt.json")).write_text(json.dumps(receipt, indent=2))
+            try:
+                guest(session.machine, f"Stop-ScheduledTask -TaskName '{task}' -ErrorAction SilentlyContinue;"
+                      f"Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false -ErrorAction SilentlyContinue",
+                      stdin=subprocess.DEVNULL, timeout=30, check=False)
+            except (Exception, SystemExit) as error:
+                receipt["task_cleanup_error"] = str(error)
+                (directory / (role + "-receipt.json")).write_text(json.dumps(receipt, indent=2))
+        return receipt
+
+    def withdraw_graphics_session(self, session, withdrawal, peers):
+        account = withdrawal["account"].rsplit("\\", 1)[-1].lower()
+        if account != session.account or not withdrawal.get("session_id") or not withdrawal.get("logon_sid"):
+            raise RuntimeError("The graphics withdrawal has no matching private-session identity")
+        boot = json.loads((session.machine.runtime / "session-health" / "boot.json").read_text())
+        if withdrawal["boot_utc"] != boot:
+            raise RuntimeError("The graphics withdrawal belongs to a different guest boot")
+        session.graphics_withdrawal = withdrawal
+        session.draining = True
+        self.queue.drain(session.id)
+        record = dict(withdrawal, run=self.id, worker=session.id, evidence_state="pending",
+                      evidence_started=time.time(), evidence_deadline=time.time() + 360)
+        write_session_health(session.machine, session.account, record)
+        healthy = next((peer for peer in peers if peer is not session and not peer.closing and not peer.draining
+                        and peer.last_passed and time.time() - peer.last_passed["observed_utc"] <= 300
+                        and peer.results and peer.results[-1]["exit"] == 0 and peer.graphics_identity
+                        and peer.graphics_identity["boot_utc"] == boot
+                        and peer.account not in withdrawn_accounts(session.machine)), None)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as captures:
+                pending = [captures.submit(self.capture_session_graphics, session, withdrawal, session, "affected")]
+                if healthy:
+                    pending.append(captures.submit(self.capture_session_graphics, healthy, healthy.graphics_identity, session, "healthy"))
+                else:
+                    directory = self.local / "graphics" / session.id
+                    directory.mkdir(parents=True, exist_ok=True)
+                    (directory / "healthy-receipt.json").write_text(json.dumps({
+                        "status": "unavailable", "reason": "No same-VM leased account has a passing row and a verified worker identity"}, indent=2))
+                record["captures"] = [future.result() for future in pending]
+        finally:
+            record.update(evidence_state="finished", evidence_finished=time.time())
+            try:
+                guest(session.machine, f"[IO.File]::WriteAllText('{session.root}\\output\\graphics-evidence-complete',"
+                      f"'{record['evidence_finished']}',[Text.UTF8Encoding]::new($false))",
+                      stdin=subprocess.DEVNULL, timeout=30)
+            except (Exception, SystemExit) as error:
+                record["acknowledgement_error"] = str(error)
+            write_session_health(session.machine, session.account, record)
 
     def schedule(self, executor):
         waiting_since = time.monotonic()
