@@ -208,7 +208,8 @@ fn dialog_presentation_in(role: DialogRole, viewport: [f32; 2], insets: [f32; 4]
     let Some(work_area) = work_area else { return DialogPresentation::Floating; };
     match role {
         DialogRole::Alert => DialogPresentation::Floating,
-        DialogRole::CanvasPanel => DialogPresentation::CanvasPanel(work_area.intersection(visible).unwrap_or(work_area)),
+        DialogRole::CanvasPanel => DialogPresentation::CanvasPanel(work_area.intersection(visible)
+            .filter(|area| area.height >= crate::HEADER_HEIGHT.min(work_area.height)).unwrap_or(work_area)),
         DialogRole::Editor => {
             let [left, top, right, bottom] = insets;
             DialogPresentation::Page(Bounds { x: left, y: top,

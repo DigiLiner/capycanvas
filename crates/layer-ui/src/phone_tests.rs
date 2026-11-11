@@ -1157,6 +1157,19 @@ fn phone_canvas_panels_fit_the_visible_part_of_the_work_area() {
 }
 
 #[test]
+fn phone_canvas_panels_ignore_keyboard_overlap_below_the_header_minimum() {
+    let s = phone_session([320,568]);
+    let viewport = [320.,568.];
+    let work = s.phone_layout().unwrap().work_area;
+    let visible = Bounds {x:0.,y:0.,width:320.,height:work.y+14.};
+    assert_eq!(work.intersection(visible).unwrap().height,14.);
+    let panel = s.state.dialog_presentation_in(DialogRole::CanvasPanel,viewport,visible);
+    assert_eq!(panel,DialogPresentation::CanvasPanel(work));
+    let bounds = panel.bounds(||[320.,160.]).unwrap();
+    assert_eq!(bounds.height,160.);
+}
+
+#[test]
 fn phone_editor_panels_notices_and_search_stay_between_the_bars() {
     for viewport in [[412, 891], [891, 412], [320, 568], [320, 320]] {
         let mut s = phone_session(viewport);

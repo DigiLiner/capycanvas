@@ -1987,32 +1987,19 @@ class AndroidPhoneAuditTest {
             host.awaitFrame("Workspace manager settles") { host.workspaceManager?.optBoolean("busy") == false && host.workspaceManager?.optBoolean("saving") != true }
         }
         fun close(tag: String) { if(exists(tag)) { try { tap(tag) } catch(error: Throwable) { predictiveBack(activity,cancel = false) };compose.waitForIdle() } }
-        var keyboardHeight = 0
-        fun measureKeyboard() {
-            if(keyboardHeight > 0) return
-            invoke("search_commands")
-            host.awaitFrame("Command search measures the native keyboard") { findTag("command-search") != null && keyboard() }
-            keyboardHeight = decor.rootWindowInsets.getInsets(WindowInsets.Type.ime()).bottom
-            if(keyboard())hideIme()
-            close("command-close")
-            host.awaitFrame("Search closes") { host.commandSearch == null && findTag("command-bar") == null }
-        }
         fun withKeyboard(tag: String) {
-            measureKeyboard()
-            val view = checkNotNull(findTag("workspace")).first.view
-            val original = decor.rootWindowInsets
-            instrumentation.runOnMainSync { view.dispatchApplyWindowInsets(WindowInsets.Builder(original)
-                .setInsets(WindowInsets.Type.ime(),android.graphics.Insets.of(0,0,0,keyboardHeight)).setVisible(WindowInsets.Type.ime(),true).build()) }
-            host.awaitFrame("$tag follows the reduced visible area") { findTag(tag)?.second?.boundsInRoot?.let { it.bottom <= decor.height-keyboardHeight+1 } == true }
+            tap("number-value-"+tag.removeSuffix("-panel"))
+            host.awaitFrame("$tag focuses its numeric field above the keyboard", diagnostics = {
+                "field=${findTag(tag)?.second?.find { it.config.getOrNull(SemanticsActions.SetText) != null }?.boundsInRoot}; ime=${decor.rootWindowInsets.getInsets(WindowInsets.Type.ime()).bottom}"
+            }) {
+                val field = findTag(tag)?.second?.find { it.config.getOrNull(SemanticsActions.SetText) != null } ?: return@awaitFrame false
+                val blocked = decor.rootWindowInsets.getInsets(WindowInsets.Type.ime() or WindowInsets.Type.navigationBars())
+                keyboard() && field.config.getOrNull(SemanticsProperties.Focused) == true && field.size.width > 0 && field.size.height > 0 &&
+                    field.boundsInRoot.height >= field.size.height-1 && field.boundsInRoot.bottom <= decor.height-blocked.bottom+1
+            }
             compose.waitForIdle()
         }
-        fun restoreKeyboard() {
-            val view = findTag("workspace")?.first?.view ?: return
-            val original = decor.rootWindowInsets
-            instrumentation.runOnMainSync { view.dispatchApplyWindowInsets(WindowInsets.Builder(original)
-                .setInsets(WindowInsets.Type.ime(),android.graphics.Insets.NONE).setVisible(WindowInsets.Type.ime(),false).build()) }
-            compose.waitForIdle()
-        }
+        fun restoreKeyboard() { if(keyboard())hideIme() }
         for ((command,tag) in listOf("canvas_size" to "canvas-size","image_size" to "image-size")) {
             state(tag) { invoke(command);wait("$tag-panel");settle() }
             close("$tag-cancel");gone("$tag-panel")

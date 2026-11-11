@@ -179,7 +179,7 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
                 Column {
                     DialogHeader(host,headerView,title,tag,onCancel,onBack,onPrimary,primaryEnabled,primaryLabel,primaryTag,cancelTag)
                     HorizontalDivider(color = colors.dialogSeparator)
-                    content(PaddingValues(16.dp))
+                    Box(Modifier.weight(1f,fill = false).then(if(scrollBody)Modifier.verticalScroll(scroll) else Modifier)) { content(PaddingValues(16.dp)) }
                 }
             }
             else if (alert) AlertShell(host,title,tag,frame.optBoolean("prefer_wide"),visible,responses,

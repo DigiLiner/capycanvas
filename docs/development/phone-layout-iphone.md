@@ -392,3 +392,9 @@ no regression. If a physical iPhone is available, record the same rows there.
   label height. iOS must measure complete labels and consume the query instead
   of fixing every tile to 44 pt. Verify labels start at least 24 pt below the
   tile top at every text size, with 44 pt tiles at normal text.
+
+- **Keep canvas panels usable above the keyboard.** Shared canvas-panel
+  presentation falls back to the full work area when its visible intersection
+  is shorter than the existing header minimum. iOS must consume those bounds
+  and scroll the focused field into view. Verify Refine and Frequency with a
+  14 pt keyboard intersection at 320 pt width, including text entry and Done.
