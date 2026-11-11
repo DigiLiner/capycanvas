@@ -2712,6 +2712,21 @@ class AndroidPhoneAuditTest {
         state("unsaved-changes") {
             instrumentation.runOnMainSync { host.drawingTabs.closeSelected() }
             host.awaitFrame("Unsaved Changes opens") { findTag("document-close") != null }
+            compose.waitForIdle()
+            val buttons = listOf("document-close-save", "document-close-discard", "document-close-cancel").map { tag ->
+                val node = compose.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode()
+                textLayouts(tag).forEach { layout ->
+                    assertFalse("Alert response $tag keeps its complete label height", layout.didOverflowHeight)
+                    assertTrue("Alert response $tag shows every word", (0 until layout.lineCount).none { layout.isLineEllipsized(it) } &&
+                        layout.getLineEnd(layout.lineCount-1,visibleEnd = true) == layout.layoutInput.text.length)
+                }
+                val bounds = node.boundsInRoot
+                assertTrue("Alert responses fit the viewport", bounds.left >= 0 && bounds.top >= 0 && bounds.right <= activity.window.decorView.width && bounds.bottom <= activity.window.decorView.height)
+                bounds
+            }
+            if (activity.window.decorView.width <= 320) {
+                assertTrue("Short narrow alerts stack nonfitting responses", buttons.zipWithNext().all { (above, below) -> above.bottom <= below.top })
+            }
         }
         if(findTag("document-close") != null) {
             tap("document-close-cancel")

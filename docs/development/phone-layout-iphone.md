@@ -393,6 +393,12 @@ no regression. If a physical iPhone is available, record the same rows there.
   of fixing every tile to 44 pt. Verify labels start at least 24 pt below the
   tile top at every text size, with 44 pt tiles at normal text.
 
+- **Fit alert responses in short windows.** Shared `alert_dialog_layout`
+  stacks responses whenever their row does not fit, regardless of height, and
+  bounds the alert width to the viewport. iOS must consume that decision, keep
+  responses outside the message scroller, and preserve fitting inline rows.
+  Verify Unsaved Changes at 320×320 with 16 pt text and 280×280, in both themes.
+
 - **Keep canvas panels usable above the keyboard.** Shared canvas-panel
   presentation falls back to the full work area when its visible intersection
   is shorter than the existing header minimum. iOS must consume those bounds

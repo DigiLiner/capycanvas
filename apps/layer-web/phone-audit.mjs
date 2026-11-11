@@ -86,7 +86,7 @@ const gtkPhoneAudit={matrix:phoneAuditMatrix,defaultCases:phoneAuditMatrix.filte
 export const auditModes={
   audit:gtkPhoneAudit,frame:gtkPhoneAudit,drawers:gtkPhoneAudit,
   menus:gtkPhoneAudit,input:{...gtkPhoneAudit,mobile:true},customize:gtkPhoneAudit,
-  'dialogs-phone':{matrix:phoneAuditMatrix,dialogMode:'phone',defaultCases:['412x891-light','891x412-dark']},
+  'dialogs-phone':{matrix:[...phoneAuditMatrix,...['light','dark'].map(theme=>({viewport:[280,280],text_pt:11,text_scale:1,dpr:1,theme}))],dialogMode:'phone',defaultCases:['412x891-light','891x412-dark']},
   'dialogs-desktop':{matrix:dialogAuditMatrix,dialogMode:'desktop'},
 };
 
@@ -950,6 +950,15 @@ export function dialogAuditSpecifications(rootselector,root=document){
     for(const [part,suffix]of [['value','.preference-choice > summary > span'],['arrow','.preference-choice > summary > svg:last-child']])if(row.querySelector(suffix))specs.push({id:`preference.${input.slice(8)}.${part}`,role:`preference-${part}`,selector:`${selector} ${suffix}`});
   }
   return specs;
+}
+
+async function assertAlertResponses(evaluate,state){
+  if(state!=='unsaved-changes')return;
+  const actual=await evaluate(`(()=>{const root=document.querySelector('dialog.document-dialog[open]'),footer=root.querySelector('footer'),buttons=[...footer.querySelectorAll('button')],box=node=>{const r=node.getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom};},bounds=box(footer),natural=Math.max(...buttons.map(button=>{const range=document.createRange();range.selectNodeContents(button);const style=getComputedStyle(button);return Math.max(parseFloat(style.minWidth)||0,range.getBoundingClientRect().width+parseFloat(style.paddingLeft)+parseFloat(style.paddingRight));}))*buttons.length+(buttons.length-1)*parseFloat(getComputedStyle(footer).gap),viewport=root.querySelector('.preference-viewport'),overflow=viewport.scrollHeight>viewport.clientHeight+1,before=box(footer);viewport.scrollTop=viewport.scrollHeight;const after=box(footer);viewport.scrollTop=0;return{stacked:footer.classList.contains('alert-responses-stacked'),fits:natural<=bounds.right-bounds.left+.5,width:innerWidth,height:innerHeight,buttons:buttons.map(box),overflow,before,after,scrollable:/auto|scroll/.test(getComputedStyle(viewport).overflowY)};})()`);
+  assert.ok(actual.buttons.every(button=>button.left>=-.5&&button.right<=actual.width+.5&&button.top>=-.5&&button.bottom<=actual.height+.5),`Unsaved Changes responses fit the viewport: ${JSON.stringify(actual)}`);
+  assert.equal(actual.stacked,!actual.fits,`Unsaved Changes responses stack only when their row does not fit, including short viewports: ${JSON.stringify(actual)}`);
+  assert.deepEqual(actual.after,actual.before,'Scrolling the alert message keeps responses fixed');
+  if(actual.overflow)assert.ok(actual.scrollable,'A message that does not fit scrolls independently of its responses');
 }
 
 async function assertSettingsPresentation(evaluate,state){
@@ -1830,7 +1839,7 @@ export async function checkPhoneAudit({call,evaluate,reload,settle,canvasPixels,
         await send(shortcuts);await settle();
       }
       if(row.requestedpage)assert.equal(await evaluate('layerApp.app.preferences().page'),row.requestedpage,'Requested Settings page');
-      const shot=async route=>{if(['shortcut-recording','shortcut-conflict','modifier-key'].includes(route.id)){await evaluate("document.querySelector('#shortcut-recording').scrollIntoView({block:'nearest'})");await settle();}if(route.id==='all-swatches'){const fill=await evaluate(`(()=>{const sheet=document.querySelector('.color-sheet.open'),body=sheet.querySelector('.color-sheet-body'),s=sheet.getBoundingClientRect(),b=body.getBoundingClientRect();return{sheetBottom:s.bottom,bodyBottom:b.bottom,height:b.height};})()`);assert.ok(fill.height>0&&Math.abs(fill.sheetBottom-fill.bodyBottom)<=1,'All Swatches fills the available page height');}await assertSettingsPresentation(evaluate,route.id);if(route.drawingstate)await drawingState(evaluate,route.drawingstate);if(route.id==='new-drawing-footer-paper-color'){const {assertColorEditorCells}=await import('./color-editor.test.mjs');await assertColorEditorCells(evaluate,'#new-drawing-color-drawer');}const parts=await evaluate(row.collector==='menu'?JSON.stringify([{id:'page',role:'page',selector:row.rootselector}]):row.collector==='drawer'?`(${phoneAuditDrawerSpecifications.toString()})()`:`(${dialogAuditSpecifications.toString()})(${JSON.stringify(row.rootselector)})`);const specifications=dialogPhoneSpecifications(frame,parts,active);return capture(test,route.id,specifications,dialogs?'existing dialog presentation':'existing Web editor; phone page/header parity not established',null,route.document?.count==='photo'?await evaluate('phoneAuditPhotoCount'):route.document?.count??1,route.document?.color??{space:'Srgb',depth:'U8'},route.document?.extent,route.document?.draft);};
+      const shot=async route=>{if(['shortcut-recording','shortcut-conflict','modifier-key'].includes(route.id)){await evaluate("document.querySelector('#shortcut-recording').scrollIntoView({block:'nearest'})");await settle();}if(route.id==='all-swatches'){const fill=await evaluate(`(()=>{const sheet=document.querySelector('.color-sheet.open'),body=sheet.querySelector('.color-sheet-body'),s=sheet.getBoundingClientRect(),b=body.getBoundingClientRect();return{sheetBottom:s.bottom,bodyBottom:b.bottom,height:b.height};})()`);assert.ok(fill.height>0&&Math.abs(fill.sheetBottom-fill.bodyBottom)<=1,'All Swatches fills the available page height');}await assertAlertResponses(evaluate,route.id);await assertSettingsPresentation(evaluate,route.id);if(route.drawingstate)await drawingState(evaluate,route.drawingstate);if(route.id==='new-drawing-footer-paper-color'){const {assertColorEditorCells}=await import('./color-editor.test.mjs');await assertColorEditorCells(evaluate,'#new-drawing-color-drawer');}const parts=await evaluate(row.collector==='menu'?JSON.stringify([{id:'page',role:'page',selector:row.rootselector}]):row.collector==='drawer'?`(${phoneAuditDrawerSpecifications.toString()})()`:`(${dialogAuditSpecifications.toString()})(${JSON.stringify(row.rootselector)})`);const specifications=dialogPhoneSpecifications(frame,parts,active);return capture(test,route.id,specifications,dialogs?'existing dialog presentation':'existing Web editor; phone page/header parity not established',null,route.document?.count==='photo'?await evaluate('phoneAuditPhotoCount'):route.document?.count??1,route.document?.color??{space:'Srgb',depth:'U8'},route.document?.extent,route.document?.draft);};
       if(row.id==='color'){
         const {assertColorEditorCells}=await import('./color-editor.test.mjs');
         await assertColorEditorCells(evaluate);
