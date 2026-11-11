@@ -15,6 +15,8 @@ mod outline;
 mod telemetry;
 mod selection;
 mod cursor_icons;
+mod filter_preparation;
+pub use filter_preparation::{FilterPreparation, PreparationKey};
 pub mod panel_geometry;
 mod panel_mesh;
 pub use panel_mesh::{panel_mesh, panel_mesh_with_coverage};
@@ -867,6 +869,7 @@ pub struct PreparationContext {
     pub next: PreparationUses,
     pub brushes: Vec<layer_core::BrushSnapshot>,
     pub regions: RegionRefinement,
+    pub filters: Vec<FilterPreparation>,
 }
 
 /// GPU command boundary implemented by the renderer owned by each platform.
@@ -881,6 +884,7 @@ pub trait CanvasRenderer {
     /// holds admission during a stroke/gesture or unfinished document edit.
     fn shader_input(&mut self) {}
     fn shader_idle(&mut self, _idle: bool, _speculative_idle: bool) {}
+    fn preparation_key(&self, _document: &layer_core::Document) -> Option<std::sync::Arc<dyn PreparationKey>> { None }
     /// Declare optional pipeline needs for the current tool context.
     fn prepare_context(&mut self, _document: &layer_core::Document, _brush: &layer_core::BrushSnapshot, _context: PreparationContext) {}
     /// UI-only tool changes may still need a first-use preparation callback.

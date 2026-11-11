@@ -9,6 +9,7 @@ use layer_core::authored::{OccurrenceHandle, MaskUse, CoverageSource};
 mod images;
 #[path = "filter_previews.rs"]
 mod previews;
+pub(super) use previews::preview_space;
 mod metadata;
 mod scratch;
 fn omitted_ancestor_masks(scene: SceneView<'_>, layer: OccurrenceHandle) -> impl Iterator<Item = OccurrenceHandle> {

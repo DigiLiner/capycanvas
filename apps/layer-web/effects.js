@@ -78,7 +78,7 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
   const disposePreviews=filterPreviewView(app,wake,()=>{
     if(!adjustments.isConnected||!adjustments.clientHeight)return null;
     const viewport=panels.get("adjustments").getBoundingClientRect(),filters=[];
-    for(const choice of state().adjustments){if(choice.bundled_preview)continue;const rect=rows.get(choice.id)?.node.getBoundingClientRect();if(rect?.height&&rect.bottom>Math.max(0,viewport.top)&&rect.top<Math.min(innerHeight,viewport.bottom))filters.push(choice.id);}
+    for(const choice of state().adjustments){const rect=rows.get(choice.id)?.node.getBoundingClientRect();if(rect?.height&&rect.bottom>Math.max(0,viewport.top)&&rect.top<Math.min(innerHeight,viewport.bottom))filters.push(choice.id);}
     return {filters};
   },(images,key)=>{
     for(const [id,row] of rows){

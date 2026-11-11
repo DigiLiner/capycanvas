@@ -4506,6 +4506,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.cancel_tonal();
             }
         }
+        if was_filter_drawer != self.filter_drawer_open() {
+            self.filter_previews.visible.clear();
+        }
         if !was_filter_drawer && self.filter_drawer_open() {
             self.open_filter_picker();
             changed |= DOCUMENT;
@@ -6617,6 +6620,17 @@ impl<R: CanvasRenderer> UiSession<R> {
         if regions & (regions::LAYOUT | regions::CUSTOMIZATION | regions::BRUSH | regions::DOCUMENT | regions::SETTINGS) != 0 {
             self.toolbar_brushes = self.visible_toolbar_brushes();
         }
+        self.prepare_shader_context();
+        UiChange {
+            revision: self.state.revision,
+            regions,
+            canvas_wake: canvas_wake || self.engine.backend().shaders_need_update(
+                self.engine.document(), self.engine.brush(), self.engine.transform_preview().is_some()),
+            presentation_wake,
+        }
+    }
+    pub(crate) fn prepare_shader_context(&mut self) {
+        let filters = self.filter_previews.visible.as_slice();
         let tool = self.layer_interaction.tool;
         let selected = self.engine.document().working.selection.is_some();
         let next = layer_render::PreparationUses {
@@ -6630,17 +6644,19 @@ impl<R: CanvasRenderer> UiSession<R> {
                 _ => None,
             },
         };
-        if self.preparation_context.as_ref().is_none_or(|c| c.next != next || c.brushes != self.toolbar_brushes || c.regions != self.region_tools.refinement) {
-            let context = layer_render::PreparationContext { next, brushes: self.toolbar_brushes.clone(), regions: self.region_tools.refinement };
+        if self.preparation_context.as_ref().is_none_or(|c| c.next != next || c.brushes != self.toolbar_brushes || c.regions != self.region_tools.refinement || c.filters.len() != filters.len() || c.filters.iter().zip(filters).any(|(filter, program)| filter.program != *program || !filter.matches(self.engine.document()))) {
+            let filters = if filters.is_empty() { Vec::new() } else {
+                let key = self.preparation_context.as_ref().and_then(|context| context.filters.first())
+                    .filter(|filter| filter.matches(self.engine.document())).map(|filter| filter.key.clone())
+                    .unwrap_or_else(|| self.engine.backend().preparation_key(self.engine.document()));
+                filters.iter().map(|program| self.preparation_context.as_ref()
+                    .and_then(|context| context.filters.iter().find(|filter|
+                        filter.program == *program && filter.key == key)).cloned()
+                    .unwrap_or_else(|| self.prepare_visible_filter(program.clone(), key.clone()))).collect()
+            };
+            let context = layer_render::PreparationContext { next, brushes: self.toolbar_brushes.clone(), regions: self.region_tools.refinement, filters };
             self.engine.prepare_context(context.clone());
             self.preparation_context = Some(context);
-        }
-        UiChange {
-            revision: self.state.revision,
-            regions,
-            canvas_wake: canvas_wake || self.engine.backend().shaders_need_update(
-                self.engine.document(), self.engine.brush(), self.engine.transform_preview().is_some()),
-            presentation_wake,
         }
     }
     fn visible_toolbar_brushes(&self) -> Vec<layer_core::BrushSnapshot> {

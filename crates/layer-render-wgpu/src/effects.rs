@@ -55,7 +55,7 @@ impl Gpu for Context {
 // the rest let ordinary aligned masks participate in the same fused shader.
 pub(super) const MASK_SLOTS: usize = 14;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Execution {
     Fused,
     Reduced,
@@ -492,12 +492,7 @@ impl Effects {
             )?;
             let compute=computable(&programs,execution);
             let original_independent=validate_source(&mut source,compute,programs.len().min(MASK_SLOTS),execution.reduced(),&programs)?;
-            let module = r
-                .device()
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("checked pointwise effect"),
-                    source: wgpu::ShaderSource::Wgsl(source.into()),
-                });
+            let module = Deferred::wgsl(r.device(), "checked pointwise effect", source);
             let pipeline = if compute {
                 let (device,layout)=(r.device().for_recipe(),self.compute_layout[programs.len().min(MASK_SLOTS)-1].clone());
                 Pipeline::Compute(Deferred::pipeline(move |mode|mode.compute(&device,&wgpu::ComputePipelineDescriptor {

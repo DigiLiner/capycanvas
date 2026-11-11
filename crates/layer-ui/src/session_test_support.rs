@@ -6,6 +6,7 @@ use layer_render::{BackendError, FilterPreviewImage, FilterPreviewRequest, Frame
 thread_local! {
     pub(super) static LAYOUT_RESOLVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(super) static COMMAND_REFRESHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static FILTER_DOCUMENT_PREPARATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Protocol recorder only: no canvas storage or software rasterization.
@@ -110,6 +111,9 @@ impl CanvasRenderer for Recorder {
     fn has_pending_work(&self) -> bool { self.refining }
     fn shader_input(&mut self) { self.shader_inputs += 1; }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { self.shader_idle = (idle, speculative_idle); }
+    fn preparation_key(&self, document: &Document) -> Option<std::sync::Arc<dyn layer_render::PreparationKey>> {
+        Some(std::sync::Arc::new(layer_render_wgpu::ShaderDocument::new(document)))
+    }
     fn prepare_context(&mut self, _document: &Document, _brush: &layer_core::BrushSnapshot, context: layer_render::PreparationContext) { self.contexts.push(context); }
     fn can_submit(&self) -> bool { !self.settling }
     fn raster_dependencies_ready(&mut self, _packet: FramePacket<'_>, _preview: Option<&layer_render::TransformPreview>) -> bool {

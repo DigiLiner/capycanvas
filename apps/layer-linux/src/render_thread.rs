@@ -1166,6 +1166,9 @@ impl Drop for RenderWorker {
 impl CanvasRenderer for RenderWorker {
     fn shader_input(&mut self) { if let Some(activity) = &self.shader_activity { activity.input(); } }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { if let Some(activity) = &self.shader_activity { activity.idle(idle, speculative_idle); } }
+    fn preparation_key(&self, document: &layer_core::Document) -> Option<Arc<dyn layer_render::PreparationKey>> {
+        Some(Arc::new(layer_render_wgpu::ShaderDocument::new(document)))
+    }
     fn prepare_context(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, context: layer_render::PreparationContext) {
         let _ = self.send(Command::PrepareContext(Box::new((document.clone(), brush.clone(), context))));
     }

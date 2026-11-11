@@ -3889,6 +3889,10 @@ impl WgpuRasterizer {
 impl CanvasRenderer for WgpuRasterizer {
     fn shader_input(&mut self) { WgpuRasterizer::shader_input(self); }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { WgpuRasterizer::shader_idle(self, idle, speculative_idle); }
+    fn preparation_key(&self, document: &layer_core::Document) -> Option<Arc<dyn layer_render::PreparationKey>> {
+        Some(self.startup.as_ref().and_then(|startup| startup.document_key.as_ref())
+            .filter(|key| key.matches(document)).cloned().unwrap_or_else(|| Arc::new(ShaderDocument::new(document))))
+    }
     fn prepare_context(&mut self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, context: layer_render::PreparationContext) {
         WgpuRasterizer::prepare_context(self, document, brush, context);
     }

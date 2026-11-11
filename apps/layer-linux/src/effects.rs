@@ -617,7 +617,7 @@ impl EffectPanels {
                     .borrow()
                     .iter()
                     .filter_map(|id| {
-                        let (_, picture, false) = rows.get(id)? else { return None };
+                        let (_, picture, _) = rows.get(id)?;
                         let rect = picture.compute_bounds(&view.picker_scroller)?;
                         (rect.y() + rect.height() > 0.
                             && rect.y() < view.picker_scroller.height() as f32)

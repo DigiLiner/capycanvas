@@ -77,7 +77,7 @@ private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dis
     LaunchedEffect(host, previewView) {
         snapshotFlow {
             val visible = list.layoutInfo.visibleItemsInfo.map { it.key }.toSet()
-            currentChoices.filter { !it.getBoolean("bundled_preview") }.map { it.getString("id") }.filter { it in visible }
+            currentChoices.map { it.getString("id") }.filter { it in visible }
         }.collect { ids -> cache.update(previewView, ids) }
     }
     Column(modifier.padding(panelMetrics().inset), verticalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {

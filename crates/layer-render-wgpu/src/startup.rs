@@ -33,12 +33,13 @@ impl StartupProgress {
 /// Only changes that can require different pipelines invalidate readiness.
 /// Ordinary raster/parameter edits reuse their prepared dependencies. The
 /// revision memo avoids scanning layers on unchanged display callbacks.
+#[derive(Debug)]
 pub struct ShaderDocument {
     id: layer_core::authored::PortableId,
-    revision: std::cell::Cell<layer_core::Revision>,
+    revision: std::sync::atomic::AtomicU64,
     key: DocumentKey,
 }
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 struct DocumentKey {
     extent: [u32; 2],
     color: layer_core::color::DocumentColor,
@@ -147,19 +148,27 @@ pub(super) fn has_watercolor(scene: SceneView<'_>) -> bool {
 }
 impl ShaderDocument {
     pub fn new(document: &Document) -> Self {
-        Self { id: document.artwork.id, revision: std::cell::Cell::new(document.revision), key: DocumentKey::new(document) }
+        Self { id: document.artwork.id, revision: std::sync::atomic::AtomicU64::new(document.revision), key: DocumentKey::new(document) }
     }
     pub fn matches(&self, document: &Document) -> bool {
         if self.id != document.artwork.id { return false; }
-        if self.revision.get() == document.revision { return true; }
+        if self.revision.load(std::sync::atomic::Ordering::Relaxed) == document.revision { return true; }
         let mut key = DocumentKey::new(document);
         if key.composition.iter().zip(self.key.composition).any(|(required, prepared)| *required && !prepared) { return false; }
         key.composition = self.key.composition;
         if self.key != key { return false; }
-        self.revision.set(document.revision);
+        self.revision.store(document.revision, std::sync::atomic::Ordering::Relaxed);
         true
     }
 }
+impl layer_render::PreparationKey for ShaderDocument {
+    fn matches(&self, document: &Document) -> bool { ShaderDocument::matches(self, document) }
+    fn equivalent(&self, other: &dyn layer_render::PreparationKey) -> bool {
+        (other as &dyn std::any::Any).downcast_ref::<Self>()
+            .is_some_and(|other| self.id == other.id && self.key == other.key)
+    }
+}
+
 impl Needs {
     pub(super) fn brush(&mut self, r: &WgpuRasterizer, document: &Document, brush: &BrushSnapshot, selection: Option<Arc<layer_core::Selection>>) {
         let mask = document.drawing_target().or(document.working.target).is_some_and(SourceTarget::is_coverage);
@@ -219,6 +228,29 @@ impl Needs {
         if uses.selection_paint { self.selection_paint(r); }
         if uses.fill { self.fill(r, Some(document.scene())); }
         if let Some(operation) = uses.operation { self.operation(r, operation); }
+    }
+    fn filter_apply(r: &WgpuRasterizer, filter: &layer_render::FilterPreparation) -> Result<Self, GpuRasterError> {
+        let Some((scene, handle)) = &filter.scene else { return Ok(Self::default()); };
+        let view = scene.view();
+        let composition = view.composition();
+        let mut effects = r.scene_pipelines.effects(r);
+        for (chain, execution) in scene::effect_chains(view, scene::EffectPreparation::Capture) {
+            effects.prepare(r, view, &chain, execution, 0., 0, composition.blend)?;
+        }
+        if filter.program.kind == layer_core::EffectKind::Generator {
+            effects.prepare(r, view, &[*handle], effects::Execution::Preview, 0., 0,
+                scene::preview_space(view.effect(*handle).unwrap(), composition.blend))?;
+        }
+        let mut needs = Self::capture_scene(r, view, false);
+        let prepared = effects.needs();
+        needs.render.extend(prepared.render);
+        needs.compute.extend(prepared.compute);
+        match filter.program.analysis() {
+            Some(layer_core::EffectAnalysisKind::LocalIllumination) => needs.compute.extend(crate::local_tone::pipelines(&r.device).pipelines.iter().cloned()),
+            Some(layer_core::EffectAnalysisKind::Dehaze) => needs.compute.extend(crate::dehaze::pipelines(&r.device).pipelines.iter().cloned()),
+            None => {}
+        }
+        Ok(needs)
     }
     pub(super) fn capture_scene(r:&WgpuRasterizer,view:SceneView<'_>,watercolor:bool)->Self {
         let mut required = Self::default();
@@ -319,7 +351,7 @@ impl Needs {
 pub(super) struct Startup {
     pub compiler: crate::compile::Scope,
     pub(super) masks: builtin_masks::Masks,
-    document_key: Option<ShaderDocument>,
+    pub(super) document_key: Option<Arc<ShaderDocument>>,
     brush: Option<ShaderBrushKey>,
     transform: bool,
     pub(super) document: Needs,
@@ -492,6 +524,11 @@ impl WgpuRasterizer {
         idle[4].fill(self, Some(document.scene()));
         idle[5].regions(self, context.regions, false, true, true);
         next.warm(&self.context_compilation, ANTICIPATED, generation);
+        for filter in context.filters {
+            if let Ok(needs) = Needs::filter_apply(self, &filter) {
+                needs.warm(&self.context_compilation, ANTICIPATED, generation);
+            }
+        }
         for family in idle { family.warm(&self.context_compilation, BACKGROUND, generation); }
     }
     fn prepare_startup_into(
@@ -584,7 +621,7 @@ impl WgpuRasterizer {
             }
             required.require(&startup.compiler, DOCUMENT);
             startup.document = required;
-            startup.document_key = Some(shader);
+            startup.document_key = Some(Arc::new(shader));
             let chains = scene::effect_chains(document.scene(),scene::EffectPreparation::Display);
             let cached = self.scene.as_ref().map(|s| &s.effects).or(self.validated_effects.as_ref());
             let blend_space = document.composition().blend;
@@ -763,6 +800,49 @@ mod tests {
         assert_eq!(SourceKinds::for_scene(object_document(true).scene()),SourceKinds::default());
         assert_eq!(SourceKinds::for_descriptor(layer_core::raster::RasterPlane::Mask.descriptor(DocumentColor::default())),
             SourceKinds {float:false,integer:true});
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn ordinary_layer_and_selection_changes_keep_startup_prepared() {
+        use layer_core::authored::*;
+        let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
+        renderer.shader_idle(false, false);
+        let mut document = Document::new(PortableId::random(), 64, 64,
+            layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() }).without_paper().unwrap();
+        let first = document.working.occurrence.unwrap();
+        let paint = document.artwork.paint.iter().next().unwrap().2.clone();
+        let source = document.artwork.paint.insert(PortableId::random(), paint).unwrap();
+        let second = document.artwork.occurrences.insert(PortableId::random(),
+            Occurrence::new(OccurrenceContent::Paint(source), "Second")).unwrap();
+        let stack = document.composition().result;
+        document.artwork.stacks.get_mut(stack).unwrap().entries.push(second);
+        crate::artwork_sample_tests::refresh(&mut document);
+        document.working.selection = Some(layer_core::Selection::polygon(vec![
+            layer_core::Point { x: 0., y: 0. }, layer_core::Point { x: 32., y: 0. },
+            layer_core::Point { x: 0., y: 32. }]).unwrap());
+        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        renderer.prepare_startup(&document, &brush, false).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready, format_args!("coarse startup key"));
+        let generation = renderer.startup.as_ref().unwrap().compiler.generation();
+        let mut preparations = 0;
+        for change in 0..3 {
+            match change {
+                0 => { document.working.occurrence = Some(second); document.working.target = Some(SourceTarget::Paint(source)); }
+                1 => document.artwork.occurrences.get_mut(first).unwrap().visible = false,
+                _ => document.working.selection = Some(layer_core::Selection {
+                    shape: layer_core::SelectionShape::Pixels(Arc::new(layer_core::SelectionPixels::new([8, 1], [0, 0, 8, 1], vec![0x44444444]).unwrap())),
+                    affine: layer_core::Affine::IDENTITY, inverted: false }),
+            }
+            document.revision += 1;
+            if renderer.startup_needs_update(&document, &brush, false) {
+                preparations += 1;
+                renderer.prepare_startup(&document, &brush, false).unwrap();
+            }
+            assert_eq!(preparations, 0);
+            assert_eq!(renderer.startup.as_ref().unwrap().compiler.generation(), generation);
+        }
     }
     #[test]
     fn shader_document_invalidates_when_source_depth_changes_the_normalizer() {
@@ -1952,3 +2032,6 @@ mod mc_transform_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod mc_context_tests;
+
+#[cfg(test)]
+mod visible_filter_tests;
