@@ -177,6 +177,9 @@ extension XCTestCase {
         XCTAssertTrue(create.waitForNonExistence(timeout: 5), "The presets cover the page")
         #endif
         attachEditor(in: app, name: "new-drawing-presets-" + theme)
+        #if os(iOS)
+        workspaceActivate(search)
+        #endif
         app.typeText("chalk")
         expectation(for: NSPredicate(format: "value == %@", "chalk"), evaluatedWith: search)
         waitForExpectations(timeout: 10)

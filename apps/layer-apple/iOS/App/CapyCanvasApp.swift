@@ -32,6 +32,7 @@ private struct IPadEditorScene: View {
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }.ignoresSafeArea()
             .statusBarHidden()
+            .modifier(PhoneSystemOverlays())
             .defersSystemGestures(on: deferredEdges)
             .onChange(of: phase) { _, next in
                 if next != .active {

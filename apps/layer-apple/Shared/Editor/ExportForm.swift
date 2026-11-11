@@ -116,7 +116,10 @@ struct ExportForm: View {
             if !view["preset_status"].isNull { Text(view["preset_status"].string).foregroundStyle(view["preset_error"].bool ? .red : .secondary) }
         case "save_preset":
             TextField(copy["preset_name"].string, text: Binding(get: { drafts["name"] ?? view["name"].string }, set: { drafts["name"] = $0 }))
-                .focused($focused, equals: "name").onSubmit { if commit("name") { editor.storePreset() } }
+                .focused($focused, equals: "name").onNativeTextSubmit(drafts["name"] ?? view["name"].string) { text in
+                    drafts["name"] = text
+                    if commit("name") { if phonePage { focused = nil } else { editor.storePreset() } }
+                }
                 .textFieldStyle(.roundedBorder).accessibilityIdentifier("export-preset-name")
             if !phonePage { HStack {
                 Button(copy["common"]["cancel"].string) { drafts["name"] = nil; editor.act(["type": "preset_cancel"]) }.keyboardShortcut(.cancelAction)

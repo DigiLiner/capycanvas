@@ -1,6 +1,14 @@
 import SwiftUI
 
 #if os(iOS)
+struct PhoneSystemOverlays: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            content.statusBarHidden().persistentSystemOverlays(.hidden)
+        } else { content }
+    }
+}
+
 @available(iOS 18.0, *)
 private struct EditorPreferredPresentationSizing: PresentationSizing {
     func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
@@ -208,7 +216,7 @@ private struct EditorSheet<Sheet: View>: ViewModifier {
     private var visible: [String: Any] {
         let viewport = store.snapshot["layout"]["viewport"]
         return ["x": 0, "y": 0, "width": viewport[0].number,
-            "height": max(0, viewport[1].number - Double(store.keyboardInset))]
+            "height": max(0, viewport[1].number - Double(store.obscuredBottom))]
     }
     private func binding(page: Bool) -> Binding<Bool> {
         Binding(get: { presented && !alert && !closing && !presentation.isNull && (presentation["kind"].string == "page") == page },
@@ -224,12 +232,15 @@ private struct EditorSheet<Sheet: View>: ViewModifier {
         content.sheet(isPresented: binding(page: false), onDismiss: dismissed) {
             sheet().environment(\.editorDialogPage, false).environment(\.editorDialogAvailableHeight, nil)
         }.fullScreenCover(isPresented: binding(page: true), onDismiss: dismissed) {
-            ZStack(alignment: .topLeading) {
-                EditorPalette(source: store.state["palette"])["settings"].ignoresSafeArea()
-                sheet().environment(\.editorDialogPage, true)
-                    .environment(\.editorDialogAvailableHeight, CGFloat(presentation["bounds"]["height"].number))
-                    .placed(presentation["bounds"])
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).ignoresSafeArea(.container)
+            GeometryReader { _ in
+                ZStack(alignment: .topLeading) {
+                    EditorPalette(source: store.state["palette"])["settings"].ignoresSafeArea()
+                    sheet().environment(\.editorDialogPage, true)
+                        .environment(\.editorDialogAvailableHeight, CGFloat(presentation["bounds"]["height"].number))
+                        .placed(presentation["bounds"])
+                }
+            }.ignoresSafeArea(.container)
+                .modifier(PhoneSystemOverlays())
         }.modifier(EditorAlertSurface(store: store, presented: presented && alert, onDismiss: dismissed) { size in
             sheet().environment(\.editorDialogPage, false).environment(\.editorDialogAvailableHeight, size.height)
         }).onChange(of: presented) { _, shown in if !shown { closing = false } }
@@ -421,7 +432,7 @@ private struct EditorAlertSurface<Alert: View>: ViewModifier {
                 if presented {
                     GeometryReader { geometry in
                         let frame = geometry.frame(in: .global), layout = store.snapshot["layout"]
-                        let height = max(0, layout["viewport"][1].number - Double(store.keyboardInset))
+                        let height = max(0, layout["viewport"][1].number - Double(store.obscuredBottom))
                         let insets = store.state["phone"]["insets"]
                         let visible = layout["phone"].isNull
                             ? CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: min(frame.height, height))

@@ -243,6 +243,7 @@ private struct PaperNameForm: View {
     @State private var name: String
     @State private var error: String?
     @State private var saving = false
+    @FocusState private var focused: Bool
     init(controller:PaperController,draft:PaperRename) {
         self.controller = controller; self.draft = draft; _name = State(initialValue:draft.action["name"].string)
     }
@@ -254,7 +255,8 @@ private struct PaperNameForm: View {
                     cancel: { controller.rename = nil }, primary: save)
             } else { Text(copy["paper"]["rename_title"].string).font(.headline) }
             TextField(controller.common["name"].string,text:$name).textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("paper-library-name").onNativeTextSubmit(name) { name = $0; save() }
+                .focused($focused).accessibilityIdentifier("paper-library-name")
+                .onNativeTextSubmit(name) { name = $0; if page { focused = false } else { save() } }
             if let error { Text(error).foregroundStyle(.red).accessibilityIdentifier("paper-name-error") }
             if !page { HStack {
                 Spacer()

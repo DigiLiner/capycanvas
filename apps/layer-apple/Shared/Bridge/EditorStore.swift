@@ -15,6 +15,8 @@ import UIKit
     @Published var displayDetails = DisplayDetails()
     @Published var displayHeadroom: Double = 1
     @Published var keyboardInset: CGFloat = 0
+    @Published var navigationInset: CGFloat = 0
+    var obscuredBottom: CGFloat { max(keyboardInset, navigationInset) }
     @Published var catalog = JSON()
     @Published private(set) var bootstrap = JSON()
     @Published private(set) var interfaceLanguage = ""

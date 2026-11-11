@@ -271,7 +271,7 @@ private struct WorkspaceManagerForm: View {
         Group {
             if spec["dialog"]["role"].string == "alert", let store = workspaces.store {
                 EditorAlertLayout(viewport: CGSize(width: store.snapshot["layout"]["viewport"][0].number,
-                    height: max(0, store.snapshot["layout"]["viewport"][1].number - store.keyboardInset)),
+                    height: max(0, store.snapshot["layout"]["viewport"][1].number - store.obscuredBottom)),
                     preferWide: spec["dialog"]["frame"]["prefer_wide"].bool,
                     fontPixels: CGFloat(store.catalog["text_size_pt"].number * 4 / 3)) {
                     Text(spec["title"].string).font(.headline).multilineTextAlignment(.center)
