@@ -205,11 +205,15 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
 @Composable internal fun PhoneFrame(host: CanvasHost, snapshot: JSONObject, dock: DockInteraction) {
     val layout = snapshot.getJSONObject("layout").getJSONObject("phone")
     val state = snapshot.getJSONObject("state")
+    val opened = state.getJSONObject("customization").objectOrNull("drawer")?.getJSONObject("anchor")
+        ?.takeIf { it.optString("kind") == "phone" }?.getJSONObject("anchor")
     val tiles = state.getJSONObject("workspace").getJSONObject("layout").array("phone")
     val view = LocalView.current
     val input = remember(host, dock, view) { PhoneInteraction(host, dock, view) }
     val density = LocalDensity.current.density
     val colors = LocalPalette.current
+    val toolbarContext = remember { obj("kind" to "phone_toolbar") }
+    val settingsAction = remember { obj("kind" to "tool_settings") }
     SideEffect { input.layout = layout; input.tiles = tiles; dock.phone = input; if (!input.valid()) input.cancel() }
     DisposableEffect(input) { onDispose { input.cancel(); if (dock.phone === input) dock.phone = null } }
     PhoneMetrics(host, state)
@@ -217,7 +221,7 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
         layout.array("bars").objects().forEachIndexed { index, rect ->
             key(index) {
             if (rect.number("width") > 0 && rect.number("height") > 0) Box(Modifier.placedAbsolute(rect, density)
-                .chromeRegion(dock).contextAnchor(dock, obj("kind" to "phone_toolbar")).testTag("phone-bar-$index"))
+                .chromeRegion(dock).contextAnchor(dock, toolbarContext).testTag("phone-bar-$index"))
             }
         }
         layout.array("chips").objects().forEachIndexed { index, rect ->
@@ -228,27 +232,29 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
         }
         val views = snapshot.array("phone_tools")
         tiles.objects().forEachIndexed { index, tile ->
-            key(tile.getInt("id")) {
+            val id = tile.getInt("id")
+            key(id) {
+                val (action, context) = remember(id) { obj("kind" to "tool", "tile" to id) to obj("kind" to "phone_tile", "tile" to id) }
                 val lifted = input.preview?.optInt("lifted", -1) == index
                 val visual = input.preview?.array("geometry")?.optJSONObject(index) ?: layout.array("tools").getJSONObject(index)
                 val divider = tile.getJSONObject("control").getString("kind") == "divider"
                 val hit = if (lifted || divider) visual else layout.array("tool_hits").getJSONObject(index)
-                PhoneTile(host, dock, input, views.getJSONObject(index), visual, hit, "phone-tool-${tile.getInt("id")}",
-                    obj("kind" to "tool", "tile" to tile.getInt("id")), obj("kind" to "phone_tile", "tile" to tile.getInt("id")),
-                    obj("kind" to "tool", "id" to tile.getInt("id")), layout.number("icon"), divider, lifted)
+                PhoneTile(host, dock, input, views.getJSONObject(index), visual, hit, "phone-tool-$id", action, context,
+                    opened?.let { it.optString("kind") == "tool" && it.optInt("id", -1) == id } == true, layout.number("icon"), divider, lifted)
             }
         }
         PhoneTile(host, dock, input, snapshot.getJSONObject("phone_settings"), layout.getJSONObject("settings"), layout.getJSONObject("settings_hit"),
-            "phone-tool-settings", obj("kind" to "tool_settings"), null, obj("kind" to "tool_settings"), layout.number("icon"))
+            "phone-tool-settings", settingsAction, null, opened?.optString("kind") == "tool_settings", layout.number("icon"))
         val capyFocus = remember { FocusRequester() }
+        val capyModifier = remember(host,capyFocus) { Modifier.fillMaxSize().phoneFocus(host,capyFocus).testTag("phone-capy") }
         val capy = snapshot.getJSONObject("header").getJSONObject("capy")
         val source = (dock.drawerSources["menu"] ?: dock.drawerSources["tool"])?.takeIf { it.anchor?.optString("kind") == "phone" && it.anchor.objectOrNull("anchor")?.optString("kind") == "capy" }
         val rect = layout.getJSONObject("capy"); val hit = layout.getJSONObject("capy_target")
         Box(Modifier.placedAbsolute(hit, density).chromeRegion(dock).testTag("phone-capy-target"), contentAlignment = androidx.compose.ui.AbsoluteAlignment.TopLeft) {
             key(host.phoneContactEpoch) {
             HeaderButton(snapshot.getString("capy_caption"), false, true, source != null,
-                Modifier.fillMaxSize().phoneFocus(host,capyFocus).testTag("phone-capy"), inBar = true, shape = drawerButtonShape(source?.direction),
-                face = Modifier.placedAbsolute(rect.copy().put("x", rect.number("x") - hit.number("x")).put("y", rect.number("y") - hit.number("y")), density),
+                capyModifier, inBar = true, shape = drawerButtonShape(source?.direction),
+                face = remember(rect,hit,density) { Modifier.placedAbsolute(rect.copy().put("x", rect.number("x") - hit.number("x")).put("y", rect.number("y") - hit.number("y")), density) },
                 onClick = { input.click(obj("kind" to "capy")) }) {
                 SharedIcon(capy.getString("icon"), null, Modifier.size(layout.number("capy_icon").dp))
             }
@@ -260,9 +266,9 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
             if (bounds.number("width") > 0 && bounds.number("height") > 0) {
                 val control = remember(kind) { obj("kind" to kind) }
                 snapshot.array("phone_sliders").optJSONObject(index)?.let {
-                    ToolbarComponent(host, control, it, bounds, obj("tile_style" to "medium"), dock, layout.getString("edge") != "top",
+                    ToolbarComponent(host, control, it, bounds, remember { obj("tile_style" to "medium") }, dock, layout.getString("edge") != "top",
                         Modifier.placedAbsolute(bounds, density).chromeRegion(dock).systemGestureExclusion().testTag("phone-slider-$name"),
-                        obj("show_value" to false, "expand" to false), name, phone = layout)
+                        remember { obj("show_value" to false, "expand" to false) }, name, phone = layout)
                 }
             }
         }
@@ -270,13 +276,11 @@ internal class PhoneInteraction(val host: CanvasHost, val dock: DockInteraction,
 }
 
 @Composable private fun PhoneTile(host: CanvasHost, dock: DockInteraction, input: PhoneInteraction, view: JSONObject,
-    visual: JSONObject, hit: JSONObject, tag: String, action: JSONObject, context: JSONObject?, anchor: JSONObject,
+    visual: JSONObject, hit: JSONObject, tag: String, action: JSONObject, context: JSONObject?, opened: Boolean,
     icon: Float, divider: Boolean = false, lifted: Boolean = false) {
     if (hit.number("width") <= 0 || hit.number("height") <= 0) return
     val density = LocalDensity.current.density
     val focus = remember { FocusRequester() }
-    val opened = host.snapshot?.getJSONObject("state")?.getJSONObject("customization")?.objectOrNull("drawer")?.objectOrNull("anchor")
-        ?.takeIf { it.optString("kind") == "phone" }?.getJSONObject("anchor")?.toString() == anchor.toString()
     Box(Modifier.placedAbsolute(hit, density).zIndex(if (lifted) 1f else 0f).chromeRegion(dock)
         .then(if (context != null) Modifier.contextAnchor(dock, context) else Modifier), contentAlignment = androidx.compose.ui.AbsoluteAlignment.TopLeft) {
         val face = Modifier.placedAbsolute(visual.copy().put("x", visual.number("x") - hit.number("x")).put("y", visual.number("y") - hit.number("y")), density).testTag(tag)
