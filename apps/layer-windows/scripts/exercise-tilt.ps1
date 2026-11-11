@@ -430,7 +430,7 @@ function Utility-Overlays{
     Evidence 'utility-over-column' @{default_bounds=$initial;work_area=$work;drawer=$drawer;overlap=$bounds;connections=$connections;samples=$samples}
     foreach($sample in $samples){if($sample.after_pixels -ne $sample.pixels){throw "$($sample.kind) paints through the opaque utility interior"}}
     $window=$root.Current.BoundingRectangle;$frame=(Control 'pen-tilt-dialog' -Arranged).Current.BoundingRectangle
-    Move-Utility $frame.Left ($view.Top+4*$scale)
+    Move-Utility $frame.Left ($view.Top+((Model).titlebar_insets[2]+4)*$scale)
     $at=Center 'pen-tilt-title';$header=(Screen-Bounds @{x=0;y=0;width=(Model).layout.viewport[0];height=$work.y})
     if(!$header.Contains([double]$at[0],[double]$at[1])){throw 'The native utility title does not overlap the header'}
     $frame=(Control 'pen-tilt-dialog' -Arranged).Current.BoundingRectangle;Move-Utility ($frame.Left-20*$scale) ($frame.Top+4*$scale)
