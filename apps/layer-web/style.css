@@ -124,7 +124,7 @@ button[aria-pressed="true"], button[aria-selected="true"] { background: var(--se
 #gpu-notice[data-launch="leaving"] { opacity: 0; pointer-events: none; }
 .launch-splash { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; }
 .launch-capy { width: min(var(--launch-mark-size), var(--launch-mark-fit)); height: min(var(--launch-mark-size), var(--launch-mark-fit)); background: currentColor; mask: url("icons/layer-zen-looking-up-symbolic.svg") center / contain no-repeat; }
-.launch-caption { position: absolute; left: 0; right: 0; top: calc(50% + min(var(--launch-mark-size), var(--launch-mark-fit)) / 2 + var(--launch-caption-gap)); margin: 0; padding: 0 20px; opacity: 0; color: var(--secondary); text-align: center; transition: opacity 150ms ease-out; }
+.launch-caption { position: absolute; left: 0; right: 0; top: calc(50% + min(var(--launch-mark-size), var(--launch-mark-fit)) * (var(--launch-mark-ink-bottom) - .5) + var(--launch-caption-gap)); margin: 0; padding: 0 20px; opacity: 0; color: var(--launch-caption-color); font-size: var(--launch-caption-size); line-height: 1; text-align: center; transition: opacity 150ms ease-out; }
 .launch-caption[data-visible] { opacity: 1; }
 .gpu-help { width: 100%; max-width: 640px; flex: none; margin: auto; padding: 16px 20px; font-size: var(--ui-text-size); line-height: 1.4; user-select: text; overflow-wrap: anywhere; }
 .gpu-help h1 { font-size: var(--ui-text-size); line-height: 1.25; margin: 0 0 8px; }

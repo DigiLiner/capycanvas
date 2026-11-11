@@ -74,6 +74,11 @@ pub struct BootstrapView {
     pub launch_mark_size: f32,
     pub launch_mark_max_fraction: f32,
     pub launch_caption_gap: f32,
+    pub launch_caption: Arc<str>,
+    pub launch_caption_size: f32,
+    pub launch_caption_color_role: &'static str,
+    pub launch_mark_ink_bottom: f32,
+    pub launch_system_mark_ink_bottom: f32,
     pub active_tag: &'static str,
     pub app_name: &'static str,
     pub common: crate::CommonCopy,
@@ -119,6 +124,11 @@ pub fn bootstrap_view(l: &Localizer) -> BootstrapView {
         launch_mark_size: crate::LAUNCH_MARK_SIZE,
         launch_mark_max_fraction: crate::LAUNCH_MARK_MAX_FRACTION,
         launch_caption_gap: crate::LAUNCH_CAPTION_GAP,
+        launch_caption: l.text(MessageId::COMMON_COMPILING_GPU_SHADERS),
+        launch_caption_size: crate::LAUNCH_CAPTION_SIZE,
+        launch_caption_color_role: crate::LAUNCH_CAPTION_COLOR_ROLE,
+        launch_mark_ink_bottom: crate::LAUNCH_MARK_INK_BOTTOM,
+        launch_system_mark_ink_bottom: crate::LAUNCH_SYSTEM_MARK_INK_BOTTOM,
         active_tag: l.language().tag(),
         app_name: l.language().app_name(),
         common: crate::CommonCopy::new(l),
@@ -515,7 +525,13 @@ mod tests {
         assert_eq!(crate::launch_mark_size([400., 300.]), 120.);
         assert_eq!(crate::launch_mark_size([844., 390.]), 156.);
         assert_eq!(crate::launch_mark_size([0., 390.]), 0.);
-        assert!(Arc::ptr_eq(&first.preparing_canvas, &second.preparing_canvas));
+        assert!(Arc::ptr_eq(&first.launch_caption, &second.launch_caption));
+        assert_eq!(&*first.launch_caption, "Compiling GPU shaders…");
+        assert_eq!(first.launch_caption_size, crate::UI_TEXT_PT as f32 * 96. / 72.);
+        assert_eq!(first.launch_caption_gap, 18.);
+        assert_eq!(first.launch_caption_color_role, "settings_secondary");
+        assert!(first.launch_mark_ink_bottom < 1.);
+        assert!(first.launch_system_mark_ink_bottom < first.launch_mark_ink_bottom);
         assert_eq!(first.active_tag, "en");
         assert_eq!(first.shipped_tags, SHIPPED_LANGUAGES.iter().map(|language| language.tag()).collect::<Vec<_>>());
         let name = "作品{draft}\"🎨\u{2068}literal\u{2069}";

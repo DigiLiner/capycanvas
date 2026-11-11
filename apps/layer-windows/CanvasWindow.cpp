@@ -187,16 +187,20 @@ void CanvasWindow::CreateLaunchCover() {
     launchMark.HorizontalAlignment(HorizontalAlignment::Left);launchMark.VerticalAlignment(VerticalAlignment::Top);
     launchCaption.HorizontalAlignment(HorizontalAlignment::Center);launchCaption.VerticalAlignment(VerticalAlignment::Top);
     launchCaption.TextWrapping(TextWrapping::Wrap);launchCaption.TextAlignment(TextAlignment::Center);
+    launchCaption.FontFamily(FontFamily(L"Segoe UI"));
+    launchCaption.TextLineBounds(TextLineBounds::Tight);launchCaption.OpticalMarginAlignment(OpticalMarginAlignment::TrimSideBearings);
     launchCaption.Opacity(0);launchCaption.IsHitTestVisible(false);
     AutomationProperties::SetAutomationId(launchCaption,L"launch-caption");
     launchCover.Children().Append(launchMark);launchCover.Children().Append(launchCaption);root.Children().Append(launchCover);
     launchCaptionTimer=dispatcher.CreateTimer();launchCaptionTimer.IsRepeating(false);
     launchCaptionTimer.Tick([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock();self&&self->launchCover.Visibility()==Visibility::Visible){
-        if(!self->uiSettings.AnimationsEnabled()){self->launchCaption.Opacity(.45);return;}
-        Animation::DoubleAnimation opacity;opacity.From(0.);opacity.To(.45);opacity.Duration(DurationHelper::FromTimeSpan(CanvasLaunchTiming::CaptionFadeDuration));
+        self->LayoutLaunchCover();
+        if(!self->uiSettings.AnimationsEnabled()){self->launchCaption.Opacity(1.);return;}
+        Animation::DoubleAnimation opacity;opacity.From(0.);opacity.To(1.);opacity.Duration(DurationHelper::FromTimeSpan(CanvasLaunchTiming::CaptionFadeDuration));
         Animation::Storyboard::SetTarget(opacity,self->launchCaption);Animation::Storyboard::SetTargetProperty(opacity,L"Opacity");
         self->launchCaptionFade=Animation::Storyboard();self->launchCaptionFade.Children().Append(opacity);self->launchCaptionFade.Begin();
     }});
+    launchMark.ImageOpened([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->LayoutLaunchCover();});
     launchCover.SizeChanged([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->LayoutLaunchCover();});
     launchCover.Loaded([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){self->launchLoaded=true;self->launchTiming=CanvasLaunchTiming();self->LayoutLaunchCover();self->ArmLaunchCaption();self->QueueLaunchReveal();}});
 }
@@ -208,13 +212,19 @@ void CanvasWindow::LayoutLaunchCover() {
     auto theme=CapyUi::str(CapyUi::object(lastModel,L"state"),L"theme",dark?L"dark":L"light");
     CapyUi::setIcon(launchMark,L"zen-looking-up",theme,placement.size);
     launchMark.Margin({placement.left,placement.top,0,0});
-    if(bootstrap.Size())launchCaption.Margin({20,placement.CaptionTop(bootstrap.GetNamedNumber(L"launch_caption_gap")),20,0});
+    if(bootstrap.Size()){
+        launchCaption.FontSize(bootstrap.GetNamedNumber(L"launch_caption_size"));
+        auto source=launchMark.Source().try_as<Imaging::SvgImageSource>();
+        auto scale=launchCover.XamlRoot()?launchCover.XamlRoot().RasterizationScale():1.;
+        launchCaption.Margin({20,placement.CaptionTop(bootstrap.GetNamedNumber(L"launch_caption_gap"),
+            bootstrap.GetNamedNumber(L"launch_mark_ink_bottom"),source?source.RasterizePixelHeight():0.,scale),20,0});
+    }
 }
 void CanvasWindow::ArmLaunchCaption() {
     if(!launchLoaded||!bootstrap.Size()||launchCover.Visibility()!=Visibility::Visible)return;
     auto delay=std::chrono::milliseconds(static_cast<int64_t>(bootstrap.GetNamedNumber(L"launch_caption_delay_ms")));
     auto remaining=launchTiming.CaptionRemaining(CanvasLaunchTiming::Clock::now(),delay);
-    if(remaining.count()==0)launchCaption.Opacity(.45);
+    if(remaining.count()==0)launchCaption.Opacity(1.);
     else{launchCaptionTimer.Interval(remaining);launchCaptionTimer.Start();}
 }
 void CanvasWindow::HideLaunchCover(bool animate) {
@@ -270,8 +280,8 @@ void CanvasWindow::ApplyLaunchCover(Windows::Data::Json::JsonObject const& model
     if(flag(launch,L"finished")&&launchCover.Visibility()==Visibility::Collapsed)return;
     auto theme=str(state,L"theme",L"dark");launchCover.RequestedTheme(theme==L"dark"?ElementTheme::Dark:ElementTheme::Light);
     launchCover.Background(SolidColorBrush(color(str(palette,L"bg",theme==L"dark"?L"#323232":L"#f4f4f4"))));
-    LayoutLaunchCover();launchCaption.Foreground(SolidColorBrush(color(str(palette,L"text",L"#fafafb"))));
-    launchCaption.Text(str(bootstrap,(L"preparing_"+str(launch,L"notice",L"canvas")).c_str()));
+    LayoutLaunchCover();launchCaption.Foreground(SolidColorBrush(color(str(palette,str(bootstrap,L"launch_caption_color_role").c_str()))));
+    launchCaption.Text(str(bootstrap,L"launch_caption"));
     AutomationProperties::SetName(launchCover,launchCaption.Text());
     if(statusFailed||!str(model,L"error").empty()||!str(state,L"host_error").empty()){HideLaunchCover(false);return;}
     if(!launch.Size())return;
@@ -606,7 +616,7 @@ bool CanvasWindow::StartPrepared(CapyLaunch  prepared) {
     Automation::AutomationProperties::SetName(canvasFocus,CapyUi::str(bootstrap,L"drawing_canvas"));
     Automation::AutomationProperties::SetHelpText(canvasFocus,CapyUi::str(bootstrap,L"drawing_canvas_help"));
     Automation::AutomationProperties::SetName(root,CapyUi::str(bootstrap,L"drawing_workspace"));
-    launchCaption.Text(CapyUi::str(bootstrap,L"preparing_canvas"));
+    launchCaption.Text(CapyUi::str(bootstrap,L"launch_caption"));
     LayoutLaunchCover();
     ArmLaunchCaption();
     Resize();

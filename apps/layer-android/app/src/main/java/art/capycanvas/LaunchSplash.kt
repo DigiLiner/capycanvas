@@ -1,17 +1,24 @@
 package art.capycanvas
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Rect
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.LayerDrawable
+import android.util.TypedValue
 import android.os.Build
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.TextView
 import android.window.SplashScreenView
 import androidx.activity.compose.LocalActivity
+import androidx.lifecycle.viewModelScope
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -19,9 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -35,12 +40,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.ceil
 
 internal class LaunchReveal {
     var covered by mutableStateOf(false)
@@ -97,6 +109,19 @@ internal class LaunchReveal {
     }
 }
 
+internal class LaunchCaptionTextView(context: android.content.Context) : TextView(context) {
+    private val ink = Rect()
+    init { includeFontPadding = false; gravity = Gravity.CENTER_HORIZONTAL }
+    override fun onDraw(canvas: Canvas) {
+        val end = layout?.getLineEnd(0) ?: text.length
+        paint.getTextBounds(text.toString(), 0, end, ink)
+        val saved = canvas.save()
+        canvas.translate(0f, -baseline.toFloat() - ink.top)
+        super.onDraw(canvas)
+        canvas.restoreToCount(saved)
+    }
+}
+
 internal class LaunchSplashWindow(private val activity: MainActivity) {
     val shownAt = SystemClock.uptimeMillis()
     val reveal = LaunchReveal()
@@ -118,6 +143,10 @@ internal class LaunchSplashWindow(private val activity: MainActivity) {
     private var duration: Long? = null
     private var gap = 0f
     private var text: String? = null
+    private var captionSize = 0f
+    private var captionColor = foreground
+    private var nativeInkBottom: Float? = null
+    private var iconBoundsJob: Job? = null
 
     fun install() {
         if (Build.VERSION.SDK_INT >= 31) activity.splashScreen.setOnExitAnimationListener { splash ->
@@ -133,9 +162,8 @@ internal class LaunchSplashWindow(private val activity: MainActivity) {
                 if (nativeActive) {
                     cancelFrame()
                     reveal.native()
-                    caption = TextView(activity).apply {
-                        textSize = 12f
-                        gravity = Gravity.CENTER
+                    measureIcon(splash)
+                    caption = LaunchCaptionTextView(activity).apply {
                         alpha = 0f
                         splash.addView(this, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
                             FrameLayout.LayoutParams.WRAP_CONTENT))
@@ -145,13 +173,53 @@ internal class LaunchSplashWindow(private val activity: MainActivity) {
             }
         }
     }
-    fun update(visible: Boolean, finished: Boolean, text: String?, reveal: Long?, gap: Float) {
+    private fun measureIcon(splash: SplashScreenView) {
+        val icon = splash.iconView as? ImageView ?: return
+        val drawable = icon.drawable ?: return
+        val bounds = Rect(drawable.bounds)
+        val matrix = Matrix(icon.imageMatrix)
+        val height = icon.height
+        val padding = icon.paddingTop
+        val source = (drawable as? BitmapDrawable)?.bitmap
+        val state = if (source == null) drawable.constantState else null
+        iconBoundsJob?.cancel()
+        nativeInkBottom = null
+        iconBoundsJob = activity.host.viewModelScope.launch {
+            val bottom = withContext(Dispatchers.Default) {
+                val bitmap = if (source != null) {
+                    if (source.config == Bitmap.Config.HARDWARE) source.copy(Bitmap.Config.ARGB_8888, false) else source
+                } else state?.newDrawable(activity.resources)?.mutate()?.let { copy ->
+                    Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888).also {
+                        copy.setBounds(0, 0, it.width, it.height)
+                        copy.draw(Canvas(it))
+                    }
+                }
+                if (bitmap == null) return@withContext null
+                try {
+                    val row = IntArray(bitmap.width)
+                    var y = bitmap.height - 1
+                    while (y >= 0) {
+                        bitmap.getPixels(row, 0, row.size, 0, y, row.size, 1)
+                        if (row.any { it ushr 24 != 0 }) break
+                        y--
+                    }
+                    val point = floatArrayOf(bounds.exactCenterX(), bounds.top + bounds.height() * (y + 1f) / bitmap.height)
+                    matrix.mapPoints(point)
+                    (padding + point[1]) / height
+                } finally { if (bitmap !== source) bitmap.recycle() }
+            }
+            if (view === splash && !reveal.closed) { nativeInkBottom = bottom; refresh() }
+        }
+    }
+    fun update(visible: Boolean, finished: Boolean, text: String?, reveal: Long?, gap: Float, size: Float, color: Int) {
         if (this.reveal.closed) return
         this.reveal.update(visible, finished)
         if (visible || !finished) cancelFrame()
         this.text = text
         this.duration = reveal
         this.gap = gap
+        this.captionSize = size
+        this.captionColor = color
         refresh()
     }
     fun readyDrawn(content: View) {
@@ -188,18 +256,20 @@ internal class LaunchSplashWindow(private val activity: MainActivity) {
         }
         caption?.apply {
             val showing = this.text.isNotEmpty()
-            this.text = this@LaunchSplashWindow.text.orEmpty()
-            setTextColor(this@LaunchSplashWindow.foreground)
+            val inkBottom = nativeInkBottom
+            this.text = if (inkBottom == null) "" else this@LaunchSplashWindow.text.orEmpty()
+            setTextColor(captionColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, captionSize)
             val icon = splash.iconView
-            if (icon != null) {
+            if (icon != null && inkBottom != null) {
                 val bounds = Rect(0, 0, icon.width, icon.height)
                 splash.offsetDescendantRectToMyCoords(icon, bounds)
                 measure(View.MeasureSpec.makeMeasureSpec(splash.width, View.MeasureSpec.AT_MOST),
                     View.MeasureSpec.makeMeasureSpec(splash.height, View.MeasureSpec.AT_MOST))
                 x = bounds.exactCenterX() - measuredWidth / 2f
-                y = bounds.bottom + gap
+                y = ceil(bounds.top + bounds.height() * inkBottom) + ceil(gap)
             }
-            if (this.text.isNotEmpty() && !showing) animate().alpha(.5f).setDuration(180).start()
+            if (this.text.isNotEmpty() && !showing) animate().alpha(1f).setDuration(180).start()
             else if (this.text.isEmpty()) { animate().cancel(); alpha = 0f }
         }
         if (!reveal.visible) {
@@ -221,6 +291,8 @@ internal class LaunchSplashWindow(private val activity: MainActivity) {
     }
     fun close() {
         reveal.close()
+        iconBoundsJob?.cancel()
+        iconBoundsJob = null
         cancelFrame()
         if (Build.VERSION.SDK_INT >= 31) (view as? SplashScreenView)?.let { it.animate().cancel(); it.remove() }
         view = null
@@ -242,7 +314,6 @@ internal fun CanvasHost.launchHolding(reveal: LaunchReveal?): Boolean {
 @Composable internal fun LaunchSplash(host: CanvasHost) {
     val activity = LocalActivity.current as? MainActivity ?: return
     val window = activity.launchSplash
-    val launch = host.snapshot?.objectOrNull("launch")
     val visible = host.launchCovered()
     val finished = host.launchFinished()
     val bootstrap = host.bootstrap
@@ -258,10 +329,15 @@ internal fun CanvasHost.launchHolding(reveal: LaunchReveal?): Boolean {
             captionVisible = true
         }
     }
-    val captionAlpha by animateFloatAsState(if (captionVisible) .5f else 0f,
+    val captionAlpha by animateFloatAsState(if (captionVisible) 1f else 0f,
         tween(if (Build.VERSION.SDK_INT >= 31) 180 else 0), label = "launch-caption")
-    val caption = if (captionVisible) bootstrap?.optString("preparing_${launch?.optString("notice", "canvas") ?: "canvas"}") else null
-    SideEffect { window.update(visible, finished, caption, reveal, gap * density.density) }
+    val caption = if (captionVisible) bootstrap?.optString("launch_caption") else null
+    val size = bootstrap?.optDouble("launch_caption_size")?.toFloat() ?: 0f
+    val role = bootstrap?.optString("launch_caption_color_role").orEmpty()
+    val color = host.snapshot?.objectOrNull("state")?.objectOrNull("palette")?.optString(role)
+        ?.takeIf { it.isNotEmpty() }?.let { android.graphics.Color.parseColor(it) } ?: window.foreground
+    val systemInkBottom = bootstrap?.optDouble("launch_system_mark_ink_bottom")?.toFloat() ?: 0f
+    SideEffect { window.update(visible, finished, caption, reveal, gap * density.density, size * density.density, color) }
     val holding = host.launchHolding(window.reveal)
     val alpha by animateFloatAsState(if (holding) 1f else 0f,
         tween(if (finished) reveal?.toInt() ?: 0 else 0), label = "launch-reveal")
@@ -273,15 +349,28 @@ internal fun CanvasHost.launchHolding(reveal: LaunchReveal?): Boolean {
             val mark = window.legacyMarkSize?.let { with(density) { it.toDp() } }
                 ?: if (bootstrap != null) Native.launchMarkSize(maxWidth.value, maxHeight.value).dp else 0.dp
             val foreground = Color(window.foreground)
-            val captionTop = maxHeight / 2 + mark / 2 + gap.dp
-            Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }.background(Color(window.background))
-                .testTag("launch-splash"), contentAlignment = Alignment.Center) {
+            val inkBottom = if (window.legacyMarkSize != null) systemInkBottom
+                else bootstrap?.optDouble("launch_mark_ink_bottom")?.toFloat() ?: 0f
+            Layout(modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }.background(Color(window.background))
+                .testTag("launch-splash"), content = {
                 Image(painterResource(if (window.legacyMarkSize != null) R.drawable.capy_splash_mark else R.drawable.capy_full_mark),
                     null, Modifier.size(mark), colorFilter = ColorFilter.tint(foreground))
-                if (!caption.isNullOrEmpty()) Box(Modifier.fillMaxSize().offset(y = captionTop),
-                    contentAlignment = Alignment.TopCenter) {
-                    Text(caption, color = foreground.copy(alpha = captionAlpha), fontSize = 12.sp,
-                        modifier = Modifier.testTag("launch-splash-caption"))
+                if (!caption.isNullOrEmpty()) AndroidView(factory = { LaunchCaptionTextView(it) }, update = {
+                    it.text = caption
+                    it.setTextSize(TypedValue.COMPLEX_UNIT_PX, size * density.density)
+                    it.setTextColor(color)
+                    it.alpha = captionAlpha
+                }, modifier = Modifier.testTag("launch-splash-caption"))
+            }) { children, constraints ->
+                val loose = constraints.copy(minWidth = 0, minHeight = 0)
+                val image = children[0].measure(loose)
+                val text = children.getOrNull(1)?.measure(loose)
+                val viewport = IntSize(constraints.maxWidth, constraints.maxHeight)
+                val at = Alignment.Center.align(IntSize(image.width, image.height), viewport, layoutDirection)
+                val textTop = ceil(at.y + image.height * inkBottom).toInt() + ceil(gap * density.density).toInt()
+                layout(viewport.width, viewport.height) {
+                    image.place(at.x, at.y)
+                    text?.place((viewport.width - text.width) / 2, textTop)
                 }
             }
         }

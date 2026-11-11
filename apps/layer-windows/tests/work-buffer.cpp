@@ -115,8 +115,13 @@ int main() {
             CanvasLaunchPlacement placement(extent[0],extent[1],extent[2]);
             assert(placement.left>=0&&placement.top>=0);
             assert(placement.left+placement.size/2==extent[0]/2&&placement.top+placement.size/2==extent[1]/2);
-            assert(placement.CaptionTop(18)>placement.top+placement.size);
-            assert(placement.CaptionTop(18)+20<=extent[1]);
+            for(double scale:{1.,1.5,2.}){
+                auto raster=std::ceil(placement.size*std::max(2.,scale));
+                auto top=placement.CaptionTop(18,.923271,raster,scale);
+                assert(top>=placement.top+placement.size*.923271+18);
+                assert(top+20<=extent[1]);
+                assert(std::abs(top*scale-std::round(top*scale))<1e-9);
+            }
         }
     }
     {

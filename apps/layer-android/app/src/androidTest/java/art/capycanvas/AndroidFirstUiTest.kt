@@ -25,6 +25,12 @@ class AndroidFirstUiTest {
     @get:Rule(order = 0) val device = CapyDeviceRule()
     @get:Rule(order = 1) val compose = createEmptyComposeRule()
 
+    private fun awaitLaunchReveal(activity: MainActivity) {
+        compose.waitUntil(5_000) {
+            !activity.launchSplash.nativeActive && compose.onAllNodesWithTag("launch-splash").fetchSemanticsNodes().isEmpty()
+        }
+    }
+
     @Test fun launchRevealWaitsForReadyDrawAndCommit() {
         val reveal = LaunchReveal()
         reveal.update(true, false)
@@ -218,6 +224,7 @@ class AndroidFirstUiTest {
                 compose.onNodeWithTag("workspace-submit", useUnmergedTree = true).assertIsEnabled().performTouchInput { click() }
             }
             compose.waitUntil(60_000) { host.workspaceManager?.isNull("error") == true && host.snapshot?.objectOrNull("launch")?.optBoolean("finished") == true }
+            awaitLaunchReveal(scenario.activity())
             compose.onNodeWithTag("launch-splash").assertDoesNotExist()
             screenshot("startup-workspace-recovered-$theme-${if(saveAsNew) "save" else "retry"}.png")
         } finally {
@@ -311,6 +318,8 @@ class AndroidFirstUiTest {
                 }
                 assertTrue("The splash capture follows its rendered frame", committed.await(5, TimeUnit.SECONDS))
             }
+            var markReference: IntArray? = null
+            var markBottom = 0
             fun splashScreenshot(name: String, captionShown: Boolean) {
                 awaitSplashFrame()
                 scenario.onActivity {
@@ -331,12 +340,36 @@ class AndroidFirstUiTest {
                     }
                     assertTrue("The capy mark is visible at its launch bounds", markPixels > 100)
                     val density = instrumentation.targetContext.resources.displayMetrics.density
-                    val top = mark.bottom + (host.bootstrap!!.getDouble("launch_caption_gap") * density).toInt()
-                    val captionPixels = (top until (top + 32 * density).toInt().coerceAtMost(bitmap.height)).sumOf { y ->
-                        (cover.left until cover.right).count { x -> bitmap.getPixel(x, y) != expected }
+                    if (!captionShown) {
+                        val pixels = IntArray(mark.width() * mark.height())
+                        bitmap.getPixels(pixels, 0, mark.width(), mark.left, mark.top, mark.width(), mark.height())
+                        markReference = pixels
+                        markBottom = mark.top + (mark.height() - 1 downTo 0).first { y ->
+                            (0 until mark.width()).any { x -> pixels[y * mark.width() + x] != expected }
+                        } + 1
+                    } else {
+                        val captionBounds = android.graphics.Rect()
+                        scenario.onActivity {
+                            val label = LaunchSplashWindow::class.java.getDeclaredField("caption").apply { isAccessible = true }
+                                .get(it.launchSplash) as? android.widget.TextView
+                                ?: it.window.decorView.descendant<LaunchCaptionTextView>()!!
+                            assertTrue(label.getGlobalVisibleRect(captionBounds))
+                            val padding = kotlin.math.ceil(label.textSize).toInt()
+                            captionBounds.inset(-padding, -padding)
+                            assertTrue(captionBounds.intersect(cover))
+                        }
+                        fun before(x: Int, y: Int) = if (mark.contains(x, y))
+                            markReference!![(y - mark.top) * mark.width() + x - mark.left] else expected
+                        fun differs(a: Int, b: Int) = listOf(0, 8, 16).any { shift ->
+                            kotlin.math.abs((a shr shift and 255) - (b shr shift and 255)) >= 4
+                        }
+                        val inkTop = (captionBounds.top until captionBounds.bottom).firstOrNull { y ->
+                            (captionBounds.left until captionBounds.right).any { x -> differs(bitmap.getPixel(x, y), before(x, y)) }
+                        }
+                        assertNotNull("The delayed caption is visible", inkTop)
+                        val expectedTop = markBottom + host.bootstrap!!.getDouble("launch_caption_gap") * density
+                        assertTrue("Caption ink uses the shared gap", kotlin.math.abs(inkTop!! - expectedTop) <= density)
                     }
-                    if (captionShown) assertTrue("The delayed caption is visible", captionPixels > 0)
-                    else assertEquals("Only the capy appears before the shared caption delay", 0, captionPixels)
                 } finally { bitmap.recycle() }
             }
             assertTrue(beforeCaption())
@@ -354,7 +387,7 @@ class AndroidFirstUiTest {
                     scenario.onActivity {
                         val caption = LaunchSplashWindow::class.java.getDeclaredField("caption").apply { isAccessible = true }
                             .get(it.launchSplash) as? android.widget.TextView
-                        showing = caption != null && caption.text.isNotEmpty() && caption.alpha > 0f
+                        showing = caption != null && caption.text.isNotEmpty() && caption.alpha == 1f
                     }
                     showing
                 } else compose.onAllNodesWithTag("launch-splash-caption").fetchSemanticsNodes().isNotEmpty()
@@ -364,9 +397,7 @@ class AndroidFirstUiTest {
             splashScreenshot("startup-splash-without-gpu-$theme.png", true)
             resume.countDown()
             compose.waitUntil(60_000) { host.snapshot?.objectOrNull("launch")?.optBoolean("finished") == true }
-            compose.waitUntil(5_000) {
-                !activity.launchSplash.nativeActive && compose.onAllNodesWithTag("launch-splash").fetchSemanticsNodes().isEmpty()
-            }
+            awaitLaunchReveal(activity)
             compose.runOnIdle {
                 assertTrue(host.snapshot!!.getJSONObject("state").getBoolean("workspace_ready"))
                 val layout = host.snapshot!!.getJSONObject("layout")
@@ -424,55 +455,59 @@ class AndroidFirstUiTest {
     }
 
     @Test fun startupFailureRetainsLongCauseAndRestartStaysReachable() {
-        for (theme in listOf("light", "dark")) {
-            val cause = IllegalStateException("Vulkan attach diagnostic\n" + (1..60).joinToString("\n") {
-                "Driver detail $it: preserved native cause for renderer initialization"
-            })
-            val diagnostic = cause.message!!
-            CanvasHost.beforeGpuAttachForTest = { throw cause }
-            try {
-                ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                    val activity = scenario.activity()
-                    val host = activity.host
-                    compose.waitUntil(20_000) { host.failure != null && host.workspaceManager?.optBoolean("ready") == true }
-                    compose.runOnIdle {
-                        assertEquals(diagnostic, host.failure)
-                        host.dispatch(obj("type" to "set_theme", "theme" to theme))
+        val directory = AppStorage.directoryForTest
+        try {
+            for (theme in listOf("light", "dark")) {
+                AppStorage.directoryForTest = File(device.root, "startup-failure-$theme").apply { mkdirs() }
+                val cause = IllegalStateException("Vulkan attach diagnostic\n" + (1..60).joinToString("\n") {
+                    "Driver detail $it: preserved native cause for renderer initialization"
+                })
+                val diagnostic = cause.message!!
+                CanvasHost.beforeGpuAttachForTest = { throw cause }
+                try {
+                    ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                        val activity = scenario.activity()
+                        val host = activity.host
+                        compose.waitUntil(20_000) { host.failure != null && host.workspaceManager?.optBoolean("ready") == true }
+                        compose.runOnIdle {
+                            assertEquals(diagnostic, host.failure)
+                            host.dispatch(obj("type" to "set_theme", "theme" to theme))
+                        }
+                        compose.waitUntil(10_000) { host.snapshot?.optJSONObject("state")?.optString("theme") == theme }
+                        assertNull(host.actionError)
+                        compose.onNodeWithTag("launch-splash").assertDoesNotExist()
+                        assertFalse(host.snapshot!!.getJSONObject("launch").getBoolean("finished"))
+                        compose.onNodeWithText(host.bootstrap!!.getString("canvas_init_failed")).assertIsDisplayed()
+                        val detail = compose.onNodeWithText(diagnostic, useUnmergedTree = true)
+                        detail.assertIsDisplayed().assertTextEquals(diagnostic)
+                        val viewport = detail.fetchSemanticsNode().boundsInRoot
+                        assertTrue("Long diagnostic keeps a bounded viewport", viewport.height <= 180f * activity.resources.displayMetrics.density + 1f)
+                        val scroller = compose.onNode(hasScrollAction() and (hasText(diagnostic) or hasAnyDescendant(hasText(diagnostic))), useUnmergedTree = true)
+                        assertTrue("The entire cause remains available by scrolling",
+                            scroller.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue() > 0f)
+                        scroller.performTouchInput { swipeUp() }
+                        val restart = compose.onNodeWithText(host.bootstrap!!.getString("restart_canvas"))
+                        restart.assertIsDisplayed().assertHasClickAction()
+                        val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+                        val button = restart.fetchSemanticsNode().boundsInRoot
+                        assertTrue("Restart stays within the editor", root.contains(button.topLeft) && root.contains(button.bottomRight))
+                        screenshot("startup-failure-$theme.png")
+                        val epoch = host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch")
+                        CanvasHost.beforeGpuAttachForTest = null
+                        restart.performClick()
+                        compose.waitUntil(60_000) {
+                            host.failure == null && host.surfaceReady && host.snapshot?.optBoolean("brush_ready") == true &&
+                                host.snapshot?.objectOrNull("launch")?.optBoolean("finished") == true
+                        }
+                        compose.runOnIdle {
+                            assertEquals(epoch, host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch"))
+                        }
+                        detail.assertDoesNotExist()
+                        compose.onNodeWithTag("canvas-placeholder").assertDoesNotExist()
                     }
-                    compose.waitUntil(10_000) { host.snapshot?.optJSONObject("state")?.optString("theme") == theme }
-                    assertNull(host.actionError)
-                    compose.onNodeWithTag("launch-splash").assertDoesNotExist()
-                    assertFalse(host.snapshot!!.getJSONObject("launch").getBoolean("finished"))
-                    compose.onNodeWithText(host.bootstrap!!.getString("canvas_init_failed")).assertIsDisplayed()
-                    val detail = compose.onNodeWithText(diagnostic, useUnmergedTree = true)
-                    detail.assertIsDisplayed().assertTextEquals(diagnostic)
-                    val viewport = detail.fetchSemanticsNode().boundsInRoot
-                    assertTrue("Long diagnostic keeps a bounded viewport", viewport.height <= 180f * activity.resources.displayMetrics.density + 1f)
-                    val scroller = compose.onNode(hasScrollAction() and (hasText(diagnostic) or hasAnyDescendant(hasText(diagnostic))), useUnmergedTree = true)
-                    assertTrue("The entire cause remains available by scrolling",
-                        scroller.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue() > 0f)
-                    scroller.performTouchInput { swipeUp() }
-                    val restart = compose.onNodeWithText(host.bootstrap!!.getString("restart_canvas"))
-                    restart.assertIsDisplayed().assertHasClickAction()
-                    val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
-                    val button = restart.fetchSemanticsNode().boundsInRoot
-                    assertTrue("Restart stays within the editor", root.contains(button.topLeft) && root.contains(button.bottomRight))
-                    screenshot("startup-failure-$theme.png")
-                    val epoch = host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch")
-                    CanvasHost.beforeGpuAttachForTest = null
-                    restart.performClick()
-                    compose.waitUntil(60_000) {
-                        host.failure == null && host.surfaceReady && host.snapshot?.optBoolean("brush_ready") == true &&
-                            host.snapshot?.objectOrNull("launch")?.optBoolean("finished") == true
-                    }
-                    compose.runOnIdle {
-                        assertEquals(epoch, host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch"))
-                    }
-                    detail.assertDoesNotExist()
-                    compose.onNodeWithTag("canvas-placeholder").assertDoesNotExist()
-                }
-            } finally { CanvasHost.beforeGpuAttachForTest = null }
-        }
+                } finally { CanvasHost.beforeGpuAttachForTest = null }
+            }
+        } finally { AppStorage.directoryForTest = directory }
     }
 
     @Test fun unsupportedGpuExplainsTheDeviceInTheCanvasArea() {

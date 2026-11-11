@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <chrono>
+#include <cmath>
 #include <memory>
 
 class CanvasSurfaceState {
@@ -51,5 +52,8 @@ private:
 struct CanvasLaunchPlacement {
     double left,top,size;
     CanvasLaunchPlacement(double width,double height,double markSize):left((width-markSize)/2),top((height-markSize)/2),size(markSize){}
-    double CaptionTop(double gap)const{return top+size+gap;}
+    double CaptionTop(double gap,double inkBottom,double rasterHeight,double scale)const{
+        auto bottom=top+size*(rasterHeight>0?std::ceil(inkBottom*rasterHeight)/rasterHeight:inkBottom);
+        return (std::ceil(bottom*scale)+std::ceil(gap*scale))/scale;
+    }
 };

@@ -25,8 +25,15 @@ impl LaunchSplash {
         icon.set_halign(gtk::Align::Center);
         icon.set_valign(gtk::Align::Center);
         background.add_overlay(&icon);
-        let label = gtk::Label::new(Some(&layer_ui::bootstrap_view(localization).starting_canvas));
-        label.set_opacity(0.45);
+        let copy = layer_ui::bootstrap_view(localization);
+        let label = gtk::Label::new(Some(&copy.launch_caption));
+        label.add_css_class("launch-caption");
+        let attributes = gtk::pango::AttrList::new();
+        attributes.insert(gtk::pango::AttrSize::new_size_absolute((copy.launch_caption_size * gtk::pango::SCALE as f32).round() as i32));
+        label.set_attributes(Some(&attributes));
+        let dark = adw::StyleManager::default().is_dark();
+        let theme = if dark { layer_ui::Theme::Dark } else { layer_ui::Theme::Light };
+        let palette = layer_ui::Settings::default().palette(theme, layer_ui::Platform::Gtk, None);
         label.set_wrap(true);
         label.set_justify(gtk::Justification::Center);
         label.set_max_width_chars(48);
@@ -41,11 +48,14 @@ impl LaunchSplash {
         background.add_overlay(&caption);
         let mark = icon.downgrade();
         let text = caption.downgrade();
+        let ink = label.downgrade();
         sizing.connect_resize(move |_, width, height| {
             let size = layer_ui::launch_mark_size([width as f32, height as f32]);
             if let Some(mark) = mark.upgrade() { mark.set_pixel_size(size.round() as i32); }
             if let Some(text) = text.upgrade() {
-                text.set_margin_top(((height as f32 + size) * 0.5 + layer_ui::LAUNCH_CAPTION_GAP).round() as i32);
+                let padding = ink.upgrade().map_or(0, |label| label.layout().pixel_extents().0.y());
+                text.set_margin_top((height as f32 * 0.5 + size * (layer_ui::LAUNCH_MARK_INK_BOTTOM - 0.5)
+                    + layer_ui::LAUNCH_CAPTION_GAP).round() as i32 - padding);
             }
         });
         root.set_child(Some(&background));
@@ -54,16 +64,22 @@ impl LaunchSplash {
         glib::timeout_add_local_once(std::time::Duration::from_millis(layer_ui::LAUNCH_CAPTION_DELAY_MS), move || {
             if let Some(caption) = weak.upgrade() { caption.set_reveal_child(true); }
         });
-        Self {root, label, paint: Rc::new(RefCell::new(None))}
+        let splash = Self {root, label, paint: Rc::new(RefCell::new(None))};
+        splash.set_palette(&palette);
+        splash
+    }
+    pub fn set_palette(&self, palette: &layer_ui::ThemePalette) {
+        let [r, g, b] = palette.settings_secondary.0.map(|channel| u16::from(channel) * 257);
+        let attributes = self.label.attributes().unwrap();
+        attributes.change(gtk::pango::AttrColor::new_foreground(r, g, b));
+        attributes.change(gtk::pango::AttrInt::new_foreground_alpha(u16::MAX));
+        self.label.set_attributes(Some(&attributes));
     }
     pub fn update(&self, view: layer_ui::LaunchView, localization: &layer_ui::Localizer) {
         if !view.visible && !self.root.reveals_child() { return; }
         if view.visible {
             self.cancel_paint();
-            self.label.set_text(&localization.text(match view.notice {
-                layer_ui::CanvasNotice::Canvas => layer_ui::MessageId::COMMON_PREPARING_CANVAS,
-                layer_ui::CanvasNotice::Brush => layer_ui::MessageId::COMMON_PREPARING_BRUSH,
-            }));
+            self.label.set_text(&layer_ui::bootstrap_view(localization).launch_caption);
         }
         if view.visible {
             self.root.set_can_target(true);
@@ -147,7 +163,10 @@ mod tests {
             assert!((bounds.height() - icon.pixel_size() as f32).abs() <= 1.);
             if caption.reveals_child() {
                 let text = caption.compute_bounds(&window).unwrap();
-                assert!(text.y() >= bounds.y() + bounds.height() + layer_ui::LAUNCH_CAPTION_GAP - 1.);
+                let ink = splash.label.layout().pixel_extents().0;
+                let label = splash.label.compute_bounds(&window).unwrap();
+                assert!((label.y() + ink.y() as f32 - (bounds.y() + bounds.height() * layer_ui::LAUNCH_MARK_INK_BOTTOM)
+                    - layer_ui::LAUNCH_CAPTION_GAP).abs() <= 1.);
                 assert!(text.y() + text.height() <= surface.y() + surface.height());
             }
             bounds
@@ -167,7 +186,7 @@ mod tests {
         assert_eq!(icon.compute_bounds(&window).unwrap(), bounds, "caption reveal keeps the mark centered");
         geometry();
         capture("launch-after-caption.png");
-        let view = layer_ui::LaunchView {visible: false, finished: true, notice: layer_ui::CanvasNotice::Canvas, frame: None};
+        let view = layer_ui::LaunchView {visible: false, finished: true, frame: None};
         splash.update(view, &localization);
         assert!(splash.root.reveals_child() && splash.root.can_target(), "readiness does not reveal an unpainted editor");
         assert!(splash.paint.borrow().is_some());

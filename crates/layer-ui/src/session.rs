@@ -45,7 +45,8 @@ use held_actions::{ERASER_END, merge_change};
 mod canvas_transition;
 use canvas_transition::CanvasTransition;
 pub use renderer_lifecycle::{CanvasNotice, LaunchReadiness, LaunchView, LAUNCH_CAPTION_DELAY_MS, LAUNCH_REVEAL_MS,
-    LAUNCH_MARK_SIZE, LAUNCH_MARK_MAX_FRACTION, LAUNCH_CAPTION_GAP, launch_mark_size};
+    LAUNCH_MARK_SIZE, LAUNCH_MARK_MAX_FRACTION, LAUNCH_CAPTION_GAP, LAUNCH_CAPTION_SIZE, LAUNCH_CAPTION_COLOR_ROLE,
+    LAUNCH_MARK_INK_BOTTOM, LAUNCH_SYSTEM_MARK_INK_BOTTOM, launch_mark_size};
 #[path = "session_bubbles.rs"]
 mod session_bubbles;
 #[path = "zen_peek.rs"]

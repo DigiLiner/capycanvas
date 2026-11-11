@@ -144,6 +144,17 @@ export function createLaunchCover({ container, now = () => performance.now(), se
     if (event.target === container && event.propertyName === 'opacity' && container.dataset.launch === 'leaving')
       container.hidden = true;
   });
+  const alignCaption = () => {
+    const document = caption.ownerDocument;
+    if (!document) return;
+    const style = document.defaultView.getComputedStyle(caption);
+    const context = document.createElement('canvas').getContext('2d');
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const ink = context.measureText(caption.textContent);
+    const baseline = (parseFloat(style.lineHeight) - ink.fontBoundingBoxAscent - ink.fontBoundingBoxDescent) / 2 + ink.fontBoundingBoxAscent;
+    caption.style.transform = `translateY(${ink.actualBoundingBoxAscent - baseline}px)`;
+  };
+  caption.ownerDocument?.fonts.ready.then(alignCaption);
   let captionTimer;
   return {
     update(view, copy) {
@@ -152,11 +163,17 @@ export function createLaunchCover({ container, now = () => performance.now(), se
       container.style.setProperty('--launch-mark-size', `${copy.launch_mark_size}px`);
       container.style.setProperty('--launch-mark-fit', `calc(${copy.launch_mark_max_fraction} * min(100vw, 100dvh))`);
       container.style.setProperty('--launch-caption-gap', `${copy.launch_caption_gap}px`);
+      container.style.setProperty('--launch-caption-size', `${copy.launch_caption_size}px`);
+      container.style.setProperty('--launch-caption-color', `var(--${copy.launch_caption_color_role.replaceAll('_', '-')})`);
+      container.style.setProperty('--launch-mark-ink-bottom', copy.launch_mark_ink_bottom);
       captionTimer ??= setTimer(() => { caption.dataset.visible = ''; }, Math.max(0, Number(copy.launch_caption_delay_ms) - now()));
       controls(view.visible);
       if (view.visible) {
-        caption.textContent = copy[`preparing_${view.notice}`];
-        if (container.firstElementChild !== content) container.replaceChildren(content);
+        const changed = caption.textContent !== copy.launch_caption;
+        const detached = container.firstElementChild !== content;
+        if (changed) caption.textContent = copy.launch_caption;
+        if (detached) container.replaceChildren(content);
+        if (changed || detached) alignCaption();
         container.hidden = false;
         container.dataset.launch = 'loading';
       } else if (!view.finished) {

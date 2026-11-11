@@ -3197,6 +3197,7 @@ impl Workspace {
     }
 
     fn apply_palette(&self, palette: ThemePalette) {
+        self.launch.set_palette(&palette);
         if self.palette.replace(Some(palette)) == Some(palette) {
             return;
         }

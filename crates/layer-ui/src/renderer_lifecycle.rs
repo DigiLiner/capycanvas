@@ -6,6 +6,10 @@ pub const LAUNCH_REVEAL_MS: u64 = 500;
 pub const LAUNCH_MARK_SIZE: f32 = 7. * crate::layout::TILE_SIZE;
 pub const LAUNCH_MARK_MAX_FRACTION: f32 = 0.4;
 pub const LAUNCH_CAPTION_GAP: f32 = crate::layout::TILE_SIZE * 0.5;
+pub const LAUNCH_CAPTION_SIZE: f32 = crate::UI_TEXT_PT as f32 * 96. / 72.;
+pub const LAUNCH_CAPTION_COLOR_ROLE: &str = "settings_secondary";
+pub const LAUNCH_MARK_INK_BOTTOM: f32 = (400. - 4.84) / 428.;
+pub const LAUNCH_SYSTEM_MARK_INK_BOTTOM: f32 = (144. + (400. - 214.49) * 95. / 232.) / 288.;
 
 pub fn launch_mark_size(viewport: [f32; 2]) -> f32 {
     LAUNCH_MARK_SIZE.min(viewport[0].min(viewport[1]).max(0.) * LAUNCH_MARK_MAX_FRACTION)
@@ -33,7 +37,6 @@ pub struct LaunchReadiness {
 pub struct LaunchView {
     pub visible: bool,
     pub finished: bool,
-    pub notice: CanvasNotice,
     pub frame: Option<u64>,
 }
 
@@ -103,9 +106,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         LaunchView {
             visible: !self.launch_finished && !blocked,
             finished: self.launch_finished,
-            notice: if workspace && canvas && readiness.chrome && !readiness.brush {
-                CanvasNotice::Brush
-            } else { CanvasNotice::Canvas },
             frame,
         }
     }
@@ -487,7 +487,7 @@ mod tests {
             let pending = app.launch_state(readiness);
             assert!(pending.visible && !pending.finished);
             assert_eq!(pending.frame, None);
-            assert_eq!(pending.notice, if missing == 2 { CanvasNotice::Brush } else { CanvasNotice::Canvas });
+            assert!(serde_json::to_value(pending).unwrap().get("notice").is_none());
             app.set_workspace_read_only(false);
             let ready = app.launch_state(LAUNCH_READY);
             assert!(ready.visible && !ready.finished);

@@ -31,14 +31,14 @@ export async function checkWorkspaceStartup({call, evaluate, settle}) {
       const shot = await call('Page.captureScreenshot',{format:'png'});
       await writeFile(`${directory}/${theme}-${device.id}-${phase}.png`,Buffer.from(shot.data,'base64'));
     };
-    const geometry=()=>evaluate("(()=>{const mark=document.querySelector('.launch-capy').getBoundingClientRect(),caption=document.querySelector('.launch-caption').getBoundingClientRect();return{mark:mark.toJSON(),caption:caption.toJSON(),width:innerWidth,height:innerHeight};})()");
+    const geometry=()=>evaluate("(()=>{const mark=document.querySelector('.launch-capy').getBoundingClientRect(),caption=document.querySelector('.launch-caption').getBoundingClientRect();const node=document.querySelector('.launch-caption'),style=getComputedStyle(node),context=document.createElement('canvas').getContext('2d');context.font=`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;const ink=context.measureText(node.textContent),baseline=(parseFloat(style.lineHeight)-ink.fontBoundingBoxAscent-ink.fontBoundingBoxDescent)/2+ink.fontBoundingBoxAscent;return{mark:mark.toJSON(),caption:caption.toJSON(),inkTop:caption.y+baseline-ink.actualBoundingBoxAscent,width:innerWidth,height:innerHeight};})()");
     const checkGeometry=async early=>{
-      const actual=await geometry(),copy=await evaluate('(()=>{const v=layerApp.app.bootstrap_view();return {size:v.launch_mark_size,fit:v.launch_mark_max_fraction,gap:v.launch_caption_gap};})()');
+      const actual=await geometry(),copy=await evaluate('(()=>{const v=layerApp.app.bootstrap_view();return {size:v.launch_mark_size,fit:v.launch_mark_max_fraction,gap:v.launch_caption_gap,inkBottom:v.launch_mark_ink_bottom};})()');
       const size=Math.min(copy.size,copy.fit*Math.min(actual.width,actual.height));
       for(const value of [actual.mark.width,actual.mark.height])assert.ok(Math.abs(value-size)<.5,'The mark uses the shared fitted size');
       assert.ok(Math.abs(actual.mark.x+actual.mark.width/2-actual.width/2)<.5);
       assert.ok(Math.abs(actual.mark.y+actual.mark.height/2-actual.height/2)<.5);
-      assert.ok(Math.abs(actual.caption.y-actual.mark.bottom-copy.gap)<.5,'The caption follows the fitted mark with the shared gap');
+      assert.ok(Math.abs(actual.inkTop-actual.mark.y-actual.mark.height*copy.inkBottom-copy.gap)<.5,'The caption ink follows the visible mark with the shared gap');
       assert.ok(actual.caption.bottom<=actual.height,'The caption fits inside the window');
       for(const key of ['x','y','width','height'])assert.ok(Math.abs(actual.mark[key]-early.mark[key])<.5,'Bootstrap must not move or resize the pre-Wasm mark');
     };

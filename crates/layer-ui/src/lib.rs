@@ -84,7 +84,8 @@ mod navigator;
 pub use navigator::NavigatorGeometry;
 pub use session::tonal_selection::{TonalAction, TonalOptions};
 pub use session::{CanvasNotice, LaunchReadiness, LaunchView, LAUNCH_CAPTION_DELAY_MS, LAUNCH_REVEAL_MS,
-    LAUNCH_MARK_SIZE, LAUNCH_MARK_MAX_FRACTION, LAUNCH_CAPTION_GAP, launch_mark_size, ThumbnailRequests, occurrence_token, occurrence_handle, object_token, object_handle, SourceUse, FilterPreviewCache, FilterPreviewStatus, FilterPreviewUpdate};
+    LAUNCH_MARK_SIZE, LAUNCH_MARK_MAX_FRACTION, LAUNCH_CAPTION_GAP, LAUNCH_CAPTION_SIZE, LAUNCH_CAPTION_COLOR_ROLE,
+    LAUNCH_MARK_INK_BOTTOM, LAUNCH_SYSTEM_MARK_INK_BOTTOM, launch_mark_size, ThumbnailRequests, occurrence_token, occurrence_handle, object_token, object_handle, SourceUse, FilterPreviewCache, FilterPreviewStatus, FilterPreviewUpdate};
 mod curve_editor;
 pub use curve_editor::{CurveEditorView, CurveEditorTarget, CurveEditorAction};
 pub use session::pressure_calibration::{PressureCalibrationAction, PressureCalibrationView};
