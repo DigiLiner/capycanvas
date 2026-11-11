@@ -61,6 +61,17 @@ function Begin-Rename{
  Wait-Until {(Model).state.layer_tools.rename_layer -eq $layer} 'Layer rename did not open'
  Control "layer-$layer-rename"
 }
+function Set-ImePrediction($Values){
+ $key=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\IME\15.0\IMEJP\MSIME')
+ try{
+  $previous=@{}
+  foreach($name in $Values.Keys){
+   $previous[$name]=if($name -in $key.GetValueNames()){@{kind=$key.GetValueKind($name);value=$key.GetValue($name)}}
+   if($Values[$name]){$key.SetValue($name,$Values[$name].value,$Values[$name].kind)}else{$key.DeleteValue($name,$false)}
+  }
+  $previous
+ }finally{$key.Dispose()}
+}
 function Assert-Renaming([string]$Name){
  $view=Model
  if($view.state.layer_tools.rename_layer -ne $layer -or $view.state.layer_tools.editing_layer.label -ne $Name){throw 'An IME candidate key committed or canceled the layer rename'}
@@ -68,6 +79,7 @@ function Assert-Renaming([string]$Name){
 try{
  Enter-CapyEnvironment
  if(!(Get-WinUserLanguageList | Where-Object {$_.InputMethodTips -match '^0411:'})){throw 'Enable the installed Japanese IME in the private Windows user before running this fixture'}
+ $script:imePrediction=Set-ImePrediction @{PredictionUseInputHistory=@{kind='DWord';value=0};PredictionUseSystemDictionary=@{kind='DWord';value=0}}
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
  [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
  $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log');$null=$review.Handle
@@ -84,7 +96,9 @@ try{
  Wait-Until {$view=Model;$null -eq $view.state.layer_tools.rename_layer -and $view.state.layer_tools.editing_layer.label -eq $candidate} 'The ordinary Enter after candidate confirmation did not commit rename'
  $entry=Begin-Rename;Compose $entry 'kanji' 'かんじ';Key 27;Assert-Renaming $candidate
  Wait-Until {(Value $entry) -eq 'かんじ'} 'Candidate Escape did not restore Hiragana preedit'
- Key 27;Assert-Renaming $candidate;Key 27
+ Key 27;Assert-Renaming $candidate
+ Wait-Until {(Value $entry) -ceq ''} 'The composition Escape did not cancel the Hiragana preedit'
+ Key 27
  Wait-Until {$null -eq (Model).state.layer_tools.rename_layer} 'The ordinary Escape after composition did not cancel rename'
  $opacity=Control 'layer-opacity';$before=Model;$value=$before.state.layer_tools.editing_layer.opacity
  Compose $opacity 'nihonn' 'にほん';Key 13
@@ -108,5 +122,6 @@ try{
 }finally{
  [CapyRowPointer]::Dispose()
  if($completed -and $review -and !$review.HasExited){& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run}
+ if($script:imePrediction){$null=Set-ImePrediction $script:imePrediction}
  Exit-CapyEnvironment
 }
