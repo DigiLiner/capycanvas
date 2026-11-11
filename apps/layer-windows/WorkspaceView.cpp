@@ -622,7 +622,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         for(auto value:array(layout,L"groups")){
             auto geometry=value.GetObject();uint32_t id=uint32_t(num(geometry,L"id"));visible.push_back(id);
             auto panel=find(array(model,L"panels"),L"id",str(geometry,L"active"));
-            auto [it,added]=groups.try_emplace(id);auto& group=it->second;
+            auto [it,added]=groups.try_emplace(id);auto& group=it->second;bool rebound=false;
             if(added){
                 group.frame.UseLayoutRounding(false);group.frame.Child(group.surfaceHost);group.frame.Background(clear());group.frame.CornerRadius({SurfaceRadius*CornerFit,SurfaceRadius*CornerFit,SurfaceRadius*CornerFit,SurfaceRadius*CornerFit});
                 group.frame.RenderTransform(group.translation);group.shadow.Root().RenderTransform(TranslateTransform());
@@ -650,7 +650,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 {L"text_size",N(data->textSize())}}).Stringify();
             std::wstring key=signature.Stringify().c_str();
             if(group.key!=key||!group.body){
-                try{build(group,geometry,panel);rebuilt=true;group.key=std::move(key);group.tabsPresentationKey=tabsPresentationKey;}
+                try{build(group,geometry,panel);rebuilt=rebound=true;group.key=std::move(key);group.tabsPresentationKey=tabsPresentationKey;}
                 catch(...){removeGroup(group);groups.erase(it);throw;}
             }else if(group.tabsPresentationKey!=tabsPresentationKey){buildTabs(group,geometry);rebuilt=true;group.tabsPresentationKey=tabsPresentationKey;}
             data->apply(group.iconInputs,[&]{for(auto const& update:group.paintIcons)update();},true);
@@ -665,7 +665,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 resizeHandle(handleKey,object(handle,L"bounds"),O({{L"type",S(L"resize_floating")},
                     {L"group",N(id)},{L"edge",S(str(handle,L"edge"))}}),z+1);handleIds.push_back(handleKey);
             }
-            if(full||added)group.body->Apply(!hidden||(group.frame.Visibility()==Visibility::Visible&&group.frame.Opacity()>0));
+            if(full||added||rebound)group.body->Apply(!hidden||(group.frame.Visibility()==Visibility::Visible&&group.frame.Opacity()>0),rebound);
         }
         for(auto it=groups.begin();it!=groups.end();){
             if(std::find(visible.begin(),visible.end(),it->first)==visible.end()){

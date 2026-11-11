@@ -662,6 +662,8 @@ function Invoke-BlenderCellChecks([int]$Preset,[string]$CellId,[double]$DefaultC
     }
     Wait-Until {!(Find $tool.label -Name -Type ([System.Windows.Automation.ControlType]::MenuItem) -Visible)} 'Tool settings menu did not dismiss before Blender ring input'
     if(Find 'panel-tab-tool_settings' -Visible){Invoke 'panel-tab-tool_settings'}
+    $size=Blender-Field 'size';$sizeValue=$size.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    if([single]$sizeValue -ne [single]@((Model).state.tool_settings|Where-Object id -eq 'size')[0].value){throw 'Reopened Tool settings did not adopt the selected brush size'}
     $cell=Blender-Field $CellId;$cellValue=$cell.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
     if([double]$cellValue -ne $DefaultCell){throw 'Native Blender Cell Size does not show its shared default'}
     $observations=@()
