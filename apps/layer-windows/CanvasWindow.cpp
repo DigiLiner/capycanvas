@@ -1710,7 +1710,7 @@ void CanvasWindow::Publish(std::string snapshot,CapySnapshotInfo const& info) {
         bool glassChanged=info.glass.length&&CapyUi::object(tracedModel,L"windows_glass").Stringify()!=CapyUi::object(model,L"windows_glass").Stringify();
         if(full)tracedModel=model;
         else{CanvasModelSource trace;trace.model=tracedModel;trace.Patch(model);tracedModel=trace.model;}
-        if(full||info.layout||glassChanged)TraceState("ui-state",identity+",\"model\":"+to_string(tracedModel.Stringify())+"}");
+        if(full||info.layout||glassChanged)TraceState("ui-state",CapyUi::CanonicalJson(identity+",\"model\":"+to_string(tracedModel.Stringify())+"}"));
         if(full||model.HasKey(L"command_search")){
             auto search=full?CapyUi::branch(model,L"state").GetNamedValue(L"command_search",Windows::Data::Json::JsonValue::CreateNullValue()):model.GetNamedValue(L"command_search");
             TraceState("search-state",identity+",\"search\":"+to_string(search.Stringify())+"}");

@@ -279,6 +279,14 @@ int main(){
         assert(batch.model.Stringify()==original&&!batch.HasPendingChanges());
     }
     {
+        auto snapshot=[](wchar_t const* panels){return J::Parse(std::wstring(LR"({"state":{"camera":{"zoom":1},"workspace":{"id":"paint","layout":{"phone":null,"header":{"items":[{"label":"Ink \"wet\" {1}, [2]"}]},"canvas_info":true,"canvas_bar":{"edge":"top"},"bands":[],"panels":)")+panels+LR"(,"floating":[],"collapsed":[],"column_stacks":[[1,2]],"fit_tab_groups":[],"fit_height_groups":[],"next_tile_id":4,"next_id":9}}},"layout":{"width":200},"windows_glass":{"chrome_revision":1}})");};
+        CanvasModelSource traced;traced.model=snapshot(LR"(["layers"])");
+        traced.Patch(J::Parse(LR"({"workspace_layout":{"panels":["layers","color"]},"windows_glass":{"chrome_revision":1}})"));
+        auto canonical=CapyUi::CanonicalJson(winrt::to_string(traced.model.Stringify()));
+        assert(canonical==CapyUi::CanonicalJson(winrt::to_string(snapshot(LR"(["layers","color"])").Stringify())));
+        assert(CapyUi::JsonEqual(J::Parse(winrt::to_hstring(canonical)),traced.model));
+    }
+    {
         CanvasModelSource layoutSource;CanvasModelInputs layoutReads;int updates=0;
         auto full=J::Parse(LR"({"state":{},"layout":{"width":100}})"),resolved=J::Parse(LR"({"width":200})");
         auto refresh=[&]{layoutSource.apply(layoutReads,[&]{assert(CapyUi::num(CapyUi::object(layoutSource.model,L"layout"),L"width")==200);++updates;});};

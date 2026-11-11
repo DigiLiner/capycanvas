@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include "CanvasModelInputs.h"
 #include <initializer_list>
@@ -6,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
 
@@ -63,6 +65,46 @@ inline bool JsonEqual(winrt::Windows::Data::Json::IJsonValue const& left,winrt::
     case Type::Null:return true;
     default:return false;
     }
+}
+inline void CanonicalJson(std::string_view text,size_t& at,std::string& out){
+    auto space=[&]{while(at<text.size()&&std::string_view(" \t\r\n").find(text[at])!=std::string_view::npos)++at;};
+    auto token=[&]{
+        auto start=at;
+        if(text[at]=='"'){for(++at;at<text.size()&&text[at]!='"';++at)if(text[at]=='\\')++at;++at;}
+        else while(at<text.size()&&std::string_view(",:]} \t\r\n").find(text[at])==std::string_view::npos)++at;
+        if(at>text.size()||at==start)throw std::invalid_argument("Invalid JSON text");
+        return text.substr(start,at-start);
+    };
+    space();
+    if(at>=text.size())throw std::invalid_argument("Invalid JSON text");
+    auto open=text[at],close=open=='{'?'}':']';
+    if(open!='{'&&open!='['){out+=token();return;}
+    std::vector<std::pair<std::string_view,std::string>> members;
+    for(++at,space();at>=text.size()||text[at]!=close;space()){
+        auto& member=members.emplace_back();
+        if(open=='{'){
+            if(at>=text.size()||text[at]!='"')throw std::invalid_argument("Invalid JSON member");
+            member.first=token();space();
+            if(at>=text.size()||text[at++]!=':')throw std::invalid_argument("Invalid JSON member");
+        }
+        CanonicalJson(text,at,member.second);space();
+        if(at<text.size()&&text[at]==',')++at;
+        else if(at>=text.size()||text[at]!=close)throw std::invalid_argument("Invalid JSON text");
+    }
+    ++at;
+    if(open=='{')std::sort(members.begin(),members.end(),[](auto const& a,auto const& b){return a.first<b.first;});
+    out+=open;
+    for(size_t i=0;i<members.size();++i){
+        if(i)out+=',';
+        if(open=='{'){out+=members[i].first;out+=':';}
+        out+=members[i].second;
+    }
+    out+=close;
+}
+inline std::string CanonicalJson(std::string_view text){
+    size_t at=0;std::string out;out.reserve(text.size());CanonicalJson(text,at,out);
+    if(text.find_first_not_of(" \t\r\n",at)!=std::string_view::npos)throw std::invalid_argument("Invalid JSON text");
+    return out;
 }
 inline std::string JsonUnsignedFields(std::string object,std::initializer_list<std::pair<std::string_view,uint64_t>> fields){
     if(object.empty()||object.front()!='{'||object.back()!='}')throw std::invalid_argument("Expected a JSON object");
