@@ -185,7 +185,7 @@ try{
  for($i=1;$i -le 20;$i++){$angle=$i*[Math]::PI/40;$dx=[int](100*[Math]::Cos($angle));$dy=[int](100*[Math]::Sin($angle));[CapyCanvasTouch]::Pair(($cx-$dx),($cy-$dy),($cx+$dx),($cy+$dy));Start-Sleep -Milliseconds 12};End-Pair
  Wait-Until {[Math]::Abs((Model).state.camera.rotation-[Math]::PI/2) -lt .02} 'Canvas did not rotate before quick fit'
  $rotated=(Model).state.camera
- [CapyRowPointer]::RightDrag(($cx-40),$cy,($cx+40),($cy+40))
+ [CapyRowPointer]::Down('mouse',($cx-40),$cy,'right');try{[CapyRowPointer]::Move(($cx+40),($cy+40))}finally{[CapyRowPointer]::Up()}
  Wait-Until {[Math]::Abs((Model).state.camera.translation[0]-$rotated.translation[0]) -gt 30} 'Canvas did not pan before quick fit'
  $prior=(Model).state.camera
  $duration=[CapyCanvasTouch]::QuickPinch($cx,$cy,$false)
