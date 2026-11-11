@@ -36,7 +36,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     await call("Page.reload");
     for (const deadline = Date.now() + 20000; ; await new Promise(resolve => setTimeout(resolve, 50))) {
       assert.ok(Date.now() < deadline, `reload to ${gpu} failed`);
-      if (await evaluate(`performance.timeOrigin !== ${previous} && !!window.layerApp && document.body.dataset.gpu === '${gpu}'`).catch(() => false)) break;
+      if (await evaluate(`performance.timeOrigin !== ${previous} && !!window.layerApp && document.body.dataset.gpu === '${gpu}' && ('${gpu}'!=='ready'||layerApp.app.brush_ready()&&document.querySelector('#gpu-notice').hidden)`).catch(() => false)) break;
     }
   };
   const capture = async (name) => {
