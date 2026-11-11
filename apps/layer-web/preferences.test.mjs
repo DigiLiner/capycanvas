@@ -499,6 +499,20 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   assert.equal(await prefs("view.capture.conflict"), "Eraser");
   assert.equal(await evaluate("document.querySelector('#confirm-shortcut').textContent"), "Reassign");
   await capture("shortcut-conflict");
+  const shortcutSizingStyle=await evaluate("document.querySelector('#shortcut-editor').style.cssText"),shortcutSizingTheme=await evaluate('layerApp.state().theme');
+  try{
+    for(const theme of ['light','dark']){
+      await action({type:'set_theme',theme});
+      await evaluate("document.querySelector('#shortcut-editor').style.maxWidth='280px'");await settle();
+      assert.equal(await evaluate("document.querySelector('#shortcut-recording').classList.contains('recording-stacked')"),true,'Narrow floating conflict actions follow the notice text');
+      await capture(`shortcut-conflict-narrow-${theme}`);
+      await evaluate("document.querySelector('#shortcut-editor').style.maxWidth='none';document.querySelector('#shortcut-editor').style.width='700px'");await settle();
+      assert.equal(await evaluate("document.querySelector('#shortcut-recording').classList.contains('recording-stacked')"),false,'Widening the floating conflict restores actions beside the notice text');
+      await capture(`shortcut-conflict-wide-${theme}`);
+    }
+  }finally{
+    await evaluate(`document.querySelector('#shortcut-editor').style.cssText=${JSON.stringify(shortcutSizingStyle)}`);await action({type:'set_theme',theme:shortcutSizingTheme});
+  }
   await click('#confirm-shortcut');
   assert.equal(await evaluate("layerApp.state().settings.shortcuts['command.Eraser'].length"), 0);
   assert.deepEqual(await prefs("view.shortcut_editor.bindings"), ["B", "E"], "adding keeps the existing shortcut");

@@ -1409,6 +1409,37 @@ fn phone_layout_swatches(d: &mut Driver) {
     assert!(failures.is_empty(),"{}",failures.join("\n"));
 }
 
+fn phone_layout_shortcuts(d: &mut Driver) {
+    let mut failures = Vec::new();
+    d.w.dispatch(UiAction::Invoke {command:CommandId::KeyboardShortcuts});
+    let (dialog,_)=dialog_frame(d);
+    capture(d,"shortcuts");
+    d.w.dispatch(UiAction::Preferences {action:PreferenceAction::BeginShortcut {id:CommandId::Hand.shortcut_id()}});
+    let (recording,frame)=dialog_frame(d);
+    for name in ["shortcut-recording","shortcut-conflict"] {
+        if name=="shortcut-conflict" {
+            keys(d,101);
+            until(||ui_session(&d.w).preferences().unwrap().capture.as_ref().is_some_and(|capture|capture.conflict.is_some()),"Eraser chord conflicts with Hand");
+        }
+        capture(d,name);
+        for button_name in ["cancel-shortcut","confirm-shortcut"] {
+            let button=find_named(&frame,button_name).unwrap();
+            if !std::iter::successors(button.parent(),|parent|parent.parent()).any(|parent|parent.widget_name()=="shortcut-recording-footer") {
+                failures.push(format!("{name} {button_name} is outside its fixed footer"));
+            }
+        }
+        let label=descendants::<gtk::Label>(&frame).into_iter().find(|label|label.is_mapped()
+            && label.text()==if name=="shortcut-recording" {"Press a new key combination"} else {"Used by Eraser."}).unwrap();
+        let word = label.text().split_whitespace().map(|word|label.create_pango_layout(Some(word)).pixel_size().0).max().unwrap();
+        if label.width()<word { failures.push(format!("{name} text is crushed to {}px below a word width {word}",label.width())); }
+    }
+    d.w.dispatch(UiAction::Preferences {action:PreferenceAction::CancelShortcut});
+    crate::page_dialog::close_dialog(&recording);
+    until(||d.w.visible_dialog().as_ref()==Some(&dialog),"recording returns to Shortcuts");
+    close(d,&dialog);
+    assert!(failures.is_empty(),"{}",failures.join("\n"));
+}
+
 fn phone_layout_choices(d: &mut Driver) {
     let mut failures = Vec::new();
     d.w.dispatch(UiAction::OpenSettings {page:SettingsPage::Appearance});
@@ -1437,6 +1468,14 @@ fn native_phone_layout_image() {
 fn native_phone_layout_swatches() {
     let mut d = super::phone_motion::setup("art.capycanvas.PhoneLayoutSwatches");
     phone_layout_swatches(&mut d);
+    d.finish();
+}
+
+#[test]
+#[ignore = "private compositor and storage; phone viewport/theme external"]
+fn native_phone_layout_shortcuts() {
+    let mut d = super::phone_motion::setup("art.capycanvas.PhoneLayoutShortcuts");
+    phone_layout_shortcuts(&mut d);
     d.finish();
 }
 

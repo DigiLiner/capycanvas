@@ -193,7 +193,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                             val contentWidth=(org.json.JSONTokener(Native.dialogUi(obj("kind" to "preferences_content_width","width" to this@BoxWithConstraints.maxWidth.value,"minimum" to 0f).toString())).nextValue() as Number).toFloat()
                             Column(Modifier.widthIn(max = contentWidth.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 when {
-                                    editor != null -> ShortcutEditor(host,model,editor)
+                                    editor != null -> ShortcutEditor(host,model,editor,fixedActions = !wide)
                                     modifierKey != null -> {
                                         val key = modifierKey.getJSONObject("key")
                                         PerToolPage(host, "modifier", JSONObject(Native.nativeCaption(obj("type" to "modifier_hold", "label" to modifierKey.getString("label")).toString(),host.languageTag)).getString("text"), modifierKey,
@@ -247,6 +247,9 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                                 host.actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                             }
                         }
+                    }
+                    view.objectOrNull("capture")?.takeIf { !wide && it.getString("id") == view.objectOrNull("shortcut_editor")?.optString("id") }?.let { capture ->
+                        PickerFooter("shortcut-recording") { Spacer(Modifier.weight(1f));RecordingActions(host,capture) }
                     }
                 }
             }

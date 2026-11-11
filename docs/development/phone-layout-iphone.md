@@ -398,3 +398,9 @@ no regression. If a physical iPhone is available, record the same rows there.
   is shorter than the existing header minimum. iOS must consume those bounds
   and scroll the focused field into view. Verify Refine and Frequency with a
   14 pt keyboard intersection at 320 pt width, including text entry and Done.
+
+- **Keep shortcut recording actions visible on phones.** GTK, Web and Android
+  put recording actions in the phone page's fixed footer and use the shared
+  notice rule when actions remain beside a conflict message. iOS must use the
+  same placement. Verify recording at 320 pt and conflicts at 280 pt, scrolling
+  the content while the action buttons remain visible, in both themes.

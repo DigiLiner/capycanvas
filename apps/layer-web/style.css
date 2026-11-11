@@ -689,6 +689,10 @@ dialog.sheet.picker { height: 600px; }
 #action-picker-search { margin: 0; flex: none; }
 .picker-list { display:flex; flex-direction:column; }
 .recording { gap:6px; }
+.recording-actions { display:flex; flex:none; gap:6px; }
+.recording-stacked { flex-wrap:wrap; }
+.recording-stacked > .preference-text { flex-basis:calc(100% - 22px); }
+.recording-stacked > .recording-actions { flex-basis:100%; justify-content:flex-end; }
 .recording > svg { flex: none; width: 16px; height: 16px; }
 .recording > svg.warning { color: #e5a50a; }
 body[data-theme="light"] .recording > svg.warning { color: #9c5700; }

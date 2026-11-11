@@ -84,7 +84,7 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
     search: SearchState? = null, onCancel: () -> Unit, onBack: () -> Unit = onCancel, onPrimary: () -> Unit = {},
     primaryEnabled: Boolean = true, primaryLabel: String = "", tag: String = "dialog-shell", naturalWidth: Dp = 720.dp,
     responses: List<DialogResponse> = emptyList(), shown: Boolean = true, page: Any? = null, scrollBody: Boolean = true, header: Boolean = true, windowed: Boolean = true, primaryTag: String? = null, cancelTag: String? = null,
-    secondary: (@Composable () -> Unit)? = null, navigation: (@Composable () -> Unit)? = null, keys: ((KeyEvent) -> Boolean)? = null, overlay: (@Composable BoxScope.() -> Unit)? = null, body: @Composable (PaddingValues) -> Unit, actions: (@Composable RowScope.() -> Unit)? = null) {
+    secondary: (@Composable () -> Unit)? = null, footer: (@Composable () -> Unit)? = null, navigation: (@Composable () -> Unit)? = null, keys: ((KeyEvent) -> Boolean)? = null, overlay: (@Composable BoxScope.() -> Unit)? = null, body: @Composable (PaddingValues) -> Unit, actions: (@Composable RowScope.() -> Unit)? = null) {
     val dialogs = LocalDialogLayer.current
     val environment = rememberUpdatedState(currentCompositionLocalContext)
     val content = rememberUpdatedState<@Composable () -> Unit>(shell@{
@@ -226,6 +226,7 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
                         Box(if(scrollBody)Modifier else Modifier.weight(1f)) { content(PaddingValues(16.dp)) }
                         secondary?.invoke()
                     }
+                    footer?.invoke()
                 }
             }
             if(!shown)DialogCapture(Color.Transparent)

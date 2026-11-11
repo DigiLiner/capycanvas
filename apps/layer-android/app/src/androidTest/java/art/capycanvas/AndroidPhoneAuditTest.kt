@@ -2387,6 +2387,14 @@ class AndroidPhoneAuditTest {
             preference(obj("type" to "edit_shortcut","id" to "command.Hand"));wait("settings-content-shortcut:command.Hand")
             reveal("add-shortcut");tap("add-shortcut")
             host.awaitFrame("Hand records a shortcut") { preferences()?.objectOrNull("capture") != null && placed("shortcut-recording") }
+            if (host.snapshot!!.getJSONObject("layout").getJSONArray("viewport").getDouble(0) <= 320) {
+                val divider = checkNotNull(findTag("shortcut-recording-divider")).second.boundsInRoot
+                for (tag in listOf("cancel-shortcut", "confirm-shortcut")) {
+                    val button = compose.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode()
+                    assertTrue("Recording actions stay in the fixed footer", button.boundsInRoot.top >= divider.bottom)
+                    assertFalse("Recording actions are outside the scrolling page", generateSequence(button.parent) { it.parent }.any { it.config.getOrNull(SemanticsActions.ScrollBy) != null })
+                }
+            }
         }
         state("shortcut-conflict") {
             pressKey(KeyEvent.KEYCODE_E)
