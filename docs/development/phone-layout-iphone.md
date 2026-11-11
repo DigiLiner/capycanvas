@@ -423,3 +423,11 @@ no regression. If a physical iPhone is available, record the same rows there.
   with the existing caret or selection; picker search keeps its input-mode rule.
   Verify Paper, Workspace, toolbar and preset names in both themes, including
   native edits that retain their caret and keyboard-opened Choose Action.
+
+- **Measure every column when a drawer retargets.** Android renders the current
+  model's columns and takes missing placement bounds from the new measure plan.
+  SwiftUI's `WorkspaceContentDrawer.columns` still limits columns by the old
+  placement count. iOS must render the model's columns, falling back to the new
+  measurement plan for missing bounds. Verify Tool Settings→Color during a
+  partial opening reaches Color and Palettes in two columns, then settles in
+  both themes; retargeting to fewer columns must still work.

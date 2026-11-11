@@ -124,4 +124,55 @@ class AndroidDrawerCompositionTest {
             }
         }
     }
+
+    @Test fun partiallyOpenedToolSettingsRetargetsToBothColorColumns() {
+        val host=compose.activity.host
+        host.awaitReady(compose=compose)
+        assumeTrue("Requires the native phone layout",host.snapshot!!.getJSONObject("layout").objectOrNull("phone") != null)
+        host.awaitMain("launch reveal removed",30_000,{ "${host.snapshot?.opt("launch")}" },compose) { findTag("launch-splash") == null }
+        assertTrue("The private window owns the drawer",compose.activity.window.decorView.hasWindowFocus())
+        val dock=checkNotNull(host.workspaceInteraction)
+        val color=host.snapshot!!.getJSONObject("state").getJSONObject("workspace").getJSONObject("layout")
+            .array("phone").objects().first { it.getJSONObject("control").getString("kind")=="color" }.getInt("id")
+        val counts=compose.runOnIdle { CompositionCounts { info -> "PalettePanel".takeIf { info.startsWith("art.capycanvas.PalettePanel") } } }
+        val originalAdvance=compose.mainClock.autoAdvance
+        counts.use {
+            try {
+                compose.mainClock.autoAdvance=false
+                host.drain(obj("type" to "phone","action" to obj("kind" to "tool_settings")))
+                var partial:Rect?=null
+                var targetHeight=0f
+                for(frame in 0 until 30) {
+                    host.drain();compose.mainClock.advanceTimeByFrame();compose.waitForIdle()
+                    compose.runOnIdle {
+                        val placement=dock.drawer?.objectOrNull("placement")
+                        val node=findTag("tool-drawer")?.second
+                        val actual=node?.boundsInRoot
+                        val published=placement?.objectOrNull("bounds")
+                        val target=placement?.array("columns")?.objects()?.maxOfOrNull { it.number("height") }?.times(dock.density) ?: 0f
+                        if(node?.layoutInfo?.isPlaced==true && published!=null && published.number("width")>0f && published.number("height")>0f &&
+                            actual!=null && actual.width>1f && actual.height>1f && actual.height<target-1f) {partial=actual;targetHeight=target}
+                    }
+                    if(partial!=null)break
+                }
+                assertNotNull("Tool Settings is actually partially open before retarget: ${dock.drawer}",partial)
+                assertTrue("The partial viewport is smaller than its measured content",partial!!.height<targetHeight-1f)
+                host.drain(obj("type" to "phone","action" to obj("kind" to "tool","tile" to color)))
+                repeat(30) {host.drain();compose.mainClock.advanceTimeByFrame();compose.waitForIdle()}
+                compose.runOnIdle {
+                    val model=host.snapshot!!.getJSONObject("state").getJSONObject("customization").getJSONObject("drawer")
+                    val panels=host.snapshot!!.array("panels").objects().map { it.getString("id") }
+                    assertEquals("Color requests both columns",2,model.array("columns").length())
+                    assertTrue("Both new panel bodies are available: $panels",panels.containsAll(listOf("color","palettes")))
+                    val placement=dock.drawer?.objectOrNull("placement")
+                    val palette=findTag("drawer-panel-palettes")
+                    assertTrue("Retarget composes both new columns: partial=$partial; targetHeight=$targetHeight; drawer=$placement; model=$model; palette=${palette!=null}; compositions=${counts["PalettePanel"]}",
+                        findTag("drawer-panel-color")!=null && palette!=null && counts["PalettePanel"]>0 && placement?.array("columns")?.length()==2)
+                }
+            } finally {
+                compose.mainClock.autoAdvance=originalAdvance
+                compose.waitForIdle()
+            }
+        }
+    }
 }

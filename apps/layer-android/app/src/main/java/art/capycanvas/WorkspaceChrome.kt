@@ -367,8 +367,9 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                     }
                 }) {
                 Box(if (together) Modifier.fillMaxWidth().height(contentPlacement.array("columns").objects().maxOf { it.number("y")+it.number("height") }.dp) else Modifier.fillMaxSize(),contentAlignment = if (phone != null) androidx.compose.ui.AbsoluteAlignment.TopLeft else Alignment.TopStart) {
-                // Placement can lag the model by a frame when switching to a drawer with fewer columns.
-                contentPlacement.array("columns").objects().take(columns.size).forEachIndexed { index, bounds ->
+                columns.forEachIndexed { index, _ ->
+                    val bounds=contentPlacement.array("columns").optJSONObject(index)
+                        ?: plan?.array("columns")?.optJSONObject(index) ?: return@forEachIndexed
                     val contentBounds = JSONObject(bounds.toString()).apply {
                         plan?.array("columns")?.optJSONObject(index)?.let { put("x", it.get("x")); put("width", it.get("width")) }
                     }
