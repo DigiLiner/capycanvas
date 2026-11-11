@@ -386,3 +386,9 @@ no regression. If a physical iPhone is available, record the same rows there.
   row and Tool Settings' Size entry above the real keyboard in portrait and both
   landscapes, in light and dark.
   If `PhoneBarInput.swift` keys Capy on the whole layout, key it on `capy_target`.
+
+- **Grow brush size tiles around large labels.** The shared `brush_size_tile`
+  query reserves 24 pt above each label and grows the tile around the measured
+  label height. iOS must measure complete labels and consume the query instead
+  of fixing every tile to 44 pt. Verify labels start at least 24 pt below the
+  tile top at every text size, with 44 pt tiles at normal text.

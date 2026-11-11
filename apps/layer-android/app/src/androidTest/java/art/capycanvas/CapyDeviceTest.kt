@@ -402,6 +402,8 @@ internal fun assertBrushSizeLabelsAtFontScales(activity: MainActivity, host: Can
                     assertEquals("$message retains every digit", label.length, measured.getLineEnd(0, visibleEnd = true))
                     val t = tile.positionInRoot
                     val p = node.positionInRoot
+                    assertTrue("$message starts below the dot row", p.y >= t.y + 24f * density - .5f)
+                    if (scale == 1f) assertEquals("$message keeps the normal tile height", 44f * density, tile.size.height.toFloat(), 1f)
                     assertTrue("$message shows the complete line", p.x + measured.getLineLeft(0) >= t.x - .5f &&
                         p.y + measured.getLineTop(0) >= t.y - .5f && p.x + measured.getLineRight(0) <= t.x + tile.size.width + .5f &&
                         p.y + measured.getLineBottom(0) <= t.y + tile.size.height + .5f)

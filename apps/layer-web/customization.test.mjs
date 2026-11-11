@@ -659,11 +659,12 @@ export async function checkCustomization({ call, evaluate, settle, canvasPixels 
         if (width === 412) { await send({type:'phone',action:{kind:'panel',panel:'sizes'}}); await wait(); }
         for (const scale of [1, 1.5]) {
           await evaluate(`document.documentElement.style.setProperty('--ui-text-size', ${JSON.stringify(`calc(${textSize} * ${scale})`)})`); await settle(); await wait();
-          const tiles = await evaluate("[...document.querySelectorAll('.sizes-panel .size-button')].map(n=>{const b=n.getBoundingClientRect(),label=n.querySelector('.size-label'),l=label.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(label);const text=range.getBoundingClientRect(),d=n.querySelector('.size-dot').getBoundingClientRect(),s=getComputedStyle(n);return{value:Number(n.dataset.size),width:b.width,height:b.height,contained:l.left>=b.left&&l.right<=b.right&&l.top>=b.top&&l.bottom<=b.bottom&&text.left>=b.left&&text.right<=b.right,center:d.top+d.height/2-b.top,fullText:s.fontSize===getComputedStyle(n.closest('.panel')).fontSize&&s.fontWeight==='400',fade:getComputedStyle(n.querySelector('.size-preview')).maskImage}})");
+          const tiles = await evaluate("[...document.querySelectorAll('.sizes-panel .size-button')].map(n=>{const b=n.getBoundingClientRect(),label=n.querySelector('.size-label'),l=label.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(label);const text=range.getBoundingClientRect(),d=n.querySelector('.size-dot').getBoundingClientRect(),s=getComputedStyle(n);return{value:Number(n.dataset.size),width:b.width,height:b.height,labelTop:l.top-b.top,contained:l.left>=b.left&&l.right<=b.right&&l.top>=b.top&&l.bottom<=b.bottom&&text.left>=b.left&&text.right<=b.right,center:d.top+d.height/2-b.top,fullText:s.fontSize===getComputedStyle(n.closest('.panel')).fontSize&&s.fontWeight==='400',fade:getComputedStyle(n.querySelector('.size-preview')).maskImage}})");
           assert.equal(tiles.length, 40);
           for (const tile of tiles) {
             assert.equal(tile.contained, true, `${theme} ${width}px ${scale}× ${tile.value}: label lies inside its button`);
             assert.equal(tile.width, tiles[0].width, `${theme} ${width}px ${scale}× ${tile.value}: uniform tile width`);
+            assert.ok(tile.labelTop >= 24, `${theme} ${width}px ${scale}× ${tile.value}: label starts below the dot row`);
             assert.equal(tile.center, 18); assert.ok(tile.fullText && tile.fade.includes('linear-gradient'));
             if (scale === 1) assert.equal(tile.height, 44);
           }

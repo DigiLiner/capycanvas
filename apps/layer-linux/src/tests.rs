@@ -641,8 +641,11 @@ fn native_default_workspace() {
                 assert!(!w.size_number.is_mapped());
                 let buttons = w.size_buttons.borrow();
                 assert_eq!(buttons.len(), 40);
-                for (_, button) in buttons.iter() {
+                for (value, button) in buttons.iter() {
                     assert_eq!(button.height() as f32, layer_ui::BRUSH_SIZE_TILE[1]);
+                    let label = descendant::<gtk::Label>(button).unwrap();
+                    let bounds = label.compute_bounds(button).unwrap();
+                    assert!(bounds.y() >= 24., "{value}: label starts above the label row: {bounds:?}");
                 }
                 {
                     struct RestoreDpi(gtk::Settings, i32);
@@ -661,6 +664,7 @@ fn native_default_workspace() {
                             - label.margin_start() - label.margin_end();
                         let bounds = label.compute_bounds(button).unwrap();
                         assert!(label.width() >= natural, "{value}: label {} < natural {natural}", label.width());
+                        assert!(bounds.y() >= 24., "{value}: label starts above the label row: {bounds:?}");
                         assert!(bounds.x() >= 0. && bounds.y() >= 0.
                             && bounds.x() + bounds.width() <= button.width() as f32
                             && bounds.y() + bounds.height() <= button.height() as f32,

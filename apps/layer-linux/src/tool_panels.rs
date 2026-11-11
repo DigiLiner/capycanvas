@@ -678,6 +678,7 @@ pub fn size_grid(workspace: &Rc<Workspace>) -> (adw::WrapBox, Vec<(f32, gtk::But
         label.set_valign(gtk::Align::End);
         label.set_margin_start(layer_ui::BRUSH_SIZE_LABEL_INSET as i32);
         label.set_margin_end(layer_ui::BRUSH_SIZE_LABEL_INSET as i32);
+        label.set_margin_top(layer_ui::BRUSH_SIZE_LABEL_TOP as i32);
         label.set_margin_bottom(layer_ui::BRUSH_SIZE_LABEL_INSET as i32);
         label.set_can_target(false);
         preview.add_overlay(&label);

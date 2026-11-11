@@ -291,16 +291,16 @@ fn tool_set_queries_share_aligned_columns_and_natural_preview_geometry() {
 
 #[test]
 fn brush_size_tiles_fit_complete_labels_without_shrinking_the_default() {
-    assert_eq!(brush_size_tile([32., 20.]), BRUSH_SIZE_TILE);
-    assert_eq!(brush_size_tile([39., 20.]), [43., 44.]);
-    assert_eq!(brush_size_tile([32., 50.]), [36., 52.]);
+    assert_eq!(brush_size_tile([32., 18.]), BRUSH_SIZE_TILE);
+    assert_eq!(brush_size_tile([39., 20.]), [43., 46.]);
+    assert_eq!(brush_size_tile([32., 50.]), [36., 76.]);
 }
 
 #[test]
 fn brush_size_tile_queries_round_trip_native_label_measurements() {
     let request = serde_json::from_str(r#"{"type":"brush_size_tile","label":[39,50]}"#).unwrap();
     let result = toolbar_ui(request, &Localizer::shared(UiLanguage::English)).unwrap();
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&result).unwrap()).unwrap(), serde_json::json!([43., 52.]));
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&result).unwrap()).unwrap(), serde_json::json!([43., 76.]));
 }
 
 #[test]

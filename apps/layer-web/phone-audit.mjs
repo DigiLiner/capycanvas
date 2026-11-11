@@ -1522,6 +1522,11 @@ export async function checkPhoneAudit({call,evaluate,reload,settle,canvasPixels,
         }
         await settle();
         await auditLayerPreviews({evaluate,wait});
+        if(name==='inventory-window-sizes'){
+          const labels=await evaluate("[...document.querySelectorAll('.content-drawer .sizes-panel .size-button')].map(node=>{const tile=node.getBoundingClientRect(),label=node.querySelector('.size-label').getBoundingClientRect();return{value:node.dataset.size,top:label.top-tile.top,height:tile.height};})");
+          assert.equal(labels.length,40,'The Sizes drawer shows every preset');
+          for(const label of labels){assert.ok(label.top>=24,`${name} ${label.value}: label starts below the dot row`);if(test.text_pt===11)assert.equal(label.height,44);}
+        }
         const actual=await evaluate(`(${phoneAuditDrawerSpecifications.toString()})()`);
         const record=await capture(test,name,[...phoneAuditFrameSpecifications(await evaluate('layerApp.state().workspace.layout.phone??[]')),...actual],'existing shared drawer owner');
         assert.equal(record.status,'captured');assert.deepEqual(record.missing,[]);
