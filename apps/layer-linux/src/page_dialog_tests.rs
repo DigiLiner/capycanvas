@@ -1377,6 +1377,31 @@ fn w9_failed_drawing_recovery() {
     d.finish();
 }
 
+fn phone_layout_swatches(d: &mut Driver) {
+    let mut failures = Vec::new();
+    crate::color_editor::show(&d.w,layer_ui::ColorSlot::Foreground);
+    let (dialog,frame)=dialog_frame(d);
+    d.click(named::<gtk::Button>(&frame,"edit-color-swatches").upcast_ref());
+    until(||d.w.color_editors.borrow().last().is_some_and(|editor|editor.slide.is_open()),"All Swatches opens");
+    capture(d,"all-swatches");
+    let sheet=find_named(&frame,"edit-color-sheet").unwrap();
+    let content=sheet.parent().unwrap().parent().unwrap();
+    let last=content.last_child().unwrap().compute_bounds(&frame).unwrap();
+    if last.y()+last.height()<frame.height() as f32-1. {
+        failures.push(format!("All Swatches footer leaves unused page height: {last:?}, page {}",frame.height()));
+    }
+    close(d,&dialog);
+    assert!(failures.is_empty(),"{}",failures.join("\n"));
+}
+
+#[test]
+#[ignore = "private compositor and storage; phone viewport/theme external"]
+fn native_phone_layout_swatches() {
+    let mut d = super::phone_motion::setup("art.capycanvas.PhoneLayoutSwatches");
+    phone_layout_swatches(&mut d);
+    d.finish();
+}
+
 #[test]
 #[ignore = "private compositor: --native-test=native_phone_dialogs --native-storage; LAYER_DIALOG_BATCH=w6a/w6a-capture/w6b/w6c/w6d/w7-photo/w9-storage/w9-workspace-recovery/w9-drawing-recovery/w9-open; drawing recovery also needs --native-recovery, phone viewport/theme external"]
 fn native_phone_dialogs() {

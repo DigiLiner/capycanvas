@@ -2470,6 +2470,10 @@ class AndroidPhoneAuditTest {
             if(findTag("color-use") == null) { instrumentation.runOnMainSync { host.colorEditor = ColorEditorRequest("foreground",null,false,false) { _,_ -> } };wait("color-use") }
             reveal("color-swatches");tap("color-swatches");wait("color-sheet-search")
             if(keyboard())hideIme()
+            host.awaitFrame("All Swatches list fills its allocation") { findTag("color-sheet-list")?.second?.let { it.layoutInfo.isPlaced && it.boundsInRoot.height > 0 } == true }
+            val sheet = checkNotNull(findTag("color-sheet")).second.boundsInRoot
+            val list = checkNotNull(findTag("color-sheet-list")).second.boundsInRoot
+            assertEquals("All Swatches fills the available height", sheet.bottom, list.bottom, 1f)
         }
         if(findTag("color-sheet-search") != null) { tap("color-cancel");host.awaitFrame("All Swatches returns to Edit Color") { findTag("color-sheet-search") == null && findTag("color-value-hex") != null } }
         state("color-eyedropper") {
