@@ -330,16 +330,17 @@ install an `-PcapyOptimize` benchmark or release build under an isolated ID on a
 tablet or emulator, and verify every class:
 
 ```bash
-adb install -r "$APK"
-adb shell cmd package delete-dexopt "$CAPY_APPLICATION_ID"
+adb shell am force-stop "$CAPY_APPLICATION_ID"
+adb shell cmd package uninstall -k "$CAPY_APPLICATION_ID"
 adb logcat -b all -c
+adb install --no-incremental "$APK"
 adb shell cmd package compile -m verify -f "$CAPY_APPLICATION_ID"
 adb logcat -b all -d | grep -E 'Verification error|failed to verify|Rejecting class'
 ```
 
-No output means every class verified. Without `delete-dexopt`, the compile step
-reuses the install-time result and logs nothing. Then confirm a launch with
-`adb shell am start -W -n "$CAPY_APPLICATION_ID/art.capycanvas.MainActivity"`.
+No output means every class verified. Reinstalling makes ART verify every class
+again on every Android version, and `-k` keeps the app's data. Then confirm a
+launch with `adb shell am start -W -n "$CAPY_APPLICATION_ID/art.capycanvas.MainActivity"`.
 
 Each benchmark skips unless its opt-in argument is set. Use the tier photo and
 follow the [measurement rules](../performance/measuring.md) for gesture counts
