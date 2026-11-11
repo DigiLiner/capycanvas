@@ -173,7 +173,7 @@ export function createPhone({app,state,workspace,capy,header,element,button,icon
   },true);
   function report(){
     const viewport=window.visualViewport;
-    const keyboard=viewport?Math.max(0,window.innerHeight-(viewport.offsetTop+viewport.height)):0;
+    const keyboard=viewport?Math.max(0,Math.round(window.innerHeight-(viewport.offsetTop+viewport.height)*viewport.scale)):0;
     if(!state().workspace_ready||keyboard===(state().phone.keyboard??0)&&insets.every((value,index)=>value===state().phone.insets[index]))return;
     send({kind:'metrics',native:[0,0],native_counts:[0,0],movable:false,insets,keyboard});
   }
