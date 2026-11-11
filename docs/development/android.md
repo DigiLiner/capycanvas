@@ -322,6 +322,25 @@ self-instrumenting runners in `app/src/benchmark` (`BrushBenchmarkInstrumentatio
 and `UiStartupInstrumentation`). R8 can remove methods that only a separate test
 APK calls, so test-APK benchmarks use the unminified build.
 
+### Minified class verification
+
+R8 can emit DEX that ART rejects even when the source compiles, and the app then
+crashes before `MainActivity` starts. After changing Kotlin or the R8 version,
+install an `-PcapyOptimize` benchmark or release build under an isolated ID on a
+tablet or emulator, and verify every class:
+
+```bash
+adb install -r "$APK"
+adb shell cmd package delete-dexopt "$CAPY_APPLICATION_ID"
+adb logcat -b all -c
+adb shell cmd package compile -m verify -f "$CAPY_APPLICATION_ID"
+adb logcat -b all -d | grep -E 'Verification error|failed to verify|Rejecting class'
+```
+
+No output means every class verified. Without `delete-dexopt`, the compile step
+reuses the install-time result and logs nothing. Then confirm a launch with
+`adb shell am start -W -n "$CAPY_APPLICATION_ID/art.capycanvas.MainActivity"`.
+
 Each benchmark skips unless its opt-in argument is set. Use the tier photo and
 follow the [measurement rules](../performance/measuring.md) for gesture counts
 and recording results. Renderer submissions, GPU completions, draw
