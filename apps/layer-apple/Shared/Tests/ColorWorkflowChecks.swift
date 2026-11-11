@@ -78,11 +78,7 @@ extension XCTestCase {
         let hide = keyboard.buttons["Hide keyboard"]
         let numberPad = app.popovers.containing(.key, identifier: "0").firstMatch
         func keyboardShown() -> Bool { keyboard.exists && keyboard.frame.intersects(window.frame) }
-        let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            keyboardShown() || numberPad.exists
-        }, object: app)
-        let ready = XCTWaiter.wait(for: [visible], timeout: 5)
-        guard ready == .completed else { return }
+        guard keyboardShown() || numberPad.exists else { return }
         let pads: [Pad]
         do { pads = numberPad.exists ? numberPads(try app.snapshot()) : [] }
         catch { XCTFail("Cannot inspect the editor keyboard: \(error)"); return }
@@ -120,7 +116,7 @@ extension XCTestCase {
             let result = XCTWaiter.wait(for: [absent], timeout: 5)
             guard result == .completed else { fail("The number pad must close while its editor fields remain visible"); return }
         }
-        if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in keyboardShown() }, object: app)], timeout: 5) == .completed {
+        if keyboardShown() {
             let hasHide = UIDevice.current.userInterfaceIdiom == .phone ? hide.exists : hide.waitForExistence(timeout: 15)
             if hasHide && hide.isHittable { hide.clickOrTap() }
             else {

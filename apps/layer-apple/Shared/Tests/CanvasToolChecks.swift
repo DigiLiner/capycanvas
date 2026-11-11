@@ -60,9 +60,11 @@ extension XCTestCase {
             XCTFail("The native scroll needs a finite viewport inside its editor window")
             return false
         }
-        let cells = snapshot.children.filter { $0.elementType == .cell }.map { $0.frame.intersection(viewport) }
+        func leaves(_ node: XCUIElementSnapshot) -> [XCUIElementSnapshot] { node.children.isEmpty ? [node] : node.children.flatMap(leaves) }
+        let cells = snapshot.children.filter { $0.elementType == .cell }
+        let visible = (cells.isEmpty ? leaves(snapshot) : cells).map { $0.frame.intersection(viewport) }
             .filter { $0.width > 0 && $0.height > 0 }.reduce(CGRect.null) { $0.union($1) }
-        let content = cells.isNull ? viewport : cells
+        let content = visible.isNull ? viewport : visible
         let x = (content.minX - frame.minX + content.width * 0.05) / frame.width
         let startY = (viewport.minY - frame.minY + viewport.height * (towardEnd ? 0.8 : 0.2)) / frame.height
         let endY = (viewport.minY - frame.minY + viewport.height * (towardEnd ? 0.2 : 0.8)) / frame.height
