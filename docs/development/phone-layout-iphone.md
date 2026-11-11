@@ -416,3 +416,10 @@ no regression. If a physical iPhone is available, record the same rows there.
   64×200 pt curve minimum. iOS must consume that minimum while retaining a
   positive plot and visible axis gutters. Verify 891×412 and 320 pt with 16 pt
   text, in both themes.
+
+- **Keep requested name editing in the active dialog.** Parent modal focus
+  containment must yield to a child page, and initial dialog focus must preserve
+  its requested name field. Touch-opened rename/name pages show the keyboard
+  with the existing caret or selection; picker search keeps its input-mode rule.
+  Verify Paper, Workspace, toolbar and preset names in both themes, including
+  native edits that retain their caret and keyboard-opened Choose Action.

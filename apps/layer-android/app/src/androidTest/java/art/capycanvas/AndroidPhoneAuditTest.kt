@@ -469,9 +469,7 @@ class AndroidPhoneAuditTest {
             for ((name, orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
                 "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
                 "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
-                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
-                val rotation = when (orientation) { 0 -> 1; 8 -> 3; else -> 0 }
-                host.awaitFrame("$name input viewport") { activity.display!!.rotation == rotation && (decor.width > decor.height) == (rotation != 0) }
+                requestPhoneOrientation(activity,host,orientation,"$name input viewport")
                 for (theme in listOf("light", "dark")) {
                     host.drain(obj("type" to "set_theme", "theme" to theme))
                     touchWorkspace()
@@ -479,7 +477,7 @@ class AndroidPhoneAuditTest {
                     awaitEditorPage(activity, host, "tool-picker")
                     assertFalse("Touch opening does not focus search", focused())
                     assertFalse("Touch opening does not raise the keyboard", decor.rootWindowInsets.isVisible(WindowInsets.Type.ime()))
-                    screenshot("fix4b-$name-$theme-touch.png")
+                    capturePhonePage("tool-picker","fix4b-$name-$theme-touch.png")
                     closePicker()
                     pressKey(KeyEvent.KEYCODE_DPAD_RIGHT)
                     compose.waitForIdle()
@@ -487,7 +485,7 @@ class AndroidPhoneAuditTest {
                     openPicker()
                     host.awaitFrame("Keyboard opening focuses search") { focused() }
                     awaitEditorPage(activity, host, "tool-picker")
-                    screenshot("fix4b-$name-$theme-keyboard.png")
+                    capturePhonePage("tool-picker","fix4b-$name-$theme-keyboard.png")
                     closePicker()
                 }
             }
@@ -612,22 +610,20 @@ class AndroidPhoneAuditTest {
             for ((name, orientation) in listOf("portrait" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
                 "landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
                 "reverse-landscape" to android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)) {
-                instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
-                val rotation = when (orientation) { 0 -> 1; 8 -> 3; else -> 0 }
-                host.awaitFrame("$name phone page viewport") { activity.display!!.rotation == rotation && (decor.width > decor.height) == (rotation != 0) }
+                requestPhoneOrientation(activity,host,orientation,"$name phone page viewport")
                 for (theme in listOf("light", "dark")) {
                     host.drain(obj("type" to "set_theme", "theme" to theme))
                     host.drain(obj("type" to "phone", "action" to obj("kind" to "insert_tools", "before" to null)))
                     host.awaitFrame("Add Tools search opens") { findTag("tool-picker-search") != null }
                     done("tool-picker-search", "pen")
                     host.awaitFrame("Done preserves the search and page") { host.snapshot?.objectOrNull("picker")?.optString("query") == "pen" && findTag("tool-picker") != null }
-                    screenshot("fix4a-$name-$theme-search-done.png")
+                    capturePhonePage("tool-picker","fix4a-$name-$theme-search-done.png")
                     cancelPicker()
                     host.drain(obj("type" to "customize", "action" to obj("type" to "new_toolbar", "group" to JSONObject.NULL)))
                     host.awaitFrame("The toolbar name opens") { findTag("toolbar-name") != null }
                     done("toolbar-name", "Keyboard draft")
                     host.awaitFrame("Done preserves the unconfirmed name and page") { host.snapshot?.objectOrNull("picker")?.optString("name") == "Keyboard draft" && findTag("tool-picker") != null }
-                    screenshot("fix4a-$name-$theme-name-done.png")
+                    capturePhonePage("tool-picker","fix4a-$name-$theme-name-done.png")
                     cancelPicker()
                     host.drain(obj("type" to "invoke", "command" to "new_document"))
                     host.awaitFrame("New Drawing opens") { findTag("new-drawing-width") != null }
@@ -640,7 +636,7 @@ class AndroidPhoneAuditTest {
                     done("new-drawing-width", "64", "new-drawing-dialog")
                     assertNotNull("Valid Done keeps New Drawing open", findTag("new-drawing-width"))
                     host.awaitFrame("Done commits the numeric value") { host.snapshot!!.getJSONObject("state").getJSONObject("new_drawing").getJSONArray("values").getDouble(0) == 64.0 }
-                    screenshot("fix4a-$name-$theme-number-done.png")
+                    capturePhonePage("new-drawing-dialog","fix4a-$name-$theme-number-done.png")
                     compose.onNodeWithTag("new-drawing-cancel", useUnmergedTree = true).performClick()
                     host.awaitFrame("New Drawing cancels") { findTag("new-drawing-width") == null }
                 }
@@ -928,6 +924,203 @@ class AndroidPhoneAuditTest {
         } finally { scenario.close() }
     }
 
+    private fun requestPhoneOrientation(activity: MainActivity, host: CanvasHost, orientation: Int, label: String) {
+        val landscape = orientation != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        val previous = activity.display!!.rotation
+        val turnsOver = landscape && activity.requestedOrientation in listOf(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE) && activity.requestedOrientation != orientation
+        instrumentation.runOnMainSync { activity.requestedOrientation = orientation }
+        host.awaitFrame(label,diagnostics = { "rotation=${activity.display!!.rotation}, extent=${activity.window.decorView.width}x${activity.window.decorView.height}, configuration=${activity.resources.configuration.orientation}, focus=${activity.window.decorView.hasWindowFocus()}" }) {
+            (activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) == landscape &&
+                (activity.window.decorView.width > activity.window.decorView.height) == landscape &&
+                (!turnsOver || activity.display!!.rotation != previous) && activity.window.decorView.hasWindowFocus()
+        }
+    }
+
+    private fun capturePhonePage(tag: String, path: String) {
+        compose.waitForIdle()
+        val owner = checkNotNull(findTag(tag)).first.view.rootView
+        assertTrue("The private page owns its capture",owner.isAttachedToWindow && owner.hasWindowFocus())
+        assertEquals(instrumentation.targetContext.packageName,owner.context.packageName)
+        val committed = java.util.concurrent.CountDownLatch(1)
+        instrumentation.runOnMainSync { owner.viewTreeObserver.registerFrameCommitCallback { committed.countDown() };owner.invalidate() }
+        assertTrue("The page frame commits",committed.await(5,java.util.concurrent.TimeUnit.SECONDS))
+        screenshot(path)
+    }
+
+    @Test fun actionPickerAcceptsNativeKeyboardEntry() {
+        startupTheme()
+        val scenario = launchCapy(180_000,compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val original = activity.requestedOrientation
+        fun searchFocused() = findTag("action-picker-search")?.second?.find { it.config.getOrNull(SemanticsProperties.Focused) == true } != null
+        fun keyboard() = findTag("action-picker-search")?.first?.view?.rootView?.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true
+        fun focusNodes(): List<SemanticsNode> {
+            val result = mutableListOf<SemanticsNode>()
+            fun visit(node: SemanticsNode) { if(node.config.getOrNull(SemanticsProperties.Focused) == true)result.add(node);node.children.forEach(::visit) }
+            semanticsRoots().forEach { visit(it.semanticsOwner.unmergedRootSemanticsNode) }
+            return result
+        }
+        try {
+            requestPhoneOrientation(activity,host,android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,"The private landscape window owns keyboard input")
+            host.drain(obj("type" to "open_settings","page" to "input"))
+            host.awaitFrame("The two-finger action row is composed") { findTag("trigger-touch.tap.2") != null }
+            compose.onNodeWithTag("trigger-touch.tap.2",useUnmergedTree=true).performScrollTo()
+            awaitEditorPage(activity,host,"preferences-dialog")
+            val (root,row) = checkNotNull(findTag("trigger-touch.tap.2"))
+            val origin = IntArray(2);instrumentation.runOnMainSync { root.view.getLocationOnScreen(origin) }
+            val point = row.boundsInRoot.center+Offset(origin[0].toFloat(),origin[1].toFloat())
+            val down = SystemClock.uptimeMillis()
+            for(phase in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                assertTrue("The private window owns touch input",activity.window.decorView.hasWindowFocus())
+                val input = motion(MotionEvent.TOOL_TYPE_FINGER,phase,point,down)
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(input,true)) } finally { input.recycle() }
+            }
+            host.awaitFrame("Touch activation opens Choose Action") { findTag("action-picker-search") != null }
+            awaitEditorPage(activity,host,"action-picker")
+            assertNull("Touch opening leaves search unfocused",findTag("action-picker-search")!!.second.find { it.config.getOrNull(SemanticsProperties.Focused) == true })
+            assertFalse("Touch opening leaves the keyboard hidden",findTag("action-picker-search")!!.first.view.rootView.rootWindowInsets.isVisible(WindowInsets.Type.ime()))
+            capturePhonePage("action-picker","action-picker-touch.png")
+            host.drain(obj("type" to "preferences","action" to obj("type" to "close_action_picker")))
+            host.awaitFrame("The touch-opened picker dismisses") { findTag("action-picker-search") == null }
+            assertTrue(activity.window.decorView.hasWindowFocus())
+            pressKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            compose.onNodeWithTag("trigger-touch.tap.2",useUnmergedTree=true).performSemanticsAction(SemanticsActions.RequestFocus) { assertTrue(it()) }
+            assertTrue(activity.window.decorView.hasWindowFocus())
+            pressKey(KeyEvent.KEYCODE_DPAD_CENTER)
+            host.awaitFrame("Keyboard activation opens Choose Action") { findTag("action-picker-search") != null }
+            awaitEditorPage(activity,host,"action-picker")
+            val visited = mutableSetOf<List<Int>>()
+            var traversals = 0
+            while(!searchFocused()) {
+                val before = focusNodes().map { it.id }
+                assertTrue("Native traversal must not cycle before reaching search",visited.add(before))
+                assertTrue("Search follows its page header in the native focus order",traversals++ < 4)
+                assertTrue(activity.window.decorView.hasWindowFocus())
+                pressKey(KeyEvent.KEYCODE_TAB)
+                host.awaitFrame("Tab advances the native focused node",diagnostics = { "focused=${focusNodes().map { it.config.getOrNull(SemanticsProperties.TestTag) }}; search=${searchFocused()}; ime=${keyboard()}" }) { focusNodes().map { it.id } != before }
+            }
+            assertTrue("Native traversal focuses the search field",searchFocused())
+            assertTrue(activity.window.decorView.hasWindowFocus())
+            pressKey(KeyEvent.KEYCODE_DPAD_CENTER)
+            assertTrue(activity.window.decorView.hasWindowFocus())
+            instrumentation.sendStringSync("Undo")
+            host.awaitFrame("Native keyboard text filters actions") { host.snapshot?.objectOrNull("preferences")?.getJSONObject("shortcut_page")?.objectOrNull("picker")?.optString("query") == "Undo" }
+            host.awaitFrame("Native field activation opens the real IME") { keyboard() }
+            awaitEditorPage(activity,host,"action-picker")
+        } finally {
+            if(findTag("action-picker") != null) {
+                capturePhonePage("action-picker","action-picker-keyboard.png")
+            }
+            instrumentation.runOnMainSync { activity.requestedOrientation = original }
+            scenario.close()
+        }
+    }
+
+    @Test fun paperRenameRequestsFocusOnOpen() = renameRequestsFocusOnOpen("paper")
+    @Test fun workspaceRenameRequestsFocusOnOpen() = renameRequestsFocusOnOpen("workspace")
+
+    @Test fun toolbarPromptRequestsNameFocusOnOpen() = renameRequestsFocusOnOpen("toolbar")
+    @Test fun toolbarPickerRequestsNameFocusOnTouchOpen() = renameRequestsFocusOnOpen("picker")
+    @Test fun toolbarPickerRequestsNameFocusOnKeyboardOpen() = renameRequestsFocusOnOpen("picker",true)
+    @Test fun drawingPresetRequestsNameFocusOnOpen() = renameRequestsFocusOnOpen("preset")
+
+    private fun renameRequestsFocusOnOpen(kind: String, keyboardOpening: Boolean = false) {
+        startupTheme()
+        val scenario = launchCapy(180_000,compose)
+        val activity = scenario.activity()
+        val host = activity.host
+        val original = activity.requestedOrientation
+        val tag = when(kind) { "paper" -> "paper-rename-name";"workspace" -> "workspace-name";"preset" -> "new-drawing-save-name";else -> "toolbar-name" }
+        val page = when(kind) { "paper" -> "paper-rename-dialog";"workspace" -> "workspace-form";"picker" -> "tool-picker";"preset" -> "new-drawing-dialog";else -> "toolbar-prompt" }
+        val case = InstrumentationRegistry.getArguments().getString("case","$kind-name-${if(keyboardOpening)"keyboard" else "touch"}")
+        fun focused() = findTag(tag)?.second?.find { it.config.getOrNull(SemanticsProperties.Focused) == true } != null
+        fun ime() = findTag(tag)?.first?.view?.rootView?.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true
+        try {
+            requestPhoneOrientation(activity,host,android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,"The private landscape canvas owns input")
+            host.awaitFrame("The launch cover releases input") { findTag("launch-splash") == null }
+            createDrawing(host,800,600,"Rename focus")
+            val (root,canvas) = checkNotNull(findTag("workspace"))
+            val origin = IntArray(2);instrumentation.runOnMainSync { root.view.getLocationOnScreen(origin) }
+            val down = SystemClock.uptimeMillis()
+            for(phase in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                assertTrue("The private rename fixture owns touch input",activity.window.decorView.hasWindowFocus())
+                val input = motion(MotionEvent.TOOL_TYPE_FINGER,phase,canvas.boundsInRoot.center+Offset(origin[0].toFloat(),origin[1].toFloat()),down)
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(input,true)) } finally { input.recycle() }
+            }
+            assertTrue("The rename page opens in native touch mode",root.view.isInTouchMode)
+            if(keyboardOpening) { assertTrue(activity.window.decorView.hasWindowFocus());pressKey(KeyEvent.KEYCODE_DPAD_RIGHT) }
+            if(kind == "paper") {
+                val fixture = File(device.root,"Paper.webp")
+                instrumentation.targetContext.assets.open("10-light.webp").use { input -> fixture.outputStream().use { input.copyTo(it) } }
+                runBlocking { importLibraryPaper(host,android.net.Uri.fromFile(fixture)) }
+                host.drain()
+                val layer = host.snapshot!!.getJSONObject("state").array("layers").objects().first { it.optJSONObject("paper")?.optBoolean("editable") == true }.getLong("id")
+                host.drain(obj("type" to "layer","action" to obj("op" to "select","id" to layer,"mask" to false)))
+                instrumentation.runOnMainSync { host.textureDialog = TextureDialogRequest(layer,false) }
+                host.awaitFrame("The imported paper tile is composed") { findNode({ it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("texture-tile-") == true && it.config.contains(SemanticsActions.OnLongClick) }) != null }
+                val tile = checkNotNull(findNode({ it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("texture-tile-") == true && it.config.contains(SemanticsActions.OnLongClick) })).second.config[SemanticsProperties.TestTag]
+                compose.onNodeWithTag(tile,useUnmergedTree=true).performScrollTo().performSemanticsAction(SemanticsActions.OnLongClick)
+                host.awaitFrame("The paper rename action is composed") { findTag("texture-action-rename_paper") != null }
+                compose.onNodeWithTag("texture-action-rename_paper",useUnmergedTree=true).performClick()
+            } else if(kind == "picker") {
+                host.drain(obj("type" to "customize","action" to obj("type" to "new_toolbar","group" to JSONObject.NULL)))
+            } else if(kind == "preset") {
+                host.drain(obj("type" to "invoke","command" to "new_document"))
+                host.awaitFrame("New Drawing opens") { findTag("new-drawing-create") != null }
+                host.drain(obj("type" to "new_drawing","action" to obj("op" to "presets")))
+                host.awaitFrame("Preset browser opens") { findTag("new-drawing-save-as") != null }
+                host.drain(obj("type" to "new_drawing","action" to obj("op" to "save_as")))
+            } else if(kind == "toolbar") {
+                host.drain(obj("type" to "customize","action" to obj("type" to "manage_toolbars")))
+                host.awaitFrame("Toolbar manager opens") { host.snapshot?.objectOrNull("toolbar_manager") != null }
+                val panel = host.snapshot!!.getJSONObject("toolbar_manager").array("toolbars").objects().first().get("panel")
+                host.drain(obj("type" to "customize","action" to obj("type" to "close_toolbar_manager")))
+                host.awaitFrame("Toolbar manager closes") { findTag("toolbar-manager") == null }
+                host.drain(obj("type" to "customize","action" to obj("type" to "rename_toolbar","panel" to panel)))
+            } else {
+                instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "open","page" to "workspaces")) }
+                host.awaitFrame("Workspace manager opens",diagnostics = { "manager=${host.workspaceManager}; blocked=${host.documentInputBlocked}; nameCommit=${host.workspaceNameCommit != null}; privateFocus=${activity.window.decorView.hasWindowFocus()}" }) { findTag("workspace-manager") != null }
+                instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "form","action" to obj("type" to "new"))) }
+                host.awaitFrame("New workspace form opens") { findTag("workspace-name") != null }
+                instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "submit","name" to "Rename focus workspace")) }
+                host.awaitFrame("The fixture workspace is stored") { host.workspaceManager?.objectOrNull("prompt_action") == null && host.workspaceManager?.optBoolean("busy") == false }
+                host.awaitFrame("The new workspace form dismisses before Rename",diagnostics = { "form=${findTag("workspace-form") != null}; manager=${findTag("workspace-manager") != null}; blocked=${host.documentInputBlocked}; privateFocus=${activity.window.decorView.hasWindowFocus()}; view=${host.workspaceManager}" }) {
+                    findTag("workspace-form") == null && !host.documentInputBlocked &&
+                        findTag("workspace-manager")?.first?.view?.rootView?.hasWindowFocus() == true
+                }
+                val id = host.workspaceManager!!.array("rows").objects().first { it.optString("title") == "Rename focus workspace" }.getString("id")
+                instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "form","action" to obj("type" to "rename","value" to id))) }
+            }
+            host.awaitFrame("The rename field is placed without tapping it") { findTag(tag)?.second?.layoutInfo?.isPlaced == true }
+            compose.waitForIdle()
+            host.awaitFrame("The actual rename page is fully placed inside its own window") {
+                val (root,node) = checkNotNull(findTag(page))
+                val bounds = node.boundsInRoot
+                node.layoutInfo.isPlaced && bounds.width >= node.size.width-1 && bounds.height >= node.size.height-1 &&
+                    bounds.left >= -1 && bounds.top >= -1 && bounds.right <= root.view.width+1 && bounds.bottom <= root.view.height+1
+            }
+            host.awaitFrame("Requested rename focus opens the real IME without a tap",diagnostics = { "focused=${focused()}, ownIme=${ime()}" }) { focused() && ime() }
+            fun entry() = checkNotNull(findTag(tag)!!.second.find { it.config.getOrNull(SemanticsProperties.EditableText) != null })
+            val originalName = entry().config[SemanticsProperties.EditableText].text
+            assertEquals("Rename opens with its caret at the end",androidx.compose.ui.text.TextRange(originalName.length),entry().config[SemanticsProperties.TextSelectionRange])
+            val start = minOf(1,originalName.length);val end = minOf(3,originalName.length)
+            instrumentation.runOnMainSync {
+                val input = checkNotNull(findTag(tag)!!.first.view.onCreateInputConnection(android.view.inputmethod.EditorInfo()))
+                assertTrue(input.setSelection(start,end));assertTrue(input.commitText("X",1))
+            }
+            host.awaitFrame("Name entry preserves its native edit and caret") {
+                entry().config[SemanticsProperties.EditableText].text == originalName.take(start)+"X"+originalName.drop(end) &&
+                    entry().config[SemanticsProperties.TextSelectionRange] == androidx.compose.ui.text.TextRange(start+1)
+            }
+            compose.waitForIdle()
+        } finally {
+            if(findTag(tag) != null)capturePhonePage(page,"rename-focus/$case/open.png")
+            instrumentation.runOnMainSync { activity.requestedOrientation = original }
+            scenario.close()
+        }
+    }
+
     @Test fun admission() = visit(true)
     @Test fun frame() = visit(false)
     @Test fun proofProfileDialogUsesWindowBoundsOutsideItsPanel() = visit(false, "proofProfile")
@@ -1123,6 +1316,9 @@ class AndroidPhoneAuditTest {
         val epoch = host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch")
         host.drain(obj("type" to "invoke", "command" to "new_document"))
         host.awaitFrame("New Drawing controller is open") { host.snapshot!!.getJSONObject("state").objectOrNull("new_drawing") != null }
+        host.awaitFrame("New Drawing presenter is placed") { findTag("new-drawing-dialog")?.second?.layoutInfo?.isPlaced == true }
+        val page = checkNotNull(findTag("new-drawing-dialog")).first.view.rootView
+        val canvas = checkNotNull(findTag("workspace")).first.view.rootView
         compose.waitForIdle()
         runBlocking { host.withNative {
             orderDrawing(it, width, height, create = false)
@@ -1134,6 +1330,10 @@ class AndroidPhoneAuditTest {
             state.getJSONObject("document_file").getLong("epoch") != epoch &&
                 state.array("tabs").objects().any { it.getBoolean("active") && it.getInt("width") == width && it.getInt("height") == height } &&
                 !host.documents.working && !host.drawingTabs.switching && state.objectOrNull("new_drawing") == null
+        }
+        host.awaitFrame("New Drawing dismisses before canvas input") {
+            findTag("new-drawing-dialog") == null && (page === canvas || !page.isAttachedToWindow) &&
+                canvas.isAttachedToWindow && canvas.hasWindowFocus() && !host.documentInputBlocked
         }
     }
 

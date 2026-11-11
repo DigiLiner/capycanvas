@@ -167,7 +167,7 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
         if (!shown && mode != "page") return@BoxWithConstraints
         val hosting = mode to (phone != null)
         val restoreSearch = remember(hosting) { search?.focused == true }
-        LaunchedEffect(hosting,shown) { if(shown) { if (restoreSearch) currentSearch?.focus?.requestFocus() else focus.requestFocus() } }
+        LaunchedEffect(hosting,shown) { if(shown && (phone == null || host.dialogFocus.lastOrNull() === focus)) { if (restoreSearch) currentSearch?.focus?.requestFocus() else if (!focus.saveFocusedChild()) focus.requestFocus() } }
         val frame = intent.getJSONObject("frame")
         val alert = frame.getString("kind") == "alert"
         val canvas = mode == "canvas_panel"
@@ -208,7 +208,7 @@ internal data class DialogResponse(val label: String, val tag: String, val accen
             if (intent.getBoolean("modal")) DialogCapture(Color.Transparent)
             Surface(Modifier.placedAbsolute(presentation!!.getJSONObject("bounds"),density.density).testTag(tag)
                 .graphicsLayer { translationY = slide*size.height }
-                .focusRequester(focus).focusProperties { onExit = { if(shown && intent.getBoolean("modal"))cancelFocusChange() } }.focusGroup()
+                .focusRequester(focus).focusProperties { onExit = { if(shown && intent.getBoolean("modal") && host.dialogFocus.lastOrNull() === focus)cancelFocusChange() } }.focusGroup()
                 .onPreviewKeyEvent { event ->
                     val key = event.nativeKeyEvent
                     if(intent.getBoolean("modal") && key.keyCode == KeyEvent.KEYCODE_TAB) {

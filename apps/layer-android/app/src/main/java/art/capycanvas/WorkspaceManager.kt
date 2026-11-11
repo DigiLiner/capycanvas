@@ -142,7 +142,7 @@ import org.json.JSONArray
                 DialogResponse(confirm,"workspace-submit",accent=true,enabled=!busy&&nameError==null,destructive=form.optBoolean("destructive"),action=submit)),body={padding ->
                 Column(Modifier.padding(padding),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     form.getString("message").takeIf{it.isNotEmpty()}?.let{Text(it)}
-                    if(named)CoreTextField(name,{name=it},Modifier.fillMaxWidth().testTag("workspace-name"),label={Text(host.bootstrap!!.getJSONObject("common").getString("name"))},background=colors.dialogField)
+                    if(named)CoreTextField(name,{name=it},Modifier.fillMaxWidth().testTag("workspace-name"),label={Text(host.bootstrap!!.getJSONObject("common").getString("name"))},background=colors.dialogField,focusRequest=1)
                     if(!form.isNull("description"))CoreTextField(description,{description=it},Modifier.fillMaxWidth().testTag("workspace-description"),label={Text(copy.getString("description"))},background=colors.dialogField)
                     if(choices.isNotEmpty())PropertyChoice(form.getString("choice_label"),choices.map{it.getString("label")},choices.indexOfFirst{it.getString("id")==choice}.coerceAtLeast(0),enabled=!busy,fill=colors.dialogField){choice=choices[it].getString("id")}
                     if(nameError!=null||error!=null)Text(nameError ?: error.orEmpty(),color=MaterialTheme.colorScheme.error)

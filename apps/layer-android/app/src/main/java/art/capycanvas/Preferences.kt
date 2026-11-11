@@ -611,7 +611,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
             ToolPickerBody(Modifier.fillMaxWidth().padding(padding),header = {
                 picker.optString("name").takeIf { !picker.isNull("name") }?.let { name ->
                     CoreTextField(name, { host.customize(obj("type" to "picker_name", "name" to it)) }, Modifier.fillMaxWidth().testTag("toolbar-name"),
-                        label = { Text(picker.getString("name_label")) }, background = LocalPalette.current.dialogField)
+                        label = { Text(picker.getString("name_label")) }, background = LocalPalette.current.dialogField,focusRequest=1)
                 }
                 CoreTextField(searchText,{ value ->
                     val previous = searchText.text
@@ -626,7 +626,7 @@ private fun JSONObject.preferencesDepth() = getJSONObject("navigation").getJSONA
                         if(searchText.text.isEmpty())Text(picker.getString("search_hint"),color = LocalPalette.current.secondary)
                         field()
                     } })
-                LaunchedEffect(Unit) { if (keyboardMode) focus.requestFocus() }
+                LaunchedEffect(Unit) { if (keyboardMode && picker.isNull("name")) focus.requestFocus() }
             },choices = {
                 Column(Modifier.verticalScroll(choicesScroll).testTag("tool-picker-list")) {
                     picker.array("choices").objects().forEachIndexed { index,tool ->
