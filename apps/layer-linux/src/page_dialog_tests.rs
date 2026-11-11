@@ -1487,6 +1487,41 @@ fn native_phone_layout_choices() {
     d.finish();
 }
 
+fn phone_layout_sizes(d: &mut Driver) {
+    d.w.dispatch(UiAction::Phone {action:PhoneAction::Panel {panel:Panel::Sizes}});
+    until(||find_named(d.w.window.upcast_ref(),"drawer-panel-Sizes").is_some_and(|panel|panel.is_mapped()) && !d.w.drawer.animation_active(),"phone Sizes opens");
+    let panel=find_named(d.w.window.upcast_ref(),"drawer-panel-Sizes").unwrap();
+    let buttons=descendants::<gtk::Button>(&panel).into_iter().filter(|button|button.has_css_class("size-preset")).collect::<Vec<_>>();
+    assert_eq!(buttons.len(),40);
+    let width=buttons[0].width();
+    for button in &buttons {
+        let label=descendant::<gtk::Label>(button).unwrap();let bounds=label.compute_bounds(button).unwrap();
+        assert!(bounds.y()>=24.,"{}: label starts above24: {bounds:?}",label.text());
+        assert!(bounds.x()>=0. && bounds.x()+bounds.width()<=button.width() as f32 && bounds.y()+bounds.height()<=button.height() as f32);
+        assert_eq!(button.width(),width);
+    }
+    buttons.last().unwrap().grab_focus();
+    capture(d,"brush-sizes");
+    d.w.dispatch(UiAction::Customize {action:CustomizationAction::CloseExpanded});
+    until(||d.w.drawer.is_closed(),"phone Sizes closes");
+}
+
+#[test]
+#[ignore = "private compositor --tablet and storage; phone viewport/theme external"]
+fn native_phone_batch_a_layout() {
+    let mut d=super::phone_motion::setup("art.capycanvas.PhoneBatchALayout");
+    phone_layout_sizes(&mut d);
+    phone_layout_image(&mut d);
+    phone_layout_swatches(&mut d);
+    phone_layout_shortcuts(&mut d);
+    phone_layout_choices(&mut d);
+    for tilt in [false,true] {
+        w7_calibration(&mut d,tilt);
+        if let Some(dialog)=d.w.visible_dialog() { close(&d,&dialog); }
+    }
+    d.finish();
+}
+
 #[test]
 #[ignore = "private compositor: --native-test=native_phone_dialogs --native-storage; LAYER_DIALOG_BATCH=w6a/w6a-capture/w6b/w6c/w6d/w7-photo/w9-storage/w9-workspace-recovery/w9-drawing-recovery/w9-open; drawing recovery also needs --native-recovery, phone viewport/theme external"]
 fn native_phone_dialogs() {

@@ -11,6 +11,19 @@ fn calibration(s: &mut UiSession<Recorder>, action: PressureCalibrationAction) {
 }
 
 #[test]
+fn response_calibration_exposes_a_square_graph_minimum_on_every_host() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        s.dispatch(UiAction::Invoke { command: CommandId::PenPressure }).unwrap();
+        let pressure = serde_json::to_value(s.state.pressure_calibration.as_ref().unwrap()).unwrap();
+        assert_eq!(pressure["graph_minimum"], serde_json::json!([200.,200.]));
+        s.dispatch(UiAction::Invoke { command: CommandId::PenTilt }).unwrap();
+        let tilt = serde_json::to_value(&s.state.tilt_calibration.as_ref().unwrap().panel).unwrap();
+        assert_eq!(tilt["graph_minimum"], pressure["graph_minimum"]);
+    }
+}
+
+#[test]
 fn live_pressure_preview_is_independent_of_artwork_settings_and_workspace_history() {
     let mut s = session(Platform::Gtk);
     let layout = serde_json::to_value(&s.state.workspace).unwrap();

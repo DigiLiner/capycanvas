@@ -3440,6 +3440,31 @@ class AndroidHostTest {
         compose.onNodeWithTag("settings-done").performClick()
     }
 
+    @Test fun calibrationGraphsKeepTheirMinimumAndControlsOnScreen() {
+        device.landscape(compose.activityRule.scenario)
+        val density = compose.activity.resources.displayMetrics.density
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            for (kind in listOf("pressure", "tilt")) {
+                action(obj("type" to "invoke", "command" to "pen_$kind"))
+                waitState { it.objectOrNull("${kind}_calibration") != null }
+                val graph = compose.onNodeWithTag("effect-curve").performScrollTo().assertIsDisplayed().fetchSemanticsNode()
+                val panel = state().getJSONObject("${kind}_calibration")
+                val minimum = panel.getJSONArray("graph_minimum")
+                assertTrue("Calibration keeps its shared graph minimum", graph.size.width >= minimum.getDouble(0)*density-1 && graph.size.height >= minimum.getDouble(1)*density-1)
+                val inset = panel.getJSONObject("editor").getJSONObject("controls").number("inset")*density
+                assertTrue("Calibration keeps a positive curve plot", graph.size.width > 2*inset && graph.size.height > 2*inset)
+                assertEquals("Calibration keeps symmetric curve gutters", bounds("pen-$kind-dialog").center.x, graph.boundsInRoot.center.x, 1f)
+                for (tag in listOf("firmer", "lighter"))
+                    compose.onNodeWithTag("pen-$kind-$tag").performScrollTo().assertIsDisplayed()
+                for (tag in listOf("reset", "cancel", "apply"))compose.onNodeWithTag("pen-$kind-$tag").assertIsDisplayed()
+                capture("calibration-$kind-$theme").recycle()
+                compose.onNodeWithTag("pen-$kind-cancel").performClick()
+                waitState { it.objectOrNull("${kind}_calibration") == null }
+            }
+        }
+    }
+
     @Test fun penTiltCalibrationUsesNativeSensorsAndPersistsLight() = penTiltCalibrationJourney("light")
 
     @Test fun penTiltCalibrationUsesNativeSensorsAndPersistsDark() = penTiltCalibrationJourney("dark")

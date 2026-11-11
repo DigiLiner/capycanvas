@@ -404,3 +404,9 @@ no regression. If a physical iPhone is available, record the same rows there.
   notice rule when actions remain beside a conflict message. iOS must use the
   same placement. Verify recording at 320 pt and conflicts at 280 pt, scrolling
   the content while the action buttons remain visible, in both themes.
+
+- **Share the calibration graph minimum with Android.** Shared pressure and
+  tilt views expose `graph_minimum`, a square derived from GTK's existing
+  64×200 pt curve minimum. iOS must consume that minimum while retaining a
+  positive plot and visible axis gutters. Verify 891×412 and 320 pt with 16 pt
+  text, in both themes.

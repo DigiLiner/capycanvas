@@ -310,7 +310,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
 }
 
 @Composable internal fun SharedCurveControl(host: CanvasHost, state: JSONObject, control: JSONObject, label: String, target: JSONObject,
-    enabled: Boolean = true, histogram: Boolean = false, gutterLabel: String? = null, overlay: @Composable BoxScope.() -> Unit = {}) {
+    enabled: Boolean = true, histogram: Boolean = false, gutterLabel: String? = null, minimumSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize(0.dp,200.dp), overlay: @Composable BoxScope.() -> Unit = {}) {
     val colors = LocalPalette.current
     val density = LocalDensity.current.density
     val current by rememberUpdatedState(control)
@@ -322,7 +322,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
         if (gutterLabel != null) (measurer.measure(gutterLabel, style).size.width / density).dp + 8.dp else 40.dp
     }
     var graphWidth by remember { mutableIntStateOf(0) }
-    val graphHeight = if (gutterLabel != null && graphWidth > 0) (graphWidth / density).dp else 200.dp
+    val graphHeight = if (gutterLabel != null && graphWidth > 0) maxOf((graphWidth / density).dp,minimumSize.height) else minimumSize.height
     val curve = control.getJSONObject("controls")
     val axes = curve.array("axes").objects()
     val focus = remember { FocusRequester() }
@@ -352,7 +352,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
                 }
                 Text(axes[1].getString("minimum"), color = colors.secondary)
             }
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).widthIn(min = minimumSize.width)) {
                 Box(Modifier.fillMaxWidth().height(graphHeight).onSizeChanged { graphWidth = it.width }.background(colors.input)) {
                     if (histogram) ScopeGraph(host, state, "tonal_histogram", Modifier.fillMaxSize())
                     Canvas(Modifier.fillMaxSize().testTag("effect-curve").semantics { contentDescription = label }
