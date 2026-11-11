@@ -706,7 +706,6 @@ private suspend fun AwaitPointerEventScope.followEdge(dock: DockInteraction, dow
     return onGloballyPositioned { dock.anchors[token] = DockInteraction.Anchor(key, it.boundsInRoot().translate(-dock.origin)) }
 }
 internal val LocalDrawerColumn = staticCompositionLocalOf<Int?> { null }
-internal val LocalDrawerClip = staticCompositionLocalOf { Rect.Zero }
 
 @Composable internal fun Modifier.columnDrawerBounds(dock: DockInteraction, column: Int, group: Int?): Modifier {
     if(!LocalWorkspaceVisible.current) return this

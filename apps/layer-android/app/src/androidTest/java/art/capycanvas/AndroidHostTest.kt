@@ -4278,7 +4278,9 @@ class AndroidHostTest {
         host.drain()
         compose.waitForIdle()
         return compose.runOnIdle {
-            findTag("tool-drawer")?.second?.takeIf { it.layoutInfo.isPlaced }?.boundsInRoot?.height
+            val bounds=host.workspaceInteraction?.drawer?.objectOrNull("placement")?.objectOrNull("bounds")
+            if(bounds==null || bounds.number("width")<=0f || bounds.number("height")<=0f)null
+            else findTag("tool-drawer")?.second?.takeIf { it.layoutInfo.isPlaced }?.boundsInRoot?.height
         }
     }
 

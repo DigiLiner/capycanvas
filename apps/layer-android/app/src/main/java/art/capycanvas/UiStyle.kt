@@ -152,14 +152,22 @@ internal class Palette(val dark: Boolean, private val source: org.json.JSONObjec
 }
 
 @Composable internal fun Modifier.glass(shape: Shape, color: Color = Color.Transparent, rootOffset: () -> Offset = { Offset.Zero },
-    key: Any = remember { Any() }, active: Boolean = true): Modifier {
+    key: Any = remember { Any() }, active: Boolean = true, nativeShape: (() -> Shape)? = null): Modifier {
     val host = LocalCanvasHost.current
     val density = LocalDensity.current
     val opacity=LocalWorkspaceOpacity.current
+    val currentShape by rememberUpdatedState(nativeShape)
     var bounds by remember { mutableStateOf<FloatArray?>(null) }
     DisposableEffect(host, key) { onDispose { host.glassBox(key, null) } }
-    LaunchedEffect(host,key,active,opacity) {
-        snapshotFlow { bounds?.toList() to (opacity?.value ?: 1f) }.collect { (box,strength) ->
+    LaunchedEffect(host,key,active,opacity,density) {
+        snapshotFlow {
+            val box=bounds?.toList()?.let { box ->
+                val corners=currentShape?.invoke() as? CornerBasedShape
+                if(corners==null)box else box.take(4)+listOf(corners.topStart,corners.topEnd,corners.bottomEnd,corners.bottomStart)
+                    .map { it.toPx(androidx.compose.ui.geometry.Size(box[2],box[3]),density) }
+            }
+            box to (opacity?.value ?: 1f)
+        }.collect { (box,strength) ->
             host.glassBox(key,box?.takeIf { active }?.toFloatArray(),strength)
         }
     }

@@ -18,10 +18,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.Layout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CornerSize
@@ -36,6 +39,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.graphicsLayer
@@ -179,7 +183,10 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     val plan = measure?.objectOrNull("placement")
     var planContext by remember { mutableStateOf<String?>(null) }
     var toolbars by remember { mutableStateOf<Map<String, JSONObject>>(emptyMap()) }
-    var geometry by remember { mutableStateOf<JSONObject?>(null) }
+    val geometry = remember { mutableStateOf<JSONObject?>(null) }
+    var visible by remember { mutableStateOf(false) }
+    var prepared by remember { mutableStateOf<Pair<String,JSONObject>?>(null) }
+    val recorded=remember { arrayOfNulls<String>(1) }
     var colorFit by remember { mutableStateOf<JSONObject?>(null) }
     var wheelHeight by remember { mutableFloatStateOf(0f) }
     val toolPanels = remember { mutableStateMapOf<String, JSONObject>() }
@@ -246,12 +253,14 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     val lastTarget=remember { arrayOfNulls<String>(1) }
     val colorHdr = snapshot.objectOrNull("color_panel")?.optBoolean("hdr") == true
     fun placeMeasured() {
+        if(current==null && geometry.value==null) {closed();return}
         val layerPlacement=layerSizes?.array("placements")?.optJSONObject(if(propertiesOpen)1 else 0)
         val key=if(current==null)"closing" else listOf(placementKey,sizingContext,planContext,
             if(inspector)layerPlacement?.toString() else heights.toList(),layerSizesContext,propertiesOpen,wheelHeight,colorHdr).toString()
         if(lastTarget[0]==key)return
         val target=when {
-            current==null -> geometry?.objectOrNull("placement")
+            current==null -> prepared?.second ?: geometry.value?.objectOrNull("placement")
+            prepared?.first==key -> prepared!!.second
             inspector -> {
                 if(layerSizesContext!=sizingContext)return
                 layerPlacement
@@ -270,9 +279,15 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             }
         }
         if(target==null) {if(current==null)closed();return}
+        if(current!=null && prepared?.first!=key) {
+            animation[0]?.cancel()
+            prepared=key to target
+            return
+        }
+        if(current!=null && recorded[0]!=key)return
         lastTarget[0]=key
         animation[0]?.cancel()
-        val from=geometry?.objectOrNull("placement")
+        val from=geometry.value?.objectOrNull("placement")
         val anchor=current?.getJSONObject("anchor")?.toString()
         val switching=anchor!=null && lastAnchor!=null && lastAnchor!=anchor
         val pageTarget=if(propertiesOpen)1f else 0f
@@ -280,13 +295,14 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
         val pageChange=inspector && current!=null && pageFrom!=pageTarget
         val animate=current==null || pageChange || !switching && from?.toString()!=target.toString()
         if(anchor!=null)lastAnchor=anchor
+        visible=true
         animation[0]=scope.launch(start=kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             workspaceFrames(200,animate) { progress ->
                 val eased=1f-(1f-progress)*(1f-progress)*(1f-progress)
                 val position=if(pageChange)pageFrom+(pageTarget-pageFrom)*eased else pageTarget
                 val reply=JSONObject(Native.drawerFrame(obj("from" to from,"to" to target,"progress" to eased,
                     "closing" to (current==null),"clip_contents" to true).toString()))
-                geometry=reply;pagePosition=position
+                geometry.value=reply;pagePosition=position
                 if(reply.objectOrNull("connection")!=null)reply.getJSONObject("placement").let { placement ->
                     val source=DockInteraction.DrawerSource(placement.getString("direction"),placement.getJSONObject("anchor").rect(),model.getJSONObject("anchor"))
                     if(dock.drawerSources[id]!=source)dock.drawerSources[id]=source
@@ -304,11 +320,14 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             if (columnId != null) dock.clearDrawerTiles(columnId)
         }
     }
-    val visible = geometry != null
-    val placement = geometry?.objectOrNull("placement") ?: plan ?: return
-    val connection = geometry?.objectOrNull("connection")
-    val corners = connection?.array("square_corners")
-    val shape = dock.drawerContainerShape(placement.getJSONObject("bounds"), joined = corners)
+    val contentKey=prepared?.first
+    val contentPlacement = prepared?.second ?: plan ?: return
+    val closedPlacement=remember(prepared) { prepared?.second?.let {
+        JSONObject(Native.drawerFrame(obj("to" to it,"progress" to 0f,"clip_contents" to true).toString())).getJSONObject("placement")
+    } }
+    val placement = { geometry.value?.objectOrNull("placement") ?: closedPlacement ?: contentPlacement }
+    val shape = { dock.drawerContainerShape(placement().getJSONObject("bounds"),
+        joined = geometry.value?.objectOrNull("connection")?.array("square_corners")) }
     val z = if (id == "tool") 220 else 200
     val tabbed = tabs != null && columnId != null
     val together = phone != null && measurement?.optBoolean("scrolls_together") == true
@@ -319,27 +338,41 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             snapshot.getJSONObject("state").getJSONObject("customization").array("column_drawers").objects()
                 .any { drawer -> drawer.array("columns").values().any { panel in (it as JSONArray).values() } }
         }
-        val cut = connection?.getJSONObject("bounds")?.rect()?.translate(-placement.getJSONObject("bounds").rect().topLeft)
-        if (visible) {
-            Box(position(placement.getJSONObject("bounds")).zIndex(if (nested) 199f else 99f)
-                .panelSurface(12.dp, shape, cut = cut?.let { Rect(it.topLeft * dock.density, it.bottomRight * dock.density) }))
-            connection?.let { DrawerBridge(it, dock, z.toFloat()) }
-        }
+        if (visible) DrawerChrome(geometry, dock, phone != null, nested, z)
         val opening = remember { PanelOpening() }
+        val outerPosition = (if (phone != null) Modifier.absoluteOffset {
+            val bounds=placement().getJSONObject("bounds")
+            IntOffset((bounds.number("x")*dock.density).roundToInt(),(bounds.number("y")*dock.density).roundToInt())
+        } else Modifier.offset {
+            val bounds=placement().getJSONObject("bounds")
+            IntOffset((bounds.number("x")*dock.density).roundToInt(),(bounds.number("y")*dock.density).roundToInt())
+        }).layout { child, _ ->
+            val bounds=placement().getJSONObject("bounds")
+            val measured=child.measure(Constraints.fixed((bounds.number("width")*dock.density).roundToInt().coerceAtLeast(0),
+                (bounds.number("height")*dock.density).roundToInt().coerceAtLeast(0)))
+            layout(measured.width,measured.height) { measured.place(0,0) }
+        }
         Layout(modifier = Modifier.fillMaxSize().zIndex(z.toFloat()), content = {
-            Box(position(placement.getJSONObject("bounds")).zIndex(z.toFloat())
-                .testTag(if (id == "tool") "tool-drawer" else "column-drawer-$id").chromeRegion(dock)
+            Layout(modifier=outerPosition.zIndex(z.toFloat())
+                .testTag(if (id == "tool") "tool-drawer" else "column-drawer-$id").chromeRegion(dock,active=visible)
                 .then(if (columnId != null) Modifier.columnDrawerBounds(dock, columnId, if (current != null) tabs?.getInt("group") else null) else Modifier)
-                .panelSurface(0.dp, shape, opening = opening)
-                .glass(shape, if (tabbed) Color.Transparent else LocalPalette.current.panelFill)
-                .then(if (together) Modifier.panelScroll(rememberScrollState()) else Modifier)) {
-                Box(if (together) Modifier.fillMaxWidth().height(placement.array("columns").objects().maxOf { it.number("y")+it.number("height") }.dp) else Modifier.fillMaxSize(),contentAlignment = if (phone != null) androidx.compose.ui.AbsoluteAlignment.TopLeft else Alignment.TopStart) {
+                .panelOpening(opening).graphicsLayer { clip=true; this.shape=shape() }
+                .glass(RectangleShape, if (tabbed || !visible) Color.Transparent else LocalPalette.current.panelFill,active=visible,nativeShape=shape)
+                .then(if (together) Modifier.panelScroll(rememberScrollState()) else Modifier),content={
+                Box(Modifier.fillMaxSize().graphicsLayer().drawWithContent {
+                    drawContent()
+                    if(contentKey!=null && prepared?.first==contentKey && recorded[0]!=contentKey) {
+                        recorded[0]=contentKey
+                        placeMeasured()
+                    }
+                }) {
+                Box(if (together) Modifier.fillMaxWidth().height(contentPlacement.array("columns").objects().maxOf { it.number("y")+it.number("height") }.dp) else Modifier.fillMaxSize(),contentAlignment = if (phone != null) androidx.compose.ui.AbsoluteAlignment.TopLeft else Alignment.TopStart) {
                 // Placement can lag the model by a frame when switching to a drawer with fewer columns.
-                placement.array("columns").objects().take(columns.size).forEachIndexed { index, bounds ->
+                contentPlacement.array("columns").objects().take(columns.size).forEachIndexed { index, bounds ->
                     val contentBounds = JSONObject(bounds.toString()).apply {
                         plan?.array("columns")?.optJSONObject(index)?.let { put("x", it.get("x")); put("width", it.get("width")) }
                     }
-                    val columnPosition = if (together) Modifier.absoluteOffset {
+                    val columnPosition = if (together) Modifier.wrapContentSize(androidx.compose.ui.AbsoluteAlignment.TopLeft, unbounded = true).absoluteOffset {
                         IntOffset((contentBounds.number("x")*dock.density).roundToInt(),(contentBounds.number("y")*dock.density).roundToInt())
                     }.width(contentBounds.number("width").dp).wrapContentHeight(unbounded = true) else Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).then(position(contentBounds))
                     Column(columnPosition) {
@@ -364,7 +397,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                                                         Modifier.testTag("drawer-tab-$panelId")
                                                             .then(if (current != null) Modifier.dragSource(dock, obj("kind" to "panel", "panel" to panelId), cursor = AndroidPointerIcon.TYPE_ARROW) else Modifier)
                                                             .drawerTabHit(dock, columnId, group, tabIndex, panelId.toString(), tabClip, current != null),
-                                                        presentation = placement.array("tab_presentations").getJSONObject(tabIndex), enabled = current != null)
+                                                        presentation = contentPlacement.array("tab_presentations").getJSONObject(tabIndex), enabled = current != null)
                                                 }
                                             }
                                         }
@@ -376,10 +409,9 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                                 }
                             }
                         }
-                        var clip by remember { mutableStateOf(Rect.Zero) }
                         Box(Modifier.fillMaxWidth().then(if (together) Modifier else Modifier.weight(1f)).then(if (tabbed) Modifier.background(LocalPalette.current.panelFill) else Modifier)
-                            .clipToBounds().onGloballyPositioned { clip = it.boundsInRoot().translate(-dock.origin) }) {
-                            CompositionLocalProvider(LocalDrawerColumn provides columnId, LocalDrawerClip provides clip,
+                            .clipToBounds()) {
+                            CompositionLocalProvider(LocalDrawerColumn provides columnId,
                                 LocalWorkspaceZ provides (200 + (columnId ?: 100)), LocalPanelOpening provides opening) {
                                 if(inspector) LayerInspector(host, host.snapshot?.getJSONObject("state") ?: snapshot.getJSONObject("state"), propertiesOpen,
                                     pagePosition, bounds.number("height"), layerSizes?.number("footer_height",49.0) ?: 49f,
@@ -411,12 +443,32 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                     }
                 }
                 }
+                }
+            }) { children, constraints ->
+                val bounds=contentPlacement.getJSONObject("bounds")
+                val height=if(together)contentPlacement.array("columns").objects().maxOf { it.number("y")+it.number("height") } else bounds.number("height")
+                val content=children.single().measure(Constraints.fixed((bounds.number("width")*dock.density).roundToInt().coerceAtLeast(0),
+                    (height*dock.density).roundToInt().coerceAtLeast(0)))
+                layout(constraints.maxWidth,if(together)content.height else constraints.maxHeight) { content.place(0,0) }
             }
         }) { measurables, constraints ->
             val content = measurables.single().measure(constraints.copy(minWidth = 0, minHeight = 0))
-            layout(constraints.maxWidth, constraints.maxHeight) { if (visible) content.place(0, 0) }
+            layout(constraints.maxWidth, constraints.maxHeight) { if (contentKey!=null) content.place(0, 0) }
         }
     }
+}
+
+@Composable private fun DrawerChrome(geometry: State<JSONObject?>, dock: DockInteraction, absolute: Boolean, nested: Boolean, z: Int) {
+    val frame=geometry.value ?: return
+    val placement=frame.getJSONObject("placement")
+    val bounds=placement.getJSONObject("bounds")
+    val connection=frame.objectOrNull("connection")
+    val shape=dock.drawerContainerShape(bounds,joined=connection?.array("square_corners"))
+    val cut=connection?.getJSONObject("bounds")?.rect()?.translate(-bounds.rect().topLeft)
+    Box((if(absolute)Modifier.placedAbsolute(bounds,dock.density) else Modifier.placed(bounds,dock.density))
+        .zIndex(if(nested)199f else 99f)
+        .panelSurface(12.dp,shape,cut=cut?.let { Rect(it.topLeft*dock.density,it.bottomRight*dock.density) }))
+    connection?.let { DrawerBridge(it,dock,z.toFloat()) }
 }
 
 @Composable internal fun LayerInspector(host: CanvasHost, state: JSONObject, open: Boolean, position: Float,
