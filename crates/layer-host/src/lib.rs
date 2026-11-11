@@ -253,7 +253,10 @@ impl NativeHost {
         else {self.preparation.retire();}
     }
     pub fn poll_preparation(&mut self)->bool {
-        if self.preparation.take() {self.dirty=true;}
+        if self.preparation.take() {
+            self.dirty |= self.session.engine().backend().0.as_ref()
+                .is_some_and(|gpu|gpu.frame_preparation_pending());
+        }
         self.dirty
     }
     pub fn close_wake(&mut self) {self.preparation.close();}
@@ -2309,6 +2312,110 @@ mod tests {
         }
         assert!(woke, "the thumbnail leaves decoding for canvas frames");
         assert!(prompt, "Idle preview batches resume promptly instead of waiting for a UI refresh");
+    }
+    #[test]
+    fn saved_selection_first_show_resumes_after_its_merge_recipe_completes() {
+        use layer_core::authored::{RecordChange,Occurrence,OccurrenceContent};
+        use std::sync::{Arc,mpsc};
+        let mut document=layer_ui::new_drawing(32,32,&layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
+        let saved=RecordChange::insert(&document.artwork.selections,layer_core::SavedSelection {selection:layer_core::Selection::polygon(vec![Point{x:0.,y:0.},Point{x:16.,y:0.},Point{x:16.,y:32.},Point{x:0.,y:32.}]).unwrap()});
+        let row=RecordChange::insert(&document.artwork.occurrences,Occurrence::new(OccurrenceContent::Selection(saved.handle),"Saved coverage"));
+        let id=row.handle;
+        let stack=document.composition().result;
+        let mut entries=document.artwork.stacks.get(stack).unwrap().clone();entries.entries.insert(0,id);
+        let entries=RecordChange::replace(&document.artwork.stacks,stack,Some(entries)).unwrap();
+        document.apply(layer_core::Edit::Batch(vec![layer_core::Edit::SavedSelection(saved),layer_core::Edit::Occurrence(row),layer_core::Edit::Stack(entries)])).unwrap();
+        document.working.selection_overlays.visibility.insert(id,false);
+        let (_reference,mut host)=gpu_document_host(layer_ui::Platform::Windows,document);
+        let clock=std::cell::Cell::new(0);
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
+        loop {
+            frame_step(&mut host,&clock,deadline);
+            if host.startup.complete&&!host.dirty&&!host.session.engine().wants_continuous_frames() {break;}
+        }
+        let view=host.session.state().camera.view();
+        let surround=host.session.state().palette.surround_linear;
+        let gpu=host.session.engine().backend().0.as_ref().unwrap();
+        let mut presenter=layer_render_wgpu::ViewportPresenter::for_renderer(gpu,wgpu::TextureFormat::Rgba8UnormSrgb);
+        let hidden=presenter.readback_rgba8(gpu,view,surround).unwrap();
+        let (notify,notified)=mpsc::channel();
+        host.set_wake(Arc::new(move || {let _=notify.send(());}));
+        host.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Visibility {id:layer_ui::occurrence_token(id),value:true}}).unwrap();
+        frame_step(&mut host,&clock,deadline);
+        notified.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert!(host.poll_preparation(),"first-show saved-selection merge completion must resume its visible tint");
+        loop {
+            frame_step(&mut host,&clock,deadline);
+            if host.dirty {continue;}
+            if !host.session.engine().backend().0.as_ref().unwrap().frame_preparation_pending() {break;}
+            notified.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("the deferred first-show frame must be resumed by a preparation wake");
+            assert!(host.poll_preparation(),"first-show saved-selection merge completion must resume its visible tint");
+        }
+        host.close_wake();
+        let gpu=host.session.engine().backend().0.as_ref().unwrap();
+        let shown=presenter.readback_rgba8(gpu,view,surround).unwrap();
+        assert!(hidden.bytes!=shown.bytes,"the resumed first-show frame must display its saved-selection tint");
+    }
+    #[test]
+    fn deferred_presentation_recipe_completion_resumes_the_canvas_frame() {
+        use std::sync::{Arc,mpsc};
+        let (_reference,mut host)=gpu_host(layer_ui::Platform::Windows,[32,32]);
+        let clock=std::cell::Cell::new(0);
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
+        loop {
+            frame_step(&mut host,&clock,deadline);
+            if host.startup.complete&&!host.dirty&&!host.session.engine().wants_continuous_frames() {break;}
+        }
+        let (notify,notified)=mpsc::channel();
+        host.set_wake(Arc::new(move || {let _=notify.send(());}));
+        let gpu=host.session.engine().backend().0.as_ref().unwrap();
+        let mut presenter=layer_render_wgpu::ViewportPresenter::for_surface(gpu,
+            wgpu::TextureFormat::Bgra8UnormSrgb,layer_render_wgpu::SdrSurfaceColor::Srgb).unwrap();
+        assert!(!host.prepare_canvas_presentation(&presenter));
+        assert!(host.dirty);
+        notified.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert!(host.poll_preparation());
+        let gpu=host.session.engine().backend().0.as_ref().unwrap();
+        pollster::block_on(presenter.prepare(gpu)).unwrap();
+        frame_step(&mut host,&clock,deadline);
+        assert!(host.prepare_canvas_presentation(&presenter));
+        host.close_wake();
+    }
+    #[test]
+    fn unrelated_thumbnail_validation_completion_does_not_request_a_canvas_frame() {
+        use std::sync::{Arc,mpsc};
+        let (_reference,mut host)=gpu_host(layer_ui::Platform::Windows,[32,32]);
+        let clock=std::cell::Cell::new(0);
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
+        loop {
+            frame_step(&mut host,&clock,deadline);
+            if host.startup.complete&&!host.dirty&&!host.session.engine().wants_continuous_frames()
+                &&host.session.engine().backend().0.as_ref().unwrap().has_presentable_frame() {break;}
+        }
+        let target=layer_ui::occurrence_token(host.session.engine().document().working.occurrence.unwrap());
+        let (notify,notified)=mpsc::channel();
+        host.set_wake(Arc::new(move || {let _=notify.send(());}));
+        let gpu=host.session.renderer_mut().0.as_mut().unwrap();
+        gpu.configure_ui_previews(layer_core::color::RgbSpace::DisplayP3).unwrap();
+        assert!(!gpu.ui_readback_ready(),"the new thumbnail conversion recipe must start cold");
+        notified.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        let frames=host.session.engine().metrics().frames;
+        let mut needs_frame=host.poll_preparation();
+        let mut accepted=false;
+        let image=loop {
+            let requests=if accepted {Vec::new()} else {vec![(1,target)]};
+            let (submitted,images)=host.layer_thumbnails(requests).unwrap();
+            accepted|=submitted.contains(&1);
+            needs_frame|=host.poll_preparation();
+            if let Some(image)=images.into_iter().find(|image|image.request_id==1) {break image;}
+            assert!(std::time::Instant::now()<deadline,"thumbnail service did not complete without a canvas frame");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        host.close_wake();
+        assert!(accepted);
+        assert!(!image.bytes.is_empty());
+        assert_eq!(host.session.engine().metrics().frames,frames);
+        assert!(!needs_frame,"unrelated thumbnail Validation completion must service its consumer without dirtying the canvas");
     }
     #[test]
     fn pending_store_decode_releases_frame_demand_and_completion_wakes_the_host() {

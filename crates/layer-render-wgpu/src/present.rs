@@ -663,6 +663,10 @@ impl ViewportPresenter {
         (placement, lit, pipeline)
     }
 
+    pub fn prepare_color_picker(&self, renderer: &WgpuRasterizer) -> bool {
+        self.picker.prepare(&renderer.compilation)
+    }
+
     pub fn pipelines_ready(&self, renderer: &WgpuRasterizer) -> bool {
         let (_, lit, pipeline) = self.bound_viewport(renderer);
         self.pipelines_ready_for(renderer, pipeline, lit)

@@ -1680,6 +1680,12 @@ impl WgpuRasterizer {
         self.selected_display_cache().map(|cache|[cache.view(),cache.coarse_view(),cache.next_view()])
     }
     pub fn has_presentable_frame(&self) -> bool { self.presentation_views().is_some() }
+    pub fn frame_preparation_pending(&self) -> bool {
+        self.wake_delegated_preparation_pending() || !self.decode_wait_blocks_frame() && (self.object_deferred
+            || !self.document_damage.is_empty() || !self.transform_damage.is_empty()
+            || self.settling.is_some()
+            || self.scale_display.as_ref().and_then(scene::scale::Cache::unfinished).is_some())
+    }
     fn activate_presentation(&mut self, scene: layer_core::SceneView<'_>) {
         let document = (scene.owner(), scene.artwork().id);
         if self.presentation.document != Some(document) {
@@ -3785,6 +3791,11 @@ impl WgpuRasterizer {
         }
         Ok(())
     }
+    fn wake_delegated_preparation_pending(&self)->bool {
+        self.selection_previews.pending || self.papers.image_waiting() || self.papers.images_ready()
+            || self.bake_preflight.as_ref().is_some_and(|state|state.pending())
+            || self.transform_sources_pending && self.moving_pixels.is_some() && self.transform_preview.is_none()
+    }
     fn preparation_can_wake(&self)->bool {
         #[cfg(not(target_arch="wasm32"))] {self.preparation_wake.is_some()}
         #[cfg(target_arch="wasm32")] {true}
@@ -4026,12 +4037,12 @@ impl CanvasRenderer for WgpuRasterizer {
     }
     fn has_pending_work(&self) -> bool {
         let waiting_objects=self.object_deferred && self.decode_wait_blocks_frame();
-        self.pending_display_selection.is_some() || self.selection_previews.pending && !self.preparation_can_wake()
-            || self.papers.images_ready() || self.papers.image_waiting() && !self.preparation_can_wake()
+        self.pending_display_selection.is_some() || self.wake_delegated_preparation_pending() && !self.preparation_can_wake()
+            || self.papers.images_ready()
             || self.fill_preview.is_some() && self.fill_preview_ready().is_none()
-            || self.held_result_ready() || self.fill_edges_preflight.as_ref().is_some_and(|state|state.pending() && !self.decode_wait_blocks_frame()) || self.bake_preflight.as_ref().is_some_and(|state|state.pending() && (!self.preparation_can_wake() || !state.waiting())) || self.restore_preparation_pending() && !self.decode_wait_blocks_frame() || self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() && !waiting_objects || self.settling.is_some() || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && !self.decode_wait_blocks_frame())
+            || self.held_result_ready() || self.fill_edges_preflight.as_ref().is_some_and(|state|state.pending() && !self.decode_wait_blocks_frame()) || self.bake_preflight.as_ref().is_some_and(|state|state.pending() && !state.waiting()) || self.restore_preparation_pending() && !self.decode_wait_blocks_frame() || self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() && !waiting_objects || self.settling.is_some() || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && !self.decode_wait_blocks_frame())
             || self.navigator_pending() && !waiting_objects
-            || self.transform_sources_pending && (self.transform_preview.is_some() || self.moving_pixels.is_some()) && !self.decode_wait_blocks_frame()
+            || self.transform_sources_pending && self.transform_preview.is_some() && !self.decode_wait_blocks_frame()
             || self.moving_images_pending()
             || self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())
                 && !self.decode_wait_blocks_frame()
@@ -5537,7 +5548,7 @@ impl WgpuRasterizer {
             let result = transforms.prepare_standby(self, &mut encoder, packet.scene, layer, &selection, level);
             self.transforms = Some(transforms);
             self.transform_sources_pending = match result {
-                Ok(ready) => !ready && !self.preparation_can_wake(),
+                Ok(ready) => !ready,
                 Err(error) if error.is_preparation_pending() => true,
                 Err(error) => return Err(error),
             };

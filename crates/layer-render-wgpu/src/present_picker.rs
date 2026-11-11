@@ -9,11 +9,12 @@ pub(super) struct Picker {
     dirty: bool,
 }
 impl Picker {
-    pub fn prepare(&self, compiler: &crate::compile::Scope) {
+    pub fn prepare(&self, compiler: &crate::compile::Scope) -> bool {
         if self.data.is_some() {
-            compiler.require([&self.pipeline], crate::startup::OTHER);
+            compiler.require([&self.pipeline], crate::startup::OTHER)
         } else {
             compiler.warm(&self.pipeline, crate::startup::OTHER, compiler.generation());
+            true
         }
     }
 
