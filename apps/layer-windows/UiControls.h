@@ -274,7 +274,7 @@ struct WorkspaceData : CanvasModelSource,std::enable_shared_from_this<WorkspaceD
         NativeLocalization next(capy_localization_for_tag(tag.c_str()),capy_localization_free);
         if(!next)throw hresult_invalid_argument(L"Invalid localization presentation");
         if(snapshot.HasKey(L"state")){model=snapshot;state=branch(snapshot,L"state");}
-        nextCatalog.Insert(L"bootstrap",bootstrap);catalog=nextCatalog;localization=std::move(next);localizationGeneration=generation;
+        nextCatalog=copyObject(nextCatalog);nextCatalog.Insert(L"bootstrap",bootstrap);catalog=nextCatalog;localization=std::move(next);localizationGeneration=generation;
         std::erase_if(copyViews,[](auto const& update){return !update();});
         return true;
     }

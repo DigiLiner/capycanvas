@@ -14,17 +14,17 @@ int main(){
     assert(CapyUi::LatinKey(VirtualKey(VK_OEM_4),true,L"\u0445")==L"{");
     assert(CapyUi::LatinKey(VirtualKey::Escape,false,L"escape").empty());
     using J=winrt::Windows::Data::Json::JsonObject;
-    auto preview=J::Parse(LR"({"picker":{"editor":true,"preview":{"rgba":[1,0,0,1]}}})"),retainedPreview=preview;
+    CanvasModelSource previews;
+    {CanvasModelSource::Adoption adoption(previews,J::Parse(LR"({"state":{},"color_preview":{"picker":{"editor":true,"preview":{"rgba":[1,0,0,1]}}}})"),{true});}
+    auto retainedPreview=previews.colorPreview;
     auto camera=J::Parse(LR"({"revision":52,"camera":{"revision":10}})");
-    assert(!CapyUi::ApplyColorPreview(camera,preview));
-    assert(preview==retainedPreview);
+    previews.Patch(camera);assert(previews.colorPreview==retainedPreview);
     auto placement=J::Parse(LR"({"workspace_update":{"revision":52,"model_revision":39,"canvas_bar":{"layout":null}}})");
-    assert(!CapyUi::ApplyColorPreview(placement,preview));
-    assert(preview==retainedPreview);
+    previews.Patch(placement);assert(previews.colorPreview==retainedPreview);
     auto ended=J::Parse(LR"({"color_preview":{"picker":{"editor":false,"preview":null}}})");
-    assert(CapyUi::ApplyColorPreview(ended,preview));
-    assert(!preview.GetNamedObject(L"picker").GetNamedBoolean(L"editor"));
-    assert(preview.GetNamedObject(L"picker").GetNamedValue(L"preview").ValueType()==winrt::Windows::Data::Json::JsonValueType::Null);
+    previews.Patch(ended);
+    assert(!previews.colorPreview.GetNamedObject(L"picker").GetNamedBoolean(L"editor"));
+    assert(previews.colorPreview.GetNamedObject(L"picker").GetNamedValue(L"preview").ValueType()==winrt::Windows::Data::Json::JsonValueType::Null);
     CanvasModelUpdate models;
     CanvasModelInputs body;
     auto record=[&](J const& model){
@@ -242,6 +242,56 @@ int main(){
     source.changes={false,{{L"state",L"selected"}}};
     source.apply(container,[&]{++containerUpdates;updateBody();});
     assert(containerUpdates==2&&bodyUpdates==2&&selectedValue);
+    for(auto const& [packet,path]:std::vector<std::pair<wchar_t const*,CanvasModelPaths::Path>>{
+        {LR"({"command_search":{"open":true}})",{L"state",L"command_search",L"open"}},
+        {LR"({"camera":{"zoom":2}})",{L"state",L"camera",L"zoom"}},
+        {LR"({"layout":{"width":200},"workspace_layout":{"corner":"right"}})",{L"layout",L"width"}},
+        {LR"({"layout":{"width":200},"workspace_layout":{"corner":"right"}})",{L"state",L"workspace",L"layout",L"corner"}},
+        {LR"({"workspace_update":{"drag":{"x":2}}})",{L"workspace_update",L"drag"}},
+        {LR"({"color_preview":{"picker":{"editor":true}}})",{L"color_preview",L"picker",L"editor"}},
+        {LR"({"windows_glass":{"chrome_revision":2}})",{L"windows_glass",L"chrome_revision"}},
+        {LR"({"background_inputs":{"value":2}})",{L"background_inputs",L"value"}}}){
+        CanvasModelUpdate transport;CanvasModelSource packetSource;CanvasModelInputs reads;int updates=0;winrt::hstring value;
+        transport.Read(J::Parse(LR"({"state":{"revision":1,"command_search":{"open":false},"camera":{"zoom":1},"workspace":{"layout":{"corner":"left"}}},"layout":{"width":100},"workspace_update":{"drag":null},"color_preview":{"picker":{"editor":false}},"windows_glass":{"chrome_revision":1},"background_inputs":{"value":1}})"));
+        auto refresh=[&]{packetSource.apply(reads,[&]{auto object=packetSource.model;for(size_t i=0;i+1<path.size();++i)object=CapyUi::branch(object,path[i].c_str());value=CapyUi::named(object,path.back().c_str()).Stringify();++updates;});};
+        {CanvasModelSource::Adoption adoption(packetSource,transport.Model(),transport.changes);refresh();}
+        auto initialValue=value;auto original=transport.Model().Stringify();
+        packetSource.changes={};packetSource.Patch(J::Parse(packet));refresh();
+        assert(updates==2&&value!=initialValue&&packetSource.HasPendingChanges());
+        assert(transport.Model().Stringify()==original);
+        transport.Read(J::Parse(LR"({"model_update":[[["state","revision"],2]]})"));
+        assert(!transport.changes.Touches(path));
+        {CanvasModelSource::Adoption adoption(packetSource,transport.Model(),transport.changes);refresh();}
+        assert(updates==3&&value==initialValue&&!packetSource.HasPendingChanges());
+        transport.Read(J::Parse(LR"({"model_update":[[["state","revision"],3]]})"));
+        {CanvasModelSource::Adoption adoption(packetSource,transport.Model(),transport.changes);refresh();}
+        assert(updates==3);
+    }
+    {
+        CanvasModelSource batch;auto initial=J::Parse(LR"({"state":{"camera":{"zoom":1},"command_search":null,"workspace":{"layout":{"corner":"left","height":100}}},"layout":{"width":100},"windows_glass":{"chrome_revision":1}})");auto original=initial.Stringify();
+        {CanvasModelSource::Adoption adoption(batch,initial,{true});}
+        batch.Patch(J::Parse(LR"({"camera":{"zoom":2},"command_search":{"open":true},"workspace_layout":{"corner":"right","height":200},"layout":{"width":200},"windows_glass":{"chrome_revision":2},"unregistered_background":null})"));
+        assert(initial.Stringify()==original&&CapyUi::num(CapyUi::object(batch.state,L"camera"),L"zoom")==2&&CapyUi::flag(CapyUi::object(batch.state,L"command_search"),L"open"));
+        auto batchLayout=CapyUi::object(CapyUi::object(batch.state,L"workspace"),L"layout");
+        assert(CapyUi::str(batchLayout,L"corner")==L"right"&&CapyUi::num(batchLayout,L"height")==200&&CapyUi::num(CapyUi::object(batch.model,L"layout"),L"width")==200);
+        assert(CapyUi::num(CapyUi::object(batch.model,L"windows_glass"),L"chrome_revision")==2&&batch.model.HasKey(L"unregistered_background")&&batch.model.GetNamedValue(L"unregistered_background").ValueType()==winrt::Windows::Data::Json::JsonValueType::Null);
+        {CanvasModelSource::Adoption adoption(batch,initial,{});assert(batch.changes.Touches({L"state",L"workspace",L"layout",L"height"})&&batch.changes.Touches({L"unregistered_background"}));}
+        assert(batch.model.Stringify()==original&&!batch.HasPendingChanges());
+    }
+    {
+        CanvasModelSource layoutSource;CanvasModelInputs layoutReads;int updates=0;
+        auto full=J::Parse(LR"({"state":{},"layout":{"width":100}})"),resolved=J::Parse(LR"({"width":200})");
+        auto refresh=[&]{layoutSource.apply(layoutReads,[&]{assert(CapyUi::num(CapyUi::object(layoutSource.model,L"layout"),L"width")==200);++updates;});};
+        {CanvasModelSource::Adoption adoption(layoutSource,full,{true});layoutSource.Patch({L"layout"},resolved);refresh();}
+        {CanvasModelSource::Adoption adoption(layoutSource,full,{});layoutSource.Patch({L"layout"},resolved);refresh();}
+        assert(updates==2&&!layoutSource.HasPendingChanges());
+        layoutSource.Patch({L"layout"},resolved);assert(!layoutSource.HasPendingChanges());
+        {CanvasModelSource::Adoption adoption(layoutSource,full,{});layoutSource.Patch({L"layout"},resolved);refresh();}
+        assert(updates==2&&!layoutSource.HasPendingChanges());
+        J repeated;repeated.Insert(L"layout",resolved);layoutSource.Patch(repeated);assert(layoutSource.HasPendingChanges());
+        {CanvasModelSource::Adoption adoption(layoutSource,full,{});layoutSource.Patch({L"layout"},resolved);refresh();}
+        assert(updates==3&&!layoutSource.HasPendingChanges());
+    }
     auto initial=J::Parse(LR"({"state":{"revision":1,"histogram":{"status":"old"},"workspace":{"layout":{"extent":240}}},"catalog":{"01":"literal","a/b":"key"},"rows":[{"value":1},{"value":2}]})");
     assert(models.Read(initial)==CanvasAllSections);
     initial.Insert(L"localization",J::Parse(LR"({"generation":1})"));

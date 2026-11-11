@@ -16,6 +16,7 @@ using winrt::Windows::Data::Json::JsonValueType;
 using J=winrt::Windows::Data::Json::JsonObject;
 using A=winrt::Windows::Data::Json::JsonArray;
 using V=winrt::Windows::Data::Json::IJsonValue;
+inline J copyObject(J const& value){J result;for(auto const& item:value)result.Insert(item.Key(),item.Value());return result;}
 
 inline std::string CameraTracePayload(winrt::Windows::Data::Json::JsonObject const& packet,bool full,std::string const& identity){
     using namespace winrt::Windows::Data::Json;
@@ -62,11 +63,6 @@ inline bool JsonEqual(winrt::Windows::Data::Json::IJsonValue const& left,winrt::
     case Type::Null:return true;
     default:return false;
     }
-}
-inline bool ApplyColorPreview(winrt::Windows::Data::Json::JsonObject const& packet,winrt::Windows::Data::Json::JsonObject& preview){
-    using namespace winrt::Windows::Data::Json;
-    if(packet.HasKey(L"color_preview")){auto value=packet.GetNamedValue(L"color_preview");preview=value.ValueType()==JsonValueType::Object?value.GetObject():JsonObject{};return true;}
-    return false;
 }
 inline std::string JsonUnsignedFields(std::string object,std::initializer_list<std::pair<std::string_view,uint64_t>> fields){
     if(object.empty()||object.front()!='{'||object.back()!='}')throw std::invalid_argument("Expected a JSON object");

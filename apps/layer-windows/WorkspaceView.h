@@ -16,9 +16,9 @@ public:
     ~WorkspaceView();
     winrt::Microsoft::UI::Xaml::Controls::Canvas Root() const;
     bool Apply(Json const& snapshot,NativeLayoutInput input={},CanvasModelChanges const& changes={true});
-    bool ApplyFields(Json const& snapshot,bool scopes);
+    bool ApplyFields(Json const& snapshot,bool scopes,CanvasModelChanges const& changes);
+    bool HasPendingChanges()const;
     void Resize(float width,float height);
-    static void MergeLayout(Json const& model,Json const& patch);
     Json ChromeFacts(bool popupOpen);
     Json ChromeDocument()const;
     void SetWindowResizing(bool value);

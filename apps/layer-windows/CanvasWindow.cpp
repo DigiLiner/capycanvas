@@ -1697,10 +1697,9 @@ void CanvasWindow::Publish(std::string snapshot,CapySnapshotInfo const& info) {
         auto identity="{\"process_id\":"+std::to_string(GetCurrentProcessId())+
             ",\"window_id\":"+std::to_string(windowId)+",\"presented\":"+std::to_string(presentationTrace.required)+
             ",\"presentation_epoch\":"+std::to_string(presentationTrace.epoch);
-        if(full)tracedModel=model;
-        else if(info.layout&&tracedModel.HasKey(L"state"))WorkspaceView::MergeLayout(tracedModel,model);
         bool glassChanged=info.glass.length&&CapyUi::object(tracedModel,L"windows_glass").Stringify()!=CapyUi::object(model,L"windows_glass").Stringify();
-        if(glassChanged)tracedModel.Insert(L"windows_glass",model.GetNamedValue(L"windows_glass"));
+        if(full)tracedModel=model;
+        else{CanvasModelSource trace;trace.model=tracedModel;trace.Patch(model);tracedModel=trace.model;}
         if(full||info.layout||glassChanged)TraceState("ui-state",identity+",\"model\":"+to_string(tracedModel.Stringify())+"}");
         if(full||model.HasKey(L"command_search")){
             auto search=full?CapyUi::branch(model,L"state").GetNamedValue(L"command_search",Windows::Data::Json::JsonValue::CreateNullValue()):model.GetNamedValue(L"command_search");
@@ -1771,7 +1770,7 @@ winrt::fire_and_forget CanvasWindow::DecodeSnapshots(std::shared_ptr<SnapshotSta
             }
             return state->layoutInput;
         };
-        if(batch.full&&(batch.sections&CanvasWorkspace))batch.fullInput=prepareInput(batch.full);
+        if(batch.full)batch.fullInput=prepareInput(batch.full);
         if(batch.layout)batch.reflowInput=prepareInput(batch.layout);
     }catch(hresult_error const& error){failure=to_string(error.message());}
      catch(std::exception const& error){failure=error.what();}
@@ -1956,8 +1955,8 @@ bool CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model,Nativ
     }
     auto focus=settings&&settings->IsOpen()?FocusManager::GetFocusedElement(root.XamlRoot()).try_as<Control>():nullptr;
     if(focus)if(auto owner=ItemsControl::ItemsControlFromItemContainer(focus))focus=owner;
-    if(sections&CanvasWorkspace){if(!workspace->Apply(model,std::move(input),changes))return false;}
-    else if(!workspace->ApplyFields(model,(sections&CanvasScopes)!=0))return false;
+    if((sections&CanvasWorkspace)||workspace->HasPendingChanges()){if(!workspace->Apply(model,std::move(input),changes))return false;}
+    else if(!workspace->ApplyFields(model,(sections&CanvasScopes)!=0,changes))return false;
     lastModel=model;
     ApplyLaunchCover(model);
     bool retheme=false;

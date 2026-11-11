@@ -78,6 +78,7 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
         auto settings=object(value,L"print_settings"),document=object(value,L"document_profile");
         auto key=array(value,L"identity").Stringify()+settings.Stringify()+document.Stringify()+array(value,L"library").Stringify()+data->language();
         if(array(value,L"profiles").Size()&&key!=*printKey&&!flag(value,L"preparing")){
+            settings=copyObject(settings);
             *printKey=key;printControls.Children().Clear();auto details=J::Parse(value.Stringify());
             auto options=J::Parse(value.Stringify());options.Insert(L"document_profile",document);
             if(!object(settings,L"profile").Size())settings.Insert(L"profile",document.Size()?document:array(value,L"profiles").GetObjectAt(0));

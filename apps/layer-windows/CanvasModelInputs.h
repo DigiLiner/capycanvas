@@ -1,12 +1,14 @@
 #pragma once
 #include <algorithm>
 #include <initializer_list>
+#include <map>
 #include <functional>
 #include <optional>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
 
 class CanvasModelPaths {
@@ -16,6 +18,7 @@ private:
     std::set<Path> paths;
     static bool contains(Path const& prefix,Path const& path){return prefix.size()<=path.size()&&std::equal(prefix.begin(),prefix.end(),path.begin());}
 public:
+    bool Empty()const{return paths.empty();}
     CanvasModelPaths(std::initializer_list<Path> initial={}){for(auto const& path:initial)Add(path);}
     void Add(Path const& path){
         auto at=paths.lower_bound(path);
@@ -108,8 +111,71 @@ public:
 
 struct CanvasModelSource {
     using J=winrt::Windows::Data::Json::JsonObject;
+    using V=winrt::Windows::Data::Json::IJsonValue;
+    using Path=CanvasModelPaths::Path;
+private:
+    CanvasModelChanges pending;
+    J presentedBeforeAdoption{nullptr};
+    static V valueAt(J const& root,Path const& path){
+        V value=root;
+        for(auto const& name:path){
+            if(value.ValueType()!=winrt::Windows::Data::Json::JsonValueType::Object)return winrt::Windows::Data::Json::JsonValue::CreateNullValue();
+            value=value.GetObject().GetNamedValue(name,winrt::Windows::Data::Json::JsonValue::CreateNullValue());
+        }
+        return value;
+    }
+    struct Change {std::optional<V> value;std::map<std::wstring,Change> children;};
+    static V replace(V const& previous,Change const& change){
+        auto value=change.value.value_or(previous);
+        if(change.children.empty())return value;
+        auto object=value.ValueType()==winrt::Windows::Data::Json::JsonValueType::Object?value.GetObject():J{};
+        std::optional<J> result;
+        for(auto const& [name,child]:change.children){
+            auto before=object.GetNamedValue(name,winrt::Windows::Data::Json::JsonValue::CreateNullValue());
+            auto after=replace(before,child);
+            if(after==before&&object.HasKey(name))continue;
+            if(!result){J copy;for(auto const& item:object)copy.Insert(item.Key(),item.Value());result=std::move(copy);}
+            result->Insert(name,after);
+        }
+        return result?V(*result):value;
+    }
+    void stage(Change& tree,Path const& path,V const& value,bool independent){
+        if(independent||valueAt(presentedBeforeAdoption?presentedBeforeAdoption:model,path)!=value){pending.paths.Add(path);changes.paths.Add(path);}
+        auto target=&tree;for(auto const& name:path)target=&target->children[name];target->value=value;
+    }
+    void patch(Change const& tree){auto next=replace(model,tree);if(next!=model){model=next.GetObject();roots();}}
+    void roots(){
+        state=model.GetNamedObject(L"state",J{});
+        auto value=model.GetNamedValue(L"color_preview",winrt::Windows::Data::Json::JsonValue::CreateNullValue());
+        colorPreview=value.ValueType()==winrt::Windows::Data::Json::JsonValueType::Object?value.GetObject():J{};
+    }
+public:
     J state,catalog,model,colorPreview;
     CanvasModelChanges changes{true};
+    CanvasModelSource()=default;
+    CanvasModelSource(CanvasModelSource const& other):state(other.state),catalog(other.catalog),model(other.model),colorPreview(other.colorPreview),changes(other.changes){}
+    class Adoption {
+        CanvasModelSource& source;
+    public:
+        Adoption(CanvasModelSource& owner,J const& snapshot,CanvasModelChanges const& changes):source(owner){
+            source.presentedBeforeAdoption=source.model;source.model=snapshot;source.roots();
+            source.changes=changes;source.changes.Merge(std::exchange(source.pending,{}));
+        }
+        Adoption(Adoption const&)=delete;
+        ~Adoption(){source.presentedBeforeAdoption=nullptr;}
+    };
+    bool HasPendingChanges()const{return pending.all||!pending.paths.Empty();}
+    void Patch(Path const& path,V const& value,bool independent=false){Change tree;stage(tree,path,value,independent);patch(tree);}
+    void Patch(J const& packet){
+        Change tree;
+        for(auto const& item:packet){
+            auto name=std::wstring(item.Key());
+            if(name==L"camera"||name==L"command_search")stage(tree,{L"state",name},item.Value(),true);
+            else if(name==L"workspace_layout")for(auto const& field:item.Value().GetObject())stage(tree,{L"state",L"workspace",L"layout",std::wstring(field.Key())},field.Value(),true);
+            else stage(tree,{name},item.Value(),true);
+        }
+        patch(tree);
+    }
     CanvasModelInputs::Capture inputs(CanvasModelInputs& reads,bool force=false)const{
         return CanvasModelInputs::Capture(reads,{{model,{}},{state,{L"state"}},{catalog,{L"localization",L"catalog"}},{colorPreview,{L"color_preview"}}},&changes,force);
     }
