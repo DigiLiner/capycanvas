@@ -255,7 +255,7 @@ private struct PaperNameForm: View {
                     cancel: { controller.rename = nil }, primary: save)
             } else { Text(copy["paper"]["rename_title"].string).font(.headline) }
             TextField(controller.common["name"].string,text:$name).textFieldStyle(.roundedBorder)
-                .focused($focused).accessibilityIdentifier("paper-library-name")
+                .focused($focused).onAppear { focused = page }.accessibilityIdentifier("paper-library-name")
                 .onNativeTextSubmit(name) { name = $0; if page { focused = false } else { save() } }
             if let error { Text(error).foregroundStyle(.red).accessibilityIdentifier("paper-name-error") }
             if !page { HStack {

@@ -267,6 +267,7 @@ private struct WorkspaceManagerForm: View {
     @Environment(\.editorDialogPage) private var page
     @ObservedObject var workspaces: WorkspaceController
     let spec: JSON
+    @FocusState private var nameFocused: Bool
     var body: some View {
         Group {
             if spec["dialog"]["role"].string == "alert", let store = workspaces.store {
@@ -303,7 +304,7 @@ private struct WorkspaceManagerForm: View {
             Text(spec["message"].string).fixedSize(horizontal: false, vertical: true)
             if !spec["name"].isNull {
                 TextField(common["name"].string, text: $workspaces.formName).textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("workspace-form-name")
+                    .focused($nameFocused).onAppear { nameFocused = page }.accessibilityIdentifier("workspace-form-name")
             }
             if !spec["description"].isNull {
                 TextField(nativeCopy["header"]["description"].string, text: $workspaces.formDescription, axis: .vertical)

@@ -211,6 +211,15 @@ extension EditorLaunchTests {
         func capture(_ state: String) {
             XCTAssertNoThrow(try phonePageCapture(state, in: app, theme: theme))
         }
+        func editsNameOnOpen(_ id: String) {
+            let field = app.textFields[id]
+            expectation(for: NSPredicate(format: "hasKeyboardFocus == YES"), evaluatedWith: field)
+            waitForExpectations(timeout: 10)
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+            let before = editorTextMatches(field, "") ? "" : field.value as? String ?? ""
+            field.typeText("X")
+            XCTAssertEqual(field.value as? String, before + "X", "A name page opened by touch keeps its caret at the end")
+        }
         for (application, label, state, closedBy) in [
             ("Image", "Assign Profile…", "assign-profile", "document-color-cancel"),
             ("Image", "Convert Color Space…", "convert-color-space", "document-color-cancel"),
@@ -289,6 +298,7 @@ extension EditorLaunchTests {
                 activate("export-preset-save")
                 XCTAssertTrue(any("export-preset-name").waitForExistence(timeout: 10))
                 capture("save-export-preset")
+                editsNameOnOpen("export-preset-name")
                 activate("export-preset-cancel")
             }
             activate("export-back")
@@ -311,6 +321,7 @@ extension EditorLaunchTests {
         XCTAssertTrue(any("workspace-form-title").waitForExistence(timeout: 10))
         XCTAssertLessThan(any("workspace-form-title").frame.midY, workspaceViewport(in: app).frame.minY + workspaceViewport(in: app).frame.height / 3)
         capture("new-workspace")
+        editsNameOnOpen("workspace-form-name")
         activate("workspace-form-cancel")
         activate("workspace-manager-close")
     }

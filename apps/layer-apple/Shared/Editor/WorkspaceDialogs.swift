@@ -28,6 +28,7 @@ struct WorkspaceDialog: View {
     #else
     @FocusState private var searchFocused: Bool
     #endif
+    @FocusState private var nameFocused: Bool
     @State private var resultsHeight: CGFloat = 0
     @State private var firstRowHeight: CGFloat = 0
     @State private var countHeight: CGFloat = 0
@@ -77,6 +78,7 @@ struct WorkspaceDialog: View {
             } else { Text(view["title"].string).font(.headline) }
             if !view["name"].isNull {
                 EditorTextField(view["name_label"].string, value: view["name"].string) { store.customize(["type": "picker_name", "name": $0]) }
+                    .focused($nameFocused).onAppear { nameFocused = page }
                     .textFieldStyle(.roundedBorder).accessibilityIdentifier("toolbar-name")
             }
             EditorTextField(view["search_hint"].string, value: view["query"].string) { store.customize(["type": "picker_search", "query": $0]) }
@@ -89,7 +91,7 @@ struct WorkspaceDialog: View {
                 .textFieldStyle(.roundedBorder).accessibilityIdentifier("tool-picker-search")
                 .onAppear {
                     #if os(iOS)
-                    searchFocused = NativeTextContext.keyboardInput
+                    searchFocused = NativeTextContext.keyboardInput && view["name"].isNull
                     #endif
                 }
             EditorScrollView {
@@ -174,6 +176,7 @@ struct WorkspaceDialog: View {
             if !view["message"].string.isEmpty { Text(view["message"].string) }
             if !view["name"].isNull {
                 EditorTextField(view["name_label"].string, value: view["name"].string) { store.customize(["type": "toolbar_name", "name": $0]) }
+                    .focused($nameFocused).onAppear { nameFocused = page }
                     .textFieldStyle(.roundedBorder).accessibilityIdentifier("toolbar-name")
             }
             error(view)
